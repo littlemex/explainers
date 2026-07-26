@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow Matching をゼロから直感で掴む</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --noise:#e07a5f; --data:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:25px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Flow Matching をゼロから直感で掴む</h1>
+  <p>ノイズがデータへ「流れる」様子を、実際に動かしながら理解する</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">元記事は最終的に Meta Flow Matching の話ですが、その土台の Flow Matching が分からないと読めません。ここでは Flow Matching だけを、数式より先に「絵と動き」で腹落ちさせます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    Flow Matching とは「<b>ノイズの点群を、少しずつ動かしてデータの点群に変形する</b>」ための<b>動かし方 (速度場)</b> をニューラルネットに学習させる生成モデルです。各点をどっちにどれだけ動かすかを教える「風向き地図」を学ぶ、と思ってください。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 生成モデルの共通目標 — 砂を並べ替える</a>
+    <a href="#s2">2. 「流れ」と速度場という考え方</a>
+    <a href="#s3">3. 【体験】ノイズがデータに流れる</a>
+    <a href="#s4">4. 核心のトリック — 直線でつなぐ</a>
+    <a href="#s5">5. 【体験】平均すると魔法が起きる</a>
+    <a href="#s6">6. 学習の目的関数 (損失)</a>
+    <a href="#s7">7. 生成 = ODE を解くだけ</a>
+    <a href="#s8">8. 拡散モデルとの違い</a>
+    <a href="#s9">9. 元記事へ — Meta Flow Matching</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>生成モデルの共通目標 — 砂を並べ替える</h2>
+  <p class="lead">まず「生成する」とは何かを、砂のイメージで揃えます。</p>
+  <p>画像生成でも分子生成でも、生成モデルがやりたいことは共通です。<b>簡単に作れるランダムなノイズ</b> (標準ガウス分布、つまり中央にこんもり積もった砂山) を、<b>本物のデータが従う複雑な分布</b> (例えば「猫の画像すべて」が作る形) へと<b>並べ替える</b>ことです。</p>
+  <div class="key">
+    出発点 <span class="tag">p&#8320;</span> = ノイズ (簡単・既知)。到着点 <span class="tag">p&#8321;</span> = データ (複雑・サンプルしか手に入らない)。<br>
+    生成 = <b>p&#8320; の砂を p&#8321; の形に積み替える手順</b>を見つけること。
+  </div>
+  <p>GAN は「一発で積み替える関数」を敵対的に学び、拡散モデルは「ノイズを少しずつ消す」ことで積み替えます。Flow Matching は<b>「砂の一粒一粒を、連続時間でなめらかに動かす速度」</b>を学ぶ、という第三の道です。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>「流れ」と速度場という考え方</h2>
+  <p class="lead">Flow Matching の "flow" が何を指すのかを定義します。</p>
+  <p>時間 <code>t</code> を 0 から 1 まで動かすとします。<code>t=0</code> でノイズ、<code>t=1</code> でデータです。各時刻の砂の積もり方 (確率密度) を <code>p&#8348;</code> と書き、これを<b>確率パス (probability path)</b> と呼びます。ノイズの山からデータの形へ変形していく「パラパラ漫画」です。</p>
+  <p>この変形を起こす主役が<b>速度場 (velocity field)</b> <code>v&#8348;(x)</code> です。これは「<b>時刻 t に、位置 x にいる砂粒は、どの向きにどれだけの速さで動くべきか</b>」を返すベクトルの地図です。天気図の風向き矢印そのものだと思ってください。</p>
+  <div class="math">
+    <span class="c"># 砂粒 (サンプル) の動き方。速度場に従って流れるだけ</span><br>
+    dx/dt = v<span class="r">&#8348;</span>(x)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="c"># これを t:0→1 で積分すると、ノイズ点がデータ点に着く</span>
+  </div>
+  <p>速度場と密度の変化は<b>連続方程式 (continuity equation)</b> で結ばれます。「砂は湧いたり消えたりせず、ただ流れて移動するだけ」という保存則です。</p>
+  <div class="math">
+    &part;p<span class="r">&#8348;</span>(x)/&part;t = &minus;&nabla;&middot;( p<span class="r">&#8348;</span>(x) &middot; v<span class="r">&#8348;</span>(x) )
+  </div>
+  <div class="key">
+    ここまでの要点。<b>正しい速度場 v&#8348; さえ手に入れば、生成は「ノイズ点を放り込んで流すだけ」</b>になります。問題は「その正しい速度場をどうやって学ぶか」です。ここが Flow Matching の核心で、4 章で解きます。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【体験】ノイズがデータに流れる</h2>
+  <p class="lead">まず結論の絵を見ます。学習済みの速度場に従うと、こんもりしたノイズの山が、狙った形 (ここでは二日月・二クラスタ) へ流れていきます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p1play">再生</button>
+    <button id="p1reset" class="ghost">最初から</button>
+    <button class="ghost active" data-shape="moons" id="shpMoons">形: 二日月</button>
+    <button class="ghost" data-shape="ring" id="shpRing">形: リング</button>
+    <div class="slider">速さ <input id="p1speed" type="range" min="1" max="6" value="3"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--noise)"></span>ノイズ由来の砂粒 (流れている途中)</span>
+    <span><span class="dot" style="background:var(--data)"></span>本物のデータ分布 (ゴール)</span>
+  </div>
+  <p>いま各粒は「自分がどこへ行くべきか」を速度場から受け取り、少しずつ移動しています。<b>誰も一粒ごとに行き先を指図していない</b>のに、群れ全体がデータの形に収束します。この "群れを正しい形に運ぶ地図" こそが学習対象です。次章で、その地図をどうやって作るかという一番のキモに入ります。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>核心のトリック — 直線でつなぐ</h2>
+  <p class="lead">「正しい速度場」を直接知る方法はありません。ここで Flow Matching の天才的な発想が出ます。</p>
+  <p>正しい速度場 <code>v&#8348;*</code> を厳密に書くと、無数のサンプルにわたる期待値と密度の割り算が入り、そのままでは計算できません (元記事の複雑な数式はこれ)。そこで発想を逆転させます。</p>
+  <div class="key">
+    <b>難しい「全体の地図」を最初から求めるのをやめる。</b>代わりに、<b>ノイズ点 x&#8320; とデータ点 x&#8321; をランダムに 1 個ずつペアにして、まっすぐな直線で結ぶ</b>。この直線上の「進むべき向き」なら、誰でも計算できる。
+  </div>
+  <p>ペアを直線補間します。これを<b>条件付き経路 (conditional path)</b> と呼びます。</p>
+  <div class="math">
+    <span class="c"># 位置: t=0 でノイズ点、t=1 でデータ点。ただの直線</span><br>
+    x<span class="r">&#8348;</span> = (1 &minus; t)&middot;x&#8320; + t&middot;x&#8321;<br><br>
+    <span class="c"># この直線を進む速度は、時間で微分するだけ。定数ベクトル！</span><br>
+    dx<span class="r">&#8348;</span>/dt = x&#8321; &minus; x&#8320;
+  </div>
+  <p>ここが最重要ポイントです。1 本の直線に対する「正解の速度」は <b>x&#8321; − x&#8320;</b> という<b>引き算一発</b>で分かります。無数のペアそれぞれについて、この超簡単な正解が手に入る。ではこの「バラバラな直線たちの速度」を教師にしてネットを訓練すると、何が学ばれるのでしょうか。次章で体感します。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】平均すると魔法が起きる</h2>
+  <p class="lead">同じ場所を、違うペアの直線が別々の向きに通り過ぎます。ネットはその「平均の向き」を学びます。すると個々の直線は消え、なめらかな正しい速度場が浮かび上がります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p2play">再生</button>
+    <button id="p2reset" class="ghost">最初から</button>
+    <button class="ghost active" data-mode="cond" id="modeCond">条件付き経路 (直線)</button>
+    <button class="ghost" data-mode="marg" id="modeMarg">平均の速度場を表示</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--noise)"></span>ノイズ点 x&#8320;</span>
+    <span><span class="dot" style="background:var(--data)"></span>データ点 x&#8321;</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>平均速度場 (矢印)</span>
+  </div>
+  <p><b>「条件付き経路」</b>では、各ペアがてんでバラバラの直線で交差しながら進みます。混沌に見えます。ところが <b>「平均の速度場」</b>に切り替えると、同じ位置を通る直線たちの向きが平均され、<b>1 枚のなめらかな風向き地図</b>になります。</p>
+  <div class="key">
+    <b>魔法の正体。</b>個々の直線 (ペア) の向きは <code>x&#8321;−x&#8320;</code> で計算できる。ネットに「位置 x と時刻 t を入れたら、そこを通る全直線の向きの<b>平均</b>を答えよ」と学習させる。平均された場は、実は 2 章の<b>計算不能だったはずの正しい速度場 v&#8348;* と一致する</b>ことが数学的に証明されています。<br>
+    つまり<b>「計算できる簡単な教師 (直線の向き) を集めて回帰するだけで、計算できないはずの正解にたどり着く」</b>。これが Flow Matching の一番おいしいところです。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>学習の目的関数 (損失)</h2>
+  <p class="lead">5 章の「平均を学ぶ」を、そのまま損失関数として書き下します。難しく見えて、やっていることは二乗誤差回帰です。</p>
+  <p>本当に最小化したいのは、ネットの速度場 <code>v&#8348;(x;&omega;)</code> と真の速度場 <code>v&#8348;*</code> のズレです。でも <code>v&#8348;*</code> は未知でした。</p>
+  <div class="math">
+    <span class="c"># 理想の損失（v* が未知なので、このままでは計算できない）</span><br>
+    L<span class="r">ideal</span> = E[ &#8214; v<span class="r">&#8348;</span>(x;&omega;) &minus; v<span class="r">&#8348;</span>*(x) &#8214;&sup2; ]
+  </div>
+  <p>ここで 4 章のトリックを使います。<code>v&#8348;*</code> を、計算できる直線の速度 <code>x&#8321;−x&#8320;</code> に置き換えても、<b>最適解が変わらない</b>ことが証明されています。こうして実際に回せる損失 (Conditional Flow Matching 損失) になります。</p>
+  <div class="math">
+    <span class="c"># 実装できる損失：直線の向き(教師) にネットを合わせるだけ</span><br>
+    L<span class="r">CFM</span> = E<span class="r">(x&#8320;,x&#8321;), t</span> &#8214; (x&#8321; &minus; x&#8320;) &minus; v<span class="r">&#8348;</span>( (1&minus;t)x&#8320;+t&middot;x&#8321; ; &omega;) &#8214;&sup2;
+  </div>
+  <ol class="steps">
+    <li>データ点 <code>x&#8321;</code> を 1 個、ノイズ点 <code>x&#8320;</code> を 1 個ランダムに取る</li>
+    <li>時刻 <code>t</code> を [0,1] から一様乱数で取る</li>
+    <li>直線上の点 <code>x&#8348; = (1−t)x&#8320; + t·x&#8321;</code> を作る</li>
+    <li>ネットに <code>(x&#8348;, t)</code> を入れ、出力を「正解の向き <code>x&#8321;−x&#8320;</code>」に近づける (二乗誤差)</li>
+    <li>1〜4 を大量に繰り返す。ネットは自然に「平均の向き = 正しい速度場」に収束する</li>
+  </ol>
+  <div class="key">
+    拡散モデルのような複雑なノイズスケジュールや、スコアの重み付けは<b>不要</b>。<b>「直線を引く → その傾きに回帰する」</b>だけ。これが Flow Matching が実装も学習も安定していると言われる理由です。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>生成 = ODE を解くだけ</h2>
+  <p class="lead">学習が終われば、生成は驚くほど単純です。</p>
+  <p>学習済みの速度場 <code>v&#8348;(x;&omega;*)</code> があれば、ノイズ点を 1 個サンプルして、常微分方程式 (ODE) を <code>t:0→1</code> で数値積分するだけです。3 章で見た動きがまさにこれです。</p>
+  <div class="math">
+    x&#8320; &nbsp;~&nbsp; ノイズ &nbsp;&nbsp;<span class="c"># スタート地点をランダムに引く</span><br>
+    dx/dt = v<span class="r">&#8348;</span>(x;&omega;*) &nbsp;&nbsp;<span class="c"># 学習済みの風に乗って流す</span><br>
+    x&#8321; = x&#8320; + &int;&#8320;&sup1; v<span class="r">&#8348;</span>(x;&omega;*) dt &nbsp;&nbsp;<span class="c"># 到着点が生成サンプル</span>
+  </div>
+  <p>数値積分は最も単純にはオイラー法で、<code>x ← x + v·Δt</code> を数十ステップ回すだけ。拡散モデルが数百〜千ステップ必要だったのに対し、Flow Matching は<b>経路が直線に近い</b>ため<b>少ないステップで生成でき、速い</b>のが実利上の強みです。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>拡散モデルとの違い (ざっくり)</h2>
+  <p class="lead">「結局、拡散モデルと何が違うの？」に答えます。</p>
+  <table>
+    <tr><th>観点</th><th>拡散モデル</th><th>Flow Matching</th></tr>
+    <tr><td>学習するもの</td><td>各時刻のノイズ (スコア ∇log p)</td><td>速度場 v&#8348;(x) (動く向き)</td></tr>
+    <tr><td>ノイズの入れ方</td><td>決められた確率過程 (SDE)</td><td>自分で決めた任意の経路 (例: 直線)</td></tr>
+    <tr><td>経路の形</td><td>曲がりくねる</td><td>直線に近づけられる</td></tr>
+    <tr><td>生成ステップ数</td><td>多い (数百〜)</td><td>少なくて済む (速い)</td></tr>
+    <tr><td>実装の素直さ</td><td>ノイズスケジュール等が煩雑</td><td>直線を引いて回帰、と単純</td></tr>
+  </table>
+  <div class="warn">
+    <b>ただし対立概念ではありません。</b>拡散モデルは Flow Matching の枠組みで「特定の曲がった経路を選んだ特殊ケース」として書き直せます。Flow Matching は<b>「経路を自由に設計してよい」一般化</b>であり、その中で一番素直な直線を選んだのが人気の Rectified Flow です。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>元記事へ — Meta Flow Matching とは</h2>
+  <p class="lead">ここまでで Flow Matching が分かったので、元記事の主題に橋渡しします。</p>
+  <p>通常の Flow Matching が学ぶのは <b>1 本の平均的な速度場</b> <code>v&#8348;(x)</code> です。条件付き版 (CFM) では、人間が与えるラベル <code>c</code> ごとに <code>v&#8348;(x|c)</code> を学べます。しかしどちらも<b>学習時に見た分布にしか対応できません</b>。</p>
+  <p>元記事の <b>Meta Flow Matching (MFM)</b> は、ここをさらに一段抽象化します。ラベル <code>c</code> の代わりに、<b>初期分布 <code>p&#8320;</code> そのものの形をネット (GNN) で読み取って埋め込み <code>&phi;(p&#8320;)</code> を作り</b>、それを条件にします。</p>
+  <div class="math">
+    FM&nbsp;&nbsp;: v<span class="r">&#8348;</span>(x) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="c"># 1 本の平均軌道</span><br>
+    CFM : v<span class="r">&#8348;</span>(x | c) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="c"># 人間が与えたラベル c 別</span><br>
+    MFM : v<span class="r">&#8348;</span>(x | &phi;(p<span class="r">0</span>)) &nbsp;<span class="c"># 初期分布の形そのものを条件にする</span>
+  </div>
+  <div class="key">
+    <b>MFM の本質。</b>「ある分布からある分布への<b>移動の答え</b>」ではなく、「<b>任意の分布を見せられたら、どう動かすべきかという解き方</b>」を学ぶ。だから<b>学習時に一度も見ていない新しい分布 (元記事の未知の文字 X, Y や、新しい患者の細胞集団)</b> にも、「風に乗るように」正しく対応できる。これが「確率分布空間 (Wasserstein 多様体) の上でダイナミクスを学ぶ」というタイトルの意味です。
+  </div>
+  <p>つまり元記事は、<b>Flow Matching を「個々のデータ点を動かす」レベルから「分布そのものを動かす」レベルへ持ち上げた</b>研究です。本記事の 1〜7 章 (点を速度場で流す) が完全に土台になっているのが分かるはずです。</p>
+  <div class="fn">
+    参考: 元記事「Flow Matching をメタ的な視点へ ー 確率分布空間上のダイナミクスを学習 ー」(<a href="https://qiita.com/shobioinfo/items/33ce3f1508c2b0e8aa97" target="_blank" rel="noopener">Qiita</a>)。<br>
+    注意: 本ページのアニメーションは Flow Matching の直感を伝えるための<b>模式的な実装</b>であり、平均速度場はガウス核による近似で表示しています。厳密な学習・生成手続きは 6〜7 章の数式を参照してください。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ 共通ユーティリティ ============
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+// ゴール形状のデータ点を生成
+function makeShape(kind,n,cx,cy,s){
+  const pts=[];
+  for(let i=0;i<n;i++){
+    if(kind==='moons'){
+      const up=i%2===0; const a=Math.PI*Math.random();
+      let x=Math.cos(a), y=Math.sin(a);
+      if(up){x=x; y=y-0.25;} else {x=1-x; y=-y+0.25;}
+      x+=0.05*randn(); y+=0.05*randn();
+      pts.push([cx+x*s*0.9-s*0.45, cy-y*s*0.9]);
+    }else if(kind==='ring'){
+      const a=2*Math.PI*Math.random(); const r=1+0.06*randn();
+      pts.push([cx+Math.cos(a)*r*s*0.5, cy+Math.sin(a)*r*s*0.5]);
+    }
+  }
+  return pts;
+}
+function makeNoise(n,cx,cy,s){
+  const p=[];for(let i=0;i<n;i++)p.push([cx+randn()*s*0.16, cy+randn()*s*0.16]);return p;}
+
+// ============ デモ1: ノイズ→データ ============
+(function(){
+  const cv=document.getElementById('cv1'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let shape='moons', t=0, playing=false, speed=3;
+  const N=420, cx0=W*0.24, cy0=H*0.5, cx1=W*0.76, cy1=H*0.5, S=200;
+  let z=[],d=[],cur=[];
+  function init(){
+    z=makeNoise(N,cx0,cy0,S);
+    d=makeShape(shape,N,cx1,cy1,S);
+    // ペアリングは最近傍っぽく見せるため単純ランダム置換
+    cur=z.map(p=>[p[0],p[1]]); t=0; draw();
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // ゴール（薄く）
+    ct.fillStyle='rgba(67,181,129,0.35)';
+    for(const p of d){ct.beginPath();ct.arc(p[0],p[1],2.2,0,7);ct.fill();}
+    // 流れる粒子
+    for(let i=0;i<N;i++){
+      const x=(1-t)*z[i][0]+t*d[i][0], y=(1-t)*z[i][1]+t*d[i][1];
+      cur[i]=[x,y];
+      const mix=t; // 色をノイズ色→データ色に補間
+      const r=Math.round(224+(25-224)*mix), g=Math.round(122+(135-122)*mix), b=Math.round(95+(84-95)*mix);
+      ct.fillStyle=`rgb(${r},${g},${b})`;
+      ct.beginPath();ct.arc(x,y,2.6,0,7);ct.fill();
+    }
+    // ラベル
+    ct.fillStyle='#8fd6b4';ct.font='15px sans-serif';ct.textAlign='center';
+    ct.fillText('ノイズ  p₀',cx0,H-16);
+    ct.fillText('データ  p₁',cx1,H-16);
+    ct.fillStyle='#d7f5e6';ct.textAlign='left';
+    ct.fillText('t = '+t.toFixed(2),16,26);
+  }
+  function loop(){
+    if(!playing)return;
+    t+=0.006*speed;
+    if(t>=1){t=1;playing=false;document.getElementById('p1play').textContent='再生';}
+    draw();
+    if(playing)requestAnimationFrame(loop);
+  }
+  document.getElementById('p1play').onclick=function(){
+    if(t>=1){t=0;}
+    playing=!playing;this.textContent=playing?'一時停止':'再生';if(playing)loop();
+  };
+  document.getElementById('p1reset').onclick=function(){playing=false;document.getElementById('p1play').textContent='再生';init();};
+  document.getElementById('p1speed').oninput=function(){speed=+this.value;};
+  function setShape(s,btn){shape=s;document.querySelectorAll('[data-shape]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');playing=false;document.getElementById('p1play').textContent='再生';init();}
+  document.getElementById('shpMoons').onclick=function(){setShape('moons',this);};
+  document.getElementById('shpRing').onclick=function(){setShape('ring',this);};
+  init();
+})();
+
+// ============ デモ2: 条件付き経路 vs 平均速度場 ============
+(function(){
+  const cv=document.getElementById('cv2'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='cond', t=0, playing=false;
+  const N=90, cx0=W*0.2, cy0=H*0.5, cx1=W*0.8, cy1=H*0.5, S=200;
+  let z=[],d=[];
+  function init(){
+    z=makeNoise(N,cx0,cy0,S);
+    d=makeShape('moons',N,cx1,cy1,S);
+    t=0;draw();
+  }
+  // 平均速度場: 位置(x,y),時刻tで全ペアの(d-z)をガウス核加重平均
+  function field(x,y,tt){
+    let sx=0,sy=0,wsum=0;const h2=(S*0.22)**2;
+    for(let i=0;i<N;i++){
+      const px=(1-tt)*z[i][0]+tt*d[i][0], py=(1-tt)*z[i][1]+tt*d[i][1];
+      const dist2=(x-px)**2+(y-py)**2;
+      const w=Math.exp(-dist2/(2*h2));
+      sx+=w*(d[i][0]-z[i][0]); sy+=w*(d[i][1]-z[i][1]); wsum+=w;
+    }
+    if(wsum<1e-6)return[0,0];return[sx/wsum,sy/wsum];
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // 端点
+    ct.fillStyle='rgba(224,122,95,0.6)';
+    for(const p of z){ct.beginPath();ct.arc(p[0],p[1],2.4,0,7);ct.fill();}
+    ct.fillStyle='rgba(25,135,84,0.55)';
+    for(const p of d){ct.beginPath();ct.arc(p[0],p[1],2.4,0,7);ct.fill();}
+
+    if(mode==='cond'){
+      // 直線経路と、その上を進む点
+      ct.strokeStyle='rgba(143,214,180,0.25)';ct.lineWidth=1;
+      for(let i=0;i<N;i++){ct.beginPath();ct.moveTo(z[i][0],z[i][1]);ct.lineTo(d[i][0],d[i][1]);ct.stroke();}
+      for(let i=0;i<N;i++){
+        const x=(1-t)*z[i][0]+t*d[i][0], y=(1-t)*z[i][1]+t*d[i][1];
+        // 各ペアの向き（バラバラ）を短い矢印で
+        const vx=d[i][0]-z[i][0], vy=d[i][1]-z[i][1];const L=Math.hypot(vx,vy)||1;
+        ct.strokeStyle='#f0a58e';ct.lineWidth=1.4;
+        ct.beginPath();ct.moveTo(x,y);ct.lineTo(x+vx/L*13,y+vy/L*13);ct.stroke();
+        ct.fillStyle='#ffd9c9';ct.beginPath();ct.arc(x,y,3,0,7);ct.fill();
+      }
+      ct.fillStyle='#d7f5e6';ct.textAlign='left';ct.font='14px sans-serif';
+      ct.fillText('各ペアがバラバラの直線で交差 → 混沌に見える',16,H-16);
+    }else{
+      // 平均速度場をグリッド矢印で
+      const gs=42;
+      for(let gx=gs*0.7;gx<W;gx+=gs){
+        for(let gy=gs*0.7;gy<H;gy+=gs){
+          const [vx,vy]=field(gx,gy,t);const L=Math.hypot(vx,vy);
+          if(L<1e-3)continue;
+          const s=Math.min(L,60)/L*16;
+          ct.strokeStyle='rgba(143,214,180,0.9)';ct.lineWidth=1.6;
+          ct.beginPath();ct.moveTo(gx,gy);ct.lineTo(gx+vx/L*s,gy+vy/L*s);ct.stroke();
+          // 矢じり
+          const ang=Math.atan2(vy,vx);
+          ct.beginPath();ct.moveTo(gx+vx/L*s,gy+vy/L*s);
+          ct.lineTo(gx+vx/L*s-Math.cos(ang-0.5)*5,gy+vy/L*s-Math.sin(ang-0.5)*5);
+          ct.moveTo(gx+vx/L*s,gy+vy/L*s);
+          ct.lineTo(gx+vx/L*s-Math.cos(ang+0.5)*5,gy+vy/L*s-Math.sin(ang+0.5)*5);
+          ct.stroke();
+        }
+      }
+      // この場に従って流れる少数の粒子
+      ct.fillStyle='#ffffff';
+      for(let i=0;i<N;i+=3){
+        const x=(1-t)*z[i][0]+t*d[i][0], y=(1-t)*z[i][1]+t*d[i][1];
+        ct.beginPath();ct.arc(x,y,2.6,0,7);ct.fill();
+      }
+      ct.fillStyle='#d7f5e6';ct.textAlign='left';ct.font='14px sans-serif';
+      ct.fillText('平均された1枚のなめらかな風向き地図 = 正しい速度場',16,H-16);
+    }
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.fillText('t = '+t.toFixed(2),16,26);
+  }
+  function loop(){if(!playing)return;t+=0.008;if(t>=1){t=1;playing=false;document.getElementById('p2play').textContent='再生';}draw();if(playing)requestAnimationFrame(loop);}
+  document.getElementById('p2play').onclick=function(){if(t>=1)t=0;playing=!playing;this.textContent=playing?'一時停止':'再生';if(playing)loop();};
+  document.getElementById('p2reset').onclick=function(){playing=false;document.getElementById('p2play').textContent='再生';init();};
+  function setMode(m,btn){mode=m;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('modeCond').onclick=function(){setMode('cond',this);};
+  document.getElementById('modeMarg').onclick=function(){setMode('marg',this);};
+  init();
+})();
+</script>
+</body>
+</html>
