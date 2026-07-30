@@ -19,3 +19,5 @@ Each explainer is a single self-contained HTML file (inline CSS/JS, no build ste
 GitHub Pages serves the repository root of the `main` branch. Add a new `*.html` file, link it from `index.html`, and push.
 
 - [RMSNorm をビジュアルに理解する](rmsnorm-explainer.html) — LayerNorm との違い・計算コスト・Fused Kernel を動くアニメで理解
+
+- [Softmax Attention をビジュアルに理解する](softmax-attention-explainer.html) — QKV の仕組み・N² の計算コスト・バウンド判定・FlashAttention を動くアニメで理解

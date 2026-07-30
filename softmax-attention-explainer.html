@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Softmax Attention をビジュアルに理解する</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --q:#e07a5f; --k:#3d7dca; --v:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .b{color:#8fb8f0}
+  .math .y{color:#ffd98f}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px;text-align:center}
+  .cost .box .big{font-size:26px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:25px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Softmax Attention をビジュアルに理解する</h1>
+  <p>Query が Key を見て Value を混ぜる ― その計算がなぜ重く、FlashAttention がなぜ効くのか</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">Attention は Transformer の心臓です。数式 <code>softmax(QK&#7488;/&radic;d)V</code> は短いのに、なぜ長い文脈で急に重くなるのか、なぜ FlashAttention が必須なのかは、式だけ見ても掴めません。ここでは「絵と動き」で、計算の中身とボトルネックの正体を腹落ちさせます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    Attention とは「<b>各トークン (Query) が、文中の全トークン (Key) との関連度を内積で測り、その重みで全トークンの中身 (Value) を加重平均する</b>」操作です。全員が全員を見るので、<b>トークン数 N の二乗に比例する計算とメモリ</b>が発生します。これが長文で重くなる根本理由で、<b>FlashAttention はその N&sup2; の中間行列を主記憶に書かずに済ませる</b>ことで<b>メモリ往復の問題</b>を回避します (計算量 O(N&sup2;d) 自体は残ります)。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. Attention は何をやっているか</a>
+    <a href="#s2">2. Scaled Dot-Product Attention の数式</a>
+    <a href="#s3">3. なぜ &radic;d で割るのか</a>
+    <a href="#s4">4. 【体験】Query が Value を混ぜる</a>
+    <a href="#s5">5. 位置情報の入れ方 (RoPE は軽く)</a>
+    <a href="#s6">6. なぜ計算が重いのか — N&sup2; の壁</a>
+    <a href="#s7">7. 【体験】系列長 N とコスト</a>
+    <a href="#s8">8. 何バウンドの処理か</a>
+    <a href="#s9">9. FlashAttention — 融合カーネル</a>
+    <a href="#s10">10. 【体験】標準 vs FlashAttention</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>Attention は何をやっているか</h2>
+  <p class="lead">数式の前に、比喩で全体像を掴みます。</p>
+  <p>図書館で調べ物をする場面を想像してください。あなたは<b>知りたいこと (Query)</b> を持っています。棚の本にはそれぞれ<b>見出し (Key)</b> と<b>中身 (Value)</b> があります。あなたは各本の見出しと自分の問いを照合し、<b>関連が強い本ほど大きく参照し</b>、複数の本の中身を<b>混ぜて答え</b>を作ります。これが Attention です。</p>
+  <div class="key">
+    3 つの登場人物。<span class="tag">Query</span> = 今知りたいこと (今のトークンが発する問い)。<span class="tag">Key</span> = 各トークンの「見出し」。<span class="tag">Value</span> = 各トークンの「中身」。<br>
+    <b>Query と Key の内積で関連度 (Attention スコア) を測り、その重みで Value を加重平均する</b>。これがすべてです。
+  </div>
+  <p>重要なのは、Query・Key・Value はいずれも<b>入力トークンのベクトルに、それぞれ別の重み行列を掛けて作られる</b>射影だという点です。同じトークンから「問い」「見出し」「中身」の 3 つの顔を作り出しているイメージです。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>Scaled Dot-Product Attention の数式</h2>
+  <p class="lead">比喩を数式に落とします。1 行ずつ分解すれば怖くありません。</p>
+  <p>系列長 <code>N</code> (トークン数)、<b>ヘッドあたりの次元</b> <code>d</code> (=d_k、実際は 64〜128 程度。モデル全体の次元 d_model とは別) とします。入力から 3 つの行列 <code>Q, K, V</code> (いずれも N&times;d) を作ります。Attention はこの一本の式です。</p>
+  <div class="math">
+    <span class="c"># Scaled Dot-Product Attention</span><br>
+    Attention(Q,K,V) = softmax( <span class="r">Q</span><span class="b">K&#7488;</span> / &radic;d ) <span class="y">V</span>
+  </div>
+  <p>これを 3 段に分けます。</p>
+  <ol class="steps">
+    <li><b>スコア行列 <code>S = QK&#7488;</code> (N&times;N)</b>。Query i と Key j の内積が S[i,j]。<b>全 Query &times; 全 Key</b> の総当たりなので N&sup2; 個の数が生まれる。ここが重さの震源地。</li>
+    <li><b>スケール &amp; softmax</b>。S を &radic;d で割ってから、各行ごとに softmax。これで各行が「合計 1 の重み (確率のようなもの)」になる。</li>
+    <li><b>Value の加重平均 <code>=AV</code></b>。softmax 後の重み行列 A (N&times;N) を V に掛け、各 Query の出力 (N&times;d) を得る。関連の強い Value ほど大きく混ざる。</li>
+  </ol>
+  <div class="math">
+    <span class="c"># 3 段に分けて書くと</span><br>
+    <span class="r">S</span> = Q K&#7488;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="c"># (N×N) 生スコア</span><br>
+    <span class="b">A</span> = softmax(S / &radic;d)&nbsp;&nbsp;<span class="c"># スケールしてから行ごと softmax</span><br>
+    out = <span class="b">A</span> <span class="y">V</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="c"># (N×d) 出力</span>
+  </div>
+  <div class="key">
+    覚えるべき形は 3 つ。<b>QK&#7488; で関連度を測り (N&sup2;)、softmax で重みに変え、V を混ぜる</b>。この <b>N&sup2; の中間行列 S / A</b> が、後で計算量とメモリの両方のボトルネックになります。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>なぜ &radic;d で割るのか</h2>
+  <p class="lead">式にひとつだけある謎の <code>&radic;d</code>。これには明確な理由があります。</p>
+  <p>Query と Key の内積は、<code>d</code> 個の積の和です。初期化時の典型的な仮定として各成分が独立に平均 0・分散 1 のとき、<b>内積の分散は次元 d に比例して大きくなります</b>。d=128 なら内積の振れ幅は標準偏差にして約 11 (&radic;128 &asymp; 11.3) になります。</p>
+  <p>この大きな値をそのまま softmax に入れると、<b>スコアの振れ幅が大きいほど、最大要素にほぼ全重みが集中しやすくなります</b> (softmax の飽和)。飽和領域では勾配がほぼ 0 になり、学習が進みません。</p>
+  <div class="key">
+    <code>&radic;d</code> で割ると内積の<b>分散が約 1 に正規化</b>され、softmax が飽和せず、なだらかな重み分布が保たれます。<b>「次元が大きいほど内積が暴れるのを、&radic;d でちょうど打ち消す」</b>のがスケーリングの意味です。d ではなく &radic;d なのは、内積の標準偏差が &radic;d なので、標準偏差で割れば分散がちょうど 1 に揃うからです。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】Query が Value を混ぜる</h2>
+  <p class="lead">1 つの Query を動かして、各 Key との関連度 (softmax の重み) と、その重みで Value がどう混ざるかを見ます。Query を Key に近づけると、その Key の重みが上がります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p1move" class="ghost active">Query をドラッグ (または自動巡回)</button>
+    <button id="p1auto">自動で動かす</button>
+    <div class="slider">スケール &beta;(=1/&radic;d, 温度の逆数) <input id="p1temp" type="range" min="1" max="20" value="8"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--q)"></span>Query (あなたの問い)</span>
+    <span><span class="dot" style="background:var(--k)"></span>Key (各トークンの見出し)</span>
+    <span><span class="dot" style="background:var(--v)"></span>出力 (Value の加重平均)</span>
+  </div>
+  <p>Query (橙) を Key (青) に近づけると、その Key との内積が大きくなり、<b>棒グラフの重み (softmax) が跳ね上がります</b>。緑の点は、その重みで全 Value を混ぜた<b>出力</b>で、関連の強い Key の方へ引き寄せられます。スケール &beta; を上げる (= 温度を下げる) と分布が<b>鋭く</b> (勝者総取りに)、下げると<b>なだらか</b>になります。&radic;d で割るのは、この &beta; を <code>1/&radic;d</code> に設定して分布が鋭くなりすぎる (飽和) のを防ぐ操作にあたります。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>位置情報の入れ方 (RoPE は軽く)</h2>
+  <p class="lead">Attention 単体には「順序」の概念がありません。ここだけ簡単に補足します。</p>
+  <p>マスクなしの素の Attention は、入力トークンを並べ替えると<b>出力も同じ順で並べ替わるだけ</b> (permutation-equivariant) で、各トークンが受け取る内容は語順に依存しません。つまり「近く/遠く」「前/後ろ」を区別できない (厳密には causal mask があると位置が部分的に漏れますが、それだけでは不十分)。そこで<b>位置情報</b>を別途注入します。現代の LLM で主流なのが <b>RoPE (Rotary Position Embedding)</b> です。</p>
+  <div class="key">
+    RoPE の発想は「<b>Query と Key のベクトルを、その位置に応じた角度だけ回転させる</b>」こと。回転させてから内積を取ると、内積の値が<b>2 つのトークンの相対的な距離</b>に依存するようになります。これで「近い/遠い」が Attention スコアに自然に反映されます。絶対位置ではなく<b>相対位置</b>が効くのが RoPE の強みです。
+  </div>
+  <p>RoPE は本記事の主題ではないので、ここでは「位置に応じてベクトルを回す仕掛け」とだけ押さえてください。仕組みの詳細 (複素数表現・周波数の割り当て・長文外挿) は<b>別記事で扱います</b>。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>なぜ計算が重いのか — N&sup2; の壁</h2>
+  <p class="lead">Attention の重さの正体は、2 章で生まれた <code>N&times;N</code> の行列です。</p>
+  <p>スコア行列 <code>S = QK&#7488;</code> は <b>N&times;N</b>。系列長 N が 2 倍になると、この行列の要素数は <b>4 倍</b>になります。<b>計算量は O(N&sup2;&middot;d)、中間行列のメモリは O(N&sup2;)</b> で、いずれも N について二乗です。</p>
+  <table>
+    <tr><th>系列長 N</th><th>スコア行列の要素数 (N&sup2;)</th><th>N=512 比</th></tr>
+    <tr><td>512</td><td>262,144</td><td>1&times;</td></tr>
+    <tr><td>2,048</td><td>4,194,304</td><td>16&times;</td></tr>
+    <tr><td>8,192</td><td>67,108,864</td><td>256&times;</td></tr>
+    <tr><td>32,768</td><td>1,073,741,824</td><td>4,096&times;</td></tr>
+  </table>
+  <div class="warn">
+    <b>ここが長文 LLM の泣きどころ。</b>文脈長を 512&rarr;32k に伸ばすと、Attention のコストは <b>約 4,000 倍</b>。モデルの他の部分 (FFN など) が N に比例 (O(N)) なのに対し、Attention だけ N&sup2; で伸びるので、<b>長文になるほど Attention が全体を支配</b>します。
+  </div>
+  <p>しかも問題は計算量だけではありません。この N&times;N 行列を<b>GPU の主記憶 (HBM) に書き出して読み直す</b>と、そのメモリ往復が帯域を食い潰します。次章で N を動かして体感し、8 章でボトルネックの正体を突き止めます。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】系列長 N とコスト</h2>
+  <p class="lead">系列長 N を動かして、計算量 (N&sup2;) とメモリが二乗で膨らむ様子を見ます。実際の LLM の文脈長 (4k〜128k) を意識してください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="360"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">系列長 N <input id="p2n" type="range" min="128" max="32768" value="2048" step="128"></div>
+  </div>
+  <div class="cost">
+    <div class="box"><span class="big" id="c_n">2048</span><span class="lbl">系列長 N</span></div>
+    <div class="box"><span class="big" id="c_score">—</span><span class="lbl">スコア行列 N&sup2; 要素</span></div>
+    <div class="box"><span class="big" id="c_mem">—</span><span class="lbl">S+A メモリ (fp16, 1ヘッド)</span></div>
+    <div class="box"><span class="big" id="c_ffn">—</span><span class="lbl">FFN (O(N)) 比の伸び</span></div>
+  </div>
+  <p>棒グラフは、系列長に対する <b>Attention (N&sup2;)</b> と <b>FFN 等 (N)</b> のコストの伸びを対比しています。N が小さいうちは FFN が支配的でも、N が伸びると <b>Attention の青い棒が二乗で突き抜けて</b>いきます。「スコア行列の概算メモリ」は<b>1 ヘッド・1 シーケンスあたり</b>の最小見積り (S+A を fp16 で) で、N=32k で数 GB。実際は<b>ヘッド数とバッチのぶんさらに倍増</b>するので、これを素直に確保するのは非現実的だと分かります。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>何バウンドの処理か</h2>
+  <p class="lead">「重い」と一口に言っても、計算が重いのかメモリ移動が重いのかで対策が変わります。Attention は<b>場面によって両方</b>です。</p>
+  <p>処理が何で律速されるかは <b>Arithmetic Intensity (演算強度 = 演算量 / メモリ移動量)</b> で決まります。GPU の「1 バイト運ぶ間にできる演算数」の分岐点より上なら compute-bound、下なら memory-bound です。Attention は使われ方で二つの顔を持ちます。</p>
+  <table>
+    <tr><th>場面</th><th>状況</th><th>律速</th></tr>
+    <tr><td>学習 / Prefill</td><td>N 個のトークンをまとめて処理。大きな行列積が主。</td><td>compute-bound 寄り<br>(ただし素朴実装は N&sup2; 行列の HBM 往復で memory-bound 化)</td></tr>
+    <tr><td>推論の Decode (1 トークン生成)</td><td>Query は 1 本だけ。過去 N トークンの K,V を全部読む。</td><td>強く memory-bound</td></tr>
+  </table>
+  <div class="key">
+    <b>Decode が memory-bound になる理由。</b>1 トークン生成するのに、<b>過去全トークンの Key と Value (KV cache) を HBM から読む</b>必要があります。読む量は N に比例して増えるのに、行うのは Query 1 本ぶんの小さな計算だけ。<b>運ぶバイトに対して演算が少なすぎる</b> = メモリ帯域で律速。だから LLM 推論は「KV cache をいかに小さく・速く扱うか」の戦いになります。読む量を減らす<b>量子化・GQA/MQA</b>、メモリ管理を効率化してバッチを広げる<b>PagedAttention</b> など、狙いの異なる対策が併用されます。
+  </div>
+  <div class="warn">
+    <b>Prefill も油断できない。</b>行列積そのものは compute-bound ですが、素朴に実装すると N&times;N のスコア行列を HBM に書いて softmax でまた読む往復が入り、<b>memory-bound に転落</b>します。これを防ぐのが次章の FlashAttention です。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>FlashAttention — 融合カーネル</h2>
+  <p class="lead">N&sup2; 行列を主記憶に書かなければ、メモリ往復は消せる。これが FlashAttention の核心です。</p>
+  <p>素朴な Attention は 3 段 (S=QK&#7488; &rarr; A=softmax(S) &rarr; AV) をそれぞれ別カーネルで実行し、<b>N&times;N の中間行列 S・A を HBM に書いては読み直します</b>。N&sup2; のデータを 2 往復以上させるので、長文では帯域が完全に飽和します。</p>
+  <div class="math">
+    <span class="c"># 素朴実装: N×N 行列が HBM を何度も往復</span><br>
+    QK&#7488; &rarr; <span class="r">S (N×N) を HBM に書く</span><br>
+    <span class="r">S を読む</span> &rarr; softmax &rarr; <span class="r">A (N×N) を HBM に書く</span><br>
+    <span class="r">A を読む</span> &rarr; AV &rarr; 出力を書く
+  </div>
+  <p><b>FlashAttention</b> は、Q・K・V を小さな<b>ブロック (タイル) に分割</b>し、<b>1 つの融合カーネルの中で</b>「部分的な QK&#7488; &rarr; 部分 softmax &rarr; 部分 AV」をオンチップ (SRAM) だけで進めます。鍵は <b>online softmax</b>: 全体の最大値や合計を最初に知らなくても、ブロックを見るたびに<b>途中経過を補正しながら</b>正しい softmax を積み上げる技法です。</p>
+  <div class="key">
+    <b>FlashAttention が消したもの。</b>N&times;N の中間行列 S・A を<b>一度も HBM に書きません</b>。追加で確保するメモリは N&sup2; ではなく <b>O(N) 級</b>で済みます。HBM アクセス量は論文では <b>&Theta;(N&sup2;d&sup2;/M)</b> (M はオンチップ SRAM の容量)。<b>N&sup2; のオーダー自体は残ります</b> (入力ブロックを繰り返し読み直すため。直感的には、K,V 全体 Nd を Q タイルの数 &asymp;Nd/M 回なめるので Nd&times;Nd/M = N&sup2;d&sup2;/M) が、係数が SRAM 容量ぶん小さくなり、実測で<b>アクセスが数倍〜10 倍ほど減り</b>ます。計算量そのもの (O(N&sup2;d)) はむしろ再計算で微増しますが、memory-bound だった処理の<b>メモリ往復を潰す</b>ので実効速度が大きく上がります。
+  </div>
+  <div class="warn">
+    <b>誤解しやすい点 (その1)。</b>FlashAttention は<b>近似ではありません</b>。出力は素朴実装と数値的に (ほぼ) 一致する<b>厳密なアルゴリズム</b>です。速くなるのは「計算を省いた」からではなく「<b>メモリ往復を省いた</b>」から。LayerNorm/RMSNorm 等でも複数カーネルを 1 つに融合して中間結果の書き出しを省く同種の最適化があり、それと同じ思想です。
+  </div>
+  <div class="warn">
+    <b>誤解しやすい点 (その2)。</b>FlashAttention が主に効くのは<b>学習 / Prefill の N&sup2; 往復</b>です。推論の Decode では中間行列がそもそも小さく (1&times;N)、律速は<b>KV cache の読み出し</b>なので、そこは FlashAttention では消えません。Decode 側は量子化・GQA 等の別対策が担います (Flash-Decoding はまた別の並列化の工夫)。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>【体験】標準 vs FlashAttention</h2>
+  <p class="lead">標準実装と FlashAttention で、N&times;N 行列が HBM とオンチップの間をどう扱われるかを見ます。往復するデータ量に注目してください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv3" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p3play">データを流す</button>
+    <button id="p3reset" class="ghost">最初から</button>
+    <button class="ghost active" data-k="naive" id="kNaive">標準 (N&sup2; を書き出す)</button>
+    <button class="ghost" data-k="flash" id="kFlash">FlashAttention (タイル融合)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>HBM &harr; コア間の移動</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>オンチップ (SRAM) の計算</span>
+  </div>
+  <p><b>標準</b>では巨大な N&times;N 行列 (赤) が HBM を往復します。<b>FlashAttention</b> に切り替えると、Q・K・V を<b>タイル単位で読み込み、オンチップで online softmax まで完結</b>させ、<b>N&sup2; の中間行列を一度も書き出しません</b>。往復するのは入力タイルと出力だけ (ただし入力タイルは複数回読み直されるので往復がゼロになるわけではなく、N&sup2; 行列の往復が消えるのがポイント ― 9章の &Theta;(N&sup2;d&sup2;/M) 参照)。<b>長文ほどこの差が効きます</b>。</p>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <p class="lead">Attention の要点を一枚に整理します。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>やっていること</td><td>Query が Key との内積で関連度を測り、softmax の重みで Value を加重平均</td></tr>
+    <tr><td>数式</td><td>softmax(QK&#7488;/&radic;d)V。中間に N&times;N のスコア/重み行列</td></tr>
+    <tr><td>&radic;d の意味</td><td>内積の分散を約 1 に正規化し softmax の飽和を防ぐ</td></tr>
+    <tr><td>計算量</td><td>O(N&sup2;d)。文脈長を伸ばすと N について二乗で重くなる</td></tr>
+    <tr><td>Prefill</td><td>compute-bound 寄り (素朴実装は N&sup2; 往復で memory-bound 化)</td></tr>
+    <tr><td>Decode</td><td>強く memory-bound。KV cache の読み出しが律速</td></tr>
+    <tr><td>FlashAttention</td><td>N&sup2; 行列を HBM に書かない厳密アルゴリズム。メモリ往復を潰して高速化</td></tr>
+    <tr><td>位置情報</td><td>素の Attention は語順を持たない。RoPE 等で注入 (別記事)</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>Attention の美しさは「全員が全員を見て加重平均する」という一様な仕組みにあり、その代償が <b>N&sup2; のコストとメモリ</b>です。計算量そのものを O(N&sup2;d) から動かすのは難しく、FlashAttention は<b>むしろ再計算で演算がわずかに増える</b>にもかかわらず速い。<b>「N&sup2; の中間行列を主記憶に書かない」というメモリ側の工夫</b>だけで実用性を劇的に上げたのです。長文 LLM を支えているのは、この「重さの正体はメモリ移動だった」という洞察です。
+  </div>
+  <div class="fn">
+    参考: Vaswani et al. "Attention Is All You Need." NeurIPS 2017 (<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">arXiv:1706.03762</a>)。Dao et al. "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness." NeurIPS 2022 (<a href="https://arxiv.org/abs/2205.14135" target="_blank" rel="noopener">arXiv:2205.14135</a>)。RoPE: Su et al. (<a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener">arXiv:2104.09864</a>)。<br>
+    注意: 本ページのアニメーションと概算値は、Attention の仕組みとボトルネックを直感的に伝えるための<b>模式的な可視化</b>です。実際の演算量・メモリ・バウンド判定は、精度・ハードウェア・実装 (MHA/GQA/MQA、causal mask 等) に依存します。
+  </div>
+</section>
+
+</main>
+<script>
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+// ============ デモ1: Query が Key を見て Value を混ぜる ============
+(function(){
+  const cv=document.getElementById('cv1'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NK=6;                       // Key の数
+  const plotL=40, plotR=W*0.52, plotT=40, plotB=H-40; // 左: 2D 空間
+  let keys=[], vals=[], q=[plotL+ (plotR-plotL)*0.5, (plotT+plotB)/2];
+  let scale=8, auto=false, dragging=false, tt=0;
+  const palette=['#f0a58e','#8fb8f0','#8fd6b4','#ffd98f','#c9a0f0','#f0c78f'];
+
+  function init(){
+    keys=[]; vals=[];
+    for(let i=0;i<NK;i++){
+      const a=2*Math.PI*i/NK + 0.3;
+      const r=(plotR-plotL)*0.32;
+      const cx=(plotL+plotR)/2 + Math.cos(a)*r;
+      const cy=(plotT+plotB)/2 + Math.sin(a)*r*0.9;
+      keys.push([cx,cy]);
+      vals.push(0.2+0.7*i/(NK-1));   // Value を 1 次元スカラー(色の濃さ)で表現
+    }
+    draw();
+  }
+  function softmaxWeights(){
+    // Query と各 Key の「近さ」を内積の代わりに -距離^2 で測り、scale を温度として softmax
+    const logits=keys.map(k=>{
+      const dx=(q[0]-k[0])/60, dy=(q[1]-k[1])/60;
+      return -(dx*dx+dy*dy)*scale*0.25;
+    });
+    const m=Math.max(...logits);
+    const ex=logits.map(l=>Math.exp(l-m));
+    const s=ex.reduce((a,b)=>a+b,0);
+    return ex.map(e=>e/s);
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const w=softmaxWeights();
+    // 左: 空間プロット
+    ct.strokeStyle='rgba(215,245,230,0.15)';ct.lineWidth=1;
+    ct.strokeRect(plotL,plotT,plotR-plotL,plotB-plotT);
+    ct.fillStyle='#8fd6b4';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('Query と Key の空間 (近いほど関連大)',plotL,plotT-12);
+    // Key から Query への線 (太さ=重み)
+    for(let i=0;i<NK;i++){
+      ct.strokeStyle=palette[i]; ct.globalAlpha=0.5; ct.lineWidth=1+w[i]*14;
+      ct.beginPath();ct.moveTo(q[0],q[1]);ct.lineTo(keys[i][0],keys[i][1]);ct.stroke();
+    }
+    ct.globalAlpha=1;
+    // Key 点
+    for(let i=0;i<NK;i++){
+      ct.fillStyle=palette[i];
+      ct.beginPath();ct.arc(keys[i][0],keys[i][1],7,0,7);ct.fill();
+      ct.fillStyle='#0d2b20';ct.font='11px sans-serif';ct.textAlign='center';
+      ct.fillText('K'+(i+1),keys[i][0],keys[i][1]+4);
+    }
+    // Query 点
+    ct.fillStyle='#e07a5f';ct.strokeStyle='#fff';ct.lineWidth=2;
+    ct.beginPath();ct.arc(q[0],q[1],10,0,7);ct.fill();ct.stroke();
+    ct.fillStyle='#fff';ct.font='11px sans-serif';ct.textAlign='center';ct.fillText('Q',q[0],q[1]+4);
+
+    // 右: 重みの棒グラフ + 出力
+    const bx=plotR+30, bw=(W-bx-30)/NK, baseY=H*0.62, maxH=H*0.42;
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('softmax の重み (合計 1)',bx,plotT-12+40);
+    for(let i=0;i<NK;i++){
+      const h=maxH*w[i];
+      ct.fillStyle=palette[i];
+      ct.fillRect(bx+i*bw+4, baseY-h, bw-8, h);
+      ct.fillStyle='#d7f5e6';ct.font='11px sans-serif';ct.textAlign='center';
+      ct.fillText('K'+(i+1), bx+i*bw+bw/2, baseY+16);
+      ct.fillText(w[i].toFixed(2), bx+i*bw+bw/2, baseY-h-6);
+    }
+    // 出力 = Σ w_i * val_i (色の濃さで表現)
+    let outv=0; for(let i=0;i<NK;i++) outv+=w[i]*vals[i];
+    const g=Math.round(120+outv*100);
+    ct.fillStyle=`rgb(25,${g},84)`;
+    const oy=baseY+40, ow=W-bx-30;
+    ct.fillRect(bx,oy,ow,26);
+    ct.fillStyle='#fff';ct.font='13px sans-serif';ct.textAlign='center';
+    ct.fillText('出力 = Σ (重み × Value)  ='+outv.toFixed(2),bx+ow/2,oy+18);
+  }
+  // インタラクション
+  function pos(e){const r=cv.getBoundingClientRect();const sx=cv.width/r.width,sy=cv.height/r.height;
+    const t=e.touches?e.touches[0]:e; return [(t.clientX-r.left)*sx,(t.clientY-r.top)*sy];}
+  cv.addEventListener('mousedown',e=>{const[x,y]=pos(e);if(x<plotR){dragging=true;auto=false;q=[x,y];draw();}});
+  cv.addEventListener('mousemove',e=>{if(dragging){const[x,y]=pos(e);q=[Math.max(plotL,Math.min(plotR,x)),Math.max(plotT,Math.min(plotB,y))];draw();}});
+  window.addEventListener('mouseup',()=>dragging=false);
+  cv.addEventListener('touchstart',e=>{const[x,y]=pos(e);if(x<plotR){dragging=true;auto=false;q=[x,y];draw();e.preventDefault();}},{passive:false});
+  cv.addEventListener('touchmove',e=>{if(dragging){const[x,y]=pos(e);q=[Math.max(plotL,Math.min(plotR,x)),Math.max(plotT,Math.min(plotB,y))];draw();e.preventDefault();}},{passive:false});
+  window.addEventListener('touchend',()=>dragging=false);
+  document.getElementById('p1temp').oninput=function(){scale=+this.value;draw();};
+  function autoLoop(){if(!auto)return;tt+=0.02;
+    const cx=(plotL+plotR)/2, cy=(plotT+plotB)/2, r=(plotR-plotL)*0.3;
+    q=[cx+Math.cos(tt)*r, cy+Math.sin(tt*1.3)*r*0.8];draw();requestAnimationFrame(autoLoop);}
+  document.getElementById('p1auto').onclick=function(){auto=!auto;this.textContent=auto?'停止':'自動で動かす';if(auto)autoLoop();};
+  init();
+})();
+
+// ============ デモ2: 系列長 N とコスト (N² vs N) ============
+(function(){
+  const cv=document.getElementById('cv2'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  function fmt(n){if(n>=1e9)return (n/1e9).toFixed(2)+'B';if(n>=1e6)return (n/1e6).toFixed(2)+'M';if(n>=1e3)return (n/1e3).toFixed(1)+'K';return ''+Math.round(n);}
+  function fmtBytes(b){if(b>=1e9)return (b/1e9).toFixed(2)+' GB';if(b>=1e6)return (b/1e6).toFixed(1)+' MB';if(b>=1e3)return (b/1e3).toFixed(1)+' KB';return b+' B';}
+  const Nmax=32768;
+  function draw(N){
+    ct.clearRect(0,0,W,H);
+    // Attention コスト ∝ N², FFN 等 ∝ N。同じ係数基準で相対比較
+    const attn=N*N, ffn=N* Nmax; // ffn を N*定数 にして N=Nmax で attn と同オーダーに正規化
+    const maxV=Nmax*Nmax;
+    const baseY=H-70, maxH=H-130;
+    const bw=120, gap=90, x0=W/2-bw-gap/2;
+    const aH=maxH*attn/maxV, fH=maxH*ffn/maxV;
+    ct.fillStyle='#3d7dca';ct.fillRect(x0,baseY-aH,bw,aH);
+    ct.fillStyle='#198754';ct.fillRect(x0+bw+gap,baseY-fH,bw,fH);
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='center';
+    ct.fillText('Attention  ∝ N²',x0+bw/2,baseY+26);
+    ct.fillText('FFN 等  ∝ N',x0+bw+gap+bw/2,baseY+26);
+    ct.font='14px sans-serif';ct.fillStyle='#8fb8f0';
+    ct.fillText(fmt(attn),x0+bw/2,baseY-aH-10);
+    ct.fillStyle='#8fd6b4';
+    ct.fillText(fmt(ffn),x0+bw+gap+bw/2,baseY-fH-10);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('縦軸: コストの相対的な伸び (N を大きくすると青が二乗で突き抜ける)',16,26);
+  }
+  const slider=document.getElementById('p2n');
+  function update(){
+    const N=+slider.value;
+    document.getElementById('c_n').textContent=N;
+    document.getElementById('c_score').textContent=fmt(N*N);
+    // S(N×N) + A(N×N) を fp16(2byte) で概算。マルチヘッド等は無視した最小見積り
+    document.getElementById('c_mem').textContent=fmtBytes(N*N*2*2);
+    // FFN(O(N)) 比: attn/ffn の伸び = N / 512 を基準に
+    document.getElementById('c_ffn').textContent=(N/512).toFixed(1)+'×';
+    draw(N);
+  }
+  slider.oninput=update;
+  update();
+})();
+
+// ============ デモ3: 標準 vs FlashAttention の HBM 往復 ============
+(function(){
+  const cv=document.getElementById('cv3'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let kind='naive', playing=false, tRaw=0;
+  const hbmX=W*0.16, coreX=W*0.84, midY=H*0.5;
+  // dir=1 読み込み(HBM→core), dir=-1 書き戻し, 0=オンチップ計算。big=N²サイズの往復
+  const naiveSeq=[
+    {dir: 1, label:'Q,K を読む', big:false},
+    {dir: 0, label:'QKᵀ を計算', big:false},
+    {dir:-1, label:'N×N スコア S を書く', big:true},
+    {dir: 1, label:'S(N×N) を読み直す', big:true},
+    {dir: 0, label:'softmax', big:false},
+    {dir:-1, label:'N×N 重み A を書く', big:true},
+    {dir: 1, label:'A(N×N),V を読む', big:true},
+    {dir: 0, label:'AV を計算', big:false},
+    {dir:-1, label:'出力を書く', big:false}
+  ];
+  const flashSeq=[
+    {dir: 1, label:'Q,K,V をタイルで読む', big:false},
+    {dir: 0, label:'部分QKᵀ→online softmax→部分AV (SRAM内)', big:false},
+    {dir:-1, label:'出力を書く (N×N は書かない!)', big:false}
+  ];
+  function seq(){return kind==='naive'?naiveSeq:flashSeq;}
+  function roundRectPath(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+  function box(x,y,w,h,fill,stroke,lines){ct.fillStyle=fill;ct.strokeStyle=stroke;ct.lineWidth=2;
+    roundRectPath(x-w/2,y-h/2,w,h,10);ct.fill();ct.stroke();ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='center';
+    const a=Array.isArray(lines)?lines:[lines];const lh=19,sy=y-(a.length-1)*lh/2+5;a.forEach((l,i)=>ct.fillText(l,x,sy+i*lh));}
+  function head(x,y,ang){ct.beginPath();ct.moveTo(x,y);ct.lineTo(x-Math.cos(ang-0.4)*10,y-Math.sin(ang-0.4)*10);
+    ct.moveTo(x,y);ct.lineTo(x-Math.cos(ang+0.4)*10,y-Math.sin(ang+0.4)*10);ct.stroke();}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const s=seq(),n=s.length;
+    const pos=Math.min(tRaw,n-1e-6),idx=Math.floor(pos),frac=pos-idx,step=s[idx];
+    let bigWrites=0,smallMoves=0;
+    for(let i=0;i<=idx;i++){if(s[i].dir!==0){if(s[i].big)bigWrites++;else smallMoves++;}}
+    box(hbmX,midY,150,90,'#241a14','#e07a5f',['HBM','(主記憶)']);
+    box(coreX,midY,160,90,'#0e2f22','#8fd6b4',['コア + SRAM','(オンチップ)']);
+    const y=midY;
+    if(step.dir!==0){
+      const from=step.dir===1?hbmX+80:coreX-85, to=step.dir===1?coreX-85:hbmX+80;
+      const px=from+(to-from)*frac;
+      ct.strokeStyle='rgba(224,122,95,0.3)';ct.lineWidth=2;ct.beginPath();ct.moveTo(hbmX+80,y);ct.lineTo(coreX-85,y);ct.stroke();
+      ct.fillStyle=step.big?'#e07a5f':'#f0a58e';
+      const rad=step.big?18:9;
+      ct.beginPath();ct.arc(px,y,rad,0,7);ct.fill();
+      if(step.big){ct.fillStyle='#fff';ct.font='11px sans-serif';ct.textAlign='center';ct.fillText('N²',px,y+4);}
+      ct.strokeStyle='#f0a58e';ct.lineWidth=2;head(px+(step.dir===1?rad+4:-rad-4),y,step.dir===1?0:Math.PI);
+    }else{
+      ct.fillStyle='rgba(143,214,180,'+(0.4+0.4*Math.sin(frac*Math.PI))+')';
+      ct.beginPath();ct.arc(coreX,y,26+8*Math.sin(frac*Math.PI*2),0,7);ct.fill();
+    }
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='center';
+    ct.fillText('ステップ '+(idx+1)+' / '+n+' : '+step.label,W/2,H-64);
+    ct.font='15px sans-serif';
+    ct.fillStyle='#e07a5f';ct.fillText('N×N 行列の往復: '+bigWrites+' 回   /   小さな移動: '+smallMoves+' 回',W/2,H-36);
+    ct.fillStyle=(kind==='flash')?'#8fd6b4':'#ffd98f';
+    ct.fillText(kind==='flash'?'N² を一度も HBM に書かない → メモリ往復が激減':'巨大な N² 行列が HBM を何度も往復 → 帯域を食い潰す',W/2,H-14);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText(kind==='naive'?'標準: N×N のスコア/重み行列を HBM に実体化':'FlashAttention: タイルを SRAM で融合処理',16,26);
+  }
+  function loop(){if(!playing)return;tRaw+=0.02;const n=seq().length;
+    if(tRaw>=n){tRaw=n-1e-6;playing=false;document.getElementById('p3play').textContent='データを流す';}draw();if(playing)requestAnimationFrame(loop);}
+  document.getElementById('p3play').onclick=function(){if(tRaw>=seq().length-1e-6)tRaw=0;playing=!playing;this.textContent=playing?'一時停止':'データを流す';if(playing)loop();};
+  document.getElementById('p3reset').onclick=function(){playing=false;tRaw=0;document.getElementById('p3play').textContent='データを流す';draw();};
+  function setKind(k,btn){kind=k;document.querySelectorAll('[data-k]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');playing=false;tRaw=0;document.getElementById('p3play').textContent='データを流す';draw();}
+  document.getElementById('kNaive').onclick=function(){setKind('naive',this);};
+  document.getElementById('kFlash').onclick=function(){setKind('flash',this);};
+  draw();
+})();
+</script>
+</body>
+</html>
