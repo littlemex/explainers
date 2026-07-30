@@ -23,3 +23,5 @@ GitHub Pages serves the repository root of the `main` branch. Add a new `*.html`
 - [Softmax Attention をビジュアルに理解する](softmax-attention-explainer.html) — QKV の仕組み・N² の計算コスト・バウンド判定・FlashAttention を動くアニメで理解
 
 - [FFN から MoE へ](ffn-moe-explainer.html) — FFN/MoE の違い・MoE の GEMM 非効率・MegaBlocks のブロックスパースを動くアニメで理解
+
+- [NKI Workshop シリーズ](nki-workshop/index.html) — AWS Trainium カーネル入門。01: ハードウェア階層 (HBM/SBUF/PSUM・容量と帯域・GPUとの違い)
