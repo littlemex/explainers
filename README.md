@@ -26,3 +26,4 @@ GitHub Pages serves the repository root of the `main` branch. Add a new `*.html`
 
 - [NKI Workshop シリーズ](nki-workshop/index.html) — AWS Trainium カーネル入門。01: ハードウェア階層 (HBM/SBUF/PSUM・容量と帯域・GPUとの違い)
   - 02: [Roofline とカーネル融合](nki-workshop/02-roofline-and-fusion.html) — 理論上限の測り方・メモリ往復を消す融合・RMSNorm+QKV融合の実例
+  - [座学トピック一覧とロードマップ](nki-workshop/syllabus.html) — 全トピックの俯瞰と学習順序
