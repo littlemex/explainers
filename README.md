@@ -25,3 +25,4 @@ GitHub Pages serves the repository root of the `main` branch. Add a new `*.html`
 - [FFN から MoE へ](ffn-moe-explainer.html) — FFN/MoE の違い・MoE の GEMM 非効率・MegaBlocks のブロックスパースを動くアニメで理解
 
 - [NKI Workshop シリーズ](nki-workshop/index.html) — AWS Trainium カーネル入門。01: ハードウェア階層 (HBM/SBUF/PSUM・容量と帯域・GPUとの違い)
+  - 02: [Roofline とカーネル融合](nki-workshop/02-roofline-and-fusion.html) — 理論上限の測り方・メモリ往復を消す融合・RMSNorm+QKV融合の実例
