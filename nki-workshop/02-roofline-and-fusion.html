@@ -82,24 +82,26 @@
 <main>
 
 <section>
-  <h2><span class="num">0</span>この記事の狙い ― まず結論から</h2>
-  <p class="lead">第 1 回でハードウェアの階層 (速いオンチップ / 遅い HBM) を学びました。今回は「その地図の上で、なぜわざわざ手でカーネルを書くのか」を一歩深掘りします。まず、その答えになる実測を先に見せます。</p>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">第 1 回でハードウェアの階層 (速いオンチップ / 遅い HBM) を学びました。今回は「その地図の上で、なぜわざわざ手でカーネルを書くのか」を一歩深掘りします。答えになる実測を先に見せます。</p>
   <div class="key">
+    <b>一言でいうと</b><br>
+    高速化の鍵は<b>「遅い HBM への往復を減らす」</b>の一点です。それを (A) ギャップを測る物差し <b>Roofline</b>、(B) 往復を消す手法 <b>カーネル融合</b>、(C) 実例 <b>RMSNorm と QKV 射影の融合</b>、の順で解き明かします。同じ数式・同じ答えでも、往復を消すだけで<b>桁違いに速くなる</b> ― それが手でカーネルを書く理由です。
+  </div>
+  <div class="key" style="background:#f3f9f6">
     <b>先に結論 (NKI Workshop の実測)。</b>小さな Llama 風モデルの推論で、同じ計算を 3 通りの実装で回すと:<br>
     ・素の PyTorch 演算 (base): <b>24 tok/s</b><br>
     ・NKI カーネル化 (core): <b>78 tok/s</b><br>
     ・<b>RMSNorm + QKV 射影 + RoPE + Attention + KV cache + 出力射影を 1 つのカーネルに融合</b> (megakernel): <b>410 tok/s</b> (base 比 <b>約 17 倍</b>)<br>
     <span style="font-size:14px;color:var(--sub)">(small モデル・128 プロンプト・greedy・torch.compile・Trn2.3xlarge)</span>
   </div>
-  <p>同じ数式・同じ答えなのに、なぜ 17 倍も差がつくのか。鍵は<b>「遅いメモリへの往復を減らす」</b>の一点です。この記事はそれを、(A) ギャップを測る物差し <b>Roofline</b>、(B) 往復を消す手法 <b>カーネル融合</b>、(C) 実例 <b>RMSNorm + 行列積の融合</b>、の順に解き明かします。</p>
   <div class="toc">
     <a href="#s1">1. 【体験】Roofline ― 計算律速かメモリ律速か</a>
     <a href="#s2">2. ハードウェアエンタイトルメント ― 理論と実測のギャップ</a>
     <a href="#s3">3. ギャップの正体 ― メモリ往復</a>
     <a href="#s4">4. 【体験】カーネル融合 ― 往復を消す</a>
     <a href="#s5">5. 実例 ― RMSNorm と QKV 射影の融合</a>
-    <a href="#s6">6. なぜ手でカーネルを書くのか</a>
-    <a href="#s7">7. NKI Workshop 座学トピック全体像と今後の章</a>
+    <a href="#s6">6. まとめ ― なぜ手でカーネルを書くのか</a>
   </div>
   <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値は NKI Workshop の講義・実測に基づく概算です。<a href="./01-hardware-hierarchy.html">前提となる第 1 回「ハードウェア階層」</a>を先に読むと理解が早いです。</p>
 </section>
@@ -135,9 +137,19 @@
     速さ   = 78.6 TFLOPS&nbsp;&nbsp;<span class="c"># Tensor Engine の bf16 ピーク (第1回)</span><br>
     時間   = 34e9 / 78.6e12 ≈ <span class="b">437 マイクロ秒</span>&nbsp;&nbsp;<span class="c"># これが理論上限</span>
   </div>
-  <p>この見積もりは「本来これくらいで終わるはず」という<b>ターゲット</b>を与えます。実測がこれに近ければ、もう触る必要はありません。遠ければ、そのギャップが<b>「手で最適化する余地」そのもの</b>です。ワークショップの Attention チュートリアルでは、理論上限が約 150μs なのに、素朴な実装は数倍遅い状態から始まりました。</p>
+  <p>この見積もりは「本来これくらいで終わるはず」という<b>ターゲット</b>を与えます。実測がこれに近ければ、もう触る必要はありません。遠ければ、そのギャップが<b>「手で最適化する余地」そのもの</b>です。</p>
+  <p>この「仕事量 ÷ 速度 = 時間」の計算過程を可視化します。行列積 A (M×K) × B (K×N) のサイズをスライダーで変えると、① 仕事量 (FLOP) の数え方、② それを 78.6 TFLOPS で割る、③ 出てくる理論上限時間、が連動します。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv0" width="840" height="360"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">M <input id="p0m" type="range" min="512" max="8192" value="4096" step="512"></div>
+    <div class="slider">K <input id="p0k" type="range" min="256" max="4096" value="1024" step="256"></div>
+    <div class="slider">N <input id="p0n" type="range" min="512" max="8192" value="4096" step="512"></div>
+  </div>
+  <p>核心は「<b>出力の要素数 (M×N) それぞれに、K 回の積和 (=2K FLOP) がかかる</b>」= <b>2·M·K·N FLOP</b>。これをハードの速さ 78.6 TFLOPS で割れば時間が出ます。行列を大きくすると仕事量が増え、時間も比例して伸びるのが見て取れます。この見積もりが「本来これくらいで終わるはず」というターゲットになり、実測との差が<b>手で最適化する余地</b>です。</p>
   <div class="key">
-    <b>これが動機の核心です。</b>「なんとなく遅い気がする」ではなく、<b>「理論上は 150μs で終わるはずなのに、実測 400μs。250μs のギャップがある」</b>と定量的に言える。原因 (次章のメモリ往復) も特定できている。<b>それなのに、汎用フレームワーク任せでは自動で埋まらない</b>。この具体的なフラストレーションが、手でカーネルを書く理由です。
+    <b>これが動機になる理由。</b>「なんとなく遅い」ではなく <b>「理論上 X μs のはずが実測 Y μs、ギャップ Z μs」</b>と言える。ワークショップの Attention チュートリアルでは、理論上限 ~150μs に対し素朴な実装が約 850μs。最適化を積んで約 240μs まで縮めました。<b>ギャップが数値で見えるから、どこまで縮むか・あと何をすべきかが分かる</b>のです。</p>
   </div>
   <details>
     <summary>もう一つの例: Attention 全体の見積もり (クリックで展開)</summary>
@@ -193,6 +205,30 @@
   <div class="key">
     <b>良い実装。</b>RMSNorm の reduction と element-wise を <b>1 パスで SBUF 上に済ませ、その出力を HBM に降ろさず、そのまま QKV 射影の行列積に流し込む</b>。正規化の結果という中間テンソルが HBM を往復しない。前章のアニメの「演算1→2→3 を SBUF 上で繋ぐ」が、まさに「RMSNorm → 射影」で起きています。
   </div>
+  <p>数式で書くと、1 本のトークンベクトル <code>x</code> (d 次元) に対して次の流れです。融合とは、この一連の計算を<b>途中結果を書き出さずに左から右へ一気に通す</b>ことに他なりません。</p>
+  <div class="math">
+    <span class="c"># RMSNorm (reduction → element-wise)</span><br>
+    ms = (1/d) &sum;&#7522; x&#7522;&sup2;&nbsp;&nbsp;<span class="p">← reduction: 全要素の二乗を1つに畳む</span><br>
+    x&#770;&#7522; = x&#7522; / &radic;(ms + &epsilon;) &middot; g&#7522;&nbsp;&nbsp;<span class="y">← element-wise: 各要素を割ってスケール</span><br><br>
+    <span class="c"># QKV 射影 (行列積) ― 正規化後の x&#770; をそのまま入力に</span><br>
+    Q = x&#770; W<span class="b">_q</span> &nbsp; K = x&#770; W<span class="b">_k</span> &nbsp; V = x&#770; W<span class="b">_v</span>&nbsp;&nbsp;<span class="b">← matmul</span>
+  </div>
+  <p>下の図で、この数式が 1 ステップずつどう計算されるかを追えます。ボタンで進めると、二乗和 → RMS で割る → スケール g → 重み <code>W_q</code> との行列積で Q が出る、が順に光ります。<b>正規化後の x&#770; を HBM に書き出さず、そのまま行列積の入力にする</b>のが融合です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv3" width="840" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p3next">計算を1ステップ進める</button>
+    <button id="p3play">自動再生</button>
+    <button id="p3reset" class="ghost">最初から</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>入力 x</span>
+    <span><span class="dot" style="background:#c9a0f0"></span>reduction (二乗和→RMS)</span>
+    <span><span class="dot" style="background:#ffd98f"></span>正規化後 x&#770;</span>
+    <span><span class="dot" style="background:#8fb8f0"></span>重み W_q と行列積 → Q</span>
+  </div>
+  <p>ここで効くのが第 1 章の Roofline です。RMSNorm は<b>演算強度が低くメモリ律速</b> (要素を 1〜2 回触るだけ) なので、途中結果を HBM に往復させると損が大きい。だから正規化の出力 x&#770; を降ろさず、演算強度の高い行列積 (QKV 射影) の入力に直結させる ― これが「融合」の中身です。</p>
   <p>ワークショップの megakernel はこれをさらに推し進め、<b>RMSNorm + QKV 射影 + RoPE + Attention + KV cache 更新 + 出力射影</b>という 1 ブロック丸ごとを単一カーネルに融合しました。ブロック内の中間結果が一度も HBM に降りない。これが冒頭の <b>base 比 17 倍</b>の正体です。</p>
   <details>
     <summary>融合には工夫が要る (この先は後続の章で)</summary>
@@ -201,45 +237,23 @@
 </section>
 
 <section id="s6">
-  <h2><span class="num">6</span>なぜ手でカーネルを書くのか</h2>
-  <p class="lead">3 つの話が 1 本につながります。</p>
-  <div class="key">
-    <b>結論。</b>(A) <b>Roofline</b> で「理論上これだけ速いはず」というターゲットと、実測とのギャップを定量化する。ギャップの原因の多くは (メモリ律速 =) <b>遅い HBM への往復</b>。(B) <b>カーネル融合</b>で、中間結果を SBUF に留めて往復を消す。(C) その発想は <b>RMSNorm + QKV 射影</b>のような現実の隣接処理でそのまま効き、ブロック丸ごとの融合で <b>17 倍</b>に届く。<br>
-    汎用フレームワークは演算を 1 つずつ実行するので、この往復を自動では消せない。<b>「理論上限が見えていて、原因も分かっているのに、自動では埋まらない」― そのギャップを自分の手で埋めるのが、カーネルを書く理由</b>です。
-  </div>
+  <h2><span class="num">6</span>まとめ</h2>
+  <p class="lead">「なぜ手でカーネルを書くのか」への答えを一枚に整理します。3 つの話が 1 本につながります。</p>
   <table>
-    <tr><th>持ち帰り</th><th>一文で</th></tr>
-    <tr><td>Roofline</td><td>演算強度でボトルネックの種類 (計算律速/メモリ律速) が分かる</td></tr>
-    <tr><td>エンタイトルメント</td><td>仕事量 ÷ ハード速度 = 理論上限。実測との差が最適化の余地</td></tr>
-    <tr><td>カーネル融合</td><td>中間結果を HBM に降ろさなければ、往復が消えて速くなる</td></tr>
-    <tr><td>RMSNorm+射影の融合</td><td>実際の隣接層でもこの発想がそのまま使える (17倍の実測)</td></tr>
-  </table>
-</section>
-
-<section id="s7">
-  <h2><span class="num">7</span>NKI Workshop 座学トピック全体像と今後の章</h2>
-  <p class="lead">NKI Workshop が座学で扱う主要トピックを俯瞰し、本シリーズの今後の章立てに位置づけます (章構成の設計メモ)。</p>
-  <h3>ワークショップの座学トピック一覧</h3>
-  <table>
-    <tr><th>トピック</th><th>要点</th><th>本シリーズでの扱い</th></tr>
-    <tr><td>ハードウェア階層</td><td>HBM/SBUF/PSUM、エンジン、帯域と容量</td><td>第 1 回 (公開済み)</td></tr>
-    <tr><td>Roofline / 性能ターゲット</td><td>演算強度、理論上限、実測とのギャップ</td><td>第 2 回 (本記事)</td></tr>
-    <tr><td>カーネル融合</td><td>中間結果を SBUF に留め HBM 往復を消す</td><td>第 2 回 (本記事)</td></tr>
-    <tr><td>最初のカーネル / NKI Lang と ISA</td><td>NumPy 参照 → NKI Lang → ISA へ段階的に</td><td>今後</td></tr>
-    <tr><td>プロファイラの読み方</td><td>Neuron Explorer、エンジン稼働率、DMA の粗密</td><td>第 3 回 (予定)</td></tr>
-    <tr><td>タイリング</td><td>オンチップに収まらないデータの分割 (128×512 等)</td><td>第 4 回 (予定)</td></tr>
-    <tr><td>データレイアウトと並列化</td><td>partition 次元、どの軸で切るか、エンジン割り当て</td><td>第 5 回 (予定)</td></tr>
-    <tr><td>ソフトウェアパイプライン / allocation</td><td>タイル i の計算中に i+1 を転送、二重バッファ</td><td>第 6 回 (予定)</td></tr>
-    <tr><td>低精度 (量子化)</td><td>bf16 / MXFP8 / FP4、精度と速度のトレードオフ</td><td>第 7 回 (予定)</td></tr>
-    <tr><td>複数チップ間の通信 (collectives)</td><td>NeuronLink、all-reduce、通信と計算の重ね合わせ</td><td>第 8 回 (予定)</td></tr>
-    <tr><td>Self-Attention 最適化の実演</td><td>800→400μs を融合・遅延除算・命令統合・低精度転置で</td><td>随所で引用</td></tr>
-    <tr><td>Advanced NKI APIs</td><td>access pattern、scheduling、DMA transpose</td><td>発展 (適宜)</td></tr>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>Roofline</td><td>演算強度 (FLOP/byte) で計算律速かメモリ律速かが分かる。ゾーンで打ち手が正反対</td></tr>
+    <tr><td>エンタイトルメント</td><td>仕事量 (FLOP) ÷ ハード速度 (FLOPS) = 理論上限。実測との差が最適化の余地</td></tr>
+    <tr><td>ギャップの正体</td><td>メモリ律速の主因は、遅い HBM への中間結果の往復</td></tr>
+    <tr><td>カーネル融合</td><td>複数演算を 1 カーネルにまとめ、中間結果を SBUF に留めて HBM 往復を消す</td></tr>
+    <tr><td>RMSNorm + QKV 射影の融合</td><td>正規化 (reduction + element-wise) の出力を降ろさず行列積へ。実際の隣接層で効く</td></tr>
+    <tr><td>実測インパクト</td><td>ブロック丸ごとの融合 (megakernel) で base 比 <b>約 17 倍</b> (410 vs 24 tok/s)</td></tr>
   </table>
   <div class="key">
-    <b>今後の積み上げ方針。</b>「測る (第 3 回プロファイラ) → 単一カーネル内の最適化 (第 4 回タイリング・第 5 回レイアウト・第 6 回パイプライン) → 1 要素を軽く (第 7 回低精度) → チップの外へ (第 8 回通信)」と、スコープを内から外へ広げます。第 3 回は「本記事で作った融合カーネルを実際にプロファイルしてみる」から始めると、回をまたいだ縦糸ができます。
+    <b>結論。</b>(A) <b>Roofline</b> で「理論上これだけ速いはず」というターゲットと実測のギャップを定量化する。ギャップの主因は<b>遅い HBM への往復</b> (メモリ律速)。(B) <b>カーネル融合</b>で、中間結果を SBUF に留めて往復を消す。(C) その発想は <b>RMSNorm + QKV 射影</b>のような現実の隣接処理でそのまま効き、ブロック丸ごとの融合で <b>17 倍</b>に届く。<br>
+    汎用フレームワークは演算を 1 つずつ実行するので、この往復を自動では消せない。<b>「理論上限が見えていて、原因も分かっているのに、自動では埋まらない」― そのギャップを自分の手で埋めるのが、カーネルを書く理由</b>です。次回はこの融合の本命 <b>FlashAttention</b> を掘り下げます。
   </div>
   <div class="fn">
-    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および native_nkilib_lab / microbenchmarking lab の実測。17 倍・410 tok/s 等は small モデル・特定条件での測定値。<br>
+    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および native_nkilib_lab / microbenchmarking lab の実測。17 倍・410 tok/s 等は small モデル・特定条件での測定値。ワークショップが座学で扱う全トピックと今後の章立ては <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。<br>
     注意: 本ページの図と数値は、Roofline とカーネル融合の考え方を直感的に伝えるための<b>模式的な可視化</b>です。実際の演算強度・帯域・達成値は世代・精度・カーネル実装・プロファイル条件に依存します。融合の実装上の難所 (reduction の同期、レイアウト、数値誤差) は後続の章で扱います。
   </div>
 </section>
@@ -247,6 +261,150 @@
 </main>
 <script>
 function fmt(n){if(n>=1e12)return (n/1e12).toFixed(1)+'T';if(n>=1e9)return (n/1e9).toFixed(1)+'G';if(n>=1e6)return (n/1e6).toFixed(0)+'M';return ''+n;}
+
+// ============ デモ0: エンタイトルメントの計算過程 (仕事量 ÷ 速度 = 時間) ============
+(function(){
+  const cv=document.getElementById('cv0'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const PEAK=78.6e12; // FLOPS
+  let M=4096,K=1024,N=4096;
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // ---- 左: 行列積の図 A(M×K) × B(K×N) = C(M×N) ----
+    const gx=40, gy=70;
+    // スケール: 表示用に対数っぽく圧縮
+    function sz(v){return 26+Math.log2(v/256)*10;}
+    const aW=sz(K), aH=sz(M), bW=sz(N), bH=sz(K), cW=sz(N), cH=sz(M);
+    // A
+    ct.fillStyle='rgba(224,122,95,0.5)';ct.strokeStyle='#e07a5f';ct.lineWidth=2;
+    ct.fillRect(gx,gy,aW,aH);ct.strokeRect(gx,gy,aW,aH);
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('A',gx+aW/2,gy+aH/2);ct.fillText('M='+M,gx+aW/2,gy+aH+16);
+    ct.save();ct.translate(gx-8,gy+aH/2);ct.rotate(-Math.PI/2);ct.fillText('K='+K,0,0);ct.restore();
+    // ×
+    const bx=gx+aW+40;
+    ct.fillStyle='#8fd6b4';ct.font='20px sans-serif';ct.fillText('×',bx-20,gy+aH/2+6);
+    // B
+    ct.fillStyle='rgba(61,125,202,0.5)';ct.strokeStyle='#3d7dca';
+    ct.fillRect(bx,gy,bW,bH);ct.strokeRect(bx,gy,bW,bH);
+    ct.fillStyle='#d7f5e6';ct.fillText('B',bx+bW/2,gy+bH/2);ct.fillText('N='+N,bx+bW/2,gy+bH+16);
+    ct.save();ct.translate(bx-8,gy+bH/2);ct.rotate(-Math.PI/2);ct.fillText('K='+K,0,0);ct.restore();
+    // =
+    const cx=bx+bW+40;
+    ct.fillStyle='#8fd6b4';ct.font='20px sans-serif';ct.fillText('=',cx-20,gy+aH/2+6);
+    // C
+    ct.fillStyle='rgba(143,214,180,0.5)';ct.strokeStyle='#43b581';
+    ct.fillRect(cx,gy,cW,cH);ct.strokeRect(cx,gy,cW,cH);
+    ct.fillStyle='#d7f5e6';ct.fillText('C',cx+cW/2,cy2(gy,cH));ct.fillText('M×N',cx+cW/2,gy+cH+16);
+    function cy2(y,h){return y+h/2;}
+
+    // ---- 右下: 計算式の3ステップ ----
+    const flop=2*M*K*N;
+    const timeS=flop/PEAK;
+    const y0=H-140;
+    ct.textAlign='left';ct.font='14px monospace';
+    ct.fillStyle='#8fd6b4';ct.fillText('① 仕事量 = 出力要素数 (M×N) × 積和 (2K)',44,y0);
+    ct.fillStyle='#f0a58e';ct.font='bold 15px monospace';
+    ct.fillText('   = 2 × '+M+' × '+K+' × '+N+' = '+fmt(flop)+'FLOP',44,y0+24);
+    ct.fillStyle='#8fd6b4';ct.font='14px monospace';
+    ct.fillText('② ハードの速さ = 78.6 TFLOPS (Tensor Engine, bf16)',44,y0+52);
+    ct.fillStyle='#8fb8f0';ct.font='bold 15px monospace';
+    ct.fillText('③ 時間 = 仕事量 ÷ 速さ = '+fmt(flop)+'FLOP ÷ 78.6T',44,y0+80);
+    // 時間の強調表示
+    const us=timeS*1e6;
+    ct.fillStyle='#ffd98f';ct.font='bold 22px sans-serif';ct.textAlign='right';
+    ct.fillText('≈ '+(us>=1000?(us/1000).toFixed(2)+' ms':us.toFixed(0)+' μs'),W-40,y0+80);
+    ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
+    ct.fillText('理論上限 (エンタイトルメント)',W-40,y0+100);
+  }
+  ['p0m','p0k','p0n'].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=function(){
+    M=+document.getElementById('p0m').value;K=+document.getElementById('p0k').value;N=+document.getElementById('p0n').value;draw();};});
+  draw();
+})();
+
+// ============ デモ3: RMSNorm+QKV の数式を1ステップずつ可視化 ============
+(function(){
+  const cv=document.getElementById('cv3'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const D=6;                 // 表示する次元数
+  const x=[1.2,-0.8,0.5,1.6,-1.1,0.9];   // 入力ベクトル(固定)
+  const g=[1.0,1.1,0.9,1.0,1.2,0.95];    // スケール
+  const eps=1e-6;
+  const ms=x.reduce((a,v)=>a+v*v,0)/D;
+  const rms=Math.sqrt(ms+eps);
+  const xh=x.map((v,i)=>v/rms*g[i]);     // 正規化後
+  // W_q は D×2 の小行列(Q の2次元だけ見せる)
+  const Wq=[[0.5,-0.3],[0.2,0.4],[-0.1,0.6],[0.3,0.2],[0.4,-0.5],[-0.2,0.3]];
+  const Q=[0,1].map(j=>xh.reduce((a,v,i)=>a+v*Wq[i][j],0));
+  let step=0, playing=false;   // 0:入力 1:二乗和 2:RMS 3:正規化 4:行列積Q
+  const NS=5;
+  const cellW=52, cellH=30, x0=60, y0=90;
+  function cell(cx,cy,val,fill,stroke){
+    ct.fillStyle=fill;ct.strokeStyle=stroke;ct.lineWidth=1.5;
+    ct.fillRect(cx,cy,cellW,cellH);ct.strokeRect(cx,cy,cellW,cellH);
+    ct.fillStyle='#eaf7f0';ct.font='12px monospace';ct.textAlign='center';
+    ct.fillText(val,cx+cellW/2,cy+cellH/2+4);
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    // 入力ベクトル x
+    ct.fillText('入力 x (トークンベクトル, d 次元)',x0,y0-14);
+    for(let i=0;i<D;i++) cell(x0+i*cellW, y0, x[i].toFixed(1), '#12321f', step>=0?'#43b581':'#2c5c44');
+
+    // step1: 二乗和 (reduction)
+    if(step>=1){
+      ct.fillStyle='#c9a0f0';ct.font='13px monospace';
+      ct.fillText('① reduction: ms = (1/d) Σ xᵢ² = '+ms.toFixed(3),x0,y0+58);
+      // 各セルの下に二乗値を薄く
+      ct.font='11px monospace';ct.fillStyle='#c9a0f0';ct.textAlign='center';
+      for(let i=0;i<D;i++) ct.fillText(x[i].toFixed(1)+'²',x0+i*cellW+cellW/2,y0+42);
+    }
+    // step2: RMS
+    if(step>=2){
+      ct.fillStyle='#c9a0f0';ct.font='13px monospace';ct.textAlign='left';
+      ct.fillText('② RMS = √(ms+ε) = '+rms.toFixed(3),x0,y0+82);
+    }
+    // step3: 正規化後 x̂
+    const y3=y0+110;
+    if(step>=3){
+      ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+      ct.fillText('③ element-wise: x̂ᵢ = xᵢ / RMS × gᵢ',x0,y3-14);
+      for(let i=0;i<D;i++) cell(x0+i*cellW, y3, xh[i].toFixed(2), '#3a3212', '#ffd98f');
+    }
+    // step4: 行列積 x̂ Wq = Q
+    const y4=y3+70;
+    if(step>=4){
+      ct.fillStyle='#8fb8f0';ct.font='14px sans-serif';ct.textAlign='left';
+      ct.fillText('④ matmul: Q = x̂ · W_q  (x̂ の各要素と重みを掛けて和)',x0,y4-14);
+      // x̂ 再掲(小)
+      for(let i=0;i<D;i++) cell(x0+i*cellW, y4, xh[i].toFixed(2), '#1c2c3f', '#3d7dca');
+      // × Wq → Q (2要素)
+      const qx=x0+D*cellW+40;
+      ct.fillStyle='#8fb8f0';ct.font='16px sans-serif';ct.fillText('→',qx-30,y4+cellH/2+5);
+      cell(qx, y4, 'Q₀='+Q[0].toFixed(2), '#12321f', '#43b581');
+      cell(qx+ (cellW+30), y4, 'Q₁='+Q[1].toFixed(2), '#12321f', '#43b581');
+      ct.fillStyle='#8fd6b4';ct.font='11px sans-serif';ct.textAlign='left';
+      ct.fillText('(K,V も同様に W_k, W_v で)',qx,y4+cellH+16);
+    }
+    // フッタ
+    const labels=['入力 x を読む','① 二乗和 (reduction)','② RMS を出す','③ 正規化 x̂ (element-wise)','④ x̂ と W_q の行列積 → Q'];
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='center';
+    ct.fillText('ステップ '+(step+1)+' / '+NS+' : '+labels[step], W/2, H-16);
+    if(step>=4){ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
+      ct.fillText('x̂ を HBM に書き出さず、そのまま行列積の入力にするのが「融合」', W/2, H-2);}
+  }
+  document.getElementById('p3next').onclick=function(){if(step<NS-1)step++;else step=0;draw();};
+  document.getElementById('p3reset').onclick=function(){playing=false;step=0;document.getElementById('p3play').textContent='自動再生';draw();};
+  let timer=null;
+  document.getElementById('p3play').onclick=function(){
+    playing=!playing;this.textContent=playing?'停止':'自動再生';
+    if(playing){const tick=()=>{if(!playing)return;step=(step+1)%NS;draw();timer=setTimeout(tick,1100);};timer=setTimeout(tick,1100);}
+  };
+  draw();
+})();
 
 // ============ デモ1: Roofline ============
 (function(){
