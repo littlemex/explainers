@@ -17,3 +17,5 @@ Each explainer is a single self-contained HTML file (inline CSS/JS, no build ste
 ## Publishing
 
 GitHub Pages serves the repository root of the `main` branch. Add a new `*.html` file, link it from `index.html`, and push.
+
+- [RMSNorm をビジュアルに理解する](rmsnorm-explainer.html) — LayerNorm との違い・計算コスト・Fused Kernel を動くアニメで理解

@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RMSNorm をビジュアルに理解する</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --ln:#e07a5f; --rms:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .y{color:#ffd98f}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px;text-align:center}
+  .cost .box .big{font-size:28px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:25px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>RMSNorm をビジュアルに理解する</h1>
+  <p>「平均を引かない」だけの正規化が、なぜ性能を落とさず実装をシンプルにできるのか</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">RMSNorm は LLaMA・Gemma・Qwen など近年の主要オープン LLM の多くが採用する正規化層です (一方 GPT-2/3 系や BERT 系は今も LayerNorm)。数式は一見 LayerNorm とそっくりですが、たった一つの引き算を捨てたことで、計算とカーネル実装がシンプルになります。ここでは「絵と動き」でその差を腹落ちさせます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    RMSNorm (Root Mean Square Normalization) とは、ベクトルを<b>「二乗平均平方根 (RMS)」で割って大きさを揃えるだけ</b>の正規化です。LayerNorm がやっていた<b>「平均を引いて中心を 0 に寄せる (centering)」を丸ごと省略</b>し、スケールを整える仕事だけに絞りました。それでも精度はほぼ落ちず、計算とカーネル実装がシンプルになる。速さそのものより、この「性能同等 + 実装の簡潔さ」の費用対効果で選ばれています。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. なぜ正規化が要るのか — 大きさを揃える</a>
+    <a href="#s2">2. LayerNorm の数式を分解する</a>
+    <a href="#s3">3. RMSNorm — 平均を捨てる</a>
+    <a href="#s4">4. 【体験】LayerNorm vs RMSNorm の動き</a>
+    <a href="#s5">5. 計算コストを数える</a>
+    <a href="#s6">6. 【体験】次元 d と演算量</a>
+    <a href="#s7">7. 本当のボトルネックはメモリ</a>
+    <a href="#s8">8. 【体験】Fused Kernel の効き方</a>
+    <a href="#s9">9. まとめ — 引き算一つの費用対効果</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ正規化が要るのか — 大きさを揃える</h2>
+  <p class="lead">まず「正規化層が何のためにあるのか」を素朴なイメージで揃えます。</p>
+  <p>ニューラルネットの層を深く積むと、各層を通るベクトル (アクティベーション) の<b>大きさがどんどん暴れます</b>。ある層では値が桁違いに大きくなり、別の層では潰れて小さくなる。この「スケールの暴れ」は勾配を不安定にし、学習を難しくします。</p>
+  <p>正規化層の仕事は、各トークンの特徴ベクトルを受け取って、<b>その大きさを毎回そろえて次の層に渡す</b>ことです。ここで「そろえる」に何を含めるかが、LayerNorm と RMSNorm の分かれ道になります。イメージで言うと、<b>LayerNorm は「偏差値化」(平均を引いてから広がりで割る)、RMSNorm は「原点からの距離で割るだけ」</b>(平均を動かさず大きさだけ単位を揃える)、という違いです。</p>
+  <div class="key">
+    正規化のそろえ方には 2 つの操作があります。<br>
+    (a) <b>中心をそろえる (centering)</b>: 平均を引いて、山の位置を 0 に動かす。<br>
+    (b) <b>大きさをそろえる (scaling)</b>: 全体の広がりで割って、スケールを 1 に統一する。<br>
+    LayerNorm は (a) と (b) の両方をやり、<b>RMSNorm は (b) だけ</b>をやります。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>LayerNorm の数式を分解する</h2>
+  <p class="lead">比較の土台として、まず LayerNorm を一行ずつ分解します。難しくありません。</p>
+  <p>入力を <code>d</code> 次元のベクトル <code>x = (x&#8321;, x&#8322;, ..., x_d)</code> とします (1 トークン分の特徴)。LayerNorm は次の順で計算します。</p>
+  <div class="math">
+    <span class="c"># 1. 平均を求める (centering に使う)</span><br>
+    &mu; = (1/d) &middot; &sum;&#7522; x&#7522;<br><br>
+    <span class="c"># 2. 分散を求める (平均からのばらつき)</span><br>
+    &sigma;&sup2; = (1/d) &middot; &sum;&#7522; (x&#7522; &minus; &mu;)&sup2;<br><br>
+    <span class="c"># 3. 平均を引いて割る → スケールγとバイアスβを掛け足す</span><br>
+    y&#7522; = <span class="y">&gamma;&#7522;</span> &middot; (x&#7522; &minus; <span class="r">&mu;</span>) / &radic;(&sigma;&sup2; + &epsilon;) + <span class="y">&beta;&#7522;</span>
+  </div>
+  <p>ポイントは <b>2 回、全要素を走査して和を取っている</b>ことです。1 回目は平均 <code>&mu;</code>、2 回目はその平均を使った分散 <code>&sigma;&sup2;</code>。そして式のあちこちに <code>&minus;&mu;</code> という<b>「平均を引く」操作 (centering)</b> が埋め込まれています。<code>&gamma;</code> (スケール) と <code>&beta;</code> (バイアス) は学習パラメータです。</p>
+  <div class="warn">
+    <b>注目すべき登場人物は 2 つ。</b>「平均 <b>&mu;</b>」と「バイアス <b>&beta;</b>」。RMSNorm はこの<b>両方を持ちません</b>。ただし &mu; の省略 (centering をやめる) と &beta; の省略は<b>本来は独立した設計判断</b>です (bias 無し LayerNorm も存在します)。RMSNorm は標準定義でこの 2 つの簡素化を同時に採っている、と理解してください。次章で見ます。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>RMSNorm — 平均を捨てる</h2>
+  <p class="lead">RMSNorm の発想は「centering は本当に必要か？ scaling だけで十分では？」という問いです。</p>
+  <p>RMSNorm を提案した論文 (Zhang &amp; Sennrich, 2019) の<b>仮説</b>はシンプルです。LayerNorm が効く主因は<b>スケールをそろえること</b> (入力を定数倍しても出力が変わらない性質) であって、<b>平均を引くこと (re-centering) の寄与は小さいのではないか</b>。ならば <code>&mu;</code> の計算をまるごと省いてしまおう、というものです。論文はこれを理論的に断定したのではなく、<b>多数のタスクで「LayerNorm と同等の性能」を実験的に示す</b>ことで仮説を裏づけました。その後の LLM 実務でも同等性を支持する結果が積み上がっています。</p>
+  <div class="math">
+    <span class="c"># 1. 二乗平均平方根 (RMS) だけを求める。平均μは計算しない</span><br>
+    RMS(x) = &radic;( (1/d) &middot; &sum;&#7522; x&#7522;&sup2; + &epsilon; )<br><br>
+    <span class="c"># 2. RMS で割って、スケールγを掛けるだけ。μ も β も無い</span><br>
+    y&#7522; = <span class="y">&gamma;&#7522;</span> &middot; x&#7522; / RMS(x)
+  </div>
+  <p style="font-size:14px;color:var(--sub)">補足: <code>&epsilon;</code> はゼロ割りを防ぐ数値安定化のための実装上の追加で、原論文の RMS の定義には現れません。LLaMA など実装では <code>rsqrt(mean(x&sup2;)+&epsilon;)</code> の形が一般的です。また Gemma のように <code>&gamma;</code> を <code>(1+&gamma;)</code> の形で持つ変種もあります。</p>
+  <p>LayerNorm と見比べてください。<b>消えたもの</b>は 3 つです。</p>
+  <ol class="steps">
+    <li><b>平均 &mu; の計算が消えた</b>。全要素の和を取る走査が 1 回分まるごと不要になる。</li>
+    <li><b>各要素からの引き算 (x&#7522; &minus; &mu;) が消えた</b>。この減算は分散の計算と正規化の両方に現れるので、実装によっては 2d 回。それがゼロに。</li>
+    <li><b>バイアス &beta; が消えた</b>。足し込むパラメータが 1 セット減る (これは centering の省略とは独立した簡素化)。</li>
+  </ol>
+  <div class="key">
+    分散 <code>&sigma;&sup2;</code> と RMS の違いに注目。分散は<b>平均からの</b>ばらつき <code>(x&#7522;&minus;&mu;)&sup2;</code> を測るので <code>&mu;</code> が要る。RMS は<b>原点からの</b>大きさ <code>x&#7522;&sup2;</code> を測るので <code>&mu;</code> が要らない。<b>「原点を基準にしていい」と割り切った瞬間に、平均の計算が丸ごと消える</b>。これが RMSNorm の本質です。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】LayerNorm vs RMSNorm の動き</h2>
+  <p class="lead">同じ入力ベクトルに両者を適用し、値がどう動くかを見ます。棒グラフの各バーが 1 次元の値です。切り替えて違いを体感してください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p1play">アニメで正規化</button>
+    <button id="p1reset" class="ghost">入力を作り直す</button>
+    <button class="ghost active" data-mode="ln" id="modeLN">LayerNorm</button>
+    <button class="ghost" data-mode="rms" id="modeRMS">RMSNorm</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>入力 x</span>
+    <span><span class="dot" style="background:#ffd98f"></span>平均 &mu; の位置</span>
+    <span><span class="dot" style="background:#43b581"></span>正規化後 y</span>
+  </div>
+  <p><b>LayerNorm</b> では、まず平均 &mu; (黄線) の分だけ棒全体が<b>左右にシフト (centering)</b> し、その後に高さがそろえられます。<b>RMSNorm</b> に切り替えると、黄線のシフトが<b>起きません</b>。棒はその場で<b>高さだけ調整</b>されます。平均を引かない = 分布の中心を動かさない、というのがこの「横シフトの有無」に現れています。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>計算コストを数える</h2>
+  <p class="lead">「平均を捨てる」が演算量にどう効くかを、要素ごとの操作回数で正確に数えます。</p>
+  <p>次元 <code>d</code> のベクトル 1 本あたりに必要な主要演算を並べます。ここでは「全要素を何回なめる (走査する) か」が効きます。</p>
+  <table>
+    <tr><th>操作</th><th>LayerNorm</th><th>RMSNorm</th></tr>
+    <tr><td>集計するアキュムレータ</td><td>2 本 (&mu; と &sigma;&sup2;)<br><span style="font-size:12px;color:var(--sub)">※ Welford 等で走査は 1 回にできる (7章)</span></td><td>1 本 (&sum;x&sup2; のみ)</td></tr>
+    <tr><td>要素ごとの減算 (&minus;&mu;)</td><td>d〜2d 回 (&sigma;&sup2; と正規化で使用)</td><td>0 回</td></tr>
+    <tr><td>要素ごとの二乗</td><td>d 回</td><td>d 回</td></tr>
+    <tr><td>要素ごとの乗除算</td><td>約 2d 回 (割る&times;&gamma;)</td><td>約 2d 回 (割る&times;&gamma;)</td></tr>
+    <tr><td>学習パラメータ</td><td>&gamma; と &beta; (2d 個)</td><td>&gamma; のみ (d 個)</td></tr>
+  </table>
+  <div class="key">
+    ざっくり言うと、RMSNorm は集計する<b>アキュムレータを 2 本から 1 本に減らし</b>、<b>d 回の減算をゼロ</b>にし、<b>パラメータを半分</b>にします。純粋な浮動小数点演算数 (FLOPs) で見ると、RMSNorm は LayerNorm のおおむね<b>「3〜4 割減」</b>程度です。<b>ただし後述のとおり、この FLOPs 差がそのまま壁時計時間の短縮に直結するわけではありません</b> (正規化は memory-bound で、そもそも正規化層の FLOPs はモデル全体では matmul に比べ小さい)。
+  </div>
+  <div class="warn">
+    <b>ここで誤解しやすい点を先に潰します。</b>正規化層はこの後 7 章で見るとおり <b>memory-bound</b> (メモリ帯域で律速) です。だから <b>FLOPs が数十%減っても、それがそのまま実行時間の数十%短縮になるわけではありません</b>。融合カーネルにすれば LayerNorm も RMSNorm も「入力を 1 回読んで結果を 1 回書く」だけで、動かすデータ量はほぼ同じだからです。<b>RMSNorm の本当の勝ち筋は「メモリが減る」ことではなく、「計算とカーネル実装が単純になる」こと</b>です。それを 7〜8 章で正確に見ます。まず次章で、演算量そのものの差を体感します。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】次元 d と演算量</h2>
+  <p class="lead">次元 d を動かして、LayerNorm と RMSNorm の要素ごと操作回数がどう開くかを見ます。実際の LLM の d (例: LLaMA-7B は 4096) を意識してください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="360"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">次元 d <input id="p2d" type="range" min="8" max="8192" value="4096" step="8"></div>
+  </div>
+  <div class="cost">
+    <div class="box"><span class="big" id="c_d">4096</span><span class="lbl">次元 d</span></div>
+    <div class="box"><span class="big" id="c_ln">—</span><span class="lbl">LayerNorm 要素操作数</span></div>
+    <div class="box"><span class="big" id="c_rms">—</span><span class="lbl">RMSNorm 要素操作数</span></div>
+    <div class="box"><span class="big" id="c_save">—</span><span class="lbl">削減率</span></div>
+  </div>
+  <p>ここでの「要素操作数」は、要素ごとに走る主要な算術 (減算・二乗・乗除算) と reduction の走査を合算した概算です。d が大きくなるほど両者の差は<b>一定の比率</b>で開きます (オーダーはどちらも O(d) なので比率は概ね一定)。</p>
+  <div class="warn">
+    <b>但し書き (5章の注意を再掲)。</b>これは<b>算術操作の数</b>の比較で、<b>実行時間の比ではありません</b>。正規化は memory-bound なので、この 3〜4 割の差がそのまま速度差になるわけではない点に注意してください。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>本当のボトルネックはメモリ</h2>
+  <p class="lead">正規化層は「演算が軽くてメモリ移動が重い」典型的な memory-bound 処理です。ここが Fused Kernel が効く理由の核心です。</p>
+  <p>GPU で正規化のような処理を実行するとき、支配的なコストは掛け算の回数ではなく、<b>データを HBM (GPU の主記憶) と計算コア (SM) の間で何往復させるか</b>です。正規化は 1 要素あたりの計算がごく軽い一方、全要素を読み書きするので、<b>メモリ帯域で律速される (memory-bound)</b>。</p>
+  <p>フレームワークで演算子を<b>素朴に合成 (eager 実行)</b> すると、各ステップが別々の GPU カーネルになり、途中結果のベクトルを HBM に実体化しては読み直します。例えば <code>x.pow(2).mean()</code> → <code>x / rms</code> → <code>x * &gamma;</code> をバラバラに実行するイメージです。</p>
+  <div class="math">
+    <span class="c"># 演算子を素朴に合成: 中間ベクトルの書き戻し・読み直しが何度も発生</span><br>
+    HBM &rarr; x を読む &rarr; 二乗 &rarr; <span class="r">中間ベクトルを HBM に書く</span><br>
+    <span class="r">HBM &rarr; 読み直す</span> &rarr; RMS で割る &rarr; <span class="r">HBM に書く</span><br>
+    <span class="r">HBM &rarr; 読み直す</span> &rarr; &gamma; を掛ける &rarr; HBM に書く
+  </div>
+  <p>この「読んでは書き、また読む」の往復が帯域を食い潰します。<b>Fused Kernel (融合カーネル)</b> は、これらのステップを<b>1 つのカーネルにまとめ</b>、ベクトルを<b>一度だけ HBM から読み、オンチップの高速メモリ (レジスタ / 共有メモリ) の上で全部計算し、結果を一度だけ書き戻す</b>実装です。行 (d 次元) は d=4096 程度ならオンチップに載るので、読み込み中に reduction も済ませられます。</p>
+  <div class="warn">
+    <b>ここが最重要の注意点です。</b>この「融合で速くなる」は <b>RMSNorm 固有の話ではありません</b>。<b>LayerNorm も融合できます</b>。&mu; と &sigma;&sup2; は Welford 法 (平均と分散を 1 回の走査で同時に更新していく古典的アルゴリズム) や &sum;x・&sum;x&sup2; の同時集計で<b>1 パスで計算でき</b>、実際 PyTorch の <code>nn.LayerNorm</code> や Apex の <code>FusedLayerNorm</code> は昔から融合済みです。<b>融合した LayerNorm と融合した RMSNorm では、HBM の往復回数 (読み 1 + 書き 1) は同じ</b>で、動かすデータ量もほぼ同じ。つまり<b>「RMSNorm だからメモリが減って速い」わけではない</b>、というのが正確な理解です。
+  </div>
+  <div class="key">
+    <b>では RMSNorm の勝ち筋は何か。</b>メモリ量ではなく、<b>カーネルの中身の単純さ</b>です。RMSNorm は集計するアキュムレータが <code>&sum;x&sup2;</code> の <b>1 本だけ</b> (LayerNorm は &mu; と &sigma;&sup2; の実質 2 本)。並列リダクション (複数スレッドの部分和をまとめる処理) のマージが単純で、レジスタ使用も少なく、<b>backward (逆伝播) の式も短く検証しやすい</b>。だから<b>融合カーネルを書きやすく・保守しやすい</b>。速度差そのものは融合実装同士なら数%程度にとどまることが多いですが、この「実装の簡潔さ」がライブラリ普及と相まって効いてきます。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【体験】Fused Kernel の効き方</h2>
+  <p class="lead">演算子を素朴に合成した場合 (naive) と融合した場合 (fused) で、データが HBM とオンチップの間を何往復するかを見ます。往復の回数 = メモリ帯域の消費量だと思ってください。これは正規化<b>一般</b>の話で、LayerNorm でも RMSNorm でも同じ構図です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv3" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p3play">データを流す</button>
+    <button id="p3reset" class="ghost">最初から</button>
+    <button class="ghost active" data-k="naive" id="kNaive">非融合 (naive)</button>
+    <button class="ghost" data-k="fused" id="kFused">融合 (fused)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>HBM &harr; コア間のデータ移動</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>オンチップでの計算</span>
+  </div>
+  <p><b>非融合</b>ではベクトルが HBM と計算コアの間を<b>何度も往復</b>します (読み書きのたびに赤い移動が発生)。<b>融合</b>に切り替えると、<b>往復は「読み込み 1 回 + 書き戻し 1 回」だけ</b>になり、途中の計算はすべてオンチップ (緑) で完結します。memory-bound な処理では、この往復回数の削減がそのまま速度向上になります。<b>ここで速くなっているのは「融合したこと」であって、LayerNorm→RMSNorm の差ではない</b>点に改めて注意してください。LayerNorm も融合すれば同じ「読み 1 + 書き 1」になります。</p>
+  <div class="warn">
+    <b>実務での位置づけ。</b>PyTorch などでは <code>torch.compile</code> や Triton、Apex の融合実装が、こうした融合を自動または手書きで行います。Apex に <code>FusedLayerNorm</code> があることが示すとおり、<b>融合は LayerNorm にも普通に適用されています</b>。RMSNorm はアキュムレータが 1 本で backward も短いため<b>融合カーネルを書きやすい</b>点が実務上の利点で、多くのライブラリ (例: flash-attn リポジトリ同梱の fused norm カーネルなど) で専用の fused RMSNorm 実装が提供されています。
+  </div>
+  <h3>【発展・読み飛ばし可】融合は正規化の「中」だけでは終わらない</h3>
+  <p>ここは一段深い実装の話なので、初読では飛ばして構いません。実務でより効くのは<b>正規化と、その前後の演算をまとめて 1 カーネルにする</b>融合です。狙いは同じで、<b>中間の activation を HBM に書き戻さずオンチップに留める</b>ことです。代表例:</p>
+  <ol class="steps">
+    <li><b>matmul → bias 加算 → 活性化関数 の融合 (epilogue 融合)</b>。matmul の直後にバイアス加算や活性化を畳み込み、結果だけを書き出す。最も広く使われる形。</li>
+    <li><b>残差加算 → 正規化 の融合</b>。pre-norm Transformer のブロック境界で、残差の足し込みと次の正規化をまとめる。</li>
+    <li><b>正規化 → 直後の射影 matmul の融合</b>。RMSNorm の出力がそのまま <b>QKV 射影</b>や FFN の gate/up 射影の matmul に入るので、正規化結果を HBM に書かず流し込めば往復を減らせます (ただし matmul のタイル構造上、入力行を複数回参照するため往復が完全に消えるとは限りません)。</li>
+  </ol>
+  <div class="key">
+    <b>ここでも RMSNorm の簡潔さが効きます。</b>正規化を隣の演算と融合するとき、正規化側の計算 (アキュムレータ 1 本、bias なし) が単純なほど、カーネルの prologue/epilogue (入口/出口の付随処理) に畳み込みやすい。<b>「平均を捨てた」ことが、正規化単体の速さというより、周辺演算との融合のしやすさとして効いてくる</b>わけです。ただし何とでも融合できるわけではなく、reduction (全要素を見ないと RMS が決まらない) の依存関係が融合の設計を制約する点は LayerNorm と共通です。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>まとめ — 引き算一つの費用対効果</h2>
+  <p class="lead">RMSNorm が「平均を引かない」だけで得た 3 段のメリットを、一枚に整理します。</p>
+  <table>
+    <tr><th>観点</th><th>LayerNorm</th><th>RMSNorm</th></tr>
+    <tr><td>そろえる操作</td><td>centering + scaling</td><td>scaling のみ</td></tr>
+    <tr><td>集計するアキュムレータ</td><td>2 本 (&mu;, &sigma;&sup2;)</td><td>1 本 (&sum;x&sup2;)</td></tr>
+    <tr><td>平均を引く減算</td><td>d 回あり</td><td>なし</td></tr>
+    <tr><td>学習パラメータ</td><td>&gamma;, &beta; (2d)</td><td>&gamma; のみ (d)</td></tr>
+    <tr><td>融合カーネル</td><td>1 パス融合可 (Welford 等)</td><td>1 パス融合可・中身がより単純</td></tr>
+    <tr><td>融合時のメモリ往復</td><td colspan="2" style="text-align:center">同じ (読み 1 + 書き 1)</td></tr>
+    <tr><td>精度への影響</td><td>基準</td><td>ほぼ同等 (多くの LLM で実証)</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>RMSNorm は「centering を捨てる」というたった一つの割り切りで、(1) 要素ごとの演算をわずかに減らし、(2) 正規化層のパラメータを半減し (2d&rarr;d。ただしモデル全体では無視できる量)、(3) 集計するアキュムレータが 1 本になり <b>融合カーネルと backward が単純になる</b>。しかも性能はほぼ維持できる。<b>劇的な速度差ではなく、この「実装の簡潔さ + 性能同等」という費用対効果の良さ</b>ゆえに、LLaMA・Gemma・Qwen など近年の主要オープン LLM の多くが採用しています。<b>「本質は re-centering ではなく re-scaling だったのでは」という仮説</b>が、実装のシンプルさという形で実を結んだ好例です。
+  </div>
+  <div class="fn">
+    参考: Biao Zhang, Rico Sennrich. "Root Mean Square Layer Normalization." NeurIPS 2019 (<a href="https://arxiv.org/abs/1910.07467" target="_blank" rel="noopener">arXiv:1910.07467</a>)。<br>
+    注意: 本ページのアニメーションと「要素操作数」「往復回数」は、RMSNorm と LayerNorm の差を直感的に伝えるための<b>模式的な可視化</b>です。実際の FLOPs・メモリ帯域の数値は、精度 (fp16/bf16 等)・ハードウェア・カーネル実装に依存します。厳密な定義は 2〜3 章および 7 章の数式を参照してください。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ 共通ユーティリティ ============
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+// ============ デモ1: LayerNorm vs RMSNorm の動き ============
+(function(){
+  const cv=document.getElementById('cv1'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='ln', t=0, playing=false;
+  const D=12; // 表示する次元数
+  let x=[], y=[], mu=0, rms=0, sigma=0;
+  const baseY=H*0.52, unit=30, bw=W/(D+2);
+
+  function init(){
+    x=[];
+    // 平均が 0 でない、大きさもバラつく入力を作る
+    const shift=1.2+Math.random()*1.6;
+    for(let i=0;i<D;i++) x.push(randn()*1.1+shift);
+    mu=x.reduce((a,b)=>a+b,0)/D;
+    sigma=Math.sqrt(x.reduce((a,b)=>a+(b-mu)*(b-mu),0)/D+1e-5);
+    rms=Math.sqrt(x.reduce((a,b)=>a+b*b,0)/D+1e-5);
+    y=x.map(v=> mode==='ln' ? (v-mu)/sigma : v/rms );
+    t=0; draw();
+  }
+  function lerp(a,b,s){return a+(b-a)*s;}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // 中心線 (0 の位置)
+    ct.strokeStyle='rgba(215,245,230,0.25)';ct.lineWidth=1;
+    ct.beginPath();ct.moveTo(0,baseY);ct.lineTo(W,baseY);ct.stroke();
+    ct.fillStyle='#8fd6b4';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('0',6,baseY-6);
+
+    // アニメの位相: 0->0.5 で centering(LNのみ横シフト風に色補間), 0.5->1 でscaling
+    // ここでは値を入力から出力へ補間して高さで見せる
+    const p=t;
+    // 平均μの線 (LN のみ、centering の可視化)
+    if(mode==='ln'){
+      // centering フェーズで μ 線が中央へ動く様子
+      const muScreen = baseY - mu*unit*(1-Math.min(p/0.5,1));
+      ct.strokeStyle='#ffd98f';ct.lineWidth=2;ct.setLineDash([6,5]);
+      ct.beginPath();ct.moveTo(0,muScreen);ct.lineTo(W,muScreen);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle='#ffd98f';ct.textAlign='left';
+      ct.fillText('平均 μ = '+mu.toFixed(2)+(p<0.5?' (これから引く)':' → 0 に移動済み'),12,muScreen-8);
+    }
+
+    for(let i=0;i<D;i++){
+      const cx=bw*(i+1.5);
+      const vIn=x[i], vOut=y[i];
+      const v=lerp(vIn,vOut,p);
+      const top=baseY - v*unit;
+      // 入力=薄緑, 出力=濃緑 に色補間
+      const cr=Math.round(lerp(143,67,p)), cg=Math.round(lerp(214,181,p)), cb=Math.round(lerp(180,129,p));
+      ct.fillStyle=`rgb(${cr},${cg},${cb})`;
+      const w=bw*0.6;
+      if(v>=0) ct.fillRect(cx-w/2, top, w, baseY-top);
+      else ct.fillRect(cx-w/2, baseY, w, top-baseY);
+    }
+    // 見出し
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText((mode==='ln'?'LayerNorm: 平均を引いて(中心移動) → 大きさをそろえる':'RMSNorm: 中心移動なし → RMS で大きさだけそろえる'),16,28);
+    ct.textAlign='right';
+    ct.fillText(mode==='ln'?('σ = '+sigma.toFixed(2)):('RMS = '+rms.toFixed(2)),W-16,28);
+    ct.textAlign='left';
+    ct.fillStyle='#8fd6b4';
+    ct.fillText('進捗 '+(t*100).toFixed(0)+'%',16,H-14);
+  }
+  function loop(){if(!playing)return;t+=0.015;if(t>=1){t=1;playing=false;document.getElementById('p1play').textContent='アニメで正規化';}draw();if(playing)requestAnimationFrame(loop);}
+  document.getElementById('p1play').onclick=function(){if(t>=1)t=0;playing=!playing;this.textContent=playing?'一時停止':'アニメで正規化';if(playing)loop();};
+  document.getElementById('p1reset').onclick=function(){playing=false;document.getElementById('p1play').textContent='アニメで正規化';init();};
+  function setMode(m,btn){mode=m;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+    // 出力を再計算
+    y=x.map(v=> mode==='ln' ? (v-mu)/sigma : v/rms );
+    playing=false;t=0;document.getElementById('p1play').textContent='アニメで正規化';draw();}
+  document.getElementById('modeLN').onclick=function(){setMode('ln',this);};
+  document.getElementById('modeRMS').onclick=function(){setMode('rms',this);};
+  init();
+})();
+
+// ============ デモ2: 次元 d と演算量 ============
+(function(){
+  const cv=document.getElementById('cv2'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  // 要素操作数モデル(概算):
+  //  LN  = reduction 2d(和2回) + 減算 d + 二乗 d + 乗除 2d = 6d
+  //  RMS = reduction 1d(和1回) + 二乗 d + 乗除 2d        = 4d
+  function counts(d){return {ln:6*d, rms:4*d};}
+  function fmt(n){ if(n>=1e9)return (n/1e9).toFixed(2)+'B'; if(n>=1e6)return (n/1e6).toFixed(2)+'M'; if(n>=1e3)return (n/1e3).toFixed(1)+'K'; return ''+n;}
+  function draw(d){
+    ct.clearRect(0,0,W,H);
+    const {ln,rms}=counts(d);
+    const maxV=6*8192; // スケール固定(最大 d)
+    const baseY=H-70, maxH=H-140;
+    const bw=120, gap=90, x0=W/2-bw-gap/2;
+    // LN バー
+    const lnH=maxH*ln/maxV, rmsH=maxH*rms/maxV;
+    ct.fillStyle='#e07a5f';
+    ct.fillRect(x0, baseY-lnH, bw, lnH);
+    ct.fillStyle='#198754';
+    ct.fillRect(x0+bw+gap, baseY-rmsH, bw, rmsH);
+    // ラベル
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='center';
+    ct.fillText('LayerNorm', x0+bw/2, baseY+26);
+    ct.fillText('RMSNorm', x0+bw+gap+bw/2, baseY+26);
+    ct.font='15px sans-serif';ct.fillStyle='#ffd98f';
+    ct.fillText('≈ 6d = '+fmt(ln), x0+bw/2, baseY-lnH-12);
+    ct.fillStyle='#8fd6b4';
+    ct.fillText('≈ 4d = '+fmt(rms), x0+bw+gap+bw/2, baseY-rmsH-12);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('縦軸: 1 ベクトルあたりの要素操作数(概算, 相対比較用)',16,26);
+  }
+  const slider=document.getElementById('p2d');
+  function update(){
+    const d=+slider.value;
+    const {ln,rms}=counts(d);
+    document.getElementById('c_d').textContent=d;
+    document.getElementById('c_ln').textContent=fmt(ln);
+    document.getElementById('c_rms').textContent=fmt(rms);
+    document.getElementById('c_save').textContent=Math.round((1-rms/ln)*100)+'%';
+    draw(d);
+  }
+  slider.oninput=update;
+  update();
+})();
+
+// ============ デモ3: Fused Kernel の効き方 ============
+(function(){
+  const cv=document.getElementById('cv3'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let kind='naive', playing=false, tRaw=0;
+  // レイアウト: 左=HBM, 右=オンチップ(コア)
+  const hbmX=W*0.16, coreX=W*0.84, midY=H*0.5;
+  // 各方式のデータ移動シーケンス(段階): dir=1 読み込み(HBM→core), dir=-1 書き戻し(core→HBM), 0=オンチップ計算
+  const naiveSeq=[
+    {dir: 1, label:'x を読む'},
+    {dir: 0, label:'二乗して集計'},
+    {dir:-1, label:'中間結果を書く'},
+    {dir: 1, label:'x を読み直す'},
+    {dir: 0, label:'大きさで割る'},
+    {dir:-1, label:'書き戻す'},
+    {dir: 1, label:'読み直す'},
+    {dir: 0, label:'γ を掛ける'},
+    {dir:-1, label:'最終結果を書く'}
+  ];
+  const fusedSeq=[
+    {dir: 1, label:'x を一度だけ読む'},
+    {dir: 0, label:'集計 → 大きさで割る → γ を掛ける (全部オンチップ)'},
+    {dir:-1, label:'結果を一度だけ書く'}
+  ];
+  function seq(){return kind==='naive'?naiveSeq:fusedSeq;}
+
+  function drawArrowHead(x,y,ang){
+    ct.beginPath();ct.moveTo(x,y);
+    ct.lineTo(x-Math.cos(ang-0.4)*10,y-Math.sin(ang-0.4)*10);
+    ct.moveTo(x,y);ct.lineTo(x-Math.cos(ang+0.4)*10,y-Math.sin(ang+0.4)*10);ct.stroke();
+  }
+  function roundRectPath(x,y,w,h,r){
+    // roundRect 未対応ブラウザ向けの自前パス
+    ct.beginPath();
+    ct.moveTo(x+r,y);
+    ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);
+    ct.arcTo(x,y+h,x,y,r);
+    ct.arcTo(x,y,x+w,y,r);
+    ct.closePath();
+  }
+  function box(x,y,w,h,fill,stroke,lines){
+    ct.fillStyle=fill;ct.strokeStyle=stroke;ct.lineWidth=2;
+    roundRectPath(x-w/2,y-h/2,w,h,10);ct.fill();ct.stroke();
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='center';
+    // 複数行ラベルに対応
+    const arr=Array.isArray(lines)?lines:[lines];
+    const lh=19, startY=y - (arr.length-1)*lh/2 + 5;
+    arr.forEach((ln,i)=>ct.fillText(ln,x,startY+i*lh));
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const s=seq();
+    const n=s.length;
+    const pos=Math.min(tRaw, n-1e-6);
+    const idx=Math.floor(pos), frac=pos-idx;
+    const step=s[idx];
+
+    // カウンタ集計
+    let reads=0,writes=0;
+    for(let i=0;i<=idx;i++){ if(s[i].dir===1)reads++; if(s[i].dir===-1)writes++; }
+
+    // HBM とコアの箱
+    box(hbmX,midY,150,90,'#241a14','#e07a5f',['HBM','(主記憶)']);
+    box(coreX,midY,150,90,'#0e2f22','#8fd6b4',['コア (SM)','オンチップ']);
+
+    // 移動アニメの点
+    const y=midY;
+    if(step.dir!==0){
+      const from = step.dir===1 ? hbmX+80 : coreX-80;
+      const to   = step.dir===1 ? coreX-80 : hbmX+80;
+      const px=from+(to-from)*frac;
+      // 軌跡線
+      ct.strokeStyle='rgba(224,122,95,0.35)';ct.lineWidth=2;
+      ct.beginPath();ct.moveTo(hbmX+80,y);ct.lineTo(coreX-80,y);ct.stroke();
+      // 動く赤い塊
+      ct.fillStyle='#e07a5f';
+      ct.beginPath();ct.arc(px,y,10,0,7);ct.fill();
+      const ang=step.dir===1?0:Math.PI;
+      ct.strokeStyle='#f0a58e';ct.lineWidth=2;drawArrowHead(px+ (step.dir===1?14:-14),y,ang);
+    }else{
+      // オンチップ計算: コア側で緑のパルス
+      ct.fillStyle='rgba(143,214,180,'+(0.4+0.4*Math.sin(frac*Math.PI))+')';
+      ct.beginPath();ct.arc(coreX,y,26+8*Math.sin(frac*Math.PI*2),0,7);ct.fill();
+    }
+
+    // ステップ説明
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='center';
+    ct.fillText('ステップ '+(idx+1)+' / '+n+' : '+step.label, W/2, H-64);
+
+    // カウンタ
+    ct.font='15px sans-serif';ct.textAlign='center';
+    ct.fillStyle='#f0a58e';
+    ct.fillText('HBM 読み込み: '+reads+' 回   /   書き戻し: '+writes+' 回', W/2, H-36);
+    ct.fillStyle=(kind==='fused')?'#8fd6b4':'#ffd98f';
+    ct.fillText('往復総数 = '+(reads+writes)+' 回'+(kind==='fused'?'  (最小!)':'  (往復が多い)'), W/2, H-14);
+
+    // タイトル
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText(kind==='naive'?'非融合: ステップごとに HBM を往復':'融合: 1 回読んで、オンチップで全計算、1 回書く',16,26);
+  }
+  function loop(){
+    if(!playing)return;
+    tRaw+=0.02;
+    const n=seq().length;
+    if(tRaw>=n){tRaw=n-1e-6;playing=false;document.getElementById('p3play').textContent='データを流す';}
+    draw();
+    if(playing)requestAnimationFrame(loop);
+  }
+  document.getElementById('p3play').onclick=function(){
+    if(tRaw>=seq().length-1e-6)tRaw=0;
+    playing=!playing;this.textContent=playing?'一時停止':'データを流す';if(playing)loop();
+  };
+  document.getElementById('p3reset').onclick=function(){playing=false;tRaw=0;document.getElementById('p3play').textContent='データを流す';draw();};
+  function setKind(k,btn){kind=k;document.querySelectorAll('[data-k]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');playing=false;tRaw=0;document.getElementById('p3play').textContent='データを流す';draw();}
+  document.getElementById('kNaive').onclick=function(){setKind('naive',this);};
+  document.getElementById('kFused').onclick=function(){setKind('fused',this);};
+  draw();
+})();
+</script>
+</body>
+</html>
