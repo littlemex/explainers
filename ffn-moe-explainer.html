@@ -36,6 +36,9 @@
   .math .b{color:#8fb8f0}
   .math .p{color:#c9a0f0}
   .math .y{color:#ffd98f}
+  .tex{background:#f3f9f6;border:1px solid var(--line);border-left:4px solid var(--g3);border-radius:10px;
+    padding:12px 20px;margin:16px 0;overflow-x:auto}
+  .tex .cap{font-size:13.5px;color:var(--sub);margin:0 0 6px}
   .canvas-wrap{text-align:center;margin:18px 0}
   canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
   .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
@@ -69,6 +72,13 @@
   .cost .box .lbl{font-size:13px;color:var(--sub)}
   @media(max-width:600px){.toc{columns:1}header h1{font-size:25px}section{padding:22px 18px}}
 </style>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['\\(','\\)']], displayMath: [['$$','$$']] },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
 <header>
@@ -234,6 +244,44 @@
   <div class="key">
     <b>ブロックスパースとは。</b>ここには 2 階層の「ブロック」が出てきます。(1) MoE の expert 計算は、本来<b>ブロック対角行列</b> (各 expert が対角の 1 つの領域) の積として書けます。この <b>expert の領域は、担当トークン数に応じて行数が可変</b>。(2) その領域を、GPU が扱いやすい <b>128&times;128 の固定タイル</b>で敷き詰め、<b>中身が非ゼロのタイルだけ</b>を計算します。expert 間の関係ないところ (ゼロのタイル) は計算しないので<b>無駄がなく</b>、各タイルは十分大きいので<b>GPU を効率よく使える</b>。<b>「行数可変の expert 領域」を「固定サイズのタイルの敷き詰め」で表現する</b>のが肝で、密 GEMM の効率と疎な構造の無駄のなさを両取りします。
   </div>
+  <h3>数式で見る ― batched GEMM から block-sparse へ</h3>
+  <p>なぜ「ブロック対角」「ブロックスパース」なのかを数式で押さえます。expert が \(E\) 個、各 expert の第 1 層重みを \(W_e \in \mathbb{R}^{d \times d_{ff}}\)、expert \(e\) に割り当てられたトークンを縦に積んだ行列を \(X_e \in \mathbb{R}^{n_e \times d}\) とします (\(n_e\) は expert ごとに<b>バラバラ</b>)。</p>
+  <div class="tex">
+    <p class="cap">① 各 expert の計算そのもの (やりたいこと)</p>
+    $$ Y_e = X_e \, W_e \quad (e = 1, \dots, E), \qquad n_1 + n_2 + \cdots + n_E = T \;(\text{総トークン数}) $$
+  </div>
+  <div class="tex">
+    <p class="cap">② 従来: batched GEMM は「全 expert 同形状」を要求するので \(n_e\) を定数 \(C\)(capacity) に固定せざるを得ない</p>
+    $$ \underbrace{n_e = C \;\; (\forall e)}_{\text{この制約が問題}} \;\Rightarrow\; \begin{cases} n_e > C & \text{超過分を drop(精度劣化)}\\ n_e < C & \text{不足分を 0 で padding(無駄計算)} \end{cases} $$
+  </div>
+  <div class="tex">
+    <p class="cap">③ MegaBlocks: 全 expert をまとめて 1 つの block-diagonal 行列積として書く (\(\oplus\) は対角に積む直和)</p>
+    $$ \begin{bmatrix} Y_1\\ Y_2\\ \vdots\\ Y_E \end{bmatrix} = \underbrace{\begin{bmatrix} X_1 & & & \\ & X_2 & & \\ & & \ddots & \\ & & & X_E \end{bmatrix}}_{\text{block-diagonal (対角以外は 0)}} \begin{bmatrix} W_1\\ W_2\\ \vdots\\ W_E \end{bmatrix} $$
+  </div>
+  <p>この対角行列は、各ブロックの<b>行数 \(n_e\) が可変</b>でよい ― capacity で揃える必要がない。あとはこれを <b>128×128 の固定タイル</b>で敷き詰め、<b>非ゼロのタイルだけ</b>を計算します。これが <b>block-sparse 行列積</b>で、論文では出力が疎な形 <b>SDD</b> (Sparse = Dense × Dense) と呼ばれます。</p>
+  <div class="tex">
+    <p class="cap">④ 計算するのは非ゼロブロックだけ。全体を密に計算した場合との比は、対角ブロックが占める面積の割合</p>
+    $$ \frac{\text{block-sparse の計算量}}{\text{密行列積 } (T \times T) \text{ の計算量}} \;\approx\; \frac{\sum_e n_e^{\,2}}{T^{2}} \;=\; \frac{1}{E}\;(\text{均等時}) $$
+  </div>
+  <p>つまり expert が \(E\) 個なら、密な \(T \times T\) 行列積に対して<b>約 \(1/E\) の計算量</b>で済む (対角以外のゼロブロックを触らないから)。しかも各ブロックは十分大きいので、密 GEMM 並みの効率で回せます。</p>
+
+  <h3>具体例 ― 4 expert・不揃いなトークンをタイルで敷き詰める</h3>
+  <p>下の図は、4 つの expert にトークンが \([7,2,5,1]\) と不揃いに割り当てられた場合の block-diagonal 行列を、固定タイルで敷き詰めた様子です。緑の対角ブロックだけが計算対象で、灰色 (ゼロ) は一切触りません。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv4" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p4play">非ゼロブロックを順に計算</button>
+    <button id="p4reset" class="ghost">最初から</button>
+    <div class="slider">タイルの粒度 <input id="p4tile" type="range" min="1" max="4" value="2"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>対角ブロック (expert の計算・非ゼロ)</span>
+    <span><span class="dot" style="background:#ffd98f"></span>いま計算中のタイル</span>
+    <span><span class="dot" style="background:#6b7d74"></span>ゼロ (計算しない)</span>
+  </div>
+  <p>行方向が「トークン (expert ごとに可変長)」、列方向も同じ並び。expert \(e\) のトークンは expert \(e\) の重みとだけ掛かるので、<b>対角のブロックだけが非ゼロ</b>になります。タイルの粒度を粗くすると、対角をまたぐタイルに<b>端数のゼロ (padding)</b> が少し混じるのが見えます ― これが「128×128 境界への丸めで残るごく少量のパディング」の正体です。それでも capacity 方式の大量 padding とは桁違いに小さい。</p>
+
   <p>これにより MegaBlocks は <b>dropless-MoE (dMoE)</b> ― <b>トークンを 1 つも捨てない MoE</b> を実現しました。capacity factor 起因の悩み (大量の drop か padding か) が消えます (厳密には 128&times;128 ブロック境界への丸めでごく少量の端数パディングは残りますが、capacity 方式の無駄とは桁が違います)。</p>
   <p><b>効果 (論文 arXiv:2211.15841 の実測値)。</b>トークンを捨てないので<b>精度を損なわず</b>、padding の無駄計算もしないので<b>速い</b>。論文の高速化は「何と何を比べたか」で 3 通りあり、混同しないことが大切です。</p>
   <table>
@@ -520,6 +568,92 @@ function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.rand
     document.getElementById('p3cap').disabled=(k==='block');draw();}
   document.getElementById('kCap').onclick=function(){setKind('cap',this);};
   document.getElementById('kBlock').onclick=function(){setKind('block',this);};
+  draw();
+})();
+
+// ============ デモ4: block-diagonal をタイルで敷き詰める ============
+(function(){
+  const cv=document.getElementById('cv4'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const loads=[7,2,5,1];          // expert ごとのトークン数(不揃い)
+  const T=loads.reduce((a,b)=>a+b,0); // =15
+  // 各 expert のトークン範囲 [start,end)
+  const ranges=[]; let acc=0;
+  for(const n of loads){ranges.push([acc,acc+n]);acc+=n;}
+  let tile=2;                     // タイル1辺のトークン数(粒度)
+  let step=-1, playing=false, timer=null;
+  const gx=60, gy=60, gsz=Math.min(H-140, W*0.52);
+  const u=gsz/T;                  // 1トークンあたりのピクセル
+  function expertOf(i){for(let e=0;e<ranges.length;e++){if(i>=ranges[e][0]&&i<ranges[e][1])return e;}return -1;}
+  // タイル一覧(非ゼロ=対角ブロックに重なるタイル)を作る
+  function tiles(){
+    const nT=Math.ceil(T/tile);
+    const list=[];
+    for(let r=0;r<nT;r++)for(let c=0;c<nT;c++){
+      // このタイルが覆うトークン範囲
+      const r0=r*tile, r1=Math.min(T,(r+1)*tile), c0=c*tile, c1=Math.min(T,(c+1)*tile);
+      // 非ゼロ(対角ブロックと重なる)判定 + 端数padding数
+      let real=0, pad=0, hasReal=false;
+      for(let i=r0;i<r1;i++)for(let j=c0;j<c1;j++){
+        if(expertOf(i)===expertOf(j)){real++;hasReal=true;} else pad++;
+      }
+      if(hasReal) list.push({r,c,r0,r1,c0,c1,real,pad});
+    }
+    return list;
+  }
+  let tileList=tiles();
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // 全 T×T の下地(ゼロ=灰)と対角ブロック(緑)
+    for(let i=0;i<T;i++)for(let j=0;j<T;j++){
+      const same=expertOf(i)===expertOf(j);
+      ct.fillStyle= same? 'rgba(67,181,129,0.35)':'rgba(107,125,116,0.12)';
+      ct.fillRect(gx+j*u, gy+i*u, u-0.5, u-0.5);
+    }
+    // タイル境界(白線)と、計算済み/計算中の色
+    const shown = tileList.filter((t,idx)=>idx<=step);
+    tileList.forEach((t,idx)=>{
+      const x=gx+t.c0*u, y=gy+t.r0*u, w=(t.c1-t.c0)*u, h=(t.r1-t.r0)*u;
+      if(idx===step){ct.fillStyle='rgba(255,217,143,0.5)';ct.fillRect(x,y,w,h);}
+      else if(idx<step){ct.fillStyle='rgba(67,181,129,0.25)';ct.fillRect(x,y,w,h);}
+      ct.strokeStyle= idx===step?'#ffd98f':'#8fd6b4';ct.lineWidth= idx===step?2.5:1.2;
+      ct.strokeRect(x,y,w,h);
+    });
+    // expert ラベル(左)
+    ct.font='11px sans-serif';ct.textAlign='center';
+    ranges.forEach((rg,e)=>{
+      const cy=gy+(rg[0]+rg[1])/2*u;
+      ct.fillStyle='#43b581';ct.save();ct.translate(gx-16,cy);ct.rotate(-Math.PI/2);
+      ct.fillText('E'+(e+1)+' ('+loads[e]+')',0,0);ct.restore();
+    });
+    // 見出し
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('block-diagonal 行列 (行・列=トークン, 対角=expert 計算)  タイル '+tile+'×'+tile,gx,gy-14);
+    // 集計
+    const totReal=tileList.reduce((a,t)=>a+t.real,0);
+    const totPad=shown.reduce((a,t)=>a+t.pad,0);
+    const totPadAll=tileList.reduce((a,t)=>a+t.pad,0);
+    const y2=gy+gsz+26;
+    ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillStyle='#8fd6b4';
+    ct.fillText('非ゼロタイル数: '+tileList.length+'  /  計算する実トークン対: '+totReal+' (=Σ nₑ²)',gx,y2);
+    ct.fillStyle= totPadAll>0?'#f0a58e':'#8fd6b4';
+    ct.fillText('端数 padding(タイル境界の丸め): '+totPadAll+' 対'+(tile===1?' → タイル1×1 なら padding ゼロ':''),gx,y2+22);
+    ct.fillStyle='#d7f5e6';ct.textAlign='center';ct.font='14px sans-serif';
+    const msg = step<0 ? '「非ゼロブロックを順に計算」を押す' :
+                step>=tileList.length ? '完了 ― 対角の非ゼロタイルだけ計算。灰色 (ゼロ) は一度も触らない' :
+                'タイル '+(step+1)+'/'+tileList.length+' を計算中 (E'+(expertOf(tileList[step].r0)+1)+' 付近)';
+    ct.fillText(msg,W/2,H-16);
+  }
+  function doStep(){if(step<tileList.length)step++;draw();}
+  document.getElementById('p4play').onclick=function(){
+    playing=!playing;this.textContent=playing?'停止':'非ゼロブロックを順に計算';
+    if(playing){if(step>=tileList.length)step=-1;
+      const tick=()=>{if(!playing)return;doStep();if(step>=tileList.length){playing=false;document.getElementById('p4play').textContent='非ゼロブロックを順に計算';return;}timer=setTimeout(tick,500);};timer=setTimeout(tick,500);}
+  };
+  document.getElementById('p4reset').onclick=function(){playing=false;step=-1;document.getElementById('p4play').textContent='非ゼロブロックを順に計算';draw();};
+  document.getElementById('p4tile').oninput=function(){tile=+this.value;tileList=tiles();step=-1;playing=false;document.getElementById('p4play').textContent='非ゼロブロックを順に計算';draw();};
   draw();
 })();
 </script>
