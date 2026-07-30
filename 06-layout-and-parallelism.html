@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NKI Workshop - 06: データレイアウトと並列化</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hbm:#e07a5f; --sbuf:#3d7dca; --te:#198754; --mem:#e0a35f; --psum:#a06cd5;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .b{color:#8fb8f0}
+  .math .y{color:#ffd98f}
+  .math .p{color:#c9a0f0}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:200px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:140px;text-align:center}
+  .cost .box .big{font-size:23px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  details{background:#f3f9f6;border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin:14px 0}
+  summary{cursor:pointer;font-weight:600;color:var(--g1)}
+  .back{display:inline-block;margin:0 0 4px;color:#cfeede;text-decoration:none;font-size:14px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">NKI WORKSHOP ・ 06</p>
+  <h1>データレイアウトと並列化 ― Trainium 上では全ては2D</h1>
+  <p>どの軸を partition に置くか、どの軸を free に残すか。その一手が transpose の要不要と DMA 効率を決める</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">第 1 回で SBUF は「128 partition × free」の 2D スクラッチパッドだと学びました。第 5 回はその上でタイルをどう敷き詰めるかを見ました。今回はもう一歩踏み込み「テンソルのどの軸を partition に、どの軸を free に置くか」という設計判断そのものを掘ります。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    Trainium 上では、どんなテンソルも最終的に<b>2D (128 partition × free) の形</b>に写像されます。<b>この写像の選び方 (どの軸を partition に置くか) 次第で、transpose が要るかどうか、reduction が素直に書けるかどうか、DMA が速いかどうかが決まる</b>。レイアウト設計とは、この写像を先に決めてから計算を組み立てる作業です。さらに視野を広げると、複数コア・複数チップへの並列化も「同じ写像の考え方をチップの外まで延長したもの」として理解できます。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 全ては2D ― 写像というメンタルモデル</a>
+    <a href="#s2">2. 【体験】どの軸を partition に置くか ― transpose の要不要</a>
+    <a href="#s3">3. reduction は free 軸に沿う ― ハード制約から逆算する</a>
+    <a href="#s4">4. transpose のコストと、それを消す/隠す工夫</a>
+    <a href="#s5">5. 【体験】access pattern ― 表現力のための API</a>
+    <a href="#s6">6. 並列化への拡張 ― LNC と TP × SP = world</a>
+    <a href="#s7">7. まとめ</a>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値はワークショップの講義・実測に基づく概算です。<a href="./01-hardware-hierarchy.html">第 1 回「ハードウェア階層」</a>(SBUF の 2D 構造・partition 128)と<a href="./05-tiling.html">第 5 回「タイリング」</a>を先に読むと理解が早いです。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>全ては2D ― 写像というメンタルモデル</h2>
+  <p class="lead">出発点はこの一文です。<b>Trainium 上で計算するとき、どんな形のテンソルも最終的に「128 partition × free」の2D にどこかで写像される。</b></p>
+  <p>第 1 回で見た通り、SBUF は 128 本の partition レーンと、各レーンに連なる free 次元で構成される 2D の作業台でした。3 次元・4 次元のテンソル (バッチ・ヘッド・シーケンス長・head dimension を持つ Q/K/V など) を扱うときも、最終的には <b>「どの軸を 128 本の partition レーンに割り当てるか」「残りをどう free 次元に並べるか」</b>という 2 択に帰着します。</p>
+  <div class="math">
+    <span class="c"># 例: Q 行列 (head_dim × seq_len) を SBUF に置く</span><br>
+    どちらを <span class="b">partition (128 レーン)</span> に、どちらを <span class="y">free</span> にするか<br>
+    <span class="b">head_dim</span> → partition, <span class="y">seq_len</span> → free&nbsp;&nbsp;<span class="c"># 一つの選択</span><br>
+    <span class="y">seq_len</span> → partition, <span class="b">head_dim</span> → free&nbsp;&nbsp;<span class="c"># もう一つの選択</span>
+  </div>
+  <p>この 2 択、<b>どちらも「正しい」</b>数学的には同じ行列を表現できます。しかし Trainium の計算エンジン (Tensor Engine が読む形、reduction が可能な軸) から見ると、<b>片方は素直に計算でき、もう片方は余計な transpose が要る</b>ことがあります。レイアウト設計とは、この写像を<b>計算の直前に決めるのではなく、テンソルがメモリに置かれる時点から意識して選ぶ</b>作業です。</p>
+  <div class="key">
+    <b>合言葉。</b>「このテンソルの形は何か」ではなく「<b>このテンソルのどの軸を 128 partition に、どの軸を free に置くか</b>」で考える。この一問に答えを出すことが、レイアウト設計の実質すべてです。以降の章 (transpose コスト、reduction 制約、access pattern) は、すべてこの一問への答え方を掘り下げたものです。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】どの軸を partition に置くか ― transpose の要不要</h2>
+  <p class="lead">この記事の「絵で覚えて帰ってほしい1枚」です。同じ Q・K 行列を、異なる軸で SBUF に置いた場合の違いを見比べます。</p>
+  <p>Self-Attention の QKᵀ を例にします。Q・K はどちらも <b>head dimension × sequence length</b> の形でデバイスメモリ (HBM) に置かれています。NKI ISA で SBUF にロードすると、<b>デバイスメモリ上の先頭次元が、そのまま SBUF の partition 次元に自動的にマップされる</b>という仕様があります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-lay="headfirst" id="layHead">head_dim を先頭 (partition) に置く</button>
+    <button class="ghost" data-lay="seqfirst" id="laySeq">seq_len を先頭 (partition) に置く</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--sbuf)"></span>partition (128 レーン)</span>
+    <span><span class="dot" style="background:var(--g3)"></span>free 次元</span>
+    <span><span class="dot" style="background:var(--hbm)"></span>余計な transpose (発生時のみ)</span>
+  </div>
+  <p><b>head_dim を先頭 (partition) に置いた場合</b>: QKᵀ の縮約 (contraction) はまさに head dimension に沿って行われます。Q・K どちらも<b>縮約したい軸がすでに partition 次元に来ている</b>ので、Tensor Engine はロードされたそのままの形を読んで matmul できます。<b>明示的な transpose が不要</b>です。<b>seq_len を先頭 (partition) に置いた場合</b>、縮約したい head dimension が free 側に回ってしまうため、matmul の前に<b>余計な transpose</b>を挟む必要が生じます。同じ計算結果でも、レイアウトの選び方一つで transpose の有無が変わるのが分かります。</p>
+  <div class="key">
+    <b>この例が示す原則。</b><b>縮約したい軸 (contraction dimension) を partition に置くと transpose が要らない。</b>逆に、他の理由 (例えば別の演算で使いやすいから) で違う軸を partition に置くと、matmul の直前に transpose という「税金」を払うことになります。どちらの軸を partition に置くかは、<b>後続の計算が何を縮約するか</b>を先に見て決めるべきだ、という教訓です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>reduction は free 軸に沿う ― ハード制約から逆算する</h2>
+  <p class="lead">レイアウトを決めるとき、もう一つ効いてくるハード制約があります。「合計する軸」の置き場所です。</p>
+  <p>Vector Engine や Scalar Engine が行う <b>reduction (合計・最大値などの集計)</b> には、NKI ISA 上の制約があります。<b>reduction は必ず free 軸に沿って行う</b>という制約です。partition 方向をまたいで直接 reduction することはできません。</p>
+  <div class="math">
+    <span class="c"># reduction の制約 (ハード仕様)</span><br>
+    reduction (max, sum, ...) は <span class="y">free 軸</span> に沿ってのみ実行可能<br>
+    <span class="b">partition 軸</span> をまたぐ reduction は直接できない<span class="c"> ← ここが制約</span>
+  </div>
+  <p>これが第 2 節のレイアウト選択にもう一つの判断基準を与えます。<b>「このテンソルのどの軸を後で reduction したいか」を先に確認し、その軸を free に置く</b>のです。Self-Attention の softmax がこの制約と偶然きれいに噛み合う例として知られています。softmax の row-wise な max・sum は sequence length 方向の reduction ですが、Q・K を head_dim-partition / seq_len-free で置いたレイアウトでは、<b>sequence length がちょうど free 軸に来ている</b>ため、reduction がそのまま素直に書けます。</p>
+  <div class="key">
+    <b>レイアウト設計の二段判定。</b>(1) 後続の matmul が<b>どの軸を縮約するか</b> → その軸を partition に。(2) 後続の reduction が<b>どの軸を畳みたいか</b> → その軸を free に。<b>2 つの要求が同じテンソルの中で競合することもある</b> (縮約したい軸と reduction したい軸が両方 partition を欲しがる、等)。そのときは「どちらのコストが大きいか」を見て、片方に transpose という妥協を払う判断になります。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>transpose のコストと、それを消す/隠す工夫</h2>
+  <p class="lead">レイアウトの選択を誤ると transpose が要る、と述べました。ではその transpose、実際どれくらい重いのか。そして軽くする手はあるのか。</p>
+  <p>Trainium に transpose 専用のエンジンはありません。<b>transpose は Tensor Engine 上で (単位行列との積として) 実行され、結果は PSUM に蓄積されます。</b>つまり transpose は matmul と同じ演算器を奪い合う「本来の計算ではない仕事」です。Self-Attention の最適化実演では、PV matmul の直前に value 行列を transpose する場面が、Tensor Engine の時間を有意に消費するボトルネックとして現れました。</p>
+  <div class="warn">
+    <b>効きどころの実例 (ワークショップの実測・概算)。</b>value 行列の transpose を、そのまま FP32 で行うのではなく、<b>先に BF16 へダウンキャストしてから transpose する</b>と大きく速くなる傾向が確認されています。Tensor Engine は低精度ほど高いスループットを出せるため、transpose という「必要だが本質的でない仕事」を軽くできます。<b>PSUM のアキュムレータは常に FP32 のまま</b>で、精度が必要な蓄積そのものには影響しません。
+  </div>
+  <p>この「ダウンキャストして transpose」は、後続の第 8 回で扱う低精度化の考え方の先取りです。ここで持ち帰ってほしいのは、<b>transpose のコストは「精度」でも調整できる</b>という一点。レイアウト選択で transpose を無くせるならそれが一番ですが、無くせない transpose が残るなら、bf16 化や DMA transpose (専用のハードウェアパスを使った転置) でそのコストを削る、という二段構えです。</p>
+  <div class="key">
+    <b>transpose 対策の優先順位。</b>①<b>レイアウト設計で transpose 自体を無くす</b> (第 2 節)。②無くせない transpose は<b>低精度化 (bf16 化) で高速化</b>する。③大きな連続転置には<b>専用の DMA transpose 機能</b>を使う (第 1 回の DMA 帯域の話がそのまま効く領域)。<b>「transpose は正しいレイアウトを得るために必要だが、あまり効率的な仕事ではない」</b>と割り切り、まずレイアウトで消せないか検討するのが出発点です。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】access pattern ― 表現力のための API</h2>
+  <p class="lead">標準的な numpy 風のスライシングでは表現できないレイアウトを記述する API が <b>access pattern</b> (<code>.ap()</code>) です。ここで大事なのは位置づけの誤解を避けることです。</p>
+  <p>SBUF は物理的には 1 次元のメモリです。そこに「128 partition × free」という 2D の意味を与えているのはアクセスの仕方に他なりません。access pattern API は、この読み出し方を<b>ネストしたループ</b>として明示的に書く手段です。各次元は <b>(stride, count)</b> のペアで表現され、「stride だけ進んで、count 回繰り返す」を入れ子にしていきます。</p>
+  <div class="math">
+    <span class="c"># access pattern の記法イメージ (ネストループとして解釈)</span><br>
+    t.ap(pattern=[[<span class="b">stride0</span>, <span class="b">count0</span>], [<span class="y">stride1</span>, <span class="y">count1</span>], ...])<br>
+    <span class="c"># 先頭の (stride0, count0) は必ず partition 次元をストライドする</span><br>
+    <span class="c"># かつ stride0 は free 次元の合計サイズでなければならない (ハード制約)</span>
+  </div>
+  <p>下のデモは、2 段の access pattern (partition 用のペアと free 用のペア) が SBUF 上のどのアドレスをどの順で読み出すかを 1 ステップずつトレースします。stride を変えると、同じ要素数でも読み出す順番と間隔が変わる様子が見えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">free stride <input id="p2stride" type="range" min="1" max="4" value="1" step="1"></div>
+    <button id="p2next">1 ステップ進める</button>
+    <button id="p2play">自動再生</button>
+    <button id="p2reset" class="ghost">最初から</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--sbuf)"></span>partition (先頭ペア)</span>
+    <span><span class="dot" style="background:var(--g3)"></span>読み出し済みの要素</span>
+    <span><span class="dot" style="background:#ffd98f"></span>今読んでいる要素</span>
+  </div>
+  <p>ここで最も重要な位置づけの注意です。ワークショップでは <b>「access pattern はパフォーマンス API ではなく表現力の API」</b>と明確に語られています。正しく表現できても速くなるとは限りません。特に <b>transpose を access pattern で表現すると、小さな DMA が多発して遅くなりがち</b>です (第 4 節の DMA transpose 専用パスの方が適しています)。access pattern の役割は「標準スライスでは書けない、strided/tensorized なアクセスを表現できる」ことそのものであり、速さはそこから生まれる二次的な結果に過ぎません。</p>
+  <div class="key">
+    <b>使い分けの指針。</b>連続アクセスなら標準スライスで十分。<b>strided アクセスや、n個ごとに要素を取る、reinterpret cast</b> (dtype を変えて再解釈する) のような、標準スライスで表現できないレイアウトが必要になったときに access pattern を使う。<b>「表現できるから速い」ではなく「表現できないと書けない」が使う理由</b>です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>並列化への拡張 ― LNC と TP × SP = world</h2>
+  <p class="lead">ここまでは 1 コア内のレイアウトの話でした。同じ「どの軸をどこに置くか」という発想は、コアをまたいだ並列化にもそのまま延長できます。</p>
+  <p>第 1 回で触れた <b>LNC (Logical NeuronCore)</b> を思い出してください。1 デバイスに 8 個ある物理コアを、既定では 2 個ずつ束ねて 4 個の論理コアとして扱います (LNC2)。<b>LNC1 に切り替えると、束ねずに 8 個の物理コアとして扱えます。</b>どちらが良いかは一様には決まらず、<b>計算量が支配的なワークロードか、メモリ帯域が支配的なワークロードか</b>によって選び方が変わります。小さいモデルでは LNC1 にして最小の並列度で済ませる方がコスト効率が良くなる場合がある、という判断がワークショップで語られています。</p>
+  <div class="key">
+    <b>並列化の単位を組み立てる考え方。</b>ワークショップでは <b>tensor parallelism (TP)</b> と <b>sequence parallelism (SP)</b> という 2 つの分割軸を掛け合わせて、実際に使用するコア数 (<b>world</b>) を決めるという考え方が語られています。<b>TP × SP = world</b>。TP はモデルの重み・計算を複数コアに分割する軸、SP はシーケンス長方向の分割軸で、両方を同時に使うこともできます。<b>同じ TP・SP の値でも、LNC1 か LNC2 かで実際に使う物理コア数は変わる</b>ため、world をどう組むかは LNC 設定と一緒に考える必要があります。
+  </div>
+  <p>これは第 2 節・第 3 節で見た「どの軸を partition に、どの軸を free に置くか」という問いの<b>チップ間バージョン</b>です。1 コア内では 128 partition レーンへの軸の割り当てが問題でしたが、複数コアに広がると<b>どの軸をどのコア群に分割するか</b>が問題になります。collective 通信 (all-reduce・all-gather 等) を使うレプリカグループの組み方も、TP 群は連続したコア番号、SP/CP (context parallel) 群はストライドしたコア番号、というように<b>分割の意図がグループのトポロジーに直結</b>します。</p>
+  <div class="warn">
+    <b>この章で扱う範囲。</b>並列化の具体的な規模 (何チップ・何ノードでどこまで伸びるか) はモデル・世代・構成に強く依存し、本稿では立ち入りません。ここで持ち帰ってほしいのは<b>「1 コア内のレイアウト設計と、複数コアへの並列化は、同じ『軸をどこに割り当てるか』という問いの延長線上にある」</b>という考え方の骨格だけです。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ</h2>
+  <p class="lead">「データレイアウトと並列化」の論点を一枚に整理します。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>中心メンタルモデル</td><td>Trainium 上ではどんなテンソルも最終的に2D (128 partition × free) に写像される。写像の選び方がレイアウト設計</td></tr>
+    <tr><td>partition の選び方</td><td>後続の matmul が縮約したい軸を partition に置くと transpose が不要になる (Q/K の head dimension が好例)</td></tr>
+    <tr><td>reduction 制約</td><td>reduction は free 軸に沿ってのみ可能というハード制約。畳みたい軸を free に置く</td></tr>
+    <tr><td>transpose コスト</td><td>Tensor Engine 上の演算で「本質的でない仕事」。レイアウトで消す→消せなければ bf16 化/DMA transpose で軽くする</td></tr>
+    <tr><td>access pattern</td><td>(stride, count) のネストループで SBUF の読み出しを表現する「表現力の API」。パフォーマンス API ではない</td></tr>
+    <tr><td>並列化への拡張</td><td>LNC1/LNC2 でコアの束ね方が変わる。TP × SP = world という分割の組み立てが、レイアウト設計のチップ間版</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>レイアウト設計の実質は「<b>このテンソルのどの軸を 128 partition に、どの軸を free に置くか</b>」という一問に答えることです。答えを出す基準は 2 つ ― <b>縮約したい軸は partition に</b> (transpose を消すため)、<b>畳みたい (reduction したい) 軸は free に</b> (ハード制約を満たすため)。この 2 つが競合するときに transpose という妥協が生まれ、それは低精度化や専用 DMA パスで軽くできます。access pattern は、この設計を標準スライスの外側まで表現するための道具です。そして同じ「軸をどこに割り当てるか」という発想は、1 コアの中だけでなく、LNC の設定や TP × SP という複数コアへの分割にもそのまま延長されます。<br>
+    次回はこのレイアウトの上に「エンジンを遊ばせない」ソフトウェアパイプラインと allocation を積み重ねます。
+  </div>
+  <div class="fn">
+    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義 (Introduction, HW Deep Dive, Self-Attention 最適化実演, Advanced NKI APIs, Model Performance) および advanced_nki_apis_lab / native_nkilib_lab の実測・実装例。BF16 transpose の高速化傾向・LNC1/2 の使い分け等は「ワークショップの実測(概算)」に基づく傾向表現です。ワークショップが座学で扱う全トピックと今後の章立ては <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。<br>
+    注意: 本ページの図と数値は、データレイアウトと並列化の考え方を直感的に伝えるための<b>模式的な可視化</b>です。実際の transpose コスト・access pattern の性能・並列化の規模は世代・精度・カーネル実装・モデル構成に依存します。並列化の具体的な規模数は未発表構成に触れないため本稿では概念レベルに留めています。
+  </div>
+</section>
+
+</main>
+<script>
+function rr(ct,x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+  ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+
+// ============ デモ1: レイアウト選択と transpose の要不要 ============
+(function(){
+  const cv=document.getElementById('cv1'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='headfirst'; // 'headfirst' | 'seqfirst'
+
+  function drawTile(x,y,w,h,partLabel,freeLabel,partIsContraction){
+    ct.strokeStyle='#3d7dca';ct.lineWidth=2;rr(ct,x,y,w,h,10);ct.stroke();
+    const rows=8,rh=h/rows;
+    for(let i=0;i<rows;i++){
+      ct.fillStyle= i%2===0 ? 'rgba(61,125,202,0.22)':'rgba(61,125,202,0.10)';
+      ct.fillRect(x,y+i*rh,w,rh);
+    }
+    const cols=4,cw=w/cols;
+    ct.strokeStyle='rgba(143,214,180,0.55)';ct.lineWidth=1;
+    for(let j=1;j<cols;j++){ct.beginPath();ct.moveTo(x+j*cw,y);ct.lineTo(x+j*cw,y+h);ct.stroke();}
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.save();ct.translate(x-16,y+h/2);ct.rotate(-Math.PI/2);
+    ct.fillStyle= partIsContraction ? '#ffd98f' : '#8fb8f0';
+    ct.fillText(partLabel+(partIsContraction?' ★縮約軸':''),0,0);ct.restore();
+    ct.fillStyle= partIsContraction ? '#8fb8f0' : '#ffd98f';
+    ct.fillText(freeLabel+(partIsContraction?'':' ★縮約軸'),x+w/2,y+h+18);
+  }
+  function arrow(x1,y1,x2,y2,col){
+    ct.strokeStyle=col;ct.lineWidth=2.5;ct.beginPath();ct.moveTo(x1,y1);ct.lineTo(x2,y2);ct.stroke();
+    const ang=Math.atan2(y2-y1,x2-x1);ct.beginPath();ct.moveTo(x2,y2);
+    ct.lineTo(x2-Math.cos(ang-0.5)*9,y2-Math.sin(ang-0.5)*9);
+    ct.moveTo(x2,y2);ct.lineTo(x2-Math.cos(ang+0.5)*9,y2-Math.sin(ang+0.5)*9);ct.stroke();
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const headFirst = mode==='headfirst';
+    const partLabel = headFirst ? 'head_dim (partition)' : 'seq_len (partition)';
+    const freeLabel  = headFirst ? 'seq_len (free)' : 'head_dim (free)';
+    const partIsContraction = headFirst; // 縮約軸は常に head_dim
+
+    ct.fillStyle='#d7f5e6';ct.font='bold 15px sans-serif';ct.textAlign='center';
+    ct.fillText(headFirst ? 'head_dim を partition に置く (NKI ISA が自動でこう配置)' : 'seq_len を partition に置く (別の選択)', W/2, 30);
+
+    const qx=90, kx=470, ty=70, tw=280, th=150;
+    drawTile(qx,ty,tw,th,partLabel,freeLabel,partIsContraction);
+    ct.fillStyle='#8fd6b4';ct.font='bold 16px sans-serif';ct.fillText('Q',qx+tw/2,ty-10);
+    drawTile(kx,ty,tw,th,partLabel,freeLabel,partIsContraction);
+    ct.fillStyle='#8fd6b4';ct.fillText('K',kx+tw/2,ty-10);
+
+    const teY=340, teH=54, teX=W/2-160, teW=320;
+    const midY=teY-30;
+    if(headFirst){
+      arrow(qx+tw/2, ty+th, qx+tw/2, midY, '#43b581');
+      arrow(kx+tw/2, ty+th, kx+tw/2, midY, '#43b581');
+      ct.fillStyle='#43b581';ct.font='13px sans-serif';
+      ct.fillText('直結 (transpose 不要)', qx+tw/2, midY-8);
+      ct.fillText('直結 (transpose 不要)', kx+tw/2, midY-8);
+    }else{
+      const boxW=110,boxH=30;
+      arrow(qx+tw/2, ty+th, qx+tw/2, midY+boxH/2, '#e07a5f');
+      ct.fillStyle='#3a231c';ct.strokeStyle='#e07a5f';ct.lineWidth=2;
+      rr(ct,qx+tw/2-boxW/2, midY-boxH/2, boxW, boxH,8);ct.fill();ct.stroke();
+      ct.fillStyle='#f0a58e';ct.font='bold 12px sans-serif';ct.fillText('余計な transpose', qx+tw/2, midY+4);
+      arrow(kx+tw/2, ty+th, kx+tw/2, midY+boxH/2, '#e07a5f');
+      ct.fillStyle='#3a231c';ct.strokeStyle='#e07a5f';
+      rr(ct,kx+tw/2-boxW/2, midY-boxH/2, boxW, boxH,8);ct.fill();ct.stroke();
+      ct.fillStyle='#f0a58e';ct.fillText('余計な transpose', kx+tw/2, midY+4);
+    }
+    ct.strokeStyle='rgba(120,140,160,0.4)';ct.lineWidth=1;ct.setLineDash([4,4]);
+    ct.beginPath();ct.moveTo(qx+tw/2,midY);ct.lineTo(teX+teW/2,teY);ct.stroke();
+    ct.beginPath();ct.moveTo(kx+tw/2,midY);ct.lineTo(teX+teW/2,teY);ct.stroke();
+    ct.setLineDash([]);
+    ct.fillStyle='#12321f';ct.strokeStyle='#43b581';ct.lineWidth=2;
+    rr(ct,teX,teY,teW,teH,10);ct.fill();ct.stroke();
+    ct.fillStyle='#eaf7f0';ct.font='bold 14px sans-serif';ct.textAlign='center';
+    ct.fillText('Tensor Engine ― QKᵀ の matmul (head_dim で縮約)', teX+teW/2, teY+teH/2+5);
+
+    ct.fillStyle= headFirst ? '#8fd6b4' : '#f0a58e';ct.font='14px sans-serif';
+    ct.fillText(headFirst
+      ? '縮約軸 (head_dim) が partition に一致 → 明示的な transpose 不要'
+      : '縮約軸 (head_dim) が free に配置 → matmul 前に transpose が必要',
+      W/2, H-16);
+  }
+  function setMode(m,btn){mode=m;document.querySelectorAll('[data-lay]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('layHead').onclick=function(){setMode('headfirst',this);};
+  document.getElementById('laySeq').onclick=function(){setMode('seqfirst',this);};
+  draw();
+})();
+
+// ============ デモ2: access pattern (stride, count) の読み出しトレース ============
+(function(){
+  const cv=document.getElementById('cv2'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const P=8;          // 表示用 partition 数 (概念的に縮小)
+  const FREE=8;        // 表示用 free 幅
+  let freeStride=1, idx=0, playing=false;
+
+  function order(fs){
+    // 先頭ペア: partition を1つずつ (stride=FREE, count=P)
+    // 2段目ペア: free を stride=fs で count=FREE 個 (概念的; fsが1超なら折り返してすべて訪問)
+    const seq=[];
+    for(let p=0;p<P;p++){
+      for(let c=0;c<FREE;c++){
+        const f=(c*fs)%FREE;
+        seq.push({p:p, f:f});
+      }
+    }
+    return seq;
+  }
+  function cellXY(p,f){
+    const gx=120, gy=60, cw=54, chh=34;
+    return [gx+f*cw, gy+p*chh, cw, chh];
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const seq=order(freeStride);
+    const n=Math.min(idx,seq.length-1);
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('SBUF (概念的に縮小表示: partition 8 本 × free 8 要素)',20,26);
+    // grid
+    for(let p=0;p<P;p++){
+      for(let f=0;f<FREE;f++){
+        const [x,y,w,h]=cellXY(p,f);
+        const visitedIdx = seq.findIndex((s,i)=> i<=n && s.p===p && s.f===f);
+        let fill='rgba(120,140,160,0.15)';
+        if(visitedIdx>=0 && visitedIdx===n) fill='#ffd98f';
+        else if(visitedIdx>=0) fill='rgba(67,181,129,0.45)';
+        ct.fillStyle=fill;ct.strokeStyle='rgba(143,214,180,0.3)';ct.lineWidth=1;
+        ct.fillRect(x,y,w-3,h-4);ct.strokeRect(x,y,w-3,h-4);
+      }
+    }
+    ct.fillStyle='#8fb8f0';ct.font='11px sans-serif';ct.textAlign='center';
+    for(let p=0;p<P;p++){const [x,y]=cellXY(p,0);ct.save();ct.textAlign='right';ct.fillText('p'+p, x-6, y+22);ct.restore();}
+    for(let f=0;f<FREE;f++){const [x,y]=cellXY(0,f);ct.fillText('f'+f, x+24, y-6);}
+
+    const cur=seq[n];
+    ct.fillStyle='#d7f5e6';ct.font='14px monospace';ct.textAlign='left';
+    ct.fillText('ステップ '+(n+1)+' / '+seq.length,20,H-70);
+    ct.fillText('pattern = [[stride='+FREE+', count='+P+'],  [stride='+freeStride+', count='+FREE+']]',20,H-48);
+    ct.fillStyle='#ffd98f';
+    ct.fillText('今読んでいる要素: partition '+cur.p+' / free オフセット '+cur.f, 20, H-24);
+    ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
+    ct.fillText('先頭ペアが partition を1つずつ進め、2段目ペアが free 側を stride='+freeStride+' で辿る (ネストループ)', 20, H-4);
+  }
+  function next(){idx=(idx+1)%(order(freeStride).length);draw();}
+  document.getElementById('p2next').onclick=function(){next();};
+  document.getElementById('p2reset').onclick=function(){playing=false;idx=0;document.getElementById('p2play').textContent='自動再生';draw();};
+  let timer=null;
+  document.getElementById('p2play').onclick=function(){
+    playing=!playing;this.textContent=playing?'停止':'自動再生';
+    if(playing){const tick=()=>{if(!playing)return;next();timer=setTimeout(tick,260);};timer=setTimeout(tick,260);}
+  };
+  document.getElementById('p2stride').oninput=function(){freeStride=+this.value;idx=0;draw();};
+  draw();
+})();
+</script>
+</body>
+</html>

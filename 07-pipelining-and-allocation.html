@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NKI Workshop - 07: ソフトウェアパイプラインと allocation</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hbm:#e07a5f; --sbuf:#3d7dca; --te:#198754; --psum:#a06cd5; --mem:#e0a35f;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .b{color:#8fb8f0}
+  .math .y{color:#ffd98f}
+  .math .p{color:#c9a0f0}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:200px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:140px;text-align:center}
+  .cost .box .big{font-size:23px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  details{background:#f3f9f6;border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin:14px 0}
+  summary{cursor:pointer;font-weight:600;color:var(--g1)}
+  .back{display:inline-block;margin:0 0 4px;color:#cfeede;text-decoration:none;font-size:14px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">NKI WORKSHOP ・ 07</p>
+  <h1>ソフトウェアパイプラインと allocation ― エンジンを遊ばせない</h1>
+  <p>裏で次のタイルを先読みし、アドレスの曖昧さを消してコンパイラに自動パイプライン化を許す</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">第 1 回で「NeuronCore は複数の専用エンジンが並列に動く」と学びました。第 2 回・第 3 回では「データをどこに置くか」を扱いました。今回はその続きとして「時間軸」に踏み込みます ― 複数のエンジンを、同時に、しかも隙間なく働かせるにはどうするか。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    あるタイルを計算している<b>その裏で</b>、次のタイルを DMA で先読み (prefetch) する。これが<b>ソフトウェアパイプライン</b>です。そして、そのオーバーラップをコンパイラに安全だと証明させる鍵が <b>allocation</b> ― バッファのアドレスを人が明示的に割り当て、アドレスの曖昧さを排除することです。<b>手動 allocation だけで、コンパイラが自動的にパイプライン化できる</b>ようになる、という逆説がこの章の核心です。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 動機 ― エンジンを遊ばせない</a>
+    <a href="#s2">2. 【体験】アセンブリライン ― 逐次実行とパイプラインの対比</a>
+    <a href="#s3">3. allocation の役割 ― アドレスの曖昧さを消す</a>
+    <a href="#s4">4. 一時的な後退が次の飛躍を生む ― v8 から v10 へ</a>
+    <a href="#s5">5. 【体験】スケジューリング 3 API の違い</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値はワークショップ実測の概算です。<a href="./01-hardware-hierarchy.html">第 1 回「ハードウェア階層」</a>と<a href="./02-roofline-and-fusion.html">第 2 回「Roofline とカーネル融合」</a>を先に読むと理解が早いです。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>動機 ― エンジンを遊ばせない</h2>
+  <p class="lead">第 1 回で NeuronCore は Tensor / Vector / Scalar / GP-SIMD という専用エンジンが<b>並列に</b>動くと学びました。今回はそれを「空間」だけでなく「時間」の軸で使い切る話です。</p>
+  <p>タイル単位でカーネルを書くと、各タイルの処理は<b>load (HBM→SBUF に読む) → compute (計算する) → store (結果を書く)</b>という 3 ステージに分かれます。素朴に書くと、あるタイルの load・compute・store をすべて終えてから、次のタイルの load を始めます。すると次のタイルの load を待つあいだ、計算エンジンは手が空いていても何もできず<b>遊んで</b>しまいます。ある処理が別のエンジンの完了を待つあいだ自分は手が空くこの現象を<b>structural hazard</b> と呼びます。</p>
+  <div class="key">
+    <b>着想はシンプル。</b>あるタイルを<b>計算している、その裏で</b>、次のタイルのデータを DMA が先読み (prefetch) しておけばよい。計算が終わった瞬間、次のタイルのデータはもう SBUF に届いている ― だから待ち時間がゼロになります。
+  </div>
+  <p>これを実現する基本手法が<b>二重バッファリング (double buffering)</b> です。1 つの論理的なバッファ (たとえば「QK matmul の結果」) に、物理的には<b>2 つのスロット</b>を用意する。片方のスロットを Vector Engine が読んでいる (softmax の計算に使っている) あいだに、もう片方のスロットに Tensor Engine が次のタイルの QK matmul の結果を書き込む。読む側と書く側が別の場所を使うので、上書きによる競合が起きません。</p>
+  <div class="warn">
+    <b>よくある誤解。</b>二重バッファリングは「SBUF の容量が足りないから」ではありません。<b>2 つの処理(前のタイルの読み出しと、次のタイルの書き込み)を並行させたいのに、同じ場所を使うと上書きが起きてしまう</b>から、場所を 2 つに分けるのです。目的は容量対策ではなく<b>並行性の確保</b>です。</p>
+  </div>
+  <p>なお、バッファをさらに増やす<b>三重バッファリング</b>以降は収穫が急速に減っていきます(ワークショップの実測(概算)ではさらに数パーセントの改善どまり)。まず二重バッファで structural hazard を消すのが効果の大部分を占め、それ以上はケースバイケースの判断になります。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】アセンブリライン ― 逐次実行とパイプラインの対比</h2>
+  <p class="lead">この記事の「絵で覚えて帰ってほしい 1 枚」です。工場のアセンブリラインを思い出してください。1 人の作業者が最初から最後まで 1 台を仕上げてから次の 1 台に取りかかるのと、複数の作業者が担当工程をずらして同時に流すのとでは、総所要時間がまるで違います。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-mode="seq" id="m1seq">逐次実行 (非パイプライン)</button>
+    <button class="ghost" data-mode="pipe" id="m1pipe">ソフトウェアパイプライン</button>
+  </div>
+  <div class="controls">
+    <button id="p1play">再生</button>
+    <button id="p1reset" class="ghost">最初から</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--hbm)"></span>load (DMA)</span>
+    <span><span class="dot" style="background:var(--te)"></span>compute (Tensor/Vector)</span>
+    <span><span class="dot" style="background:var(--sbuf)"></span>store (DMA)</span>
+  </div>
+  <p><b>逐次実行</b>では、どの時点を見てもガントチャートの行が同時に 1 本しか動きません。あるタイルの load・compute・store が終わるまで、次のタイルの load すら始まらない。<b>ソフトウェアパイプライン</b>に切り替えると、ステージをずらして重ねます。タイル 1 の compute をしている裏でタイル 2 の load が進み、タイル 1 の store をしている裏でタイル 2 の compute とタイル 3 の load が進む ― <b>定常状態では 3 つのステージが同時に稼働</b>します。同じ本数のタイルを流しても、パイプラインの方が総時間が短く終わるのを見てください。</p>
+  <div class="key">
+    <b>これは概念デモです。</b>グラフの時間軸は相対値であり、実際の load/compute/store の比率やタイル数はカーネルの内容次第で変わります。ここで持ち帰ってほしいのは「ステージをずらして重ねると、総時間はステージ数の合計ではなく、ほぼ最長のステージ × タイル数に近づく」という定性的な効果です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>allocation の役割 ― アドレスの曖昧さを消す</h2>
+  <p class="lead">「先読みすればいい」と分かっても、それを安全に実行できるとコンパイラに保証させるのは別の問題です。ここで <b>allocation (手動アロケーション)</b> が登場します。</p>
+  <p>通常、SBUF や PSUM のどこにどのバッファを置くかはコンパイラが決めます。多くの場合これで問題ありません。しかしプロファイルを見て「あるエンジンが遊んでいるのに、次のタイルの処理を始められていない」という機会を見つけたときに、<b>allocation</b> ― バッファの<b>サイズだけでなく、SBUF/PSUM 上の正確なアドレスまで人間が指定する</b>手法を使います。</p>
+  <div class="math">
+    <span class="c"># PSUM のバンクを明示的に割り当てる例(擬似コード)</span><br>
+    psum_bank = nl.ndarray((TILE_M, TILE_N), dtype=nl.float32, buffer=nl.psum,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="y">address=(0, b * PSUM_BANK_BYTES)</span>)&nbsp;&nbsp;<span class="c"># b 番目のバンクに固定</span>
+  </div>
+  <p>なぜアドレスを明示すると先読みが可能になるのか。<b>コンパイラは「2 つの処理が重なっても安全か」を、メモリ上の場所(アドレス)が被っていないかで判断します。</b>アドレスがコンパイラの自動割り当てのままだと、2 つの処理が同じ場所を使うかもしれず、コンパイラは安全側に倒して<b>重ねずに逐次実行</b>させます。人間が「タイル A はアドレス X、タイル B はアドレス Y」と明示的に分ければ、<b>コンパイラはオーバーラップしても互いを壊さないと証明できる</b>ようになり、自動でパイプライン化してくれるのです。</p>
+  <div class="key">
+    <b>因果関係を取り違えないこと。</b>allocation は<b>単体では速くなりません</b>。allocation がやっているのは「アドレスの曖昧さを排除する」ことだけです。速くなるのは、その結果として<b>コンパイラがオーバーラップの安全性を証明できるようになり、パイプライン化を許可する</b>から。ワークショップの Self-Attention 最適化の実演では、<b>手動 allocation を導入しただけで、コンパイラが自動的にタイル間の処理をパイプライン化</b>しました。人間がスケジュールを書いたわけではなく、「安全だと証明できる条件を整えた」だけで、あとはコンパイラが仕事をしたのです。
+  </div>
+  <p>PSUM は 8 バンクという有限の資源なので、allocation はここでも効きます。QK 用の matmul と PV 用の matmul に<b>別々のバンクを明示的に割り当てる</b>と、Tensor Engine は 2 つの matmul を異なるバンクに向けて並行に書き込めます。バンクが被っていないとコンパイラに保証されるからです。逆に、バンクをどう再利用するかを誤ると ― たとえば蓄積をリセットすべきタイミングで <code>accumulate</code> の指定を誤ると ― 結果が大きく壊れることもあり、明示的な制御には相応の注意が要ります。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>一時的な後退が次の飛躍を生む ― v8 から v10 へ</h2>
+  <p class="lead">ワークショップの Self-Attention 最適化の実演では、v8・v9・v10 という 3 段階でこの章のテーマが積み上げられます。ここでの教訓は「一歩下がることが次の飛躍の土台になる」という構造です。</p>
+  <ol class="steps">
+    <li><b>v8: PSUM を早めに解放する。</b>それまで PSUM に居座っていた中間結果 (max reduction など) を <code>tensor_scalar</code> 命令で Vector Engine 側にキャッシュし、PSUM のバンクを早く空ける。これ自体は<b>単体で見ると性能が落ちます</b>。しかし、PSUM を早く空けられるようになったことで、次のタイルの QK matmul をより早く始められる余地が生まれる ― これが後続の allocation / pipelining の<b>必須の土台</b>になります。</li>
+    <li><b>v9: 手動 allocation を導入する。</b>コードの変更は「バッファのアドレスを明示する」ことだけ。アルゴリズムやスケジュールは変えていません。それだけで<b>コンパイラが自動的にタイル間をパイプライン化</b>し、性能が上がりました。</li>
+    <li><b>v10: 明示的ソフトウェアパイプラインを書く。</b>QK matmul・rowsum・transpose・PV matmul といった複数ステージを、<b>異なるタイル間で意図的にずらして重ねる</b>設計です。ある時点で、Tensor Engine は 2 つ前のタイルの PV matmul と現在のタイルの QK matmul を同時に処理し、Scalar Engine は 1 つ前のタイルの sum/exp を処理し、DMA はバックグラウンドで transpose を進める ― <b>3 段以上のタイルが同時に「in flight」</b>な状態になります。</li>
+  </ol>
+  <div class="key">
+    <b>PSUM解放(一時後退)→allocation(コンパイラが自動パイプライン化)→明示的パイプライン(多段オーバーラップ)</b>という順で積み上げ、ワークショップの実測(概算)では最初の実装から<b>数倍程度</b>の高速化に至りました。ここで大事なのは絶対的な倍率ではなく、<b>「一時的に遅くなる変更が、次の変更を可能にする土台になる」</b>という設計の順序そのものです。最適化を一足飛びに終盤の形へ飛ばそうとすると、なぜそれが効くのか理解できないまま迷子になります。
+  </div>
+  <p>この領域は、AI エージェントに一発で解かせるのが難しい分野だと分かっています。ソフトウェアパイプラインや allocation の設計は、structural hazard がどこで起きているかをプロファイルから読み取り、どのバッファをどうずらすかを一段ずつ組み立てる必要があり、人間側の理解がエージェントの作業を軌道修正する上で重要になります。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】スケジューリング 3 API の違い</h2>
+  <p class="lead">パイプライン化を制御する NKI のスケジューリング API は 3 つあります。同じループ構造に対して「どこまでの並べ替え・オーバーラップをコンパイラに許すか」がそれぞれ違います。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-api="affine" id="a2affine">affine_range</button>
+    <button class="ghost" data-api="sequential" id="a2sequential">sequential_range</button>
+    <button class="ghost" data-api="noreorder" id="a2noreorder">no_reorder</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--te)"></span>許可されるオーバーラップ / 並べ替えの範囲</span>
+    <span><span class="dot" style="background:#f0a58e"></span>禁止される範囲</span>
+  </div>
+  <table>
+    <tr><th>API</th><th>役割</th></tr>
+    <tr><td><code>affine_range</code></td><td>ループの複数イテレーションが<b>独立</b>であることを表明し、オーバーラップ(パイプライン化)を<b>許可</b>する。多くのタイルループの既定選択。</td></tr>
+    <tr><td><code>sequential_range</code></td><td>イテレーション間に<b>依存関係がある</b>ことを表明し、実行順序を保証する(アンローリングを抑制する)。ただし命令スケジューリングそのものまでは固定しない。</td></tr>
+    <tr><td><code>no_reorder</code></td><td>ブロック<b>内部</b>の命令の並べ替えを禁止する、最も強い制約。プログラムで書いた順序どおりに逐次実行させる。</td></tr>
+  </table>
+  <p>ボタンで切り替えると、同じループ構造に対して「コンパイラに許される並べ替え・オーバーラップの範囲」が違う 3 枚の図に切り替わります。<code>affine_range</code> はイテレーション同士を重ねてよいと宣言する最も自由な指定、<code>sequential_range</code> は順序だけを固定してアンロールを抑える中間的な指定、<code>no_reorder</code> はブロック内の命令の並びそのものを凍結する最も厳格な指定です。v10 の明示的パイプラインでは、これらを<b>組み合わせて</b>使います ― ループ間の依存を <code>sequential_range</code> で保証しつつ、ブロック内の特定の命令列は <code>no_reorder</code> で順序を固定する、といった具合です。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <p class="lead">「エンジンを遊ばせない」ための時間軸の設計を一枚に整理します。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>動機</td><td>タイル処理を load/compute/store の逐次で行うと structural hazard で待ちが生まれる。裏で次のタイルを DMA 先読みして消す</td></tr>
+    <tr><td>ソフトウェアパイプライン</td><td>アセンブリラインのようにステージをずらして重ね、定常状態で全ステージが同時稼働するようにする</td></tr>
+    <tr><td>二重バッファリング</td><td>読む側・書く側で物理スロットを分け、並行動作時の上書き競合を避ける。容量対策ではなく並行性の確保が目的</td></tr>
+    <tr><td>allocation</td><td>バッファのアドレスを人が明示し、アドレスの曖昧さを排除する。単体では速くならず、コンパイラがオーバーラップの安全性を証明できるようにする土台</td></tr>
+    <tr><td>v8→v9→v10</td><td>PSUM解放(一時後退)→allocationのみでコンパイラが自動パイプライン化→明示的ソフトウェアパイプラインで多段オーバーラップ、という積み上げ</td></tr>
+    <tr><td>スケジューリング3API</td><td>affine_range(オーバーラップ許可)/ sequential_range(順序保証)/ no_reorder(並べ替え禁止)を組み合わせて制御する</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>カーネルの速度は「1 つのエンジンをどれだけ速くするか」だけでは決まりません。<b>複数のエンジンとDMAを、時間軸でどれだけ同時に働かせられるか</b>が同じくらい効きます。そのための手段が<b>ソフトウェアパイプライン(裏で先読み)</b>と<b>allocation(アドレスの曖昧さを消してコンパイラに証明させる)</b>です。allocation は単体では速くなりませんが、パイプライン化という次の一手を可能にする土台になる ― この「一時的な後退が飛躍を生む」構造は、この分野が AI エージェントに一発では解けない理由でもあり、人間の理解が軌道修正の鍵になります。<br>
+    次回は、この地図の上でデータそのものを軽くする<b>低精度化(量子化)</b>を扱います。
+  </div>
+  <div class="fn">
+    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および microbenchmarking lab / advanced_nki_apis lab / first_functional_kernel lab の実測。ワークショップが座学で扱う全トピックと今後の章立ては <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。<br>
+    注意: 本ページの図と数値は、ソフトウェアパイプラインと allocation の考え方を直感的に伝えるための<b>模式的な可視化</b>です。実際の μs 値・改善率・バッファ構成は世代・カーネル実装・プロファイル条件に依存します。ここで示すガントチャート・オーバーレイ図の時間軸・範囲は相対的な概念値です。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ デモ1: 逐次実行 vs ソフトウェアパイプライン(ガントチャート) ============
+(function(){
+  const cv=document.getElementById('cv1'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NTILES=5;
+  const rowH=70, rowY0=70;
+  const stageColors=['#e07a5f','#198754','#3d7dca'];
+  const stageNames=['load','compute','store'];
+  let mode='seq', playing=false, t=0;
+  function rr(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+  function schedule(){
+    const events=[];
+    if(mode==='seq'){
+      let cur=0;
+      for(let i=0;i<NTILES;i++){
+        for(let s=0;s<3;s++){events.push({tile:i,stage:s,start:cur,end:cur+1});cur+=1;}
+      }
+    }else{
+      for(let i=0;i<NTILES;i++){
+        for(let s=0;s<3;s++){events.push({tile:i,stage:s,start:i+s,end:i+s+1});}
+      }
+    }
+    return events;
+  }
+  function totalTime(ev){let m=0;ev.forEach(e=>{if(e.end>m)m=e.end;});return m;}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const ev=schedule();
+    const tot=totalTime(ev);
+    const padL=110, padR=30, plotW=W-padL-padR;
+    const unit=plotW/tot;
+    stageNames.forEach((name,s)=>{
+      ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='right';
+      ct.fillText(name, padL-14, rowY0+s*rowH+rowH/2-3);
+    });
+    for(let s=0;s<3;s++){
+      ct.strokeStyle='rgba(215,245,230,0.15)';
+      ct.strokeRect(padL, rowY0+s*rowH, plotW, rowH-14);
+    }
+    ev.forEach(e=>{
+      const visStart=e.start, visEnd=Math.min(e.end,t);
+      if(visEnd<=visStart) return;
+      const x=padL+visStart*unit, w=(visEnd-visStart)*unit;
+      const y=rowY0+e.stage*rowH;
+      ct.fillStyle=stageColors[e.stage];
+      rr(x,y,Math.max(w,1),rowH-14,6);ct.fill();
+      if(w>=unit*0.6){
+        ct.fillStyle='#0d2b20';ct.font='bold 13px sans-serif';ct.textAlign='center';
+        ct.fillText('T'+(e.tile+1), x+w/2, y+(rowH-14)/2+4);
+      }
+    });
+    if(t>0 && t<tot){
+      const x=padL+t*unit;
+      ct.strokeStyle='#ffd98f';ct.lineWidth=2;
+      ct.beginPath();ct.moveTo(x,rowY0-10);ct.lineTo(x,rowY0+3*rowH-14);ct.stroke();
+    }
+    ct.fillStyle='#8fd6b4';ct.font='15px sans-serif';ct.textAlign='center';
+    const doneTxt = t>=tot ? '(完了)' : '';
+    ct.fillText((mode==='seq'?'逐次実行':'ソフトウェアパイプライン')+' ― 総時間(概念値) '+tot.toFixed(0)+' 単位 '+doneTxt, W/2, H-20);
+  }
+  function loop(){if(!playing)return;t+=0.05;const tot=totalTime(schedule());
+    if(t>=tot){t=tot;playing=false;document.getElementById('p1play').textContent='再生';}draw();if(playing)requestAnimationFrame(loop);}
+  document.getElementById('p1play').onclick=function(){if(t>=totalTime(schedule()))t=0;playing=!playing;this.textContent=playing?'一時停止':'再生';if(playing)loop();};
+  document.getElementById('p1reset').onclick=function(){playing=false;t=0;document.getElementById('p1play').textContent='再生';draw();};
+  function setMode(m,btn){mode=m;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');playing=false;t=0;document.getElementById('p1play').textContent='再生';draw();}
+  document.getElementById('m1seq').onclick=function(){setMode('seq',this);};
+  document.getElementById('m1pipe').onclick=function(){setMode('pipe',this);};
+  draw();
+})();
+
+// ============ デモ2: affine_range / sequential_range / no_reorder のオーバーレイ ============
+(function(){
+  const cv=document.getElementById('cv2'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let api='affine';
+  const N=5; // イテレーション数(概念)
+  const cellW=110, cellH=48, x0=90, y0=70;
+  function rr(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+  function drawIterBlocks(){
+    for(let i=0;i<N;i++){
+      const x=x0+i*cellW, y=y0;
+      ct.fillStyle='#12321f';ct.strokeStyle='#43b581';ct.lineWidth=2;
+      rr(x,y,cellW-14,cellH,8);ct.fill();ct.stroke();
+      ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='center';
+      ct.fillText('iter '+(i+1), x+(cellW-14)/2, y+cellH/2+5);
+    }
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('同じループ (iter 1〜'+N+') に対して許可される範囲', 20, 34);
+    drawIterBlocks();
+    const rowY=y0+cellH+40;
+    if(api==='affine'){
+      // 複数イテレーションのオーバーラップを許可: 隣接イテレーション間に緑の橋を描く
+      ct.strokeStyle='#43b581';ct.lineWidth=3;
+      for(let i=0;i<N-1;i++){
+        const x1=x0+i*cellW+(cellW-14)/2, x2=x0+(i+1)*cellW+(cellW-14)/2;
+        ct.beginPath();ct.moveTo(x1,y0+cellH+6);ct.quadraticCurveTo((x1+x2)/2,y0+cellH+30,x2,y0+cellH+6);ct.stroke();
+      }
+      ct.fillStyle='#8fd6b4';ct.font='13px sans-serif';ct.textAlign='center';
+      ct.fillText('橋 = 隣接イテレーションのオーバーラップ(パイプライン化)を許可', W/2, rowY+40);
+      ct.fillStyle='#43b581';ct.font='bold 15px sans-serif';
+      ct.fillText('affine_range: イテレーション間は独立 → コンパイラが自由に重ねてよい', W/2, y0-14);
+    }else if(api==='sequential'){
+      // 順序のみ保証する矢印(重ねない、順番だけ固定)
+      ct.strokeStyle='#f0a58e';ct.lineWidth=3;
+      for(let i=0;i<N-1;i++){
+        const x1=x0+i*cellW+(cellW-14), x2=x0+(i+1)*cellW;
+        const y=y0+cellH/2;
+        ct.beginPath();ct.moveTo(x1,y);ct.lineTo(x2-6,y);ct.stroke();
+        ct.beginPath();ct.moveTo(x2-6,y);ct.lineTo(x2-14,y-5);ct.lineTo(x2-14,y+5);ct.closePath();ct.fillStyle='#f0a58e';ct.fill();
+      }
+      ct.fillStyle='#8fd6b4';ct.font='13px sans-serif';ct.textAlign='center';
+      ct.fillText('矢印 = 実行順序だけを固定(アンロール抑制)。ステージの重ねは別途 allocation 等に委ねる', W/2, rowY+10);
+      ct.fillStyle='#f0a58e';ct.font='bold 15px sans-serif';
+      ct.fillText('sequential_range: イテレーション間に依存 → 順序を保証', W/2, y0-14);
+    }else{
+      // no_reorder: ブロック内を鎖でつなぎ、並べ替え不可を示す
+      ct.strokeStyle='#c9a0f0';ct.lineWidth=2;ct.setLineDash([3,3]);
+      rr(x0-10, y0-10, N*cellW-14+10, cellH+20, 12);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle='#c9a0f0';ct.font='13px sans-serif';ct.textAlign='center';
+      ct.fillText('点線の枠 = ブロック内部の命令の並べ替えを一切禁止(プログラム順を凍結)', W/2, rowY+10);
+      ct.fillStyle='#c9a0f0';ct.font='bold 15px sans-serif';
+      ct.fillText('no_reorder: ブロック内は書いた順のまま逐次実行', W/2, y0-14);
+    }
+  }
+  function setApi(a,btn){api=a;document.querySelectorAll('[data-api]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('a2affine').onclick=function(){setApi('affine',this);};
+  document.getElementById('a2sequential').onclick=function(){setApi('sequential',this);};
+  document.getElementById('a2noreorder').onclick=function(){setApi('noreorder',this);};
+  draw();
+})();
+</script>
+</body>
+</html>

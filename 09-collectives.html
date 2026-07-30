@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NKI Workshop - 09: 複数チップ間の通信(collectives)</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hbm:#e07a5f; --sbuf:#3d7dca; --te:#198754; --mem:#e0a35f;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .b{color:#8fb8f0}
+  .math .y{color:#ffd98f}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:200px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:140px;text-align:center}
+  .cost .box .big{font-size:23px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  details{background:#f3f9f6;border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin:14px 0}
+  summary{cursor:pointer;font-weight:600;color:var(--g1)}
+  .back{display:inline-block;margin:0 0 4px;color:#cfeede;text-decoration:none;font-size:14px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">NKI WORKSHOP ・ 09</p>
+  <h1>複数チップ間の通信(collectives) ― 単一チップの地図をチップの外へ広げる</h1>
+  <p>NeuronLink と EFA ― データ移動の階段をもう1段延ばし、通信を計算の裏に隠す</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">第1回から第8回まで、話はすべて単一チップ・単一 NeuronCore の中で完結していました。今回はその境界を越え、複数チップに分かれたモデルがどう協調して動くかを見る、このシリーズの最終回です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    単一チップのメモリ階層で学んだ「<b>速い所は小さい・遅い所は大きい・往復を減らす</b>」という考え方が、そのままチップ間ネットワークに<b>もう1層拡張</b>されます。SBUF↔HBM の往復を減らす発想と同じ理屈で、チップ間の通信(collective)も<b>「減らす」「隠す(計算と重ねる)」</b>ことで速くする ― それが本章の核心です。
+  </div>
+  <div class="key" style="background:#f3f9f6">
+    <b>先に結論。</b>モデルが複数チップに分割されると、各チップは自分の担当分を計算した後、他チップの結果と<b>合算・共有</b>する必要があります(collective 通信)。これを愚直にやると通信の間だけ計算が止まる。ワークショップでは、通信をカーネルの内側から発行し<b>計算の裏で進める</b>(comm/compute overlap)というアプローチが扱われます。これは第7回で見た「タイル単位のパイプライン」の発想を、チップとチップの間に広げたものです。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 単一チップから複数チップへ ― もう1層の階段</a>
+    <a href="#s2">2. 【体験】ring all-reduce ― 部分和が一周する</a>
+    <a href="#s3">3. collective の種類 ― all-reduce・all-gather・halo exchange</a>
+    <a href="#s4">4. 【体験】計算と通信のオーバーラップ</a>
+    <a href="#s5">5. in-kernel collectives ― カーネルの内側から通信を発行する</a>
+    <a href="#s6">6. まとめ ― シリーズの結び</a>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値はワークショップの実測(概算)に基づく傾向表現です。<a href="./01-hardware-hierarchy.html">第1回「ハードウェア階層」</a>で見た容量と帯域の非対称、そして第7回で見る「エンジンを遊ばせないパイプライン」の発想が、本章の土台になります。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>単一チップから複数チップへ ― もう1層の階段</h2>
+  <p class="lead">第1回で見た「HBM は大きくて遅い、SBUF は小さくて速い」という地図に、もう1段外側の層を書き加えます。</p>
+  <p>大きなモデルは1チップの HBM に載りません。だからモデルを複数チップに<b>分割</b>し(例えば行列積の重みを分けるテンソル並列、バッチを分けるデータ並列)、各チップが自分の担当分だけを計算します。ただし分割した計算は、途中で<b>他チップの結果と合わせる</b>必要が出てきます。この「チップ間でデータを合わせる・共有する」操作が <b>collective 通信</b>です。</p>
+  <p>チップ同士をつなぐ経路は主に2種類あります。</p>
+  <ul style="padding-left:20px">
+    <li><b>NeuronLink</b> ― 同じサーバー内、チップとチップを直結する高速リンク(scale-up)。</li>
+    <li><b>EFA (Elastic Fabric Adapter)</b> ― サーバーをまたぐネットワーク(scale-out)。AWS 独自の高スループット相互接続。</li>
+  </ul>
+  <p>第1回の「オンチップ(SBUF)は速いが小さい、HBM は大きいが遅い」という非対称が、チップの外にもそのまま続きます。<b>近い(小さい範囲)ほど速く、遠い(大きい範囲)ほど遅い</b>という同じ形の階段が1段延びるだけです。</p>
+  <table>
+    <tr><th>層</th><th>範囲</th><th>役割</th></tr>
+    <tr><td><b style="color:var(--sbuf)">SBUF</b></td><td>1 チップの内側</td><td>計算エンジンが直結する作業台(第1回)</td></tr>
+    <tr><td><b style="color:var(--hbm)">HBM</b></td><td>1 チップの内側</td><td>そのチップの大容量倉庫(第1回)</td></tr>
+    <tr><td><b>NeuronLink</b></td><td>同じサーバー内の複数チップ</td><td>チップ間の高速リンク(scale-up)</td></tr>
+    <tr><td><b>EFA</b></td><td>複数サーバー(ノード)間</td><td>ノード間のネットワーク(scale-out)</td></tr>
+  </table>
+  <div class="key">
+    <b>ここが本章の軸。</b>単一チップの中で「HBM への往復を減らす」ためにカーネル融合(第2回)やタイリング(第5回)を使ったのと同じ発想で、チップ間でも「<b>通信そのものを減らす</b>」「<b>通信を計算の裏に隠す</b>」ことが速度の鍵になります。地図が1段外へ伸びただけで、戦い方の骨格は変わりません。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】ring all-reduce ― 部分和が一周する</h2>
+  <p class="lead">この記事の「絵で覚えて帰ってほしい1枚」その1です。複数チップが持つ部分和を、全チップが同じ合計を持つ状態まで導く様子を見ます。</p>
+  <p><b>all-reduce</b> は、各チップが持つ部分的な値(例えば勾配や部分和)を<b>全チップ分足し合わせ、その合計を全チップに配る</b>操作です。テンソル並列やデータ並列で、分割した計算を最後に統合する場面で必要になります。</p>
+  <p>実現方法の1つが <b>ring(リング)アルゴリズム</b>です。チップを円環に並べ、各チップは隣のチップにだけデータを渡す。これを繰り返すと、データがリングを一周する間に全員の値が合算されていきます。1チップあたりの通信は「隣とだけ」なので、チップ数が増えても各チップの負担が急には増えないのが利点です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p1next">1 ステップ進める</button>
+    <button id="p1play">自動再生</button>
+    <button id="p1reset" class="ghost">最初から</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3d7dca"></span>チップ(円環に配置)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>リングを流れる部分和</span>
+    <span><span class="dot" style="background:#43b581"></span>合算が完了した値</span>
+  </div>
+  <p>各チップは最初、自分だけの部分和(concept 値・相対値)を持っています。ステップを進めると、各チップが自分の持つ値を<b>隣のチップへ送り、隣から受け取った値と自分の値を足す</b>を繰り返します。これを一周ぶん繰り返すと、全チップが<b>同じ合計値</b>を持つ状態(all-reduce 完了)にたどり着きます。<b>リング1周 = 全員が全員分の値を知る</b>という点が、all-reduce の骨格です。</p>
+  <div class="key">
+    実際のワークショップでは、この合算アルゴリズム自体はランタイムとフレームワーク(collective ライブラリ)が実行します。カーネル開発者が書くのは「どのチップの集まり(replica group)で、どの演算(足し算等)の collective を呼ぶか」という宣言です。<b>リング/ツリーといった具体的な経路の選び方は、通信ライブラリが担う実装詳細</b>ですが、「データがどう巡って合算されるか」の直感を持っておくと、通信コストの見積もりや後述のオーバーラップ設計がしやすくなります。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>collective の種類 ― all-reduce・all-gather・halo exchange</h2>
+  <p class="lead">all-reduce だけが collective ではありません。「何を」「どこまで」共有するかによって、いくつかの型があります。</p>
+  <ol class="steps">
+    <li><b>all-reduce</b>: 全チップの値を<b>1つに合算</b>し、その合算結果を全チップに配る。前章のリングの例そのもの。テンソル並列の出力射影後などで使う。</li>
+    <li><b>all-gather</b>: 各チップが持つ<b>別々のかけら</b>を、全チップが<b>全部のかけらを集めた状態</b>にする(合算はしない、集めるだけ)。分割して持っていたデータを、後段の計算のために全員が全体を持つ必要があるときに使う。</li>
+    <li><b>reduce-scatter</b>: all-reduce の「配る」部分を「各チップが結果の一部だけを持つ」形に変えたもの。全体を合算しつつ、結果自体は再分割して各チップの負担を抑える。</li>
+  </ol>
+  <p>もう1つ、隣接チップとだけ通信する軽量なパターンが <b>halo exchange</b> です。畳み込みや空間分割のように、各チップがデータの一部(タイル)を担当し、その<b>境界(halo)部分だけ</b>を隣接チップと交換する。all-reduce のように全チップと通信するのではなく、<b>境界だけを隣とやり取りする</b>ので通信量を絞れます。第6回で見た「必要なデータだけを SBUF に載せる」という発想が、チップ間でも「必要な境界データだけを交換する」という形で再登場します。</p>
+  <div class="key">
+    <b>共通する発想。</b>all-reduce/all-gather/reduce-scatter/halo exchange のどれも、<b>「本当に必要な範囲・量だけを、必要な相手とだけやり取りする」</b>という一点に尽きます。全チップと全データを交換するのが一番単純ですが最も高コストで、halo exchange のように隣接だけに絞れるなら、その方が通信コストは小さくなります。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】計算と通信のオーバーラップ</h2>
+  <p class="lead">この記事の「絵で覚えて帰ってほしい1枚」その2です。第7回で見た「タイル単位のパイプライン」の発想を、チップ間の通信に広げます。</p>
+  <p>愚直な実装では、<b>通信している間は計算が止まります</b>(逐次実行)。QKV 射影を計算 → 結果を all-reduce で合算 → 合算が終わるまで次の計算を待つ、という具合です。通信には NeuronLink や EFA の転送時間がかかるので、これをただ待つのは第7回で見た「エンジンが遊んでいる」状態そのものです。</p>
+  <p>そこで、<b>通信をバックグラウンドで進めながら、その裏で別の計算を進める</b>ようにします。例えば、あるレイヤーの all-reduce が進んでいる間に、次のレイヤーで使うデータの計算を始めてしまう。通信そのものの時間は変わりませんが、<b>通信時間が「計算の裏」に隠れる</b>ぶん、全体の所要時間(ウォールクロック時間)が短くなります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p2play">タイムラインを再生</button>
+    <button id="p2reset" class="ghost">最初から</button>
+    <button class="ghost active" data-k="serial" id="kSerial">オーバーラップなし</button>
+    <button class="ghost" data-k="overlap" id="kOverlap">オーバーラップあり</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>計算 (Tensor Engine 等)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>通信 (NeuronLink / EFA)</span>
+  </div>
+  <p><b>オーバーラップなし</b>では、計算バーと通信バーが交互に並び、<b>通信中は計算バーが完全に途切れます</b>。合計の長さ=計算時間の総和+通信時間の総和。<b>オーバーラップあり</b>に切り替えると、通信バーが計算バーの<b>裏に重なって</b>進み、通信の待ち時間の大半が計算時間に吸収されます。同じ量の計算と通信をこなしていても、<b>全体の長さ(概念値・相対値)が縮む</b>のが見て取れます。</p>
+  <div class="key">
+    <b>第7回とのつながり。</b>第7回では「タイル i の計算中にタイル i+1 の転送を進める」二重バッファでエンジンを遊ばせませんでした。ここでは「あるチップの計算中に別のチップとの通信を進める」という、<b>同じオーバーラップの発想をチップ間に広げただけ</b>です。スコープが単一チップの中からチップの外へ移っても、「待ち時間を他の作業で埋める」という骨格は変わりません。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>in-kernel collectives ― カーネルの内側から通信を発行する</h2>
+  <p class="lead">前章の「オーバーラップ」を実現する仕組みの正体を見ます。誰が、どこから通信を指示するかが鍵です。</p>
+  <p>通信を呼び出す経路には大きく2つあります。</p>
+  <ul style="padding-left:20px">
+    <li><b>フレームワークレベルの collective</b>(host-driven): PyTorch の <code>torch.distributed</code> 経由で、ホスト側(CPU)が「ここで all-reduce しろ」と指示する。ホストとのやり取りが挟まるぶん、粒度が粗く、計算と通信を細かく重ねるのは難しい。</li>
+    <li><b>in-kernel collectives</b>(device-initiated): NKI カーネルの<b>内側から直接</b>通信を発行する。ホストとのラウンドトリップを挟まないので、<b>カーネル内の計算と通信を細かい粒度でオーバーラップ</b>できる。</li>
+  </ul>
+  <p>比喩で言うと、host-driven collective は「電話会議を1本ずつ順番にかける」ようなもので、in-kernel collective は「各会議室の中で並行して電話会議を進めながら、他の作業も同時に進める」イメージです。カーネルの内側から通信を出せるからこそ、前章のオーバーラップが細かい粒度で実現できます。</p>
+  <p>collective の対象となるチップの集まりは <b>replica group</b> という単位で表現されます。例えばテンソル並列(TP)とコンテキスト並列(CP)を組み合わせる場合、TP のグループは「隣り合う番号の集まり」、CP のグループは「一定間隔おきの番号の集まり」になるなど、<b>並列化の設計そのものがグループの形を決めます</b>。カーネルはこの集まりの中の「どの操作(合算・収集など)を、どの集まりに対して行うか」を宣言する形で通信を組み立てます。</p>
+  <div class="key">
+    <b>第2回とのつながり。</b>PSUM から SBUF への退避で活性化関数を「ついでに」済ませたのと同じ発想で、in-kernel collectives は<b>通信を計算の一部として組み込む</b>ことを可能にします。データがどこにあるか(SBUF かHBM か)、通信がどこから発行されるか(ホストかカーネル内か)を細かく制御できるほど、往復や待ち時間を削る余地が広がる ― これがシリーズ全体を通じて繰り返されてきたテーマです。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ ― シリーズの結び</h2>
+  <p class="lead">「単一チップの内側」から始まった本シリーズが、最後にチップの外へたどり着きました。全9回を1枚に整理します。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>もう1層の階段</td><td>SBUF/HBM の非対称が、NeuronLink(チップ間)・EFA(ノード間)へそのまま延びる</td></tr>
+    <tr><td>all-reduce</td><td>各チップの部分和をリング等で巡らせ、全チップが同じ合計を持つ状態にする</td></tr>
+    <tr><td>collective の種類</td><td>all-reduce/all-gather/reduce-scatter/halo exchange ― 必要な範囲・相手だけに絞るほど軽い</td></tr>
+    <tr><td>オーバーラップ</td><td>通信を計算の裏に隠す。第7回のタイル間パイプラインをチップ間に広げた形</td></tr>
+    <tr><td>in-kernel collectives</td><td>カーネル内側から通信を発行し、ホスト経由より細かい粒度でオーバーラップできる</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>複数チップに分割されたモデルは、collective 通信で結果を合わせる必要があります。単一チップで学んだ「<b>速い所は小さい・遅い所は大きい・往復を減らす</b>」という地図がチップ間にもう1層延び、「<b>通信を減らす</b>(halo exchange のように範囲を絞る)」「<b>通信を隠す</b>(計算とオーバーラップさせる)」という2つの打ち手が、チップ間でも効きます。<br><br>
+    本シリーズは、第1回の<b>単一エンジン・単一メモリ階層</b>の地図から始まり、第2回で<b>Roofline とカーネル融合</b>という測る/減らす道具を手に入れ、第3回の<b>FlashAttention</b>で融合の本命を見て、第4回で<b>プロファイラ</b>という共通言語を得て、第5回の<b>タイリング</b>・第6回の<b>データレイアウト</b>で単一カーネルの中身を整え、第7回の<b>ソフトウェアパイプライン</b>でエンジンを遊ばせない設計を学び、第8回の<b>低精度化</b>で1要素あたりのコストそのものを軽くし、そして第9回の今回、<b>複数チップ間の通信</b>でスコープをチップの外まで広げました。<b>単一エンジンから、単一カーネル、単一チップ、そしてチップ間へ ― スコープを内から外へ段階的に広げてきた</b>のが、このシリーズ全体の一貫した歩みです。
+  </div>
+  <div class="fn">
+    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および Advanced NKI APIs lab (Collective Communication) の内容。ワークショップが座学で扱う全トピックと章立ての全体像は <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。<br>
+    注意: 本ページの図と数値は、collective 通信の考え方を直感的に伝えるための<b>模式的な可視化</b>です。リングアニメーションの経路・タイミングやガントチャートの時間軸は<b>概念値・相対値</b>であり、実際のアルゴリズム選択(リング/ツリー等)や達成帯域・所要時間は世代・トポロジー・モデル構成・通信ライブラリの実装に依存します。NeuronLink 上の高度なハードウェアオフロード機能や将来の大規模構成に関する内容は、未発表のため本記事では扱いません。
+  </div>
+</section>
+
+</main>
+<script>
+function rr(ct,x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+  ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+
+// ============ デモ1: ring all-reduce ============
+(function(){
+  const cv=document.getElementById('cv1'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const N=5;
+  const vals=[3,5,2,4,1];               // 各チップの部分和(concept値)
+  const total=vals.reduce((a,b)=>a+b,0);
+  const cx=W/2, cy=200, rad=150;
+  function pos(i){const ang=-Math.PI/2 + i*(2*Math.PI/N); return [cx+rad*Math.cos(ang), cy+rad*Math.sin(ang)];}
+  const nReduce=N-1;      // phase A: 0..chipN-1 まで一周弱で合算
+  const nBroadcast=N;     // phase B: 合計をもう一周配る
+  const NS=nReduce+nBroadcast;
+  let step=0, playing=false, timer=null;
+  function chipBox(i,fill,stroke){
+    const [x,y]=pos(i);
+    ct.fillStyle=fill;ct.strokeStyle=stroke;ct.lineWidth=2.5;
+    ct.beginPath();ct.arc(x,y,30,0,Math.PI*2);ct.fill();ct.stroke();
+    ct.fillStyle='#0d2b20';ct.font='bold 13px sans-serif';ct.textAlign='center';
+    ct.fillText('チップ'+i,x,y+4);
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // リング線
+    ct.strokeStyle='rgba(143,214,180,0.3)';ct.lineWidth=1.5;ct.setLineDash([5,5]);
+    ct.beginPath();ct.arc(cx,cy,rad,0,Math.PI*2);ct.stroke();ct.setLineDash([]);
+
+    let tokenAt=-1, tokenVal=0, phaseLabel='', synced=new Array(N).fill(false);
+    if(step===0){
+      phaseLabel='開始: 各チップが自分の部分和を持つ';
+    }else if(step<=nReduce){
+      // phase A: token は chip0 から出発し、chip(step) に到達。値は vals[0..step] の和
+      tokenAt=step;
+      tokenVal=vals.slice(0,step+1).reduce((a,b)=>a+b,0);
+      phaseLabel='① reduce: 部分和がリングを巡りながら合算 (今 チップ'+step+' で合計 '+tokenVal+')';
+    }else{
+      // phase B: 合計を chip(nReduce) から配布。b=1..N
+      const b=step-nReduce;
+      const startChip=nReduce;
+      tokenAt=(startChip+b)%N;
+      tokenVal=total;
+      for(let k=0;k<=b;k++) synced[(startChip+k)%N]=true;
+      phaseLabel='② broadcast: 合計 '+total+' を全チップへ配布中 (今 チップ'+tokenAt+')';
+      if(b>=N-1){ phaseLabel='完了: 全チップが同じ合計 '+total+' を保持'; for(let k=0;k<N;k++) synced[k]=true; }
+    }
+
+    // チップ間の矢印(隣へ)
+    for(let i=0;i<N;i++){
+      const [x1,y1]=pos(i), [x2,y2]=pos((i+1)%N);
+      ct.strokeStyle='rgba(143,214,180,0.25)';ct.lineWidth=1.5;
+      ct.beginPath();ct.moveTo(x1,y1);ct.lineTo(x2,y2);ct.stroke();
+    }
+    // チップ本体
+    for(let i=0;i<N;i++){
+      let fill='#1c2c3f', stroke='#3d7dca';
+      if(synced[i]){fill='#12321f';stroke='#43b581';}
+      chipBox(i,fill,stroke);
+      const [x,y]=pos(i);
+      ct.fillStyle='#8fd6b4';ct.font='11px monospace';ct.textAlign='center';
+      const label = (step>nReduce && synced[i]) ? ('合計='+total) : ('v='+vals[i]);
+      ct.fillText(label,x,y+46);
+    }
+    // トークン(移動中の値)
+    if(tokenAt>=0){
+      const [x,y]=pos(tokenAt);
+      ct.fillStyle='#f0a58e';ct.beginPath();ct.arc(x,y-46,13,0,Math.PI*2);ct.fill();
+      ct.fillStyle='#3a231c';ct.font='bold 11px monospace';ct.textAlign='center';
+      ct.fillText(''+tokenVal,x,y-42);
+    }
+    // 説明文
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='center';
+    ct.fillText('ステップ '+step+' / '+NS,W/2,H-40);
+    ct.font='14px sans-serif';ct.fillStyle='#8fd6b4';
+    ct.fillText(phaseLabel,W/2,H-16);
+  }
+  document.getElementById('p1next').onclick=function(){step=(step<NS)?step+1:0;draw();};
+  document.getElementById('p1reset').onclick=function(){playing=false;step=0;if(timer)clearInterval(timer);document.getElementById('p1play').textContent='自動再生';draw();};
+  document.getElementById('p1play').onclick=function(){
+    playing=!playing;this.textContent=playing?'停止':'自動再生';
+    if(playing){
+      timer=setInterval(function(){
+        step++;
+        if(step>NS){step=0;playing=false;document.getElementById('p1play').textContent='自動再生';clearInterval(timer);}
+        draw();
+      },900);
+    }else{
+      clearInterval(timer);
+    }
+  };
+  draw();
+})();
+
+// ============ デモ2: 計算/通信タイムラインのオーバーラップ ============
+(function(){
+  const cv=document.getElementById('cv2'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let kind='serial', playing=false, t=0;
+
+  // 各レイヤーの計算ブロックと通信ブロック(概念値の長さ)
+  const compLens=[70,70,70,70];
+  const commLens=[50,50,50];
+  function serialSchedule(){
+    // 計算, 通信, 計算, 通信, ... を直列に並べる
+    let x=0; const comp=[], comm=[];
+    for(let i=0;i<compLens.length;i++){
+      comp.push({x0:x,x1:x+compLens[i]}); x+=compLens[i];
+      if(i<commLens.length){comm.push({x0:x,x1:x+commLens[i]}); x+=commLens[i];}
+    }
+    return {comp,comm,total:x};
+  }
+  function overlapSchedule(){
+    // 通信 i は 計算(i+1) の裏で進む。計算だけを直列に並べ、通信はその上に重ねる。
+    let x=0; const comp=[];
+    for(let i=0;i<compLens.length;i++){comp.push({x0:x,x1:x+compLens[i]}); x+=compLens[i];}
+    const comm=[];
+    for(let i=0;i<commLens.length;i++){
+      const start=comp[i].x1; // 計算(i)が終わった直後に通信(i)を発行
+      const len=commLens[i];
+      comm.push({x0:start,x1:start+len,row:1});
+    }
+    return {comp,comm,total:x};
+  }
+  function sched(){return kind==='serial'?serialSchedule():overlapSchedule();}
+
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const s=sched();
+    const padL=60,padR=40,padT=60,rowH=64;
+    const scale=(W-padL-padR)/s.total;
+    const nowX=padL + t*scale;
+
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText(kind==='serial'?'オーバーラップなし: 通信中は計算が完全に停止':'オーバーラップあり: 通信が計算の裏で進む',padL,32);
+
+    // 行ラベル
+    const rowComp=padT, rowComm= kind==='serial' ? padT : padT+rowH;
+    ct.font='13px sans-serif';ct.fillStyle='#8fd6b4';
+    ct.fillText('計算',10,rowComp+rowH/2+4);
+    ct.fillText('通信',10,rowComm+rowH/2+4+(kind==='serial'?rowH:0));
+
+    // 計算バー
+    s.comp.forEach((b,i)=>{
+      const x0=padL+b.x0*scale, w=(b.x1-b.x0)*scale;
+      const active = nowX>=padL+b.x0*scale && nowX<=padL+b.x1*scale+1;
+      ct.fillStyle= active? '#43b581' : 'rgba(67,181,129,0.35)';
+      ct.strokeStyle='#43b581';ct.lineWidth=1.5;
+      rr(ct,x0,rowComp+10,w-4,rowH-24,6);ct.fill();ct.stroke();
+      ct.fillStyle='#0d2b20';ct.font='bold 12px sans-serif';ct.textAlign='center';
+      ct.fillText('計算'+(i+1),x0+w/2,rowComp+rowH/2+4);
+    });
+    // 通信バー
+    s.comm.forEach((b,i)=>{
+      const x0=padL+b.x0*scale, w=(b.x1-b.x0)*scale;
+      const y = kind==='serial' ? rowComp : rowComm;
+      const active = nowX>=padL+b.x0*scale && nowX<=padL+b.x1*scale+1;
+      ct.fillStyle= active? '#f0a58e' : 'rgba(240,165,142,0.35)';
+      ct.strokeStyle='#f0a58e';ct.lineWidth=1.5;
+      rr(ct,x0,y+10,w-4,rowH-24,6);ct.fill();ct.stroke();
+      ct.fillStyle='#3a231c';ct.font='bold 12px sans-serif';ct.textAlign='center';
+      ct.fillText('通信'+(i+1),x0+w/2,y+rowH/2+4);
+    });
+
+    // 現在時刻の縦線
+    ct.strokeStyle='#ffd98f';ct.lineWidth=2;
+    ct.beginPath();ct.moveTo(nowX,padT-6);ct.lineTo(nowX,padT+ (kind==='serial'?rowH:rowH*2) +6);ct.stroke();
+
+    // 合計時間
+    const y2=padT+(kind==='serial'?rowH:rowH*2)+40;
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('総所要時間 (概念値・相対): '+s.total,padL,y2);
+    ct.font='12px sans-serif';ct.fillStyle='#8fd6b4';
+    ct.fillText(kind==='serial'?'計算の総和 + 通信の総和':'計算の総和のみ (通信は裏に隠れる)',padL,y2+20);
+  }
+  function loop(){
+    if(!playing)return;
+    const s=sched();
+    t+=s.total*0.006;
+    if(t>=s.total){t=s.total;playing=false;document.getElementById('p2play').textContent='タイムラインを再生';}
+    draw();
+    if(playing)requestAnimationFrame(loop);
+  }
+  document.getElementById('p2play').onclick=function(){
+    const s=sched();
+    if(t>=s.total-1e-6)t=0;
+    playing=!playing;this.textContent=playing?'一時停止':'タイムラインを再生';
+    if(playing)loop();
+  };
+  document.getElementById('p2reset').onclick=function(){playing=false;t=0;document.getElementById('p2play').textContent='タイムラインを再生';draw();};
+  function setKind(k,btn){
+    kind=k;
+    document.querySelectorAll('[data-k]').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    playing=false;t=0;document.getElementById('p2play').textContent='タイムラインを再生';draw();
+  }
+  document.getElementById('kSerial').onclick=function(){setKind('serial',this);};
+  document.getElementById('kOverlap').onclick=function(){setKind('overlap',this);};
+  draw();
+})();
+</script>
+</body>
+</html>

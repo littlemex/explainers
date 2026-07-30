@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NKI Workshop - 08: 低精度 (量子化)</title>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['\\(','\\)']], displayMath: [['$','$']] },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hbm:#e07a5f; --sbuf:#3d7dca; --te:#198754; --mem:#e0a35f;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .b{color:#8fb8f0}
+  .math .y{color:#ffd98f}
+  .tex{background:#f3f9f6;border:1px solid var(--line);border-left:4px solid var(--g3);border-radius:10px;
+    padding:12px 20px;margin:16px 0;overflow-x:auto}
+  .tex .cap{font-size:13.5px;color:var(--sub);margin:0 0 6px}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:200px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:140px;text-align:center}
+  .cost .box .big{font-size:23px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  details{background:#f3f9f6;border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin:14px 0}
+  summary{cursor:pointer;font-weight:600;color:var(--g1)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">NKI WORKSHOP ・ 08</p>
+  <h1>低精度 (量子化) ― 1 要素を軽くしてデータ移動と演算を減らす</h1>
+  <p>FP32 から BF16・FP8・FP4 へ。精度をどこまで落としてよいか、そして microscaling の考え方</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">第 1 回で「HBM は遅く、DMA 帯域が効く」、第 2 回で「メモリ律速な処理はデータ移動を減らすと速くなる」ことを学びました。今回はもう一つの強力な打ち手 ― <b>1 要素あたりのバイト数を減らす</b>低精度化 (量子化) を扱います。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    データを <b>FP32 (4 バイト) から BF16 (2 バイト)、FP8 (1 バイト) へと低精度化</b>すると、運ぶデータ量が半分・4 分の 1 になり、<b>DMA 帯域も演算スループットも一気に軽くなります</b>。ただし精度は落ちるので、<b>どこを低精度にしてよいかを見極める</b>のが肝心です。鉄則は <b>アキュムレータ (PSUM) は FP32 のまま、入力と転送だけ低精度にする</b>こと。さらに <b>microscaling (グループごとにスケールを持つ量子化)</b> を使えば、低ビットでも精度を保ちやすくなります。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. なぜ低精度が効くのか ― データ移動と演算の両取り</a>
+    <a href="#s2">2. 精度の階段 ― FP32 / BF16 / FP8 / FP4</a>
+    <a href="#s3">3. 【体験】ビット幅とデータ量</a>
+    <a href="#s4">4. どこを落としてよいか ― PSUM は FP32 のまま</a>
+    <a href="#s5">5. 量子化の数式 ― スケールで折りたたむ</a>
+    <a href="#s6">6. 【体験】per-tensor と microscaling の違い</a>
+    <a href="#s7">7. まとめ</a>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2/Trainium3。数値は NKI Workshop の講義・実測に基づく概算です。<a href="./01-hardware-hierarchy.html">第 1 回「ハードウェア階層」</a>と<a href="./02-roofline-and-fusion.html">第 2 回「Roofline とカーネル融合」</a>を先に読むと理解が早いです。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ低精度が効くのか ― データ移動と演算の両取り</h2>
+  <p class="lead">第 1 回・第 2 回は「データの動かし方」を最適化しました。今回は「データそのものの重さ」を減らします。</p>
+  <p>1 つの数値を表すのに何バイト使うか ― これがそのまま 2 つのコストに直結します。</p>
+  <ol class="steps">
+    <li><b>データ移動 (DMA)</b>: HBM ⇄ SBUF を運ぶバイト数がそのまま減る。第 1 回で見た DMA 帯域 (概算) の使い方が同じでも、運ぶ総量が減れば転送時間は短くなる。</li>
+    <li><b>演算 (compute)</b>: Tensor Engine 等は低精度なほど 1 回あたりの演算コストが小さく、同じ演算器でより多くの要素を並列に処理できる。</li>
+  </ol>
+  <div class="key">
+    <b>第 2 回の Roofline とのつながり。</b>演算強度 (FLOP/byte) が低くメモリ律速な処理 (Roofline の左側) ほど、データ量を減らす効果がそのまま速度に直結します。低精度化は「演算強度を変えずにデータ量を減らす」のではなく、<b>データ量そのものを減らして律速している側の負荷を下げる</b>打ち手です。計算律速側 (右側) でも、演算そのものが軽くなるぶん効きます。
+  </div>
+  <p>ただし精度を落とせば数値の表現力は落ちます。<b>どこまで・どこを低精度にしてよいか</b>を見極めるのが、この章の本題です。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>精度の階段 ― FP32 / BF16 / FP8 / FP4</h2>
+  <p class="lead">1 つの数値を表すビット幅を段階的に落としていくと、データ量とレンジ・精度がどう変わるかを見ます。</p>
+  <p>浮動小数点数は<b>符号・指数部・仮数部</b>の 3 つで構成されます。指数部が広いほど扱える数値の範囲(ダイナミックレンジ)が広く、仮数部が広いほど数値を細かく表現できます。</p>
+  <table>
+    <tr><th>形式</th><th>ビット幅</th><th>データ量 (FP32 比)</th><th>ひとこと</th></tr>
+    <tr><td><b>FP32</b></td><td>32 bit (4 byte)</td><td>1</td><td>基準。指数部 8 bit・仮数部 23 bit で広いレンジと高精度</td></tr>
+    <tr><td><b>BF16</b></td><td>16 bit (2 byte)</td><td>1/2</td><td>指数部 8 bit を<b>FP32 と同じ</b>に保ち、仮数部だけ 7 bit に削る設計。レンジは FP32 同等、精度は粗くなる</td></tr>
+    <tr><td><b>FP8</b></td><td>8 bit (1 byte)</td><td>1/4</td><td>指数部・仮数部の割り方に E5M2 (広いレンジ)・E4M3 (汎用) 等のバリエーションがある</td></tr>
+    <tr><td><b>FP4</b></td><td>4 bit (0.5 byte)</td><td>1/8</td><td>最もデータ量が小さいが表現力も最小。使える場面はさらに絞られる</td></tr>
+  </table>
+  <div class="key">
+    <b>BF16 の設計が効いている理由。</b>BF16 は<b>指数部を FP32 と同じ 8 bit に保つ</b>ことで、FP32 とほぼ同じ広いダイナミックレンジを確保しつつ、仮数部を削ってデータ量を半分にしています。だから FP32 で学習したモデルの重みや活性を BF16 に落としても、<b>「桁が飛ぶ (overflow/underflow する)」事故が起きにくい</b>。これが BF16 が低精度化の入り口として広く使われる理由です。FP8・FP4 はさらに指数部も仮数部も削るため、レンジと精度のどちらか (あるいは両方) を犠牲にする設計判断が必要になります。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【体験】ビット幅とデータ量</h2>
+  <p class="lead">この記事の「絵で覚えて帰ってほしい 1 枚」です。ビット幅を落とすと、符号・指数・仮数の内訳とデータ量(=DMA 転送量)がどう縮むかを見比べてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-fmt="fp32" id="fFp32">FP32</button>
+    <button class="ghost" data-fmt="bf16" id="fBf16">BF16</button>
+    <button class="ghost" data-fmt="fp8" id="fFp8">FP8 (E4M3)</button>
+    <button class="ghost" data-fmt="fp4" id="fFp4">FP4</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#f0a58e"></span>符号 (sign)</span>
+    <span><span class="dot" style="background:#8fb8f0"></span>指数部 (exponent)</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>仮数部 (mantissa)</span>
+  </div>
+  <p>ボタンを切り替えると、上段のビット構成バーの幅そのものが縮み、下段の<b>「同じテンソルを転送するのにかかる概念的な転送時間」</b>バーも比例して縮みます。BF16 は FP32 と<b>指数部の幅が同じ</b>(レンジを保つ)まま仮数部だけ削っているのが、バーの色分けから見て取れます。FP8・FP4 は指数部自体も削られ、表現できる範囲がさらに狭まります。</p>
+  <p style="font-size:14px;color:var(--sub)">補足: 下段の転送時間は「ビット幅に比例してデータ量が減る」という関係を示す概念値で、実機の絶対的な転送時間ではありません。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>どこを落としてよいか ― PSUM は FP32 のまま</h2>
+  <p class="lead">精度を落とせば数値誤差が生まれます。すべてを低精度にすると誤差が蓄積して壊れる場所があります。ここが低精度化の一番の落とし穴です。</p>
+  <p>第 1 回で見たとおり、Tensor Engine は行列積の部分和を <b>PSUM</b> に蓄積します。行列積は「積んで、足す」を何度も繰り返す演算なので、蓄積中に精度が粗いと<b>誤差がどんどん積み重なって</b>いきます。</p>
+  <div class="warn">
+    <b>鉄則: アキュムレータは常に FP32。</b>入力(重み・活性)は BF16 や FP8 に下げてよい。しかし Tensor Engine が<b>内部で積算していく先(アキュムレータ)は FP32 のまま</b>に保つ ― これが低精度化の大原則です。<b>入力・転送は軽くするが、蓄積だけは精度を落とさない</b>。だから低精度化は「全部を軽くする」のではなく「軽くしてよい場所とダメな場所を切り分ける」作業になります。
+  </div>
+  <div class="math">
+    <span class="c"># 低精度 matmul の典型的なデータの流れ</span><br>
+    入力 A, B (<span class="b">BF16 / FP8</span>) &nbsp;&mdash;Tensor Engine&rarr;&nbsp; 部分和の蓄積 (<span class="y">常に FP32</span>, PSUM) &nbsp;&mdash;退避&rarr;&nbsp; 出力 (必要な精度へ)
+  </div>
+  <p>この「入力は軽く、蓄積は重く」という配分は、演算強度の低い処理(要素ごとの正規化やソフトマックスの指数計算)にも当てはまります。ソフトマックスの指数計算のような精度に敏感な処理は、モデリング上の理由で高精度(FP32)のまま残すことが多く、<b>どこまで精度を落とせるかは、ハードウェアの容量ではなくモデリングの判断</b>で決まります。</p>
+  <div class="key">
+    <b>実例 ― PV matmul 前の value 転置を BF16 化。</b>第 3 回で扱った Self-Attention の最適化では、<code>softmax(QKᵀ)·V</code> を計算する直前に <b>V (value 行列) を転置</b>する処理があります。この転置の<b>入力を BF16 にダウンキャストしてから transpose を実行する</b>と、Tensor Engine の転置そのものが大幅に速くなります(ワークショップの実測(概算)で速度向上)。転置後の行列積の結果は、変わらず <b>PSUM 上で FP32 として蓄積</b>されるので、精度はここでは守られています。<b>「どこを軽くしてよいかを見極めて、そこだけ落とす」</b>という本章の主題がそのまま実践されている例です。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>量子化の数式 ― スケールで折りたたむ</h2>
+  <p class="lead">低精度化のうち、値のレンジをスケール 1 つで折りたたむ操作を「量子化」と呼びます。式で仕組みを見ます。</p>
+  <p>連続的な値 <code>x</code> を、より少ないビット数で表せる整数(または低ビット浮動小数点)<code>x_q</code> に変換し、後で元のスケールに戻す ― これが量子化の基本です。</p>
+  <div class="tex">
+    <p class="cap">量子化と復元(スケール s は「物差しの目盛り」)</p>
+    $ x_q = \mathrm{round}(x / s) $<br>
+    $ \hat{x} = x_q \cdot s $
+  </div>
+  <p>ポイントは、スケール <code>s</code> を<b>テンソル全体で 1 つ持つか(per-tensor)、小さなグループごとに 1 つ持つか(per-group / microscaling)</b>で精度が変わることです。</p>
+  <div class="tex">
+    <p class="cap">per-tensor スケール ― テンソル全体で 1 つの s</p>
+    $ s_{tensor} = \dfrac{\max(|x|)}{Q_{max}} \quad (\text{全要素で共有}) $
+  </div>
+  <div class="tex">
+    <p class="cap">per-group (microscaling) スケール ― グループ g ごとに異なる s_g</p>
+    $ s_g = \dfrac{\max(|x_i|,\ i \in g)}{Q_{max}} \quad (\text{グループごとに独立}) $
+  </div>
+  <p>per-tensor では、テンソルの中にたった 1 つでも大きな外れ値(outlier)があると、そのスケール <code>s</code> が全体に引きずられて大きくなり、<b>外れ値以外の大多数の値が粗く量子化されてしまいます</b>。per-group(microscaling)では、外れ値を含むグループだけがそのぶん粗くなり、<b>他のグループは自分のレンジに合った細かいスケールを保てます</b>。</p>
+  <div class="tex">
+    <p class="cap">データ量(転送量・占有量)の比較 ― 要素数 N のテンソル</p>
+    $ \mathrm{bytes} = N \times \dfrac{\text{ビット幅}}{8} $<br>
+    $ \mathrm{bytes_{BF16}} = \dfrac{1}{2}\,\mathrm{bytes_{FP32}} \qquad \mathrm{bytes_{FP8}} = \dfrac{1}{4}\,\mathrm{bytes_{FP32}} $
+  </div>
+  <p>microscaling ではスケール自体も(小さいながら)追加のデータとして持つ必要がありますが、グループサイズが十分大きければオーバーヘッドは小さく、<b>低ビット化によるデータ量削減の効果が上回ります</b>。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】per-tensor と microscaling の違い</h2>
+  <p class="lead">外れ値が 1 つあるだけで、per-tensor 量子化がどれだけ全体を粗くしてしまうか。microscaling(グループごとのスケール)がそれをどう救うかを見比べます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-mode="tensor" id="mTensor">per-tensor (スケール1つ)</button>
+    <button class="ghost" data-mode="group" id="mGroup">microscaling (グループごと)</button>
+    <div class="slider">外れ値の大きさ <input id="outlierRange" type="range" min="1" max="8" value="6" step="1"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>元の値</span>
+    <span><span class="dot" style="background:#f0a58e"></span>外れ値</span>
+    <span><span class="dot" style="background:#8fb8f0"></span>量子化後の値</span>
+    <span><span class="dot" style="background:#ffd98f"></span>誤差</span>
+  </div>
+  <p><b>per-tensor</b>を選ぶと、1 つの外れ値のせいでスケール <code>s</code> が大きくなり、<b>それ以外の大多数の値が同じ粗い目盛りに押し込められて</b>誤差(黄色のバー)が全体的に大きくなります。<b>microscaling</b>に切り替えると、値をいくつかの小グループに分け、<b>各グループが自分の最大値に合わせた目盛りを個別に持つ</b>ため、外れ値を含むグループだけが粗くなり、他のグループは元の値に近い量子化結果を保てます。スライダーで外れ値を大きくするほど、この差が広がるのを確認してください。</p>
+  <div class="key">
+    <b>microscaling の実装上の要点(概念)。</b>この考え方を実装に落とすと、テンソルを小さなグループ(ワークショップで言及される代表的な単位は 32 要素)に分け、各グループに 1 つのスケールを持たせます。さらにハードウェアが低ビット要素を効率よく扱うために、<b>P 次元(partition)を 128 から 512 まで拡張してパッキングする</b>ような実装パターンが使われます。ここでは「テンソル全体で 1 つのスケール」から「小さなグループごとに 1 つのスケール」へ発想を切り替えることが本質で、実装の詳細(命令やレイアウト変換)には本記事では踏み込みません。
+  </div>
+  <p style="font-size:14px;color:var(--sub)">補足: MXFP8 / MXFP4 のような microscaling 形式は新しい世代のハードウェアで対応が進んでいる機能です。本記事では原理面(なぜグループごとのスケールが精度を保ちやすいか)を扱い、世代ごとの対応範囲や性能の絶対値には立ち入りません。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ</h2>
+  <p class="lead">低精度化を一枚に整理します。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>動機</td><td>1 要素のビット幅を減らすと、データ移動(DMA)と演算の両方が軽くなる。メモリ律速な処理ほど効く</td></tr>
+    <tr><td>精度の階段</td><td>FP32(4B)→BF16(2B)→FP8(1B)→FP4(0.5B)。BF16 は指数部を FP32 と同じに保ち、レンジを保ったまま仮数部だけ削る設計</td></tr>
+    <tr><td>鉄則</td><td>アキュムレータ(PSUM)は常に FP32 で蓄積。入力・転送だけを低精度にし、誤差の蓄積を防ぐ</td></tr>
+    <tr><td>実例</td><td>PV matmul 前の value 転置を BF16 化すると transpose 自体が高速化。蓄積結果は変わらず FP32</td></tr>
+    <tr><td>量子化の式</td><td>x_q = round(x/s)、復元 x̂ = x_q·s。s は「物差しの目盛り」</td></tr>
+    <tr><td>microscaling</td><td>テンソル全体で 1 つのスケール(per-tensor)ではなく、小さなグループごとにスケールを持つ(per-group)。外れ値の影響をグループ内に閉じ込め、低ビットでも精度を保ちやすい</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>低精度化は<b>「データ量そのものを減らす」</b>という、第 2 回のカーネル融合(往復の回数を減らす)とは別の軸の打ち手です。ビット幅を落とすほど DMA 転送量と演算コストは軽くなりますが、精度も落ちる。だから<b>アキュムレータは FP32 に固定し、入力・転送だけを軽くする</b>という切り分けが要る。さらに<b>microscaling</b>のように、スケールをテンソル全体ではなく小さなグループごとに持たせる工夫で、低ビットでも実用的な精度を保てます。<br>
+    ここまで第 1〜3 回で単一チップ内(HBM/SBUF/PSUM、Roofline、カーネル融合、精度)の最適化を積み上げてきました。次回はこの考え方を<b>複数チップ間の通信</b>へと一段外側に広げます。
+  </div>
+  <div class="fn">
+    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および Self-Attention 最適化チュートリアル・Advanced NKI APIs (microscaling 付録) の実測・実装解説に基づく。速度向上・データ量比率等はワークショップの実測(概算)または一般的な数値表現の仕様に基づく概算です。<br>
+    注意: 本ページの図と数値は、低精度化と量子化の考え方を直感的に伝えるための<b>模式的な可視化</b>です。実際のビット配分・スケール粒度・達成される速度向上は世代(TRN2/TRN3)・データ型・カーネル実装・モデリング上の許容誤差に依存します。MXFP8/MXFP4 のような microscaling 形式は新しい世代のハードウェアで対応が進んでいる機能であり、本記事では対応世代や性能の断定的な数値には立ち入りません。ワークショップが座学で扱う全トピックと今後の章立ては <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。
+  </div>
+</section>
+
+</main>
+<script>
+function rr(ct,x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+  ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+
+// ============ デモ1: FP32/BF16/FP8/FP4 のビット構成とデータ量 ============
+(function(){
+  const cv=document.getElementById('cv1'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const FMT={
+    fp32:{name:'FP32', bits:32, sign:1, exp:8,  man:23, rel:1},
+    bf16:{name:'BF16', bits:16, sign:1, exp:8,  man:7,  rel:0.5},
+    fp8: {name:'FP8 (E4M3)', bits:8,  sign:1, exp:4,  man:3,  rel:0.25},
+    fp4: {name:'FP4', bits:4,  sign:1, exp:2,  man:1,  rel:0.125}
+  };
+  let cur='fp32';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const f=FMT[cur];
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='left';
+    ct.fillText(f.name+' のビット構成 (32 bit 幅を基準に描画)', 40, 40);
+
+    // ---- 上段: ビット構成バー (32bit幅ぶんのキャンバスに対し、実際のbit数だけ塗る) ----
+    const barX=40, barY=70, barW=W-80, barH=46;
+    const maxBits=32;
+    const unit=barW/maxBits;
+    // 背景(未使用ぶん)
+    ct.fillStyle='#123322';rr(ct,barX,barY,barW,barH,8);ct.fill();
+    // sign
+    let x=barX;
+    ct.fillStyle='#f0a58e';ct.fillRect(x,barY,f.sign*unit,barH);
+    x+=f.sign*unit;
+    // exponent
+    ct.fillStyle='#8fb8f0';ct.fillRect(x,barY,f.exp*unit,barH);
+    x+=f.exp*unit;
+    // mantissa
+    ct.fillStyle='#8fd6b4';ct.fillRect(x,barY,f.man*unit,barH);
+    // frame
+    ct.strokeStyle='#2c5c44';ct.lineWidth=2;rr(ct,barX,barY,f.bits*unit,barH,8);ct.stroke();
+    // labels
+    ct.font='12px monospace';ct.fillStyle='#12211a';ct.textAlign='center';
+    if(f.sign*unit>14){ct.fillText('S',barX+f.sign*unit/2,barY+barH/2+4);}
+    if(f.exp*unit>18){ct.fillText('exp '+f.exp,barX+f.sign*unit+f.exp*unit/2,barY+barH/2+4);}
+    if(f.man*unit>18){ct.fillText('mantissa '+f.man,barX+f.sign*unit+f.exp*unit+f.man*unit/2,barY+barH/2+4);}
+    ct.fillStyle='#8fd6b4';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('合計 '+f.bits+' bit ('+(f.bits/8)+' byte/要素)', barX, barY+barH+22);
+
+    // ---- 中段: 内訳の凡例的な数値 ----
+    ct.font='12.5px sans-serif';ct.fillStyle='#8fd6b4';
+    ct.fillText('符号 '+f.sign+' bit ・ 指数部 '+f.exp+' bit ・ 仮数部 '+f.man+' bit', barX, barY+barH+42);
+
+    // ---- 下段: データ量(転送時間の概念バー) ----
+    const y2=210;
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('同じテンソルを転送する概念的な時間 (FP32=基準)', barX, y2);
+    const order=['fp32','bf16','fp8','fp4'];
+    const rowH=42;
+    order.forEach((k,i)=>{
+      const g=FMT[k];
+      const y=y2+22+i*rowH;
+      const w=(barW-90)*g.rel;
+      ct.fillStyle= k===cur ? '#43b581' : '#2c5c44';
+      rr(ct,barX+90,y,Math.max(6,w),22,6);ct.fill();
+      ct.fillStyle='#d7f5e6';ct.font='13px monospace';ct.textAlign='right';
+      ct.fillText(g.name,barX+82,y+16);
+      ct.textAlign='left';
+      ct.fillStyle='#eaf7f0';ct.font='12px sans-serif';
+      ct.fillText((g.rel*100).toFixed(1)+'%', barX+95+Math.max(6,w), y+16);
+    });
+    ct.fillStyle='#8fd6b4';ct.font='11px sans-serif';ct.textAlign='left';
+    ct.fillText('(データ量に比例する概念値。実測の絶対転送時間ではない)', barX, y2+22+order.length*rowH+8);
+  }
+  function setFmt(k,btn){cur=k;document.querySelectorAll('[data-fmt]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('fFp32').onclick=function(){setFmt('fp32',this);};
+  document.getElementById('fBf16').onclick=function(){setFmt('bf16',this);};
+  document.getElementById('fFp8').onclick=function(){setFmt('fp8',this);};
+  document.getElementById('fFp4').onclick=function(){setFmt('fp4',this);};
+  draw();
+})();
+
+// ============ デモ2: per-tensor 量子化 vs microscaling (グループごとのスケール) ============
+(function(){
+  const cv=document.getElementById('cv2'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const QMAX=7; // 3bit符号なし相当の概念的な量子化レベル数(簡略化)
+  const base=[1.0,1.2,0.9,1.1, 1.0,0.8,1.3,0.9, 1.1,1.0,0.95,1.05, 1.0,0.9,1.1,1.0]; // 16要素・4グループ
+  const GROUP=4;
+  let mode='tensor', outlier=6;
+  function values(){
+    const v=base.slice();
+    v[0]=outlier; // 先頭要素を外れ値にする
+    return v;
+  }
+  function quantizePerTensor(v){
+    const s=Math.max(...v.map(Math.abs))/QMAX;
+    return v.map(x=>({q:Math.round(x/s)*s, s}));
+  }
+  function quantizePerGroup(v){
+    const out=[];
+    for(let g=0;g<v.length/GROUP;g++){
+      const slice=v.slice(g*GROUP,(g+1)*GROUP);
+      const s=Math.max(...slice.map(Math.abs))/QMAX;
+      slice.forEach(x=>out.push({q:Math.round(x/s)*s, s}));
+    }
+    return out;
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const v=values();
+    const res = mode==='tensor' ? quantizePerTensor(v) : quantizePerGroup(v);
+    const n=v.length;
+    const padL=50, padR=30, top=50;
+    const plotW=W-padL-padR;
+    const colW=plotW/n;
+    const maxV=Math.max(outlier,2)*1.15;
+    const baseY=top+220;
+    const scaleY=180/maxV;
+
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='left';
+    ct.fillText(mode==='tensor' ? 'per-tensor: テンソル全体で 1 つのスケール' : 'microscaling: 4要素グループごとに別スケール', padL, 30);
+
+    // グループ境界線 (microscaling時に強調)
+    if(mode==='group'){
+      for(let g=1;g<n/GROUP;g++){
+        const x=padL+g*GROUP*colW;
+        ct.strokeStyle='rgba(200,220,210,0.25)';ct.setLineDash([4,4]);ct.lineWidth=1;
+        ct.beginPath();ct.moveTo(x,top);ct.lineTo(x,baseY+10);ct.stroke();ct.setLineDash([]);
+      }
+    }
+
+    // 各要素: 元の値(緑/オレンジ)・量子化後(青)・誤差(黄)
+    let sumErr=0;
+    for(let i=0;i<n;i++){
+      const x=padL+i*colW+colW*0.12;
+      const bw=colW*0.34;
+      const isOutlier = i===0;
+      const h1=v[i]*scaleY;
+      ct.fillStyle= isOutlier ? '#f0a58e' : '#8fd6b4';
+      ct.fillRect(x, baseY-h1, bw, h1);
+      const h2=res[i].q*scaleY;
+      const x2=x+bw+4;
+      ct.fillStyle='#8fb8f0';
+      ct.fillRect(x2, baseY-h2, bw, h2);
+      const err=Math.abs(v[i]-res[i].q);
+      sumErr+=err;
+      const he=err*scaleY;
+      ct.fillStyle='#ffd98f';
+      ct.fillRect(x2, baseY-Math.max(h2,he)-6-he, bw, he);
+    }
+    // 軸
+    ct.strokeStyle='rgba(215,245,230,0.3)';ct.lineWidth=1;
+    ct.beginPath();ct.moveTo(padL,top);ct.lineTo(padL,baseY);ct.lineTo(padL+plotW,baseY);ct.stroke();
+
+    // フッタ: 誤差合計とスケールの説明
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    const scales = mode==='tensor' ? [res[0].s] : [res[0].s,res[4].s,res[8].s,res[12].s];
+    const scaleTxt = mode==='tensor'
+      ? 'スケール s = '+scales[0].toFixed(3)+' (全16要素で共有)'
+      : 'スケール s = '+scales.map(x=>x.toFixed(2)).join(', ')+' (グループ毎)';
+    ct.fillText(scaleTxt, padL, baseY+34);
+    ct.fillStyle='#ffd98f';ct.font='bold 14px sans-serif';
+    ct.fillText('誤差合計(概念値): '+sumErr.toFixed(2), padL, baseY+56);
+    ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
+    ct.fillText('外れ値(先頭の要素)の大きさ: '+outlier.toFixed(1), padL+320, baseY+56);
+  }
+  function setMode(m,btn){mode=m;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('mTensor').onclick=function(){setMode('tensor',this);};
+  document.getElementById('mGroup').onclick=function(){setMode('group',this);};
+  document.getElementById('outlierRange').oninput=function(){outlier=+this.value;draw();};
+  draw();
+})();
+</script>
+</body>
+</html>
