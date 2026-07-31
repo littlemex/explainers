@@ -98,7 +98,7 @@
     <a href="#s10">10. GPU との決定的な違い</a>
     <a href="#s11">11. まとめ</a>
   </div>
-  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2 (TRN2, NeuronCore v3)。数値は NKI Workshop の資料・実測に基づきます。GPU の内部構造には深入りしません (別記事で扱います)。</p>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2 (TRN2, NeuronCore v3)。スペック値は AWS 公式 Neuron ドキュメント (章末に出典) に基づき、帯域の達成値など一部は実測の概算です。GPU の内部構造には深入りしません (別記事で扱います)。</p>
 </section>
 
 <section id="s1">
@@ -109,7 +109,7 @@
     <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trainium2.html" target="_blank" rel="noopener">公式スペック</a>で <b>FP8 dense 約 1,299 TFLOPS (≈ 1.3 PFLOPS)</b>、<b>96 GiB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では約 667 TFLOPS (≈ 0.67 PFLOPS)</b>。1.3 PFLOPS と 0.67 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 か BF16 か) によるものです。<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/nki/arch/trainium2_arch.html" target="_blank" rel="noopener">NKI アーキテクチャガイド</a>では NeuronCore-v3 の Tensor Engine を <b>コアあたり FP8 158 / BF16 79 dense TFLOPS</b> としており、8 コアぶんにすると 158&times;8 ≈ 1,264、79&times;8 ≈ 632 とチップ公称値 (1,299 / 667) に<b>おおむね一致</b>します (端数はコアあたり値の丸めと集計条件の差)。要するに、値の大小は<b>どの精度で数えるか</b>で決まり、LNC の束ね方には依存しません。</span></li>
     <li><b>NeuronCore (物理コア)</b>: 1 デバイスの中に <b>8 個の物理コア</b>があります (TRN2/TRN3)。2 コアが 1 つの HBM スタックを共有します。</li>
     <li><b>LNC (Logical NeuronCore)</b>: 既定は <b>LNC2</b> で、<b>2 つの物理コアを 1 つの論理コアとして扱います</b>。だから <code>neuron-ls</code> は 8 でなく 4 コアと表示します。なぜ束ねるのかは 06 章で扱います。</li>
-    <li><b>Instance</b>: 複数デバイスをまとめたもの (例: 16 デバイス)。今回のワークショップは <b>trn2.3xlarge (単一デバイス)</b> を使います。</li>
+    <li><b>Instance</b>: 複数デバイスをまとめたもの (例: 16 デバイス)。本シリーズでは <b>trn2.3xlarge (単一デバイス)</b> を使います。</li>
   </ol>
   <p>言葉だけだと入れ子の関係が掴みにくいので、1 枚の図にします。クリックすると各階層がハイライトされます。</p>
   <div class="canvas-wrap">
@@ -138,22 +138,26 @@
     <tr><td><b>GP-SIMD Engine</b></td><td>カスタム演算・descriptor 生成など</td><td>8 個の SIMD プロセッサ。汎用の受け皿</td></tr>
   </table>
   <div class="key">
-    <b>Tensor Engine は 128&times;128 の systolic array。</b>行列積を、格子状に並んだ 128&times;128 個の積和演算器 (PE) にデータを流し込んで解きます。片方の行列を格子に<b>固定 (stationary) して保持</b>し、もう片方を<b>流し込む (moving) と、各 PE が積和を次々にリレー</b>していく ― この「データが格子を流れる」動きが systolic (心臓の拍動のような) と呼ばれる所以です。下の図でその流れを見ます。NKI からはこの行列積が <code>nki.isa.nc_matmul</code> という 1 命令として使えます (格子への載せ方・流し方の最適化は 06 章で扱います)。
+    <b>Tensor Engine は 128&times;128 の systolic array。</b>行列積を、格子状に並んだ 128&times;128 個の積和演算器 (PE) にデータを流し込んで解きます。片方の行列を格子に<b>固定 (stationary) して保持</b>し、もう片方を<b>流し込む (moving) と、各 PE が積和を次々にリレー</b>していく ― この「データが格子を流れる」動きが systolic (心臓の拍動のような) と呼ばれる所以です。下の図では、小さな行列積 <b>C = A &times; B</b> に実際の数値を入れて、答えの 1 マスが積和のリレーで組み上がる様子を追います。NKI からはこの行列積が <code>nki.isa.nc_matmul</code> という 1 命令として使えます (格子への載せ方・流し方の最適化は 06 章で扱います)。
   </div>
   <div class="canvas-wrap">
-    <canvas id="cv_sys" width="840" height="380"></canvas>
+    <canvas id="cv_sys" width="840" height="560"></canvas>
   </div>
   <div class="controls">
     <button id="sysPlay">流れを再生</button>
     <button id="sysReset" class="ghost">最初から</button>
   </div>
-  <div class="legend">
-    <span><span class="dot" style="background:#8fb8f0"></span>stationary (格子に固定)</span>
-    <span><span class="dot" style="background:#f0a58e"></span>moving (流れ込む入力)</span>
-    <span><span class="dot" style="background:#43b581"></span>PE (積和・稼働中)</span>
-    <span><span class="dot" style="background:var(--psum)"></span>PSUM (出力)</span>
+  <div class="controls">
+    <button class="ghost active" id="sysMode1">まず 1 マスだけ追う</button>
+    <button class="ghost" id="sysMode2">全体を並列で</button>
   </div>
-  <p style="font-size:14px;color:var(--sub)">実物は 128&times;128 の PE が並びますが、ここでは動きが見えるように一部 (6&times;6) を描いています。複数の PE が同時に光っている部分が「並列に積和が進んでいる」ことを表します。</p>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fb8f0"></span>A の値 (moving・流し込む)</span>
+    <span><span class="dot" style="background:#43b581"></span>B の値 (stationary・格子に固定)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>部分和 (積を足し込みながら下へ)</span>
+    <span><span class="dot" style="background:var(--psum)"></span>PSUM (答え C の出力先)</span>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">具体例として <b>C = A &times; B</b> (A は 2&times;3、B は 3&times;2、答え C は 2&times;2) を計算します。格子は<b>固定行列 B と同じ 3&times;2</b> で、各セルに B の値が住んでいます。実物は 128&times;128 の PE が並びますが、ここでは 1 つの答えがどう組み上がるかを追えるよう小さくしています。「まず 1 マスだけ追う」で c11 が 0→1→3→9 と育つ様子を、「全体を並列で」で 4 マスが同時に計算される様子を見てください。</p>
   <div class="key">
     <b>設計思想。</b>これらは<b>独立にスケジュールされ、並列に動きます</b>。Tensor Engine でタイル行列積をしている「その裏で」Vector Engine が別の reduction を回す ― という<b>エンジン間パイプライン</b>でチップを使い切るのが狙いです。だから「1 つのエンジンだけ速くする」のではなく「全エンジンを同時に働かせる」のが性能の鍵になります。
   </div>
@@ -301,7 +305,7 @@
     (2) <b>free 次元を大きく (連続転送を大きく)</b> ― partition あたり 4 KiB 以上 (DMA エンジン1基は8 partition 分を担当) を目安に、128 partition なら合計 512 KiB 以上でオーバーヘッドを償却。
   </div>
   <div class="warn">
-    <b>実測での効き方 (NKI Workshop の DMA ベンチ)。</b>同じ 256 MB のコピーでも、タイルの形で achieved 帯域が激変します。<br>
+    <b>実測での効き方 (DMA ベンチの一例)。</b>同じ 256 MB のコピーでも、タイルの形で achieved 帯域が激変します。<br>
     ・128&times;512 の小タイル &rarr; 約 224 GB/s (ピークの約 52%)<br>
     ・128&times;8192 の大タイル &rarr; 約 424 GB/s (約 97%)<br>
     ・128&times;16384 &rarr; 約 427 GB/s (約 98%、この構成の実質上限)<br>
@@ -419,7 +423,7 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
     {key:'device', hit:(x,y)=>x>=devBox.x&&x<=devBox.x+devBox.w&&y>=devBox.y&&y<=devBox.y+devBox.h,
       msg:'Device = 1 枚の Trainium2 チップ。96 GiB HBM (4 スタック) と 8 個の NeuronCore-v3 を持つ。FP8 dense で約 1.3 PFLOPS。'},
     {key:'instance', hit:(x,y)=>x>=instBox.x&&x<=instBox.x+instBox.w&&y>=instBox.y&&y<=instBox.y+instBox.h,
-      msg:'Instance = 複数の Device をまとめた実行単位。今回のワークショップは trn2.3xlarge (単一 Device) を使う。'}
+      msg:'Instance = 複数の Device をまとめた実行単位。本シリーズでは trn2.3xlarge (単一 Device) を使う。'}
   ];
 
   function draw(){
@@ -432,7 +436,7 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
     ct.fillStyle='#8fb8f0';ct.font='13px sans-serif';ct.textAlign='left';
     ct.fillText('Instance (複数 Device。例: 16 Device)',instBox.x+14,instBox.y+22);
     ct.font='12px sans-serif';ct.fillStyle='#9fb7d4';
-    ct.fillText('本ワークショップは trn2.3xlarge = 単一 Device を使用',instBox.x+14,instBox.y+42);
+    ct.fillText('本シリーズは trn2.3xlarge = 単一 Device を使用',instBox.x+14,instBox.y+42);
     // 小さい Device アイコンを並べて「複数」を示す
     for(let i=0;i<5;i++){
       const dx=instBox.x+14+i*70, dy=instBox.y+58, dw=54, dh=34;
@@ -504,78 +508,138 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
   draw();
 })();
 
-// ============ デモf: Tensor Engine の systolic array データフロー ============
+// ============ デモf: Tensor Engine の systolic array 行列積 (実数入り) ============
 (function(){
   const cv=document.getElementById('cv_sys'); if(!cv) return;
   const ct=cv.getContext('2d');
   const W=cv.width,H=cv.height;
-  let t=0, playing=false;
-  const N=6; // 128x128 のうち一部を可視化 (実物はもっと大きい)
-  const gx=W/2-170, gy=90, cell=48;
+  // 具体例: C = A(2x3) x B(3x2)
+  const A=[[1,2,3],[4,5,6]];
+  const B=[[1,2],[1,1],[2,1]];
+  const C=[[9,7],[21,19]];          // = A x B
+  const M=2, K=3, Ncol=2;            // A:MxK, B:KxNcol, C:MxNcol
+  // 格子 = B と同形 (K行 x Ncol列)。各セル(k,j)に B[k][j] が固定。
+  const cell=64, gx=430, gy=150;     // 格子左上
+  let mode=1;                        // 1: c11だけ追う / 2: 全体並列
+  let step=0, playing=false, timer=null;
+  // ステップ進行: 各出力要素は K 回の積和。mode1 は c[0][0] のみ、k=0,1,2 と進み step3 で完成。
+  const MAXSTEP=(mode===1)?4:6;
 
   function rr(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
     ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+  function maxStep(){return (mode===1)?4:(K+Ncol+1);}
+  // c[i][j] の k 番目までの部分和
+  function partial(i,j,upto){let s=0;for(let k=0;k<Math.min(upto,K);k++)s+=A[i][k]*B[k][j];return s;}
 
   function draw(){
     ct.clearRect(0,0,W,H);
-    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
-    ct.fillText('Tensor Engine の systolic array (128×128 のうち 6×6 を可視化)',20,26);
+    ct.textAlign='left';
+    // ---- 上: C = A x B の式パネル ----
+    ct.fillStyle='#d7f5e6';ct.font='bold 15px sans-serif';
+    ct.fillText('C = A × B  (A: 2×3,  B: 3×2,  答え C: 2×2)',24,28);
+    ct.font='12px sans-serif';ct.fillStyle='#8fd6b4';
+    ct.fillText(mode===1?'モード: まず答えの1マス c₁₁ だけを追う':'モード: 4マスが同時に計算される様子',24,48);
 
-    // stationary 行列 (格子の左上に固定ロード済み、と示す薄い縁取り)
-    ct.strokeStyle='rgba(143,184,240,0.5)';ct.lineWidth=1.5;
-    rr(gx-4,gy-4,N*cell+8,N*cell+8,10);ct.stroke();
-
-    // PE 格子
-    for(let r=0;r<N;r++){
-      for(let c=0;c<N;c++){
-        const cx=gx+c*cell, cy=gy+r*cell;
-        // このセルに波 (t) が到達しているか: 波面は反対角線 r+c<=t
-        const wave=r+c;
-        const active = t>wave && t<wave+1.6;
-        const passed = t>=wave+1.6;
-        ct.fillStyle = active ? '#43b581' : (passed ? '#1c3d2c' : '#12321f');
-        ct.strokeStyle = active ? '#8fd6b4' : '#2f5c44';
-        ct.lineWidth = active ? 2.5 : 1.2;
-        rr(cx+3,cy+3,cell-6,cell-6,6);ct.fill();ct.stroke();
-        if(active){ct.fillStyle='#0d2b20';ct.font='10px sans-serif';ct.textAlign='center';ct.fillText('+=',cx+cell/2,cy+cell/2+4);}
+    // ---- 左: A を階段状(スキュー)に待機。行 i は i マス遅れて入る ----
+    const ax=40, ay=gy, acell=44;
+    ct.fillStyle='#8fb8f0';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('A (左から流し込む)',ax,ay-14);
+    for(let i=0;i<M;i++){
+      for(let k=0;k<K;k++){
+        // Aは行を右詰めに並べ、右端がこれから格子へ入る順(k=K-1が先頭)。スキューで行ごとに1段ずらす
+        const cx=ax+k*acell, cy=ay+i*acell + i*8;
+        const dim = (mode===1 && i>0);   // mode1は1行目(i=0)だけ濃く
+        ct.fillStyle= dim?'#16233a':'#1c2c3f';
+        ct.strokeStyle= dim?'#2f4a6a':'#3d7dca'; ct.lineWidth=1.5;
+        rr(cx,cy,acell-6,acell-6,6);ct.fill();ct.stroke();
+        ct.fillStyle= dim?'#5b7089':'#cfe0f5';
+        ct.font='15px sans-serif';ct.textAlign='center';ct.fillText(A[i][k],cx+(acell-6)/2,cy+(acell-6)/2+5);
       }
+      ct.fillStyle='#8fb8f0';ct.font='11px sans-serif';ct.textAlign='left';
+      ct.fillText('A'+(i+1)+'行 →',ax-2,ay+i*acell+i*8+acell+4);
     }
-    // 左から入る moving データの粒 (行ごとに1粒、進むほど右へ)
-    for(let r=0;r<N;r++){
-      const localT=t-r*0.15;
-      if(localT>0 && localT<N){
-        const px=gx+Math.min(localT,N)*cell - cell/2;
-        const py=gy+r*cell+cell/2;
-        if(px>gx-10 && px<gx+N*cell+10){
-          ct.fillStyle='#f0a58e';ct.beginPath();ct.arc(gx-14,py,6,0,Math.PI*2);ct.fill();
+
+    // ---- 中央: 格子 (B固定, K行 x Ncol列) ----
+    ct.fillStyle='#43b581';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('積和演算器の格子 (各セルに B の値が固定)',gx,gy-14);
+    for(let k=0;k<K;k++){
+      for(let j=0;j<Ncol;j++){
+        const cx=gx+j*cell, cy=gy+k*cell;
+        const focus = (mode===1 && j>0);   // mode1 は j=0 列(c11に効く列)だけ濃く
+        // このセルが今アクティブか: 部分和がこの段(k)を通過中
+        let act=false;
+        if(mode===1){ act = (j===0 && step>=1 && step-1===k); }
+        else { act = (step-1-j>=0 && step-1-j===k); }
+        ct.fillStyle= act?'#43b581':(focus?'#122a20':'#123821');
+        ct.strokeStyle= act?'#8fd6b4':'#2f5c44'; ct.lineWidth= act?2.5:1.2;
+        rr(cx+4,cy+4,cell-8,cell-8,7);ct.fill();ct.stroke();
+        // セル内: B値(緑・固定)
+        ct.fillStyle= act?'#0d2b20':'#8fd6b4';ct.font='bold 16px sans-serif';ct.textAlign='center';
+        ct.fillText('B='+B[k][j],cx+cell/2,cy+22);
+        // アクティブ時: a×b と 部分和の更新を表示
+        if(act){
+          const i=(mode===1)?0:(step-1-j-k); // mode2の行i
+          if(i>=0 && i<M){
+            const prod=A[i][k]*B[k][j];
+            const before=partial(i,j,k), after=partial(i,j,k+1);
+            ct.fillStyle='#0d2b20';ct.font='11px sans-serif';
+            ct.fillText('A='+A[i][k]+' ×'+B[k][j]+'='+prod,cx+cell/2,cy+38);
+            ct.fillText(before+'+'+prod+'='+after,cx+cell/2,cy+52);
+          }
         }
       }
     }
-    ct.fillStyle='#f0a58e';ct.font='11px sans-serif';ct.textAlign='center';
-    for(let r=0;r<N;r++){ct.fillText('→',gx-14,gy+r*cell+cell/2+4);}
-    ct.save();ct.translate(gx+N*cell/2,gy-16);ct.fillStyle='#f0a58e';ct.font='11px sans-serif';ct.textAlign='center';
-    ct.fillText('↓ moving (流れ込む入力)',0,0);ct.restore();
-    ct.fillStyle='#8fb8f0';ct.font='11px sans-serif';ct.textAlign='left';
-    ct.fillText('stationary (格子に固定ロード)',gx,gy-30);
+    // 部分和がリレーで下へ流れる矢印 (j=0列)
+    ct.strokeStyle='rgba(240,165,142,0.7)';ct.lineWidth=2;
+    for(let k=0;k<K-1;k++){ const cx=gx+cell/2; const y1=gy+k*cell+cell-4, y2=gy+(k+1)*cell+4;
+      ct.beginPath();ct.moveTo(cx,y1);ct.lineTo(cx,y2);ct.stroke(); }
 
-    // PSUM への出力 (下端から結果が抜けていく)
-    const psumY=gy+N*cell+30, psumH=36;
-    ct.fillStyle= t>=N+1 ? '#3a2050' : '#2c1f3f';
-    ct.strokeStyle='#a06cd5';ct.lineWidth=2;
-    rr(gx,psumY,N*cell,psumH,8);ct.fill();ct.stroke();
-    ct.fillStyle='#eaf7f0';ct.font='12px sans-serif';ct.textAlign='center';
-    ct.fillText('PSUM (部分和の出力先)',gx+N*cell/2,psumY+psumH/2+4);
-    if(t>=N){
-      ct.strokeStyle='rgba(160,108,213,0.6)';ct.lineWidth=1.5;
-      ct.beginPath();ct.moveTo(gx+N*cell/2,gy+N*cell);ct.lineTo(gx+N*cell/2,psumY);ct.stroke();
+    // ---- 下: C の出力スロット(PSUM) ----
+    const psumY=gy+K*cell+34, ps=cell;
+    ct.fillStyle='#a06cd5';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('PSUM ― 答え C の出力先 (2×2)',gx,psumY-12);
+    const psW=90, psH=42, psGapX=14, psGapY=12;   // PSUMマスは横長にして数値が収まるように
+    for(let i=0;i<M;i++){
+      for(let j=0;j<Ncol;j++){
+        const cx=gx+j*(psW+psGapX), cy=psumY+i*(psH+psGapY);
+        // このマスが完成しているか
+        let done=false, cur=null;
+        if(mode===1){ done=(i===0&&j===0&&step>=4); if(i===0&&j===0){cur = step>=4?C[0][0]:(step>=1?partial(0,0,step-1):null);} }
+        else { done = (step >= (i+j)+K+1); if(step>=(i+j)+1){ const kk=step-(i+j)-1; cur = kk>=K?C[i][j]:partial(i,j,kk);} }
+        ct.fillStyle= done?'#3a2050':'#241830'; ct.strokeStyle='#a06cd5';ct.lineWidth=done?2.5:1.2;
+        rr(cx,cy,psW,psH,7);ct.fill();ct.stroke();
+        ct.fillStyle='#eaf7f0';ct.font='bold 15px sans-serif';ct.textAlign='center';
+        const label='c'+(i+1)+(j+1);
+        ct.fillText(label+(cur!=null?('='+cur):''),cx+psW/2,cy+psH/2+5);
+      }
     }
+
+    // ---- メッセージ ----
     ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='center';
-    const msg = t<=0 ? '再生を押すと、データが格子を波状に流れます' : (t<N+1.6 ? '各 PE で積和がリレーされていく (光っているセルが稼働中)' : '完了: 部分和が PSUM に出力された');
-    ct.fillText(msg, W/2, H-14);
+    let msg;
+    if(mode===1){
+      if(step===0) msg='「再生」で、c₁₁ = A の1行目 × B の1列目 が組み上がる様子を追います';
+      else if(step===1) msg='① 部分和 0 に  A=1 × B=1 = 1  を足す → 1';
+      else if(step===2) msg='② 部分和 1 に  A=2 × B=1 = 2  を足す → 3';
+      else if(step===3) msg='③ 部分和 3 に  A=3 × B=2 = 6  を足す → 9';
+      else msg='完成: c₁₁ = 1·1 + 2·1 + 3·2 = 9  (A の1行目と B の1列目の内積)';
+    } else {
+      msg = step===0 ? '「再生」で、4 マスが少しずつずれて同時に計算される様子を見ます'
+        : (step>=maxStep()? '完成: C = [[9, 7],[21, 19]]  ― 4 マスが並行して積み上がった'
+        : '複数のマスが同時に部分和を更新中 (systolic = データが格子を流れながら並列に積和)');
+    }
+    ct.fillText(msg, W/2, H-16);
   }
-  function loop(){if(!playing)return;t+=0.045;if(t>=N+2.2){t=N+2.2;playing=false;document.getElementById('sysPlay').textContent='流れを再生';}draw();if(playing)requestAnimationFrame(loop);}
-  document.getElementById('sysPlay').onclick=function(){if(t>=N+2.2)t=0;playing=!playing;this.textContent=playing?'一時停止':'流れを再生';if(playing)loop();};
-  document.getElementById('sysReset').onclick=function(){playing=false;t=0;document.getElementById('sysPlay').textContent='流れを再生';draw();};
+
+  function loop(){ if(!playing) return;
+    timer=setTimeout(()=>{ if(!playing)return; step++; if(step>=maxStep()){step=maxStep();playing=false;document.getElementById('sysPlay').textContent='流れを再生';} draw(); if(playing)loop(); }, 900); }
+  document.getElementById('sysPlay').onclick=function(){ if(step>=maxStep())step=0; playing=!playing; this.textContent=playing?'一時停止':'流れを再生'; if(playing)loop(); };
+  document.getElementById('sysReset').onclick=function(){ playing=false; clearTimeout(timer); step=0; document.getElementById('sysPlay').textContent='流れを再生'; draw(); };
+  function setMode(m,btn){ mode=m; playing=false; clearTimeout(timer); step=0;
+    document.querySelectorAll('#sysMode1,#sysMode2').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+    document.getElementById('sysPlay').textContent='流れを再生'; draw(); }
+  document.getElementById('sysMode1').onclick=function(){setMode(1,this);};
+  document.getElementById('sysMode2').onclick=function(){setMode(2,this);};
   draw();
 })();
 
