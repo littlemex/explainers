@@ -95,7 +95,7 @@
     <a href="#s3">3. reduction は free 軸に沿う ― ハード制約から逆算する</a>
     <a href="#s4">4. transpose のコストと、それを消す/隠す工夫</a>
     <a href="#s5">5. 【体験】access pattern ― 表現力のための API</a>
-    <a href="#s6">6. 並列化への拡張 ― LNC と TP × SP = world</a>
+    <a href="#s6">6. 並列化への拡張 ― LNC と world = DP × PP × TP × CP</a>
     <a href="#s7">7. まとめ</a>
   </div>
   <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値はワークショップの講義・実測に基づく概算です。<a href="./nki-workshop-01-hardware-hierarchy.html">第 1 回「ハードウェア階層」</a>(SBUF の 2D 構造・partition 128)と<a href="./05-tiling.html">第 5 回「タイリング」</a>を先に読むと理解が早いです。</p>
@@ -120,7 +120,7 @@
 <section id="s2">
   <h2><span class="num">2</span>【体験】どの軸を partition に置くか ― transpose の要不要</h2>
   <p class="lead">この記事の「絵で覚えて帰ってほしい1枚」です。同じ Q・K 行列を、異なる軸で SBUF に置いた場合の違いを見比べます。</p>
-  <p>Self-Attention の QKᵀ を例にします。Q・K はどちらも <b>head dimension × sequence length</b> の形でデバイスメモリ (HBM) に置かれています。NKI ISA で SBUF にロードすると、<b>デバイスメモリ上の先頭次元が、そのまま SBUF の partition 次元に自動的にマップされる</b>という仕様があります。</p>
+  <p>Self-Attention の QKᵀ を例にします。Q・K はどちらも <b>head dimension × sequence length</b> の形でデバイスメモリ (HBM) に置かれています。NKI ISA で SBUF にロードすると、<b>デバイスメモリ上の先頭次元が、そのまま SBUF の partition 次元に自動的にマップされる</b>という仕様があります。厳密には <b>NKI タイルの最左次元 (もしくは par_dim で明示指定した軸) が partition にマップ</b>される仕様で、それ以外の軸を partition に持ってきたい場合は strided DMA や transpose のコストを払って並べ替える必要があります。</p>
   <div class="canvas-wrap">
     <canvas id="cv1" width="840" height="440"></canvas>
   </div>
@@ -148,13 +148,13 @@
     reduction (max, sum, ...) は <span class="y">free 軸</span> に沿ってのみ実行可能<br>
     <span class="b">partition 軸</span> をまたぐ reduction は直接できない<span class="c"> ← ここが制約</span>
   </div>
-  <p>これが第 2 節のレイアウト選択にもう一つの判断基準を与えます。<b>「このテンソルのどの軸を後で reduction したいか」を先に確認し、その軸を free に置く</b>のです。Self-Attention の softmax がこの制約と偶然きれいに噛み合う例として知られています。softmax の row-wise な max・sum は sequence length 方向の reduction ですが、Q・K を head_dim-partition / seq_len-free で置いたレイアウトでは、<b>sequence length がちょうど free 軸に来ている</b>ため、reduction がそのまま素直に書けます。</p>
+  <p>これが第 2 節のレイアウト選択にもう一つの判断基準を与えます。<b>「このテンソルのどの軸を後で reduction したいか」を先に確認し、その軸を free に置く</b>のです。Self-Attention の softmax はこの制約を踏まえて<b>あえてそうレイアウトを選んでいる</b>例として知られています。matmul 出力である S (= QKᵀ) は <b>partition = クエリ側 seq、free = キー側 seq</b> という形で PSUM/SBUF に載ります。softmax の row-wise な max・sum はキー側 seq (= s の各行) の reduction であり、それがちょうど free 軸に一致するようにレイアウトが選ばれているため、reduction がそのまま素直に書けます。</p>
   <div class="key">
     <b>レイアウト設計の二段判定。</b>(1) 後続の matmul が<b>どの軸を縮約するか</b> → その軸を partition に。(2) 後続の reduction が<b>どの軸を畳みたいか</b> → その軸を free に。<b>2 つの要求が同じテンソルの中で競合することもある</b> (縮約したい軸と reduction したい軸が両方 partition を欲しがる、等)。そのときは「どちらのコストが大きいか」を見て、片方に transpose という妥協を払う判断になります。
   </div>
 
-  <h3>partition 軸をまたぐ集約が必要なら ― reduction を matmul に変換する</h3>
-  <p>ここまでの制約は「畳みたい軸を free に置けば reduction は素直に書ける」という話でした。ではどんな場面で困るのか。例えば layernorm の分散計算 (<b>E[X²] − E[X]²</b>) のように、<b>partition 軸をまたいで集約したい</b>場面 (128 本のレーンに分散した値を1つにまとめたい場合) があります。しかし reduction 命令は free 軸限定でした。だから reduction 命令では直接できないこの集約を、実務では別の手段に変換します。<b>全要素が 1 の行列 (all-ones 行列) を stationary 側に置いた nc_matmul</b> を使う、というものです。Tensor Engine の matmul は partition 軸に沿って内積を取る演算なので、stationary 側を全部 1 にしておけば、その内積はそのまま「partition 方向の足し算」になります。<b>reduction をそのまま matmul に変換してしまう</b>、という定石です。</p>
+  <h3>partition 軸をまたぐ集約が必要なら ― 3つの選択肢に変換する</h3>
+  <p>ここまでの制約は「畳みたい軸を free に置けば reduction は素直に書ける」という話でした。ではどんな場面で困るのか。例えば layernorm の分散計算 (<b>E[X²] − E[X]²</b>) のように、<b>partition 軸をまたいで集約したい</b>場面 (128 本のレーンに分散した値を1つにまとめたい場合) があります。Vector/Scalar Engine の reduce 命令はあくまで free 軸に沿う設計なので、この用途には直接使えません。partition 方向の集約は、次の <b>3つの選択肢</b>のいずれかに変換して実現します。①<b>全要素が 1 の行列 (all-ones 行列) を stationary 側に置いた nc_matmul</b>。②<b><code>nisa.tensor_partition_reduce</code></b> (GpSimd Engine 上で partition 方向の集約を直接行う命令)。③<b>transpose</b> してから free 軸の reduce に持ち込む。ワークショップで詳しく扱われるのは①で、Tensor Engine の matmul は partition 軸に沿って内積を取る演算なので、stationary 側を全部 1 にしておけば、その内積はそのまま「partition 方向の足し算」になります。<b>reduction を matmul に変換してしまう</b>、という定石です。</p>
   <div class="math">
     <span class="c"># partition 軸をまたぐ集約を matmul で行う</span><br>
     stationary = <span class="b">all-ones 行列</span> (partition × 1、全要素 1)<br>
@@ -165,7 +165,8 @@
   <p>この「ones 行列との matmul で partition 方向の総和を作る」という技法は、先に挙げた layernorm の分散計算のような、partition 方向にまとめた統計量が必要な場面で実際に使われています。</p>
 
   <h3>stationary と moving、どちらに何を割り当てるか</h3>
-  <p>いま出てきた nc_matmul の2つの引数 (stationary, moving) には、割り当ての実践ルールがあります。第 1 回で見た通り、Tensor Engine は内部で <b>LoadStationary</b> と <b>MultiplyMoving</b> という2つの命令に分けて動作し、<b>LoadStationary は MultiplyMoving より高速</b>というハードウェア上の非対称性を持ちます。この非対称性から導かれる実践ルールが、<b>free 軸が大きい方を stationary に、小さい方を moving に割り当てる</b>という判断です。LoadStationary は MultiplyMoving より速いので、<b>時間のかかる MultiplyMoving 側の free 軸を小さく</b>抑えた方が全体が速くなる ― だから大きい free 軸の側を(速い LoadStationary で運べる)stationary に回すわけです。<b>行列 × ベクトルの積</b> (autoregressive なトークン生成の decode で典型的に現れる、片側の free 軸が極端に小さい形) では、<b>行列側を stationary、ベクトル側を moving</b> に置くのが定石です。</p>
+  <p>いま出てきた nc_matmul の2つの引数 (stationary, moving) には、割り当ての実践ルールがあります。その前提として <b>nc_matmul には形状の上限</b>があります。縮約軸 (contraction、partition 軸) は最大 128、stationary 側の free 軸は最大 128、moving 側の free 軸は最大 512、出力 (PSUM 上、fp32) は stationary_free × moving_free で最大 128 × 512 です。この上限に収まらない大きな行列は、第 5 回で見たようにタイル分割して複数回の nc_matmul に分けます。</p>
+  <p>第 1 回で見た通り、Tensor Engine は内部で <b>LoadStationary</b> と <b>MultiplyMoving</b> という2つの命令に分けて動作し、<b>LoadStationary は MultiplyMoving より高速</b>というハードウェア上の非対称性を持ちます。この非対称性から導かれる実践ルールが、<b>両者の free 軸が128以下に収まる範囲で、free 軸が大きい方を stationary に、小さい方を moving に割り当てる</b>という判断です (前段の上限により stationary 側の free 軸はそもそも最大128に制約されます)。LoadStationary は MultiplyMoving より速いので、<b>時間のかかる MultiplyMoving 側の free 軸を小さく</b>抑えた方が全体が速くなる ― だから大きい free 軸の側を(速い LoadStationary で運べる)stationary に回すわけです。<b>行列 × ベクトルの積</b> (autoregressive なトークン生成の decode で典型的に現れる、片側の free 軸が極端に小さい形) では、<b>行列側を stationary、ベクトル側を moving</b> に置くのが定石です。</p>
   <div class="warn">
     <b>先ほどの all-ones の例と混同しないこと。</b>上の「reduction を matmul に変換する」例では、all-ones 行列 (free 軸 = 1) をあえて stationary に置きました。あれは<b>「partition 方向の集約という機能を実現する」</b>のが目的で、速度最適化のルールとは別の話です。ここで述べている<b>「大きい free 軸を stationary に」は、機能ではなく速度</b>を最適化するときの割り当て指針です。同じ stationary/moving の話でも、<b>何を最適化したいか (機能の実現か、速度か) で最適な割り当ては変わる</b> ― その両方を Tensor Engine の非対称構造から逆算するのがこの節の主旨です。
   </div>
@@ -177,7 +178,7 @@
 <section id="s4">
   <h2><span class="num">4</span>transpose のコストと、それを消す/隠す工夫</h2>
   <p class="lead">レイアウトの選択を誤ると transpose が要る、と述べました。ではその transpose、実際どれくらい重いのか。そして軽くする手はあるのか。</p>
-  <p>Trainium に transpose 専用のエンジンはありません。<b>transpose は Tensor Engine 上で (単位行列との積として) 実行され、結果は PSUM に蓄積されます。</b>つまり transpose は matmul と同じ演算器を奪い合う「本来の計算ではない仕事」です。Self-Attention の最適化実演では、PV matmul の直前に value 行列を transpose する場面が、Tensor Engine の時間を有意に消費するボトルネックとして現れました。</p>
+  <p>Trainium に transpose 専用のエンジンはありません。transpose は主に3つの経路のいずれかで実行されます。①<b>Tensor Engine 上で単位行列との積として実行し、結果を PSUM に蓄積する</b> (既定でよく使われる経路)。②<b>Vector Engine / DVE によるブロック単位の転置</b>。③<b>DMA transpose</b> (専用のハードウェアパスを使った転置、第 4 節後半で触れます)。①の経路では transpose は matmul と同じ演算器を奪い合う「本来の計算ではない仕事」になります。Self-Attention の最適化実演では、PV matmul の直前に value 行列を Tensor Engine で transpose する場面が、Tensor Engine の時間を有意に消費するボトルネックとして現れました。</p>
   <div class="warn">
     <b>効きどころの実例 (ワークショップの実測・概算)。</b>value 行列の transpose を、そのまま FP32 で行うのではなく、<b>先に BF16 へダウンキャストしてから transpose する</b>と大きく速くなる傾向が確認されています。Tensor Engine は低精度ほど高いスループットを出せるため、transpose という「必要だが本質的でない仕事」を軽くできます。<b>PSUM のアキュムレータは常に FP32 のまま</b>で、精度が必要な蓄積そのものには影響しません。
   </div>
@@ -189,11 +190,12 @@
 
 <section id="s5">
   <h2><span class="num">5</span>【体験】access pattern ― 表現力のための API</h2>
-  <p class="lead">標準的な numpy 風のスライシングでは表現できないレイアウトを記述する API が <b>access pattern</b> (<code>.ap()</code>) です。ここで大事なのは位置づけの誤解を避けることです。</p>
-  <p>SBUF は物理的には 1 次元のメモリです。そこに「128 partition × free」という 2D の意味を与えているのはアクセスの仕方に他なりません。access pattern API は、この読み出し方を<b>ネストしたループ</b>として明示的に書く手段です。各次元は <b>(stride, count)</b> のペアで表現され、「stride だけ進んで、count 回繰り返す」を入れ子にしていきます。</p>
+  <p class="lead">標準的な numpy 風のスライシングでは表現できないレイアウトを記述する概念が <b>access pattern</b> です。ここで大事なのは位置づけの誤解を避けることです。</p>
+  <p>第 1 回で見た通り SBUF は <b>128 本の物理 partition が並んだ 2D 構造</b>で、各 partition はそれぞれ独立した 1 次元のアドレス空間を持ちます (「1 次元」なのは各 partition 内の free 方向であって、SBUF 全体が 1 次元というわけではありません)。access pattern は、この 128 partition × free という構造の中で、どの順にどの間隔で要素を読み出すかを<b>ネストしたループ</b>として明示的に記述する考え方です。各次元は <b>(stride, count)</b> のペアで表現され、「stride だけ進んで、count 回繰り返す」を入れ子にしていきます。</p>
   <div class="math">
     <span class="c"># access pattern の記法イメージ (ネストループとして解釈)</span><br>
-    t.ap(pattern=[[<span class="b">stride0</span>, <span class="b">count0</span>], [<span class="y">stride1</span>, <span class="y">count1</span>], ...])<br>
+    <span class="c"># 以下は概念を示す疑似コード。実際のメソッド名・引数形式は SDK のバージョンで異なるため要確認</span><br>
+    pattern = [[<span class="b">stride0</span>, <span class="b">count0</span>], [<span class="y">stride1</span>, <span class="y">count1</span>], ...]<br>
     <span class="c"># 先頭の (stride0, count0) は必ず partition 次元をストライドする</span><br>
     <span class="c"># かつ stride0 は free 次元の合計サイズでなければならない (ハード制約)</span>
   </div>
@@ -219,13 +221,13 @@
 </section>
 
 <section id="s6">
-  <h2><span class="num">6</span>並列化への拡張 ― LNC と TP × SP = world</h2>
+  <h2><span class="num">6</span>並列化への拡張 ― LNC と world = DP × PP × TP × CP</h2>
   <p class="lead">ここまでは 1 コア内のレイアウトの話でした。同じ「どの軸をどこに置くか」という発想は、コアをまたいだ並列化にもそのまま延長できます。</p>
-  <p>第 1 回で触れた <b>LNC (Logical NeuronCore)</b> を思い出してください。1 デバイスに 8 個ある物理コアを、既定では 2 個ずつ束ねて 4 個の論理コアとして扱います (LNC2)。<b>LNC1 に切り替えると、束ねずに 8 個の物理コアとして扱えます。</b>どちらが良いかは一様には決まらず、<b>計算量が支配的なワークロードか、メモリ帯域が支配的なワークロードか</b>によって選び方が変わります。小さいモデルでは LNC1 にして最小の並列度で済ませる方がコスト効率が良くなる場合がある、という判断がワークショップで語られています。</p>
+  <p>第 1 回で触れた <b>LNC (Logical NeuronCore)</b> を思い出してください。1 デバイスに 8 個ある物理コアを、既定では 2 個ずつ束ねて 4 個の論理コアとして扱います (LNC2)。<b>LNC1 に切り替えると、束ねずに 8 個の物理コアとして扱えます。</b>どちらが良いかは一様には決まらず、<b>計算量が支配的なワークロードか、メモリ帯域が支配的なワークロードか</b>によって選び方が変わります。小さいモデルでは LNC1 にして最小の並列度で済ませる方がコスト効率が良くなる場合がある、という判断がワークショップで語られています。ここで効いてくるのがレイアウトとの接点です。LNC1 では partition 数 128 という制約自体は変わりませんが、<b>1 論理コアあたりの free 容量 (SBUF/PSUM) は LNC2 の場合の概ね半分</b>になるため、同じテンソルでもタイル設計 (タイル幅・段数) を LNC1/LNC2 で変える必要が出てきます。</p>
   <div class="key">
-    <b>並列化の単位を組み立てる考え方。</b>ワークショップでは <b>tensor parallelism (TP)</b> と <b>sequence parallelism (SP)</b> という 2 つの分割軸を掛け合わせて、実際に使用するコア数 (<b>world</b>) を決めるという考え方が語られています。<b>TP × SP = world</b>。TP はモデルの重み・計算を複数コアに分割する軸、SP はシーケンス長方向の分割軸で、両方を同時に使うこともできます。<b>同じ TP・SP の値でも、LNC1 か LNC2 かで実際に使う物理コア数は変わる</b>ため、world をどう組むかは LNC 設定と一緒に考える必要があります。
+    <b>並列化の単位を組み立てる考え方。</b>実際に使用するコア数 (<b>world</b>) は、複数の分割軸の積で決まります。<b>world = DP × PP × TP × CP</b> (data parallelism × pipeline parallelism × tensor parallelism × context parallelism)。このうち <b>tensor parallelism (TP)</b> はモデルの重み・計算を複数コアに分割する軸で、ワークショップでは加えて <b>sequence parallelism (SP)</b> という考え方も語られます。SP は world を増やす独立な乗算因子ではなく、<b>TP グループの中でシーケンス軸をさらに分割する</b>働き方をします (TP コミュニケータの内側でセグメントを持ち回る形)。<b>同じ DP・PP・TP・CP の値でも、LNC1 か LNC2 かで実際に使う物理コア数は変わる</b>ため、world をどう組むかは LNC 設定と一緒に考える必要があります。
   </div>
-  <p>これは第 2 節・第 3 節で見た「どの軸を partition に、どの軸を free に置くか」という問いの<b>チップ間バージョン</b>です。1 コア内では 128 partition レーンへの軸の割り当てが問題でしたが、複数コアに広がると<b>どの軸をどのコア群に分割するか</b>が問題になります。collective 通信 (all-reduce・all-gather 等) を使うレプリカグループの組み方も、TP 群は連続したコア番号、SP/CP (context parallel) 群はストライドしたコア番号、というように<b>分割の意図がグループのトポロジーに直結</b>します。</p>
+  <p>これは第 2 節・第 3 節で見た「どの軸を partition に、どの軸を free に置くか」という問いの<b>チップ間バージョン</b>です。1 コア内では 128 partition レーンへの軸の割り当てが問題でしたが、複数コアに広がると<b>どの軸をどのコア群に分割するか</b>が問題になります。collective 通信 (all-reduce・all-gather 等) を使うレプリカグループの組み方も、TP 群は連続したコア番号、CP (context parallel) 群はストライドしたコア番号、ということが多いという実装上の慣例が知られています。</p>
   <div class="warn">
     <b>この章で扱う範囲。</b>並列化の具体的な規模 (何チップ・何ノードでどこまで伸びるか) はモデル・世代・構成に強く依存し、本稿では立ち入りません。ここで持ち帰ってほしいのは<b>「1 コア内のレイアウト設計と、複数コアへの並列化は、同じ『軸をどこに割り当てるか』という問いの延長線上にある」</b>という考え方の骨格だけです。
   </div>
@@ -241,10 +243,10 @@
     <tr><td>reduction 制約</td><td>reduction は free 軸に沿ってのみ可能というハード制約。畳みたい軸を free に置く</td></tr>
     <tr><td>transpose コスト</td><td>Tensor Engine 上の演算で「本質的でない仕事」。レイアウトで消す→消せなければ bf16 化/DMA transpose で軽くする</td></tr>
     <tr><td>access pattern</td><td>(stride, count) のネストループで SBUF の読み出しを表現する「表現力の API」。パフォーマンス API ではない</td></tr>
-    <tr><td>並列化への拡張</td><td>LNC1/LNC2 でコアの束ね方が変わる。TP × SP = world という分割の組み立てが、レイアウト設計のチップ間版</td></tr>
+    <tr><td>並列化への拡張</td><td>LNC1/LNC2 でコアの束ね方が変わる。world = DP × PP × TP × CP という分割の組み立てが、レイアウト設計のチップ間版</td></tr>
   </table>
   <div class="key">
-    <b>結論。</b>レイアウト設計の実質は「<b>このテンソルのどの軸を 128 partition に、どの軸を free に置くか</b>」という一問に答えることです。答えを出す基準は 2 つ ― <b>縮約したい軸は partition に</b> (transpose を消すため)、<b>畳みたい (reduction したい) 軸は free に</b> (ハード制約を満たすため)。この 2 つが競合するときに transpose という妥協が生まれ、それは低精度化や専用 DMA パスで軽くできます。access pattern は、この設計を標準スライスの外側まで表現するための道具です。そして同じ「軸をどこに割り当てるか」という発想は、1 コアの中だけでなく、LNC の設定や TP × SP という複数コアへの分割にもそのまま延長されます。<br>
+    <b>結論。</b>レイアウト設計の実質は「<b>このテンソルのどの軸を 128 partition に、どの軸を free に置くか</b>」という一問に答えることです。答えを出す基準は 2 つ ― <b>縮約したい軸は partition に</b> (transpose を消すため)、<b>畳みたい (reduction したい) 軸は free に</b> (ハード制約を満たすため)。この 2 つが競合するときに transpose という妥協が生まれ、それは低精度化や専用 DMA パスで軽くできます。access pattern は、この設計を標準スライスの外側まで表現するための道具です。そして同じ「軸をどこに割り当てるか」という発想は、1 コアの中だけでなく、LNC の設定や world = DP × PP × TP × CP という複数コアへの分割にもそのまま延長されます。<br>
     次回はこのレイアウトの上に「エンジンを遊ばせない」ソフトウェアパイプラインと allocation を積み重ねます。
   </div>
   <div class="fn">

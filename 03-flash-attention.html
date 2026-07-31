@@ -86,7 +86,7 @@
   <p class="lead">第 2 回で「中間結果を遅い HBM に書き出さず SBUF に留める = カーネル融合」を学びました。今回はその<b>本命</b>、Attention をまるごと融合する <b>FlashAttention</b> を掘り下げます。長文 LLM を支える最重要テクニックです。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    素朴な Attention は、系列長 <b>N</b> に対して <b>N×N</b> の巨大なスコア行列を作り、それを<b>遅い HBM に書き出しては読み直します</b>。FlashAttention は、この <b>N×N 行列を一度も作らず・書き出さず</b>、Q・K・V を小さな<b>タイル (ブロック) に分けて速い SRAM の上だけで計算</b>します。鍵は <b>online softmax</b> ― 全体の最大値や合計を知らなくても、ブロックを見るたびに<b>途中経過を補正しながら</b>正しい softmax を積み上げる技法です。結果、<b>追加メモリが O(N²) から O(N)</b> に激減し (N×N ぶんが不要になる)、長文でも破綻しません。
+    素朴な Attention は、系列長 <b>N</b> に対して <b>N×N</b> の巨大なスコア行列を作り、それを<b>遅い HBM に書き出しては読み直します</b>。FlashAttention は、この <b>N×N 行列を一度も作らず・書き出さず</b>、Q・K・V を小さな<b>タイル (ブロック) に分けて速い SRAM の上だけで計算</b>します。鍵は <b>online softmax</b> ― 全体の最大値や合計を知らなくても、ブロックを見るたびに<b>途中経過を補正しながら</b>正しい softmax を積み上げる技法です。結果、<b>追加メモリが O(N²) から O(N)</b> に激減し (N×N ぶんが不要になる)、メモリの意味では長文でも破綻しません (計算量は O(N²d) のままなので、時間は依然として系列長の二乗で伸びます)。
   </div>
   <div class="toc">
     <a href="#s1">1. Attention のおさらい ― どこに N×N が出るか</a>
@@ -100,7 +100,7 @@
     <a href="#s9">9. メモリ視点のまとめ ― O(N²) → O(N)</a>
     <a href="#s10">10. まとめ</a>
   </div>
-  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。<a href="./02-roofline-and-fusion.html">第 2 回「Roofline とカーネル融合」</a>を前提にします (Trainium ではオンチップ SRAM を SBUF と呼び、本稿では同義に使います)。Attention の数式そのものは <a href="../softmax-attention-explainer.html">Softmax Attention の解説</a>も参照。</p>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。<a href="./02-roofline-and-fusion.html">第 2 回「Roofline とカーネル融合」</a>を前提にします (Trainium のオンチップ SRAM は SBUF (28 MiB/コア) と PSUM (2 MiB、行列積の出力先) から成ります。本稿は簡略化のため SBUF を指して SRAM と呼びますが、実装では部分スコアの行列積結果は一度 PSUM に出ます)。Attention の数式そのものは <a href="../softmax-attention-explainer.html">Softmax Attention の解説</a>も参照。</p>
 </section>
 
 <section id="s1">
@@ -134,7 +134,7 @@
     <div class="box"><span class="big" id="c_mem">—</span><span class="lbl">S+A メモリ (fp16, 1ヘッド)</span></div>
     <div class="box"><span class="big" id="c_io">—</span><span class="lbl">入出力 (N×d) との比</span></div>
   </div>
-  <p>青い四角が <b>N×N のスコア行列</b>、緑の細い帯が <b>入出力 (N×d)</b> です。N を 2 倍にすると、緑は 2 倍にしか伸びないのに<b>青は 4 倍</b>に膨らみます。N=32k では S+A だけで<b>数 GB</b> ― これを HBM に確保して往復させるのが、素朴な Attention の破綻点です (オンチップの SBUF は数十 MB 級しかないので、そもそも載らない)。</p>
+  <p>青い四角が <b>N×N のスコア行列</b>、緑の細い帯が <b>入出力 (N×d)</b> です。N を 2 倍にすると、緑は 2 倍にしか伸びないのに<b>青は 4 倍</b>に膨らみます。N=32k では S+A だけで<b>数 GB</b> ― これを HBM に確保して往復させるのが、素朴な Attention の破綻点です (オンチップの SBUF は 28 MiB 級 (NeuronCore あたり) しかないので、そもそも載らない)。</p>
   <p style="font-size:14px;color:var(--sub)">メモリは 1 ヘッド・1 シーケンスあたりの最小見積り。実際はヘッド数・バッチ分さらに増えます。</p>
 </section>
 
@@ -167,7 +167,7 @@
     for each Q block:<br>
     &nbsp;&nbsp;<span class="b">O_acc = 0, 統計 (m, ℓ) = 初期値</span>&nbsp;&nbsp;<span class="c"># m=これまでの最大値, ℓ=指数和 (詳細 6〜7章)</span><br>
     &nbsp;&nbsp;for each K,V block:<br>
-    &nbsp;&nbsp;&nbsp;&nbsp;S_ij = Q_i K_j&#7488;&nbsp;&nbsp;<span class="c"># 小さな部分スコア (ブロック×ブロック)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;S_ij = Q_i K_j&#7488; / &radic;d&nbsp;&nbsp;<span class="c"># 小さな部分スコア (ブロック×ブロック)</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="p">O_acc, m, ℓ を更新</span>&nbsp;&nbsp;<span class="c"># online softmax で補正 (7章)</span><br>
     &nbsp;&nbsp;O_i = O_acc / ℓ&nbsp;&nbsp;<span class="c"># 最後に正規化して出力ブロック完成</span>
   </div>
@@ -195,8 +195,9 @@
     <span><span class="dot" style="background:#8fd6b4"></span>計算した部分スコア (SRAM・使い捨て)</span>
     <span><span class="dot" style="background:#6b7d74"></span>作られない (N×N の残り)</span>
   </div>
-  <p>左の大きな格子が「本来の N×N スコア行列」。素朴な実装はこれを全部 HBM に作りますが、FlashAttention が実際に触るのは<b>いま光っている小さなブロック 1 つだけ</b>です。Q ブロック (橙行) を固定し、K,V ブロック (青列) を左から右へ順に処理。各ブロックは SRAM 上で計算してすぐ捨て、次へ進みます。<b>灰色のマスは一度も作られません</b> ― N×N のメモリが不要になるのがこの図の要点です。</p>
+  <p>左の大きな格子が「本来の N×N スコア行列」。素朴な実装はこれを全部 HBM に作りますが、FlashAttention が実際に触るのは<b>いま光っている小さなブロック 1 つだけ</b>です。Q ブロック (橙行) を固定し、K,V ブロック (青列) を左から右へ順に処理。各ブロックは SRAM 上で計算してすぐ捨て、次へ進みます。<b>灰色のマスはこの瞬間にはメモリ上に存在せず</b>、N×N として一度もまとめて実体化・HBM に書き出されることはありません (ループが進むにつれて順に計算されすぐ捨てられるため)。本当に一度も計算せずスキップできるのは、下の補足にある causal mask の対角右ブロックだけです ― N×N のメモリが不要になるのがこの図の要点です。</p>
   <p style="font-size:14px;color:var(--sub)">補足: LLM (decoder) の causal mask 付きでは、対角より右のブロック (未来のトークン) はそもそも計算不要でスキップされ、さらに約半分に減ります。上図は分かりやすさのため非因果 (全ブロック処理) で描いています。</p>
+  <p style="font-size:14px;color:var(--sub)">補足: 実際の NKI では、タイルのサイズはこの図のように自由には選べず、partition ≤ 128 などハードウェアの制約で決まります (次回)。</p>
 </section>
 
 <section id="s6">
@@ -255,7 +256,7 @@
   <table>
     <tr><th>観点</th><th>素朴な Attention</th><th>FlashAttention</th></tr>
     <tr><td>作る中間行列</td><td>N×N のスコア S・重み A</td><td>ブロック×ブロックの部分スコアのみ (使い捨て)</td></tr>
-    <tr><td>追加メモリ</td><td><b>O(N²)</b> (長文で GB 級)</td><td><b>O(N)</b> (HBM 側に置く統計 m, ℓ のぶん。出力 N×d は両者共通)</td></tr>
+    <tr><td>追加メモリ</td><td><b>O(N²)</b> (長文で GB 級)</td><td><b>O(N)</b> (HBM 側に置く統計 m, ℓ のぶん。出力 N×d は両者共通。学習では backward 用に logsumexp (各行 1 値) を HBM に残すため O(N) が生じる。推論のみなら追加は実質不要)</td></tr>
     <tr><td>N×N の HBM 書き出し</td><td>あり (書いて読み直す往復)</td><td><b>一度もない</b></td></tr>
     <tr><td>softmax</td><td>行全体を見て一括</td><td>online softmax で走りながら補正</td></tr>
     <tr><td>正しさ</td><td>定義どおり (正解の基準)</td><td><b>厳密</b> (基準と丸め誤差を除き一致)</td></tr>
@@ -263,7 +264,7 @@
     <tr><td>HBM アクセス量</td><td>Θ(N² + Nd) 相当</td><td>Θ(N²d²/M)(M=SRAM容量、詳細は下記) (N² オーダーは残るが係数減。ゼロではない)</td></tr>
   </table>
   <div class="warn">
-    <b>誤解しやすい点。</b>FlashAttention は<b>計算量 (FLOP) を減らしていません</b>。QKᵀ も AV も相変わらず N² 回のオーダー。むしろ forward では online softmax の<b>掛け直し (リスケーリング) ぶん、わずかに増えます</b> (学習時の backward では、N×N を保存せず作り直す再計算ぶんも増える)。速くなるのは「<b>N×N をメモリに実体化せず、HBM 往復を消した</b>」から。第 2 回の言葉でいえば、<b>メモリ律速だった処理のメモリ移動を潰した</b>のです。HBM アクセス量の N² オーダー自体は残ります (Q ブロックごとに K・V を読み直すため) が、原論文では <b>&Theta;(N²d²/M)</b> (M は SRAM 容量。&Theta; は「ちょうどこのオーダー」の意で、ここでは O と同様に読んで問題ありません) ― SRAM が大きくヘッド次元 d が小さいほど削減率が大きく、GPU 上の測定で最大約 9 倍の削減が報告されています (Trainium での削減率は実装・構成に依存)。</p>
+    <b>誤解しやすい点。</b>FlashAttention は<b>計算量 (FLOP) を減らしていません</b>。QKᵀ も AV も相変わらず N² 回のオーダー。むしろ forward では online softmax の<b>掛け直し (リスケーリング) ぶん、わずかに増えます</b> (学習時の backward では、N×N を保存せず作り直す再計算ぶんも増える)。速くなるのは「<b>N×N をメモリに実体化せず、HBM 往復を消した</b>」から。第 2 回の言葉でいえば、<b>メモリ律速だった処理のメモリ移動を潰した</b>のです。HBM アクセス量の N² オーダー自体は残ります (Q ブロックごとに K・V を読み直すため) が、原論文では <b>&Theta;(N²d²/M)</b> (M は SRAM 容量。&Theta; は「ちょうどこのオーダー」の意で、ここでは O と同様に読んで問題ありません) ― SRAM が大きくヘッド次元 d が小さいほど削減率が大きく、原論文の GPT-2 設定での実測例では HBM アクセス量が約 40GB から約 4.4GB に減ったと報告されています (Trainium での削減率は実装・構成に依存)。</p>
   </div>
 </section>
 
@@ -277,7 +278,7 @@
     <tr><td>難所</td><td>softmax は行全体が要るのに、ブロックでは一部しか見えない</td></tr>
     <tr><td>解法</td><td>online softmax。走っている最大値 m と指数和 ℓ を持ち歩き、大きい値が来たら過去分を割引して補正</td></tr>
     <tr><td>厳密性</td><td>近似ではない。素朴実装と丸め誤差を除き同じ答え</td></tr>
-    <tr><td>効果</td><td>追加メモリ O(N²) → O(N)。N×N の HBM 往復がゼロ。長文でも破綻しない</td></tr>
+    <tr><td>効果</td><td>追加メモリ O(N²) → O(N)。N×N の HBM 往復がゼロ。メモリの意味で長文でも破綻しない (計算量 O(N²d) 自体は変わらない)</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>FlashAttention は<b>カーネル融合の到達点</b>です。第 2 回で学んだ「中間結果を HBM に書かず SRAM に留める」を Attention に適用し、<b>N×N という最大の中間行列を丸ごと作らない</b>ところまで突き詰めた。鍵の <b>online softmax</b> が「全体を見ないと解けないはずの softmax」を「走りながら補正する」問題に変換したことで、これが可能になりました。計算量は変わらないのに実用性が激変する ― <b>「重さの正体はメモリ移動だった」</b>という第 2 回のメッセージの、最も鮮やかな実例です。
@@ -391,7 +392,7 @@ function fmtB(b){if(b>=1e9)return (b/1e9).toFixed(2)+' GB';if(b>=1e6)return (b/1
     else msg='Q'+qi+' × K,V'+kj+' の部分スコアを SRAM で計算 → online softmax で更新 → 捨てる';
     ct.fillText(msg,W/2,H-30);
     ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
-    ct.fillText('灰色のマスは一度も作られない (= N×N のメモリが不要)',W/2,H-12);
+    ct.fillText('灰色のマスはこの瞬間には未実体化 (= N×N を丸ごと確保しない)',W/2,H-12);
   }
   function step(){
     if(qi>=NB) return;

@@ -86,14 +86,14 @@
   <p class="lead">第 1 回でハードウェアの階層 (速いオンチップ / 遅い HBM) を学びました。今回は「その地図の上で、なぜわざわざ手でカーネルを書くのか」を一歩深掘りします。答えになる実測を先に見せます。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    高速化の鍵は<b>「遅い HBM への往復を減らす」</b>の一点です。それを (A) ギャップを測る物差し <b>Roofline</b>、(B) 往復を消す手法 <b>カーネル融合</b>、(C) 実例 <b>RMSNorm と QKV 射影の融合</b>、の順で解き明かします。同じ数式・同じ答えでも、往復を消すだけで<b>桁違いに速くなる</b> ― それが手でカーネルを書く理由です。
+    高速化の鍵は<b>「遅い HBM への往復を減らす」</b>の一点です。それを (A) ギャップを測る物差し <b>Roofline</b>、(B) 往復を消す手法 <b>カーネル融合</b>、(C) 実例 <b>RMSNorm と QKV 射影の融合</b>、の順で解き明かします。同じ数式・<b>数学的に等価な計算</b>でも、往復を消すだけで<b>約 17 倍</b>にもなる ― それが手でカーネルを書く理由です(融合で累算順序が変わるため、bf16 ではビット単位の一致はしないことがあります。第 3 回・第 8 回)。
   </div>
   <div class="key" style="background:#f3f9f6">
     <b>先に結論 (NKI Workshop の実測)。</b>小さな Llama 風モデルの推論で、同じ計算を 3 通りの実装で回すと:<br>
     ・素の PyTorch 演算 (base): <b>24 tok/s</b><br>
     ・NKI カーネル化 (core): <b>78 tok/s</b><br>
-    ・<b>RMSNorm + QKV 射影 + RoPE + Attention + KV cache + 出力射影を 1 つのカーネルに融合</b> (megakernel): <b>410 tok/s</b> (base 比 <b>約 17 倍</b>)<br>
-    <span style="font-size:14px;color:var(--sub)">(small モデル・128 プロンプト・greedy・torch.compile・Trn2.3xlarge)</span>
+    ・<b>attention サブレイヤー全体 (RMSNorm + QKV 射影 + RoPE + Attention + KV cache 更新 + 出力射影) を 1 つのカーネルに融合</b> (megakernel。MLP は別カーネル): <b>410 tok/s</b> (base 比 <b>約 17 倍</b>)<br>
+    <span style="font-size:14px;color:var(--sub)">(small モデル・プロンプト長 128・greedy・バッチ 1 のデコードスループット・torch.compile・trn2.3xlarge)</span>
   </div>
   <div class="toc">
     <a href="#s1">1. 【体験】Roofline ― 計算律速かメモリ律速か</a>
@@ -153,14 +153,14 @@
   </div>
   <details>
     <summary>もう一つの例: Attention 全体の見積もり (クリックで展開)</summary>
-    <p style="font-size:15px">QKᵀ と (スコア)V の 2 つの行列積が各約 54μs (128×4096²×2 ÷ 78.6 TFLOPS)、合わせて約 109μs。さらに softmax を Vector Engine (bf16 で約 2 TFLOPS) で約 41μs。合計<b>約 150μs</b>がこの Attention のエンタイトルメント。matmul は Tensor Engine が速いので軽く、要素ごとの softmax が相対的に効くのが分かります。</p>
+    <p style="font-size:15px">QKᵀ と (スコア)V の 2 つの行列積が各約 54μs (128×4096²×2 ÷ 78.6 TFLOPS)、合わせて約 109μs。さらに softmax を Vector Engine (bf16・倍速モード時で約 2 TFLOPS の概算) で約 41μs。<b>オーバーラップさせない前提</b>で単純に足すと合計<b>約 150μs</b>がこの Attention のエンタイトルメント(理想的にエンジンを重ねられれば max 側 ~110μs に寄ります)。matmul は Tensor Engine が速いので軽く、要素ごとの softmax が相対的に効くのが分かります。</p>
   </details>
 </section>
 
 <section id="s3">
   <h2><span class="num">3</span>ギャップの正体 ― メモリ往復</h2>
   <p class="lead">「メモリ律速」と診断された。ではデータ移動を減らすには? ここでカーネル融合が登場します。</p>
-  <p>汎用フレームワークは演算を<b>1 つずつ別々に</b>実行します。各演算は「HBM から SBUF に読む → 計算 → HBM に書き戻す」を繰り返す。演算が 3 つあれば、中間結果が<b>3 回 HBM に降りて、また昇ってくる</b>。第 1 回で見たとおり HBM は遅く、この往復こそがギャップの主因です。</p>
+  <p>コンパイラ (torch.compile 経由の Neuron コンパイラ) も要素ごとの演算などは自動で融合しますが、reduction・行列積・attention・KV cache 更新をまたぐ<b>広範囲でレイアウトやエンジン割り当てを跨ぐ融合</b>までは自動では届きにくい。そこが手で埋める余地です。素朴に演算を<b>1 つずつ実行</b>すると、各演算は「HBM から SBUF に読む → 計算 → HBM に書き戻す」を繰り返す。演算が 3 つ連なれば、あいだの<b>中間結果が 2 回 HBM に降りてまた昇ってくる</b>(3 回目の書き出しは最終出力で、融合しても残ります)。第 1 回で見たとおり HBM は遅く、この往復こそがギャップの主因です。</p>
   <div class="math">
     <span class="c"># 融合なし: 演算ごとに HBM を往復</span><br>
     演算1 → <span class="r">HBM に中間結果を書く</span> → <span class="r">読み直す</span> → 演算2 → <span class="r">書く</span> → <span class="r">読む</span> → 演算3<br><br>
@@ -229,7 +229,7 @@
     <span><span class="dot" style="background:#8fb8f0"></span>重み W_q と行列積 → Q</span>
   </div>
   <p>ここで効くのが第 1 章の Roofline です。RMSNorm は<b>演算強度が低くメモリ律速</b> (要素を 1〜2 回触るだけ) なので、途中結果を HBM に往復させると損が大きい。だから正規化の出力 x&#770; を降ろさず、演算強度の高い行列積 (QKV 射影) の入力に直結させる ― これが「融合」の中身です。</p>
-  <p>ワークショップの megakernel はこれをさらに推し進め、<b>RMSNorm + QKV 射影 + RoPE + Attention + KV cache 更新 + 出力射影</b>という 1 ブロック丸ごとを単一カーネルに融合しました。ブロック内の中間結果が一度も HBM に降りない。これが冒頭の <b>base 比 17 倍</b>の正体です。</p>
+  <p>ワークショップの megakernel はこれをさらに推し進め、<b>attention サブレイヤー全体</b>(RMSNorm → QKV 射影 → RoPE → Attention → KV cache 更新 → 出力射影)を単一カーネルに融合しました。<b>MLP は別カーネル</b>で、decode 1 ステップあたり計 2 カーネル構成です。サブレイヤー内の中間テンソル(正規化出力・Q/K/V・スコア等)が HBM を往復しない ― これが冒頭の <b>base 比 17 倍</b>の正体です(ただし KV cache は HBM 常駐であり、サブレイヤーの出力も MLP カーネルへ HBM 経由で渡されます)。</p>
   <details>
     <summary>融合には工夫が要る (この先は後続の章で)</summary>
     <p style="font-size:15px">reduction は「全要素を見ないと答えが出ない」ため、どのエンジンでどの順に計算し、どこで同期するかに設計が要ります。また行列積のタイルサイズ、レイアウト、bf16 の非結合性(足す順番で結果が変わる性質)による数値誤差など、踏み込むべき論点が続きます。これらは第 3 回以降で扱います。この記事では「<b>隣り合う処理を融合すると往復が消えて速い</b>」という発想が現実の層でそのまま効く、という一点を持ち帰ってください。</p>
@@ -246,11 +246,11 @@
     <tr><td>ギャップの正体</td><td>メモリ律速の主因は、遅い HBM への中間結果の往復</td></tr>
     <tr><td>カーネル融合</td><td>複数演算を 1 カーネルにまとめ、中間結果を SBUF に留めて HBM 往復を消す</td></tr>
     <tr><td>RMSNorm + QKV 射影の融合</td><td>正規化 (reduction + element-wise) の出力を降ろさず行列積へ。実際の隣接層で効く</td></tr>
-    <tr><td>実測インパクト</td><td>ブロック丸ごとの融合 (megakernel) で base 比 <b>約 17 倍</b> (410 vs 24 tok/s)</td></tr>
+    <tr><td>実測インパクト</td><td>attention サブレイヤー全体の融合 (megakernel、MLP は別カーネル) で base 比 <b>約 17 倍</b> (410 vs 24 tok/s)</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>(A) <b>Roofline</b> で「理論上これだけ速いはず」というターゲットと実測のギャップを定量化する。ギャップの主因は<b>遅い HBM への往復</b> (メモリ律速)。(B) <b>カーネル融合</b>で、中間結果を SBUF に留めて往復を消す。(C) その発想は <b>RMSNorm + QKV 射影</b>のような現実の隣接処理でそのまま効き、ブロック丸ごとの融合で <b>17 倍</b>に届く。<br>
-    汎用フレームワークは演算を 1 つずつ実行するので、この往復を自動では消せない。<b>「理論上限が見えていて、原因も分かっているのに、自動では埋まらない」― そのギャップを自分の手で埋めるのが、カーネルを書く理由</b>です。次回はこの融合の本命 <b>FlashAttention</b> を掘り下げます。
+    コンパイラは要素ごとの自動融合は行うものの、レイアウトやエンジン割り当てを跨ぐ広範囲の融合までは自動では届きにくい。<b>「理論上限が見えていて、原因も分かっているのに、自動では埋めきれない」― その残りのギャップを自分の手で埋めるのが、カーネルを書く理由</b>です。次回はこの融合の本命 <b>FlashAttention</b> を掘り下げます。
   </div>
   <div class="fn">
     出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および native_nkilib_lab / microbenchmarking lab の実測。17 倍・410 tok/s 等は small モデル・特定条件での測定値。ワークショップが座学で扱う全トピックと今後の章立ては <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。<br>

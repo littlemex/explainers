@@ -167,7 +167,7 @@
     <tr><th>メモリ</th><th>種類</th><th>容量 (TRN2)</th><th>速さ / アクセス</th><th>誰が触れる</th></tr>
     <tr><td><b style="color:var(--hbm)">HBM</b></td><td>大容量 DRAM</td><td>96 GB / デバイス</td><td>DMA ピーク 約 435 GB/s (1コア)</td><td>DMA エンジンのみ</td></tr>
     <tr><td><b style="color:var(--sbuf)">SBUF</b></td><td>オンチップ SRAM</td><td>28 MB / コア (224 KiB &times; 128 partition)</td><td>桁違いに高速・全エンジン直結</td><td>全 compute engine + DMA</td></tr>
-    <tr><td><b style="color:var(--psum)">PSUM</b></td><td>オンチップ SRAM</td><td>128 part &times; 8 bank &times; 512 要素</td><td>最速・Tensor Engine 蓄積用</td><td>書込=TE / 退避=Vector・Scalar</td></tr>
+    <tr><td><b style="color:var(--psum)">PSUM</b></td><td>オンチップ SRAM</td><td>128 part &times; 8 bank &times; 512 要素 (計 2 MiB)</td><td>最速・Tensor Engine 蓄積用</td><td>行列積の蓄積は TE 固有 / Vector・Scalar もアクセス可 (GpSimd 不可)</td></tr>
   </table>
   <div class="warn">
     <b>ここが最重要の直感。</b>SBUF は HBM より<b>桁違いに速いが、桁違いに小さい</b> (96 GB 対 28 MB = 約 3400 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。
@@ -243,15 +243,16 @@
 <section id="s7">
   <h2><span class="num">7</span>PSUM ― Tensor Engine 専用の集計台</h2>
   <p class="lead">3 層目の PSUM は、Tensor Engine の行列積の「出力受け皿」に特化した小さなメモリです。</p>
-  <p><b>PSUM (Partial Sum buffer)</b> は、Tensor Engine が行列積の部分和を<b>蓄積するための専用バッファ</b>です。最もプログラマブルでなく、強い制約があります。</p>
+  <p><b>PSUM (Partial Sum buffer)</b> は、Tensor Engine が行列積の部分和を<b>蓄積するための専用バッファ</b>です。総容量は <b>2 MiB</b> (128 partition &times; 8 bank &times; 2 KB/bank、fp32 で 512 要素/bank)。</p>
   <div class="math">
     <span class="c"># PSUM の形と制約 (TRN2)</span><br>
-    構造 : 128 partition &times; <span class="p">8 バンク</span> &times; 512 要素/バンク<br>
-    型   : FP32 アキュムレータ  <span class="c"># TRN3 は BF16 ダウンキャストも可</span><br>
-    書込 : <span class="r">Tensor Engine のみ</span><br>
-    退避 : <span class="b">Vector / Scalar エンジンのみ</span> (SBUF へ)
+    構造 : 128 partition &times; <span class="p">8 バンク</span> &times; 512 要素/バンク (fp32)、合計 <span class="b">2 MiB</span><br>
+    型   : FP32 アキュムレータ<br>
+    出力先 : <span class="r">Tensor Engine の行列積結果は PSUM にしか書けない</span><br>
+    蓄積 : <span class="r">行列積結果を足し込める (accumulate) のは Tensor Engine 固有</span><br>
+    アクセス : <span class="b">Vector / Scalar エンジンも PSUM を読み書き可</span> (v3 では並列アクセス制約も緩和)。<span class="c"># GpSimd は PSUM 非対応</span>
   </div>
-  <p>行列積のデータの流れはこうです。Tensor Engine が SBUF の 2 つの入力を読んで計算し、結果を<b>PSUM に蓄積</b>。その後、Vector か Scalar エンジンが PSUM から SBUF へ<b>退避 (evict)</b> します。</p>
+  <p>行列積のデータの流れはこうです。Tensor Engine が SBUF の 2 つの入力を読んで計算し、結果を<b>PSUM に蓄積</b>。その後、Vector か Scalar エンジンが PSUM から SBUF へ<b>退避 (evict)</b> します。<b>PSUM そのものは各エンジンからアクセスでき</b>、Tensor Engine に固有なのは「行列積の結果をハードウェアで足し込める (accumulate できる)」点です。</p>
   <div class="key">
     <b>退避はフュージョンのチャンス。</b>PSUM から SBUF へコピーする「ついで」に、活性化関数や reduction を<b>一緒に済ませられます</b>。Tensor Engine が matmul した結果を SBUF に戻す途中で活性化を掛ければ、別途エンジンを回す往復が消える ― これが NKI で手書きカーネルを書く大きな動機の一つです。
   </div>
@@ -334,7 +335,7 @@
     <tr><td>エンジン</td><td>Tensor (matmul, FLOP の90%) / Vector / Scalar / GP-SIMD が並列動作</td></tr>
     <tr><td>HBM</td><td>大容量 (96GB)・1Dフラット・DMAのみ・ピーク約435GB/s(1コア)</td></tr>
     <tr><td>SBUF</td><td>オンチップSRAM・2D (128 partition &times; 224KiB)・28MB・全エンジン直結</td></tr>
-    <tr><td>PSUM</td><td>128 part &times; 8 bank &times; 512・TE書込/Vector・Scalar退避・FP32蓄積</td></tr>
+    <tr><td>PSUM</td><td>128 part &times; 8 bank &times; 512 (計 2 MiB)・行列積の蓄積は TE 固有・Vector/Scalar もアクセス可・FP32 蓄積</td></tr>
     <tr><td>DMA</td><td>16エンジン。partition最大化 + 大きな連続転送で帯域を使い切る</td></tr>
     <tr><td>GPUとの違い</td><td>ハードウェア管理キャッシュを持たず、ソフト管理スクラッチパッド (SBUF/PSUM)。データの置き場と移動を全部ソフトで明示管理</td></tr>
   </table>

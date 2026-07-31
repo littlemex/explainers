@@ -92,10 +92,10 @@
 
 <section>
   <h2><span class="num">0</span>この記事の狙い</h2>
-  <p class="lead">第 1 回で「SBUF は速いが小さい (28 MB)」、第 2 回で「中間結果を SBUF に留めて HBM 往復を消す」ことを学びました。では、そもそも SBUF に載りきらない大きな行列はどう扱うのか。その答えが<b>タイリング</b>です。</p>
+  <p class="lead">第 1 回で「SBUF は速いが小さい (28 MiB)」、第 2 回で「中間結果を SBUF に留めて HBM 往復を消す」ことを学びました。では、そもそも SBUF に載りきらない大きな行列はどう扱うのか。その答えが<b>タイリング</b>です。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    大きなデータを<b>オンチップ (SBUF) に載る固定サイズの「タイル」に分割</b>し、タイル単位で load → compute → store を繰り返す ― これがタイリングです。しかもタイルの形は自由ではなく、<b>partition 軸 = 128 (SBUF の 128 レーン)、free 軸 = 512 (Tensor Engine の出力先 PSUM のバンク幅)</b> というハードウェアの制約から <b>128×512</b> が基本形として導かれます。タイリングは第 2 回のカーネル融合や第 3 回の FlashAttention の土台でもあります。
+    大きなデータを<b>オンチップ (SBUF) に載る固定サイズの「タイル」に分割</b>し、タイル単位で load → compute → store を繰り返す ― これがタイリングです。しかもタイルの形は自由ではなく、<b>partition 軸 = 128 (SBUF の 128 レーン)、free 軸 = 512 (Tensor Engine の出力先 PSUM のバンク幅)</b> というハードウェアの制約から <b>128×512</b> が matmul 出力の基本タイルとして導かれます。タイリングは第 2 回のカーネル融合や第 3 回の FlashAttention の土台でもあります。
   </div>
   <div class="toc">
     <a href="#s1">1. なぜタイリングが要るのか</a>
@@ -111,8 +111,8 @@
 
 <section id="s1">
   <h2><span class="num">1</span>なぜタイリングが要るのか</h2>
-  <p class="lead">第 1 回の地図をもう一度思い出してください。SBUF は 28 MB しかない。モデルの重みも、途中で作る行列も、平気でそれを超えます。</p>
-  <p>Llama クラスのモデルなら、1 枚の重み行列だけで数百 MB 〜 GB になります。Attention のスコア行列も系列長が伸びれば GB 級 (第 3 回)。どちらも <b>SBUF (28 MB) には丸ごと載りません</b>。だからといって「載らないなら諦める」わけにはいかない ― <b>載る単位まで切り分けて、少しずつ処理する</b>のがタイリングの発想です。</p>
+  <p class="lead">第 1 回の地図をもう一度思い出してください。SBUF は 28 MiB しかない。モデルの重みも、途中で作る行列も、平気でそれを超えます。</p>
+  <p>Llama クラスのモデルなら、1 枚の重み行列だけで数百 MB 〜 GB になります。Attention のスコア行列も系列長が伸びれば GB 級 (第 3 回)。どちらも <b>SBUF (28 MiB) には丸ごと載りません</b>。だからといって「載らないなら諦める」わけにはいかない ― <b>載る単位まで切り分けて、少しずつ処理する</b>のがタイリングの発想です。</p>
   <div class="key">
     <b>タイリングの基本形。</b>大きなデータを固定サイズの<b>タイル</b>に分割し、各タイルについて<br>
     (1) <b>load</b>: HBM からそのタイル分だけ SBUF に読み込む<br>
@@ -130,10 +130,10 @@
   <p><b>free 軸 = 512。</b>Tensor Engine (128×128 の systolic array) が行列積の結果を書き込む先は PSUM でした (第 1 回)。PSUM は <b>128 partition × 8 バンク × 512 要素/バンク</b>という固定形状を持ちます。この <b>1 バンクの幅が 512 要素</b>であることから、Tensor Engine が出力するタイルの free 方向のサイズが 512 という単位を持つことになります。</p>
   <div class="math">
     <span class="c"># Tensor Engine の非対称なタイル制約</span><br>
-    stationary (重み側): <span class="b">128 × 128</span> 固定&nbsp;&nbsp;<span class="c"># systolic array にロードされたまま</span><br>
-    moving (流れる側)  : <span class="b">128 × 512</span> まで&nbsp;&nbsp;<span class="c"># PSUM の 1 バンク幅ぶん流せる</span>
+    stationary (重み側): <span class="b">最大 128 × 128</span>&nbsp;&nbsp;<span class="c"># systolic array にロードされたまま</span><br>
+    moving (流れる側)  : <span class="b">最大 128 × 512</span>&nbsp;&nbsp;<span class="c"># PSUM の 1 バンク幅ぶん流せる</span>
   </div>
-  <p>この 2 つを組み合わせたのが基本タイル <b>128×512</b> です。partition 軸 128 で全レーンを使い切り、free 軸 512 で PSUM の 1 バンクぶんきっちり出力する ― どちらも「ハードウェアの物理的な形」から来ていて、恣意的な数字ではありません。</p>
+  <p>この 2 つを組み合わせたのが基本タイル <b>128×512</b> です。partition 軸 128 で全レーンを使い切り、free 軸 512 で PSUM の 1 バンクぶんきっちり出力する ― どちらも「ハードウェアの物理的な形」から来ていて、恣意的な数字ではありません。ただし free 軸 512 という上限は <b>matmul の出力が PSUM を経由する</b>ことに固有の制約です。DMA での転送や elementwise 演算では、free 方向は partition あたり 224 KiB (SBUF の容量、4 章参照) に収まる範囲で自由に取れます。128×512 は「matmul の基本タイル」であって、タイル全般の唯一形ではありません。</p>
   <div class="tex">
     <p class="cap">大きな行列 (M×N) を基本タイルで分割すると、必要なタイル数は次の式で決まります。M・N がタイルサイズの倍数でなければ切り上げ (端数タイル) が生じます。</p>
     $$ \text{タイル数} = \left\lceil \frac{M}{128} \right\rceil \times \left\lceil \frac{N}{512} \right\rceil $$
@@ -163,7 +163,7 @@
     <div class="box"><span class="big" id="c1_sbuf">—</span><span class="lbl">1 タイルの SBUF 占有 (概念, bf16)</span></div>
     <div class="box"><span class="big" id="c1_frac">—</span><span class="lbl">partition 軸は常に 128 固定</span></div>
   </div>
-  <p>M・N を動かすと格子のサイズが変わり、free 軸タイル幅を動かすと<b>タイルの本数と余り (端数タイル)</b> が変わります。partition 軸は常に 128 固定 (ハード制約) ですが、free 軸のタイル幅は 512 を基本としつつ調整可能です。<b>端数タイル (オレンジ)</b> は M や N がタイルサイズの倍数でないときに必ず生まれ、⌈⌉ の切り上げがそのまま「余りも 1 タイルとして確保する」ことに対応します。タイル幅を大きくするほど本数が減り、次章で見る DMA 効率が上がりますが、1 タイルあたりの SBUF 占有は増えます。</p>
+  <p>M・N を動かすと格子のサイズが変わり、free 軸タイル幅を動かすと<b>タイルの本数と余り (端数タイル)</b> が変わります。partition 軸は常に 128 固定 (ハード制約) ですが、free 軸のタイル幅は 512 を基本としつつ調整可能です。<b>端数タイル (オレンジ)</b> は M や N がタイルサイズの倍数でないときに必ず生まれ、⌈⌉ の切り上げがそのまま「余りも 1 タイルとして確保する」ことに対応します。タイル幅を大きくするほど本数が減り、連続領域として大きく転送できる形になるぶん DMA 効率が上がりやすくなりますが (飽和あり、レイアウトが非連続なら効果はない)、1 タイルあたりの SBUF 占有は増えます。</p>
 </section>
 
 <section id="s4">
@@ -175,16 +175,16 @@
     $$ \text{1タイルの要素数} = 128 \times F $$
     $$ \text{1タイルのSBUF占有バイト数} = 128 \times F \times (\text{dtypeバイト数}) $$
   </div>
-  <p>例えば bf16 (2 byte/要素) で F=512 のタイルなら、1 タイルの SBUF 占有は <code>128 × 512 × 2 = 131,072 byte ≈ 128 KiB</code>。SBUF が 28 MB なら、理屈上この形のタイルを 200 枚以上同時に置ける計算です (実際は入出力・重み・二重バッファなど他の用途とも共有するので、これほど多くは使いません)。</p>
+  <p>例えば bf16 (2 byte/要素) で F=512 のタイルなら、1 タイルの SBUF 占有は <code>128 × 512 × 2 = 131,072 byte ≈ 128 KiB</code>。partition あたりで見ると <code>512 × 2 = 1 KiB</code> です。SBUF は 1 partition あたり 224 KiB (28 MiB ÷ 128 partition) なので、理屈上この形のタイルを 224 枚同時に置ける計算です (実際は入出力・重み・二重バッファなど他の用途とも共有するので、これほど多くは使いません)。</p>
   <div class="key">
     <b>タイル数が全体の仕事量を決める。</b>行列積であれば「1 タイルあたりの FLOP × タイル数」が総仕事量になります (第 2 回のエンタイトルメントの計算と同じ考え方)。タイルを大きくすればタイル数は減りますが、1 タイルの SBUF 占有は増える ― この綱引きは 6 章で改めて扱います。
   </div>
 
   <h3>K 方向のタイル分割と PSUM 蓄積</h3>
-  <p>ここまでの ⌈M/128⌉×⌈N/512⌉ は出力 (M, N) 方向だけの分割でした。行列積 (M×K) × (K×N) = M×N では、内側の縮約軸 <b>K</b> も SBUF/PSUM に載らないほど大きければ分割が必要です。K を 512 単位などのブロックに割り、各 K ブロックについて Tensor Engine で <code>nc_matmul</code> を実行しますが、出力先の PSUM タイルは<b>ブロックごとに新規確保するのではなく、同じ 1 つの PSUM バッファに複数回足し込む (accumulate)</b> ことで最終結果を得ます。</p>
+  <p>ここまでの ⌈M/128⌉×⌈N/512⌉ は出力 (M, N) 方向だけの分割でした。行列積 (M×K) × (K×N) = M×N では、内側の縮約軸 <b>K</b> も SBUF/PSUM に載らないほど大きければ分割が必要です。K は Tensor Engine の <b>contraction 軸 = partition 軸</b>にあたるため、ブロック幅は free 軸 (512) ではなく <b>partition 軸の上限である 128</b> です。lhs 側 (stationary) は K を partition に置いた転置形で SBUF に置きます。各 K ブロックについて Tensor Engine で <code>nc_matmul</code> を実行しますが、出力先の PSUM タイルは<b>ブロックごとに新規確保するのではなく、同じ 1 つの PSUM バッファに複数回足し込む (accumulate)</b> ことで最終結果を得ます。</p>
   <div class="tex">
     <p class="cap">K も分割すると、計算に関わるタイルの総数はこう拡張されます。ただし K 方向の各ブロックは「別々の出力」ではなく同じ (M, N) 出力タイルに畳み込まれるため、最終的に HBM へ store するタイル数自体は ⌈M/128⌉×⌈N/512⌉ のまま変わりません。</p>
-    $$ \text{計算に関わるタイル数} = \left\lceil \frac{M}{128} \right\rceil \times \left\lceil \frac{N}{512} \right\rceil \times \left\lceil \frac{K}{512} \right\rceil $$
+    $$ \text{計算に関わるタイル数} = \left\lceil \frac{M}{128} \right\rceil \times \left\lceil \frac{N}{512} \right\rceil \times \left\lceil \frac{K}{128} \right\rceil $$
   </div>
   <p>各 K ブロックの nc_matmul は、PSUM への書き込み方法を API レベルで明示します。<code>nc_matmul</code> の <code>psum_accumulate_flag</code> (グループの先頭ブロックでは上書き、以降のブロックでは加算) や、NKI 0.3.0 で追加された明示的な <code>accumulate</code> パラメータがこの役割を担い、Tensor Engine が PSUM に直接足し込む専用の高速パスを使わせます。</p>
   <div class="canvas-wrap">
@@ -198,9 +198,9 @@
     <span><span class="dot" style="background:var(--te)"></span>K ブロックごとの nc_matmul (Tensor Engine)</span>
     <span><span class="dot" style="background:var(--psum)"></span>同じ 1 つの PSUM タイル (蓄積先)</span>
   </div>
-  <p>K を 3 ブロックに分割した例です。K0 → K1 → K2 の順に nc_matmul を実行するたびに、結果は毎回同じ PSUM タイルに足し込まれ (蓄積回数が増える)、最後の K ブロックの処理が終わった時点で初めて HBM へ 1 回だけ store されます。</p>
+  <p>K = 384 (= 128 × 3) を 3 ブロックに分割した例です。K0 → K1 → K2 の順に、各ブロック 128 幅ぶんの nc_matmul を実行するたびに、結果は毎回同じ PSUM タイルに足し込まれ (蓄積回数が増える)、最後の K ブロックの処理が終わった時点で初めて HBM へ 1 回だけ store されます。</p>
   <div class="warn">
-    <b>罠。</b>PSUM への蓄積は <code>accumulate=True</code> (または <code>psum_accumulate_flag</code> による上書き/加算の明示) のように、専用の引数・記法で意図を伝えるのが正しい書き方です。一見同じ結果になりそうな <code>psum_buf = psum_buf + nc_matmul(...)</code> という書き方は、まず現在の PSUM の値を読み出す必要があります。これは第 1 回で見た「PSUM の書込は Tensor Engine のみ」の裏を返せば「読み出しは Vector Engine が担う」ことを意味し、結果として PSUM の現在値を一度読み出してから加算する経路 ― つまり Vector Engine 側へのフォールバック ― を踏んでしまい、Tensor Engine が持つ PSUM への直接蓄積パスを使えません。同じ「足し込み」でも書き方次第で速度が大きく変わる、という API 設計上の罠です。
+    <b>罠。</b>K 方向の蓄積は <code>psum_tile += nisa.nc_matmul(...)</code> のように書くのが正しい書き方です。これは見た目こそ加算代入ですが、コンパイラがこの形を認識して Tensor Engine の PE 蓄積パス (PSUM への直接足し込み) に変換します。本当の罠は書き方の見た目ではなく、<b>K ブロックごとに別々の PSUM タイルを新規確保してしまい、あとから Vector Engine で全部足し合わせる</b>実装や、<b>ループのたびに PSUM の中身を SBUF へコピーして戻す</b>実装です。どちらも Tensor Engine の蓄積パスを使わず、余分な PSUM 消費や Vector Engine 経由のコピーが挟まって遅くなります。PSUM 自体は TE 以外のエンジンからもアクセス可能ですが (書込・蓄積は TE 固有)、蓄積は同じ 1 つの PSUM タイルに対して行うのが正しい設計です。
   </div>
 </section>
 
@@ -240,16 +240,16 @@
   <p class="lead">「タイリングとは何か・なぜその形か」を一枚に整理します。</p>
   <table>
     <tr><th>論点</th><th>要点</th></tr>
-    <tr><td>タイリングが要る理由</td><td>SBUF (28MB) にモデル全体・大きな行列は載らない。載る単位に分割して load→compute→store を繰り返す</td></tr>
-    <tr><td>タイルの形</td><td>partition 軸=128 (SBUF のレーン数)、free 軸=512 (PSUM のバンク幅) というハード制約から基本タイル 128×512 が導かれる</td></tr>
+    <tr><td>タイリングが要る理由</td><td>SBUF (28MiB) にモデル全体・大きな行列は載らない。載る単位に分割して load→compute→store を繰り返す</td></tr>
+    <tr><td>タイルの形</td><td>partition 軸=128 (SBUF のレーン数)、free 軸=512 (matmul 出力先 PSUM のバンク幅) というハード制約から matmul の基本タイル 128×512 が導かれる。DMA/elementwise の free 幅は partition あたり 224 KiB に収まる範囲で自由</td></tr>
     <tr><td>タイル数</td><td>⌈M/128⌉ × ⌈N/free幅⌉。端数は切り上げで別タイルになる</td></tr>
     <tr><td>SBUF占有</td><td>1タイルの要素数 (128×free幅) × dtype バイト数。タイルを大きくすると占有も増える</td></tr>
     <tr><td>タイリング×融合</td><td>複数のタイリングループを1つに融合すると、中間結果のHBMスピルが消える (attention のタイル処理が代表例)</td></tr>
-    <tr><td>トレードオフ</td><td>タイルを大きくするとDMA効率(帯域利用率)が上がるが、SBUF占有も増える</td></tr>
+    <tr><td>トレードオフ</td><td>タイルを大きく(連続に)するとDMA効率が上がりやすいが、SBUF占有も増える</td></tr>
   </table>
   <div class="key">
-    <b>結論。</b>タイリングとは<b>「SBUF に載る単位まで、大きなデータを固定サイズに刻む」</b>ことです。その形は恣意的ではなく、<b>partition 軸 128・PSUM バンク幅 512 というハードウェアの物理制約</b>から直接導かれます。単に分割するだけでも動きますが、<b>複数の処理をタイル単位で融合</b>すると、第 2・3 回で見た「HBM 往復を消す」効果がタイル粒度でも実現します ― FlashAttention の N×N 非マテリアライズは、その最も鮮やかな実例でした。<br>
-    タイルを大きくすれば DMA 効率は上がりますが、SBUF 占有も増える ― この綱引きの中で、どの軸をどう切るか (partition に何を置くか、free をどれだけ広げるか) が次の論点になります。次回はこの「データレイアウトと並列化」を掘り下げます。
+    <b>結論。</b>タイリングとは<b>「SBUF に載る単位まで、大きなデータを固定サイズに刻む」</b>ことです。その形は恣意的ではなく、<b>partition 軸 128・PSUM バンク幅 512 というハードウェアの物理制約</b>から直接導かれます (ただし free 軸 512 は matmul 出力に固有で、DMA/elementwise はより自由)。単に分割するだけでも動きますが、<b>複数の処理をタイル単位で融合</b>すると、第 2・3 回で見た「HBM 往復を消す」効果がタイル粒度でも実現します ― FlashAttention の N×N 非マテリアライズは、その最も鮮やかな実例でした。<br>
+    タイルを大きく・連続にすれば DMA 効率は上がりやすくなりますが、SBUF 占有も増える ― この綱引きの中で、どの軸をどう切るか (partition に何を置くか、free をどれだけ広げるか) が次の論点になります。次回はこの「データレイアウトと並列化」を掘り下げます。
   </div>
   <div class="fn">
     出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および first_functional_kernel lab / microbenchmarking lab の実測。128×512→128×8192→128×16384 のタイル幅と達成帯域の関係は、ワークショップの実測 (概算) に基づく傾向です。<br>

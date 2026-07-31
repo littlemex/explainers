@@ -114,7 +114,7 @@
   <p style="font-size:15px"><b>この章の題材になっている実装の系譜。</b>ワークショップの llama decode 実装には base(素朴な eager 実装)→ core(torch.compile + NKI 化)→ experimental(megakernel 化) という<b>進化の軸</b>があり、これが本章の 3 段階比較の元ネタです。加えて、core から RMSNorm の実装だけを意図的に劣化させた bad という分岐があり、これは<b>品質の軸</b>(進化の軸とは直交)に属します。「bad は一番遅いから進化の一番手前」ではなく、<b>core の 1 箇所だけを悪くした比較用の枝</b>だと捉えてください。</p>
   <ol class="steps">
     <li><b>Eager 実行</b>: 各演算 (op) が個別に dispatch されます。確保 (alloc) → 起動 (launch) → HBM への書き込み → host への復帰、という手続きを演算ごとに繰り返す。この alloc / copy / kernel launch のオーバーヘッドが、実際の演算そのものより支配的になりやすい。</li>
-    <li><b>torch.compile(backend="neuron")</b>: グラフ全体を融合してから実行するため、host 側の dispatch オーバーヘッドの大半が消えます。ただし、コンパイル境界を跨ぐ eager 処理 (例: KV cache へのスライス代入) が <code>aten::copy_</code> として残ることがあり、これは <code>scatter_</code> 等で in-graph 化すると解消できます。</li>
+    <li><b>torch.compile(backend="neuronx")</b> (<code>import torch_neuronx</code> が必要): グラフ全体を融合してから実行するため、host 側の dispatch オーバーヘッドの大半が消えます。ただし、コンパイル境界を跨ぐ eager 処理 (例: KV cache へのスライス代入) が <code>aten::copy_</code> として残ることがあり、これは <code>scatter_</code> 等で in-graph 化すると解消できます。</li>
     <li><b>Compile + NKI (カーネル融合)</b>: 別々の NKI カーネルを呼ぶたびに sync drain と DMA の re-staging (HBM 往復) が発生します。カーネル境界そのものを減らす (megakernel 化) と、この sync 待ちと re-staging が縮み、Arithmetic Intensity (演算/バイト) が跳ね上がります。</li>
   </ol>
   <p style="font-size:15px"><b>megakernel 化の融合範囲。</b>素朴な decode 1 step は RMSNorm・QKV 射影・RoPE・Attention・KV cache 更新・出力射影・MLP といった段が、それぞれ別々のカーネルとして呼ばれる多段構成です。ワークショップの実測(概算)では、これを「attention サブレイヤー全体を 1 カーネルに融合」+「MLP は別カーネルのまま」という<b>2 カーネル構成</b>に減らしています。「ブロック全部が 1 個に」ではなく、<b>融合の範囲は attention 部分であり、MLP は独立したまま</b>という粒度を正確に捉えておくと、カーネル境界の数え方を誤解しません。</p>
@@ -138,7 +138,7 @@
   <div class="key">
     <b>読み方の原則。</b>プロファイラの表は「次に何を直すべきか」を教えてくれます。<code>aten::copy_</code> が支配的なら、コンパイル境界をまたぐ演算をグラフの内側に移す番。逆に <code>model_default</code> (NEFF の dispatch) が支配的で他がすべて小さいなら、host 側はもう十分に速く、<b>デバイス側 (カーネルの内部) を見る番</b>です。この判断がプロファイラの一番基本的な使い方になります。
   </div>
-  <p style="font-size:15px">補足として、NKI カーネルを <code>torch.compile</code> のグラフの内側に持ち込むには、2 段のラップが要ります。<b><code>@wrap_nki</code></b> がカーネルをトレース可能な形にし、<b><code>@nki_op</code></b> がそれをカスタム op として登録して TorchDynamo に認識させる ― という役割分離です。この 2 段ラップがあるからこそ、NKI カーネルの呼び出しがグラフ融合の対象になり、Eager 段で見えていた host dispatch のオーバーヘッドがそのまま消えます。</p>
+  <p style="font-size:15px">補足として、NKI カーネルを <code>torch.compile</code> のグラフの内側に持ち込むには、2 段のラップが要ります。<b><code>@wrap_nki</code></b> がカーネルをトレース可能な形にし、<b><code>@nki_op</code></b> がそれをカスタム op として登録して TorchDynamo に認識させる ― という役割分離です。この 2 つは<b>本ワークショップ独自の薄いラッパ</b>で、公式 API としては <code>nki.jit</code> / <code>torch_neuronx.nki_jit</code> / <code>torch.library.custom_op</code> が該当します(対応関係は要 SDK 確認)。この 2 段ラップがあるからこそ、NKI カーネルの呼び出しがグラフ融合の対象になり、Eager 段で見えていた host dispatch のオーバーヘッドがそのまま消えます。</p>
   <p style="font-size:15px">もう 1 つの実務レシピが<b>「shape 安定化」</b>です。RoPE の位置や attention mask、KV cache の書き込み位置といった動的な値をそのままコンパイル済み関数に渡すと、値が変わるたびに再コンパイルが走ってしまいます。そこで、これらの動的な値を Python 側であらかじめ固定 shape のテンソルとして計算 (precompute) しておき、コンパイル済み関数には「形の変わらないテンソル」だけを渡す ― という設計にすると、再コンパイルそのものを避けられます。これも host 側オーバーヘッドを消すという、この節の主題の延長にある工夫です。</p>
 </section>
 
@@ -148,8 +148,8 @@
   <div class="key">
     <b>格言的な整理。</b><b>システムプロファイラ</b>は「時間がどこへ行ったか」を教えます (host 側、CPU から見た視点)。<b>デバイスプロファイラ</b>は「ハードウェアが何をしているか」を教えます (NeuronCore の内部、エンジンごとの視点)。前者を「空港の出発ロビー」(手続きと待ち時間)、後者を「実際に飛んでいる飛行機の中」(内部の稼働率) に例えられます。
   </div>
-  <p>システムプロファイラは PyTorch の <code>torch.profiler.profile(...)</code> で取得します。CPU と NeuronCore 両方のアクティビティを記録し、<code>key_averages()</code> で alloc / copy / kernel launch などに分類して集計できます。第 1 段の「Eager vs Compile」の違いは、主にこのシステムプロファイラで見えます。</p>
-  <p>デバイスプロファイラは、NKI カーネル単体、あるいはモデル全体を実行したときにデバイス上で生成されるトレース (<code>profile.ntff</code> 等) を読みます。UI (Neuron Explorer) で可視化するだけでなく、ディスク上の parquet ファイルを直接 pandas 等で読み込む方法もあり、これによりエージェントがプロファイルの数値を読み取って反復的に最適化するワークフローが可能になります。</p>
+  <p>システムプロファイラは PyTorch の <code>torch.profiler.profile(...)</code> で取得します。CPU と NeuronCore 両方のアクティビティを記録し、<code>key_averages()</code> で alloc / copy / kernel launch などに分類して集計できます。第 1 段の「Eager vs Compile」の違いは、主にこのシステムプロファイラで見えます。ただし <code>torch.profiler</code> が直接見ているのは主に host 側の op dispatch であり、エンジン内部の挙動までは取れません。エンジン内部を見るのはこの後のデバイスプロファイラの役割です。</p>
+  <p>デバイスプロファイラは、NKI カーネル単体、あるいはモデル全体を実行したときにデバイス上で生成されるトレース (<code>profile.ntff</code> 等) を読みます。<code>neuron-profile capture</code> で採取し <code>neuron-profile view</code> で可視化するだけでなく、ディスク上の parquet ファイルを直接 pandas 等で読み込む方法もあり、これによりエージェントがプロファイルの数値を読み取って反復的に最適化するワークフローが可能になります。</p>
   <div class="math">
     <span class="c"># システムプロファイラの主な API</span><br>
     torch.profiler.profile(...)&nbsp;&nbsp;<span class="c"># CPU/NeuronCore のアクティビティを記録</span><br>
@@ -168,18 +168,18 @@
 
 <section id="s3">
   <h2><span class="num">3</span>hardware entitlement とのギャップを測る</h2>
-  <p class="lead">第 2 回で「仕事量 ÷ ハード速度 = 理論上限」という考え方 (hardware entitlement) を学びました。プロファイラの実測値と、この理論上限を並べることで、初めて「あとどれだけ縮む余地があるか」が数値で言えるようになります。</p>
+  <p class="lead">第 2 回で「仕事量 ÷ ハード速度 = 理論最短時間 (= 性能の上限)」という考え方 (hardware entitlement) を学びました。プロファイラの実測値と、この理論最短時間を並べることで、初めて「あとどれだけ縮む余地があるか」が数値で言えるようになります。</p>
   <p>やり方は第 2 回と同じです。<b>やるべき仕事量 (FLOP) ÷ ハードウェアの速さ (FLOPS) = かかるべき時間</b>。これを命令レベル (Tier1) と、カーネル全体レベル (Tier2) の両方で見積もり、プロファイラの実測とのギャップを取ります。</p>
   <div class="math">
     <span class="c"># 例: QK matmul と PV matmul (Attention の中心)</span><br>
     仕事量 = rows &times; cols &times; contraction_dim &times; <span class="y">2</span>&nbsp;&nbsp;<span class="c"># ×2 は 乗算+加算</span><br>
     時間   = 仕事量 / エンジンのスループット&nbsp;&nbsp;<span class="c"># これが理論上限 (Tier1/Tier2 entitlement)</span><br><br>
     <span class="c"># Attention 全体の entitlement (概念)</span><br>
-    推定時間 &asymp; QK matmul の時間 + PV matmul の時間 + softmax の時間&nbsp;&nbsp;<span class="p">← 3項を単純加算</span>
+    推定時間 &asymp; QK matmul の時間 + PV matmul の時間 + softmax の時間&nbsp;&nbsp;<span class="p">← 3項を単純加算(オーバーラップ無し仮定の上限見積り)</span>
   </div>
-  <p>この見積もりと、プロファイラが返す実測時間を並べると、<b>「理論上 X のはずが実測 Y、ギャップは Z」</b>という言い方ができるようになります。ギャップが大きいほど、まだ最適化の余地があるということです。第 3 回の FlashAttention のように、素朴な実装から始めて何段階か最適化を積むと、このギャップが徐々に縮んでいく ― という進み方になります。</p>
+  <p>ここで足し合わせた 3 項は、3 つの処理がまったく重ならずに逐次実行された場合の上限見積りです。実際には各エンジンが独立にスケジュールされて処理が重なるため、実測時間はこの単純加算より短くなり、重なりが大きいほど最も遅い処理 (max 側) に寄っていきます。この見積もりと、プロファイラが返す実測時間を並べると、<b>「理論上 X のはずが実測 Y、ギャップは Z」</b>という言い方ができるようになります。ギャップが大きいほど、まだ最適化の余地があるということです。第 3 回の FlashAttention のように、素朴な実装から始めて何段階か最適化を積むと、このギャップが徐々に縮んでいく ― という進み方になります。</p>
   <h3>複数の理論値を梯子状に並べる ― バウンドの梯子</h3>
-  <p>実務では、entitlement は「1 本の理論値」だけでは終わりません。例えば 03 章で見た QKᵀ のような matmul を考えると、「理論上限どおりに動いた場合の時間」だけでなく「不要な再読み込みを除いた場合の時間」「タイル効率まで含めた場合の時間」と、複数の"あるべき時間"を段階的に置けます。仕事量÷速度という単一の理論値は最も緩い下限であり、これをさらに何段かに分けて<b>梯子状</b>に並べることで、隙間ごとに別々の原因を対応させられます。memory-bound 系列なら、実測時間 → (理論上の転送量ぴったりで動いた場合の時間) → (不要な再読み込み=reload が無かった場合の時間)、という具合に理論値を段階的に厳しくしていきます。compute-bound 系列も同様に、実測時間 → (理論 FLOP 数ぴったりの時間) → (無駄な FLOP が無い場合の時間)、と段階を踏みます。</p>
+  <p>実務では、entitlement は「1 本の理論値」だけでは終わりません。例えば 03 章で見た QKᵀ のような matmul を考えると、「理論最短時間どおりに動いた場合の時間」だけでなく「不要な再読み込みを除いた場合の時間」「タイル効率まで含めた場合の時間」と、複数の"あるべき時間"を段階的に置けます。仕事量÷速度という単一の理論値は最も緩い理論最短時間(=最も甘い性能の上限)であり、これをさらに何段かに分けて<b>梯子状</b>に並べることで、隙間ごとに別々の原因を対応させられます。memory-bound 系列なら、実測時間 → (理論上の転送量ぴったりで動いた場合の時間) → (不要な再読み込み=reload が無かった場合の時間)、という具合に理論値を段階的に厳しくしていきます(=上限をより厳しく引き直していきます)。compute-bound 系列も同様に、実測時間 → (理論 FLOP 数ぴったりの時間) → (無駄な FLOP が無い場合の時間)、と段階を踏みます。</p>
   <div class="math">
     <span class="c"># memory-bound 系列(緩い→厳しい、右へ行くほど理論値が厳しくなる)</span><br>
     実測時間 &gt; memory_bound(理論転送量 &divide; 帯域) &gt; memory_bound_no_reloads(reload 除去後)<br><br>
@@ -190,9 +190,9 @@
     memory_bound ― no_reloads の隙間&nbsp;&nbsp;<span class="p">&larr; 余剰トラフィック(不要な再読み込み)</span><br>
     compute_bound ― useful_flops の隙間&nbsp;&nbsp;<span class="p">&larr; transpose過多・無駄な演算</span>
   </div>
-  <p>この梯子を使う利点は、「遅い」という 1 つの事実を、原因の異なる複数の隙間に切り分けられることです。ワークショップの実測(概算)では、素朴な実装から段階的に最適化を積むと、実測と理論値の比(excess ratio)が例えば 12 倍程度から段階を追うごとに縮んでいく、という傾向が見られました。1 段直しただけで全部の隙間が消えるわけではなく、<b>どの段の隙間が一番大きいか</b>を見て、そこに対応する対策(DMA効率化・reload削減・タイリング見直し・transpose削減)を選ぶのが実務的な進め方です。</p>
+  <p>この梯子を使う利点は、「遅い」という 1 つの事実を、原因の異なる複数の隙間に切り分けられることです。ワークショップの実測(概算)では、この lab の特定の形状において、素朴な実装から段階的に最適化を積むと、実測と理論値の比(excess ratio)が例えば 12 倍程度から段階を追うごとに縮んでいく、という傾向が見られました。1 段直しただけで全部の隙間が消えるわけではなく、<b>どの段の隙間が一番大きいか</b>を見て、そこに対応する対策(DMA効率化・reload削減・タイリング見直し・transpose削減)を選ぶのが実務的な進め方です。</p>
   <div class="key">
-    <b>Roofline との接続。</b>第 2 回の Roofline も、実はこの entitlement と同じ道具の別の見せ方です。<b>演算強度 (Arithmetic Intensity = FLOP ÷ 転送バイト数)</b> を見て、ridge point (ハードウェア固有の折れ点) より低いか高いかで、compute-bound か memory-bound かを判定できます。ridge point の値自体もプロファイラから直接取得できるため、「紙と鉛筆の概算」と「実測のプロファイル」を同じ図の上で比較できます。
+    <b>Roofline との接続。</b>第 2 回の Roofline も、実はこの entitlement と同じ道具の別の見せ方です。<b>演算強度 (Arithmetic Intensity = FLOP ÷ 転送バイト数)</b> を見て、ridge point (ハードウェア固有の折れ点) より低いか高いかで、compute-bound か memory-bound かを判定できます。ridge point は<b>peak FLOPS ÷ peak BW から算出するハード定数</b>で、プロファイラ自体が返す値ではありません。プロファイラは実測点を Roofline 図上にプロットするのに使い、「紙と鉛筆の概算 (ridge point)」と「実測のプロファイル」を同じ図の上で比較します。
   </div>
   <p>実際のワークフローはこう進みます。①CPU にオフロードされている演算を特定する、②既存のライブラリカーネルを適用できる箇所に適用する、③プロファイルを取得する、④Tensor Engine のギャップや DMA のスパース度を確認する、⑤最も効いているボトルネックを特定する。最後の一手は、多くの場合<b>「仕事が多すぎる」か「エンジンが遊んでいる」か</b>の二択に単純化して整理できます。仕事が多すぎるなら演算そのものを削る (アルゴリズム的な改善、低精度化)。エンジンが遊んでいるなら、次章以降で扱うタイリングやパイプライン化でその遊びを埋めます。</p>
 </section>
@@ -216,7 +216,7 @@
   <p>横棒 1 本が 1 エンジンの稼働率 (相対・概念値) です。3 つのボタンで、典型的な 3 つのプロファイル像を切り替えられます。</p>
   <ul>
     <li><b>健全なプロファイル</b>: 各エンジンがそれぞれの役割で高い稼働率を保ち、極端に遊んでいるエンジンが無い状態。</li>
-    <li><b>Vector がビジー / Tensor がアイドル</b>: 第 1 回・第 3 回の Self-Attention の実演で実際に起きたパターン。softmax を担う Vector Engine が張り付いて busy な一方、行列積を担う Tensor Engine は次の入力を待って遊んでいる。これは<b>structural hazard</b> ― あるエンジンの結果を別のエンジンが待つことで生じる、構造的な遊休です。</li>
+    <li><b>Vector がビジー / Tensor がアイドル</b>: 第 1 回・第 3 回の Self-Attention の実演で実際に起きたパターン。softmax を担う Vector Engine が張り付いて busy な一方、行列積を担う Tensor Engine は次の入力を待って遊んでいる。これは<b>データ依存 (RAW) によるストール</b>です(structural hazard は本来別エンジン同時使用時の資源競合を指す語で、ここでは使いません)。</li>
     <li><b>sync 待ちが多い</b>: 複数のカーネル呼び出し (境界の多い構成) では、境界ごとに sync 命令が入り、全エンジンが同時にアイドルになる「drain」の谷が周期的に現れます。境界を減らす (megakernel 化) と、この谷自体が浅く・少なくなります。</li>
   </ul>
   <p>いずれのパターンでも、<b>一番稼働率の低いエンジンがボトルネックとは限らない</b>点に注意してください。むしろ「ビジーすぎるエンジンが、他のエンジンを待たせている」ケースの方が多く、赤くハイライトされたエンジンが<b>次に手を入れるべき箇所</b>です。</p>
@@ -232,9 +232,9 @@
   <div class="math">
     <span class="c"># achieved bandwidth の算出式</span><br>
     achieved_bw = DMA 転送バイト数の合計 &divide; DMA が稼働していた時間<br>
-    %peak = achieved_bw &divide; peak_bw&nbsp;&nbsp;<span class="c"># peak_bw もプロファイラが実測環境から自己校正する値</span>
+    %peak = achieved_bw &divide; peak_bw&nbsp;&nbsp;<span class="c"># peak_bw はハード仕様値、または microbench で測る上限</span>
   </div>
-  <p>第 1 回で見た「ピーク帯域」の実測値は、この式で算出された achieved_bw の積み上げです。<b>%peak が低い</b>状態は、DMA フラグメンテーション (転送が小さく分かれて固定オーバーヘッドが償却されない) か、そもそも転送すべきでないデータまで運んでいる (余剰トラフィック) かのいずれかを疑うきっかけになります。</p>
+  <p>第 1 回で見た「ピーク帯域」の実測値は、大きな転送で achieved_bw をこの peak_bw に漸近させたものです。<b>%peak が低い</b>状態は、DMA フラグメンテーション (転送が小さく分かれて固定オーバーヘッドが償却されない) か、そもそも転送すべきでないデータまで運んでいる (余剰トラフィック) かのいずれかを疑うきっかけになります。</p>
   <p><b>sync 命令数</b>は、カーネル境界やエンジン間の待ち合わせのたびに挿入される同期の回数です。複数の NKI カーネルを個別に呼ぶ構成 (例: 4 つのカーネルに分かれた構成) と、単一の融合カーネル (megakernel) を比較すると、sync 命令数・カーネル境界の数・DMA フラグメンテーション・GP-SIMD のプロローグ (起動準備) の回数のいずれも、境界を減らした側で明確に少なくなります。</p>
   <div class="math">
     <span class="c"># Arithmetic Intensity (AI) = 演算数 ÷ 転送バイト数</span><br>
@@ -253,7 +253,7 @@
   <p>Self-Attention の実装をタイリングして融合したあと、プロファイルを取ると 2 つの改善余地が見つかりました。</p>
   <ol class="steps">
     <li><b>Vector Engine が非常にビジー</b>: softmax の正規化 (row max の減算、指数関数、行合計) をすべて Vector Engine が担っており、負荷が集中していた。</li>
-    <li><b>Tensor Engine がアイドル</b>: Vector Engine の処理が終わるまで、次の matmul を始められない ― structural hazard による待ちが発生していた。</li>
+    <li><b>Tensor Engine がアイドル</b>: Vector Engine の処理が終わるまで、次の matmul を始められない ― データ依存 (RAW) による待ちが発生していた。</li>
   </ol>
   <p>この 2 つを<b>1 つずつ</b>潰していきます。まず、softmax の除算をタイルごとに何度も行う代わりに、線形性を利用して<b>除算を最後まで遅延</b>させ、除算の回数そのものを減らす (アルゴリズム的な改善)。次に、正規化・指数関数・行合計という 3 つの操作を、Scalar Engine の 1 命令 (bias 適用 + activation + 並列 reduction) にまとめてオフロードし、<b>Vector Engine の負荷を軽減</b>する。さらに、PV matmul 前の value 行列の transpose を BF16 にダウンキャストし、Tensor Engine の transpose 自体を速くする (第 8 回の低精度化の先取り)。</p>
   <div class="key">
@@ -261,18 +261,19 @@
   </div>
   <details>
     <summary>MFU が思ったほど上がらないこともある(クリックで展開)</summary>
-    <p style="font-size:15px">高速化の大半が「複数エンジンを同時に働かせること」から来ている場合、Tensor Engine 単体の利用率 (MFU) 自体はさほど上がらないことがあります。これは KPI の意味を丁寧に解釈する必要があるという教訓で、MFU が低いからといって「まだ余地がある」と短絡的に判断せず、<b>どのエンジンがボトルネックだったか</b>を見て評価するべきです。</p>
+    <p style="font-size:15px">ここでの MFU (Model FLOPs Utilization = 実際に計算した FLOP ÷ 理論ピーク FLOP ÷ 時間) と、これまで見てきた「Tensor Engine 稼働率」(そのエンジンが busy だった時間の割合) は別の指標です。高速化の大半が「複数エンジンを同時に働かせること」から来ている場合、Tensor Engine の稼働率が上がっても、MFU (Tensor Engine 単体の FLOP 効率) 自体はさほど上がらないことがあります。これは KPI の意味を丁寧に解釈する必要があるという教訓で、MFU が低いからといって「まだ余地がある」と短絡的に判断せず、<b>どのエンジンがボトルネックだったか</b>を見て評価するべきです。</p>
   </details>
 </section>
 
 <section id="s7">
   <h2><span class="num">7</span>よくあるエラーと対処 ― チートシート</h2>
   <p class="lead">プロファイラで測る前の段階で、コンパイルや実行が止まってしまうこともあります。エラーコードを丸暗記する必要はありません。<b>これは実務で詰まったときに辞書的に見返す表であり、通読は不要です。</b>分類だけ知っておくと、どの章の知識で対処すべきかが素早く分かります。</p>
+  <p style="font-size:14px;color:var(--sub)">以下の分類名 (EOOM/EVRF/EARG) は本ワークショップでの整理・分類です。</p>
   <table>
     <tr><th>分類</th><th>典型的な症状</th><th>対処の方向</th></tr>
     <tr><td>EOOM 系(メモリ超過)</td><td>SBUF や PSUM の確保に失敗する</td><td>タイルサイズを縮小する、allocation (第 7 回) の使い方を見直す</td></tr>
     <tr><td>EVRF 系(検証エラー)</td><td>指定した dtype や演算子がその命令に非対応</td><td>対応している dtype/演算子の組み合わせに変更する。世代 (gen) によって対応状況が異なる点にも注意</td></tr>
-    <tr><td>EARG 系(引数不整合、例: EARG001)</td><td>LNC (Logical NeuronCore) の指定が世代の上限と食い違う</td><td>世代ごとの LNC 上限を確認して指定し直す (第 6 回のレイアウト/並列化の議論と直結)</td></tr>
+    <tr><td>EARG 系(引数不整合、例: EARG001)</td><td>LNC (Logical NeuronCore、Trn2 では 1 または 2) の指定が世代の上限と食い違う</td><td>世代ごとの LNC 上限を確認して指定し直す (第 6 回のレイアウト/並列化の議論と直結)</td></tr>
   </table>
   <p style="font-size:15px">いずれの分類も、<b>「何が」ではなく「なぜ」超過・非対応・不整合になったか</b>を見るのがコツです。EOOM ならタイルの敷き詰め方 (第 5 回)、EVRF なら精度階段のどの段を使っているか (第 8 回)、EARG001 なら LNC の並列構成 (第 6 回) ― それぞれ前後の章の知識に戻って原因を探ると解決が早くなります。</p>
 </section>
@@ -285,7 +286,7 @@
     <tr><td>Eager→Compile→Compile+NKI</td><td>3 段階を比較すると host dispatch overhead の縮み方が段階的に見える。alloc/copy/kernel launch の数が減っていく</td></tr>
     <tr><td>二階層のプロファイラ</td><td>システムプロファイラ=「時間がどこへ行ったか」(host)。デバイスプロファイラ=「ハードウェアが何をしているか」(NeuronCore 内部)</td></tr>
     <tr><td>hardware entitlement</td><td>仕事量÷ハード速度=理論上限。実測とのギャップを数値化することが最適化の出発点になる</td></tr>
-    <tr><td>エンジン別稼働率</td><td>ビジーなエンジンとアイドルなエンジンを両方見る。アイドルの原因は多くの場合 structural hazard(他エンジン待ち)</td></tr>
+    <tr><td>エンジン別稼働率</td><td>ビジーなエンジンとアイドルなエンジンを両方見る。アイドルの原因は多くの場合データ依存(RAW)による他エンジン待ち</td></tr>
     <tr><td>DMA/sync</td><td>DMA フラグメンテーション(小転送の多発)と sync 命令数(カーネル境界のたび)は、境界を減らす(融合)ほど縮む</td></tr>
     <tr><td>反復ループ</td><td>ボトルネックを1つずつ潰し、直すたびに再度測る。一度に全部を直そうとしない</td></tr>
     <tr><td>よくあるエラー</td><td>EOOM(メモリ超過)/EVRF(非対応dtype・演算子)/EARG(LNC不整合)。分類で捉え、前後の章の知識に戻って対処する</td></tr>
@@ -406,7 +407,7 @@ function rr(ct,x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h
     vecbusy:{
       vals:[22,95,48,30,35],
       bottleneck:1,
-      note:'Vector Engine が張り付いてビジー。Tensor Engine は次の入力(正規化後の値)を待ってアイドル ― structural hazard。'
+      note:'Vector Engine が張り付いてビジー。Tensor Engine は次の入力(正規化後の値)を待ってアイドル ― データ依存(RAW)によるストール。'
     },
     sync:{
       vals:[55,50,45,38,88],
