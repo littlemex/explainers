@@ -74,7 +74,7 @@
 <header>
   <p class="kicker">NKI WORKSHOP ・ 01</p>
   <h1>Trainium のハードウェア階層をビジュアルに理解する</h1>
-  <p>Chip・NeuronCore・HBM / SBUF / PSUM ― 容量と帯域の差、そして「ソフトウェアが全部管理する」思想</p>
+  <p>Chip・NeuronCore・HBM / SBUF / PSUM ― 容量と帯域の差を、絵と公式スペックで腹落ちさせる</p>
 </header>
 <main>
 
@@ -83,7 +83,7 @@
   <p class="lead">NKI (Neuron Kernel Interface) で高性能なカーネルを書くには、まず<b>ハードウェアのメンタルモデル</b>が要ります。どのメモリがどれだけ速く・どれだけ入るのか、データはどう動くのか。ここでは AWS Trainium2 の 3 層メモリ階層 (HBM / SBUF / PSUM) と計算エンジンの関係を、絵と実測値で腹落ちさせます。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    Trainium は<b>「小さくて速い」オンチップメモリ (SBUF / PSUM) と「大きくて遅い」HBM</b>の 3 層で、その間を <b>DMA エンジン</b>が運びます。GPU と決定的に違うのは、<b>ハードウェアが自動で中身を出し入れするキャッシュではなく、どのデータをいつどこに置くかを全部ソフトウェア (あなた) が明示的に管理するスクラッチパッド</b>だということ。この記事で「速度と容量の地図」を頭に入れれば、以降のカーネル最適化がすべて「この地図の上でデータをどう動かすか」に見えてきます。
+    Trainium は<b>「小さくて速い」オンチップメモリ (SBUF / PSUM) と「大きくて遅い」HBM</b>の 3 層で、その間を <b>DMA エンジン</b>が運びます。それぞれ<b>容量と帯域が大きく違い</b>、この非対称が後続のカーネル最適化すべての土台になります。この記事で「速度と容量の地図」を頭に入れれば、以降の最適化がすべて「この地図の上でデータをどう動かすか」に見えてきます。
   </div>
   <div class="toc">
     <a href="#s1">1. Chip / Device / Core の関係</a>
@@ -106,11 +106,22 @@
   <p class="lead">まず用語を揃えます。「デバイス」「コア」「インスタンス」は別物です。</p>
   <p>Trainium は階層で数えます。一番外から見ると:</p>
   <ol class="steps">
-    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GiB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(理論ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされ、<b>いずれも物理コア 1 個あたりの値</b>です。だから物理 8 コアぶんを単純に足すだけで求まり、LNC(論理コアの束ね方)には依存しません ― どちらの精度で数えるかだけが効きます。</span></li>
+    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GiB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(理論ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料 (<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/nki/arch/trainium2_arch.html" target="_blank" rel="noopener">NKI アーキテクチャガイド</a>) では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされ、<b>いずれも物理コア 1 個あたりの値</b>です。だから物理 8 コアぶんを単純に足すだけで求まり、LNC(論理コアの束ね方)には依存しません ― どちらの精度で数えるかだけが効きます。チップ全体の公称値は <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trainium2.html" target="_blank" rel="noopener">FP8 1,299 / BF16 667 TFLOPS</a>。</span></li>
     <li><b>NeuronCore (物理コア)</b>: 1 デバイスの中に <b>8 個の物理コア</b>があります (TRN2/TRN3)。2 コアが 1 つの HBM バンクを共有します。</li>
     <li><b>LNC (Logical NeuronCore)</b>: 既定は <b>LNC2</b> で、<b>2 つの物理コアを 1 つの論理コアとして扱います</b>。だから <code>neuron-ls</code> は 8 でなく 4 コアと表示します。なぜ束ねるのかは 06 章で扱います。</li>
     <li><b>Instance</b>: 複数デバイスをまとめたもの (例: 16 デバイス)。今回のワークショップは <b>trn2.3xlarge (単一デバイス)</b> を使います。</li>
   </ol>
+  <p>言葉だけだと入れ子の関係が掴みにくいので、1 枚の図にします。クリックすると各階層がハイライトされます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv_hier" width="840" height="420"></canvas>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fb8f0"></span>Instance</span>
+    <span><span class="dot" style="background:var(--hbm)"></span>Device (チップ)</span>
+    <span><span class="dot" style="background:var(--te)"></span>NeuronCore</span>
+    <span><span class="dot" style="background:var(--sbuf)"></span>2 コアで 1 HBM バンクを共有</span>
+  </div>
+  <p>クリックした階層の説明: <span id="hierMsg">図の各層をクリックしてみてください。</span></p>
   <div class="key">
     この記事で主役になるのは <b>1 つの NeuronCore の内側</b>です。カーネルは基本この単位で動き、メモリ (SBUF / PSUM) も計算エンジンもこのコアに属します。「まず 1 コアを使い切る」がカーネル最適化の出発点です。以降、この記事で「1 コア」と書くときは<b>物理 NeuronCore</b>を指します (LNC でまとめた論理コアではありません)。</div>
 </section>
@@ -118,7 +129,7 @@
 <section id="s2">
   <h2><span class="num">2</span>NeuronCore の中身 ― 4 つのエンジン</h2>
   <p class="lead">NeuronCore は「1 つの万能プロセッサ」ではなく、役割の違う専用エンジンの集まりです。</p>
-  <p>Trainium は<b>ディープラーニング専用にゼロから設計</b>されており、必要な演算ごとに専用ハードウェアブロックを持ちます。これを<b>ヘテロジニアス (異種混在) コンピュートアーキテクチャ</b>と呼びます。</p>
+  <p>Trainium は<b>ディープラーニング専用にゼロから設計</b>されており、必要な演算ごとに専用ハードウェアブロックを持ちます。汎用の 1 コアが何でもこなすのではなく、<b>行列積・要素演算・活性化・カスタム演算をそれぞれ別のエンジンが担当</b>します。</p>
   <table>
     <tr><th>エンジン</th><th>役割</th><th>ひとこと</th></tr>
     <tr><td><b>Tensor Engine</b></td><td>行列積 (MatMul)・transpose・broadcast</td><td>128&times;128 の systolic array。<b>FLOP の約 90% がここ</b></td></tr>
@@ -127,8 +138,22 @@
     <tr><td><b>GP-SIMD Engine</b></td><td>カスタム演算・descriptor 生成など</td><td>8 個の SIMD プロセッサ。汎用の受け皿</td></tr>
   </table>
   <div class="key">
-    <b>Tensor Engine の内部は 2 命令に分かれる。</b>128&times;128 systolic array を動かす実際の ISA 命令は <b>LoadStationary</b> (片方の行列をアレイに固定ロード) と <b>MultiplyMoving</b> (もう片方を流し込んで乗算) の 2 つです。ハードウェア的には <b>LoadStationary が MultiplyMoving より最大で約 4 倍速い</b>という非対称があり、この差が「<b>両者の free 軸がともに 128 以下に収まる範囲で</b>、free 軸が大きい方の行列を stationary 側に置く (遅い MultiplyMoving 側の free 軸を小さく抑える)」という最適化の定石 (06 章で詳述) の根拠になります。行列&times;ベクトル積 (自己回帰的なトークン生成で頻出) では行列側を stationary に置くのが効きます。LoadStationary / MultiplyMoving はハードウェア内部の下位 ISA 命令で、NKI からは <code>nki.isa.nc_matmul</code> という 1 つの行列積命令として露出します。
+    <b>Tensor Engine は 128&times;128 の systolic array。</b>行列積を、格子状に並んだ 128&times;128 個の積和演算器 (PE) にデータを流し込んで解きます。片方の行列を格子に<b>固定 (stationary) して保持</b>し、もう片方を<b>流し込む (moving) と、各 PE が積和を次々にリレー</b>していく ― この「データが格子を流れる」動きが systolic (心臓の拍動のような) と呼ばれる所以です。下の図でその流れを見ます。NKI からはこの行列積が <code>nki.isa.nc_matmul</code> という 1 命令として使えます (格子への載せ方・流し方の最適化は 06 章で扱います)。
   </div>
+  <div class="canvas-wrap">
+    <canvas id="cv_sys" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button id="sysPlay">流れを再生</button>
+    <button id="sysReset" class="ghost">最初から</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fb8f0"></span>stationary (格子に固定)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>moving (流れ込む入力)</span>
+    <span><span class="dot" style="background:#43b581"></span>PE (積和・稼働中)</span>
+    <span><span class="dot" style="background:var(--psum)"></span>PSUM (出力)</span>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">実物は 128&times;128 の PE が並びますが、ここでは動きが見えるように一部 (6&times;6) を描いています。複数の PE が同時に光っている部分が「並列に積和が進んでいる」ことを表します。</p>
   <div class="key">
     <b>設計思想。</b>これらは<b>独立にスケジュールされ、並列に動きます</b>。Tensor Engine でタイル行列積をしている「その裏で」Vector Engine が別の reduction を回す ― という<b>エンジン間パイプライン</b>でチップを使い切るのが狙いです。だから「1 つのエンジンだけ速くする」のではなく「全エンジンを同時に働かせる」のが性能の鍵になります。
   </div>
@@ -148,7 +173,7 @@
     <span><span class="dot" style="background:var(--te)"></span>エンジン</span>
     <span><span class="dot" style="background:#f0a58e"></span>DMA が運ぶデータ</span>
   </div>
-  <p>流れを言葉にすると: <b>HBM</b> から <b>DMA</b> が SBUF へ運び (①)、<b>SBUF</b> の 2 入力を <b>Tensor Engine</b> が読んで計算し (②)、結果を <b>PSUM</b> に蓄積 (③)。<b>Vector / Scalar</b> が PSUM から SBUF へ退避し (④)、最後に <b>DMA</b> が SBUF から HBM へ書き戻す (⑤)。計算エンジンは HBM を直接触れず、必ず SBUF を経由します。この記事の主題はメモリなので、以降はエンジンより<b>「データがどこに置かれ、どう運ばれるか」</b>に集中します。</p>
+  <p>流れを、実際に「何が」流れているかまで具体化すると: (①) <b>DMA</b> が <b>重みタイル W</b> と <b>活性タイル X</b> を HBM から SBUF へ運ぶ。(②) <b>Tensor Engine</b> が SBUF 上の <b>2 入力 (W と X)</b> を読んで行列積を計算する。(③) 結果の <b>部分和 (partial sum)</b> が <b>PSUM</b> に蓄積される。(④) <b>Vector / Scalar</b> が PSUM の部分和を読み、必要なら活性化などを施しながら SBUF へ退避する (退避後のデータが出力 <b>Y</b>)。(⑤) <b>DMA</b> が出力 <b>Y</b> を SBUF から HBM へ書き戻す。計算エンジンは HBM を直接触れず、必ず SBUF を経由します。この記事の主題はメモリなので、以降はエンジンより<b>「データがどこに置かれ、どう運ばれるか」</b>に集中します。</p>
 </section>
 
 <section id="s3">
@@ -169,7 +194,8 @@
     <tr><td><b style="color:var(--psum)">PSUM</b></td><td>オンチップ SRAM</td><td>128 part &times; 8 bank &times; 512 要素 (計 2 MiB)</td><td>最速・Tensor Engine 蓄積用</td><td>行列積の蓄積は TE 固有 / Vector・Scalar もアクセス可 (GpSimd 不可)</td></tr>
   </table>
   <div class="warn">
-    <b>ここが最重要の直感。</b>SBUF は HBM より<b>桁違いに速いが、桁違いに小さい</b> (96 GiB 対 28 MiB = 約 3400 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。
+    <b>ここが最重要の直感。</b>SBUF は HBM より<b>ずっと速いが、ずっと小さい</b> (容量は 96 GiB 対 28 MiB = 約 3400 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。<br>
+    <span style="font-size:14px;color:var(--sub)">注: 一般論として、HBM (DRAM) のアクセスは数百 ns オーダー、オンチップ SRAM (SBUF/PSUM) は ns オーダーで、レイテンシで 2 桁ほど差がある。帯域でもオンチップが大きく上回る。ここでの「速い/遅い」はこの意味で、具体的な絶対値は世代・アクセスパターンに依存する。</span>
   </div>
 </section>
 
@@ -308,7 +334,8 @@
     <b>用語を正確に。</b>「SBUF はオンチップ SRAM なんだから、GPU の L2 キャッシュと同じでは?」と思うかもしれません。<b>物理的な素材 (SRAM) は同じですが、管理方式が根本的に違います。</b><br>
     ・<b>キャッシュ (cache)</b>: ハードウェアが自動で中身を出し入れする。どのデータが載っているかはタグで管理され、ヒット/ミスはプログラムから<b>透過的</b> (見えない)。ソフトは「どこに何を置くか」を指定できない。<br>
     ・<b>スクラッチパッド (scratchpad)</b>: 番地を持つ普通のメモリで、<b>載せる・降ろすを全部ソフトが明示的に命令する</b>。自動のヒット/ミスは無い。<br>
-    SBUF / PSUM は<b>後者 (スクラッチパッド)</b>です。だから正しくは「<b>Trainium はキャッシュを持たない</b>」ではなく「<b>ハードウェア管理のキャッシュを持たず、代わりにソフトウェア管理のスクラッチパッドを持つ</b>」です。<br>
+    SBUF は<b>後者 (スクラッチパッド)</b>の代表例です。だから正しくは「<b>Trainium はキャッシュを持たない</b>」ではなく「<b>ハードウェア管理のキャッシュを持たず、代わりにソフトウェア管理のオンチップメモリを持つ</b>」です。<br>
+    <span style="font-size:14px;color:var(--sub)">注: 厳密には、自由に読み書きできる汎用スクラッチパッドと呼べるのは主に SBUF。PSUM は「Tensor Engine の行列積の出力受け皿」という用途に強く縛られた専用バッファで、汎用スクラッチパッドとは性格が異なる (7 章参照)。</span><br>
     補足: GPU にも shared memory (scratchpad) はあり、「GPU=キャッシュのみ」ではありません。違いは、GPU では L1/L2 キャッシュ+ハードウェア prefetch が併存するのに対し、<b>Trainium は全メモリ移動が DMA として明示的</b>で、ハードウェア管理キャッシュそのものを持たない点です。
   </div>
   <table>
@@ -343,14 +370,213 @@
     <b>結論。</b>Trainium の性能は<b>「小さくて速いオンチップ (SBUF/PSUM) と、大きくて遅い HBM の間で、いかにデータを賢く動かすか」</b>に尽きます。partition 次元 (128) を使い切り、大きな連続転送で DMA 帯域を稼ぎ、SBUF 上で処理を繋げて HBM 往復を減らす。GPU と違って<b>ハードウェア管理キャッシュが自動で助けてくれない代わりに、スクラッチパッドをすべて自分で設計できる</b>。この「容量と帯域の地図」が、以降の NKI カーネル最適化すべての土台になります。
   </div>
   <div class="fn">
-    出典: NKI Workshop (AWS Trainium2/Trainium3, NeuronCore v3/v4) の講義および microbenchmarking lab の実測。数値は TRN2 / 単一 NeuronCore (trn2.3xlarge) の測定に基づく。<br>
-    注意: 本ページの図と数値は、Trainium のメモリ階層を直感的に伝えるための<b>模式的な可視化</b>です。実際の容量・帯域・達成値は世代 (TRN2/TRN3)・LNC 設定・精度・カーネル実装・プロファイル条件に依存します。GPU の内部構造は本記事では扱いません (別記事)。
+    出典 (ハードウェア数値): AWS 公式 Neuron ドキュメント ―
+    <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trainium2.html" target="_blank" rel="noopener">Trainium2 Architecture</a>
+    (8 NeuronCore-v3 / HBM 96 GiB・2.9 TB/s / FP8 1,299・BF16 667 TFLOPS) および
+    <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/nki/arch/trainium2_arch.html" target="_blank" rel="noopener">Trainium2 Architecture Guide for NKI</a>
+    (SBUF 28 MiB=128&times;224 KiB / PSUM 2 MiB / Tensor Engine 158 FP8・79 BF16 dense TFLOPS/コア)。<br>
+    435 GB/s 等の帯域・タイル形状別の達成値は、単一 NeuronCore での実測に基づく概算値です。<br>
+    注意: 本ページの図は、Trainium のメモリ階層を直感的に伝えるための<b>模式的な可視化</b>です。実際の容量・帯域・達成値は世代 (TRN2/TRN3)・LNC 設定・精度・カーネル実装・プロファイル条件に依存します。GPU の内部構造は本記事では扱いません (別記事)。<br>
+    シリーズの他の章と学習順序は <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。
   </div>
 </section>
 
 </main>
 <script>
 function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=1e3)return (n/1e3)+'K';return ''+n;}
+
+// ============ デモd: Chip / Device / Core の階層図 ============
+(function(){
+  const cv=document.getElementById('cv_hier'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let selected=null;
+
+  function rr(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+
+  // 領域定義
+  const instBox={x:20,y:26,w:800,h:100};
+  const devBox ={x:60,y:150,w:720,h:130};
+  const coreBox={x:60,y:296,w:720,h:104};
+  const coreW=70, coreH=44, coreGapX=14, coreGapY=12;
+  const coreStartX=100, coreStartY=176;
+  const cores=[];
+  for(let i=0;i<8;i++){
+    const col=i%4, row=Math.floor(i/4);
+    cores.push({x:coreStartX+col*(coreW+coreGapX), y:coreStartY+row*(coreH+coreGapY), w:coreW, h:coreH, idx:i});
+  }
+  // ペア (2コアで1 HBM バンク共有): (0,1)(2,3)(4,5)(6,7)
+  const pairs=[[0,1],[2,3],[4,5],[6,7]];
+
+  const regions=[
+    {key:'core', hit:(x,y)=>cores.some(c=>x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h),
+      msg:'NeuronCore (物理コア) = 計算の主役。Tensor / Vector / Scalar / GP-SIMD の4エンジンと SBUF (28 MiB) / PSUM (2 MiB) を持つ。1 デバイスに 8 個。'},
+    {key:'bank', hit:(x,y)=>pairs.some(p=>{const a=cores[p[0]],b=cores[p[1]];
+        return x>=a.x-8&&x<=b.x+b.w+8&&y>=a.y-8&&y<=a.y+a.h+8;})&&!cores.some(c=>x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h),
+      msg:'2 つの NeuronCore が 1 つの HBM バンクを共有する。既定の LNC2 は、この2物理コアを1つの論理コアとして扱う設定 (neuron-ls では4コア表示)。'},
+    {key:'device', hit:(x,y)=>x>=devBox.x&&x<=devBox.x+devBox.w&&y>=devBox.y&&y<=devBox.y+devBox.h,
+      msg:'Device = 1 枚の Trainium2 チップ。96 GiB HBM (4 スタック) と 8 個の NeuronCore-v3 を持つ。FP8 dense で約 1.3 PFLOPS。'},
+    {key:'instance', hit:(x,y)=>x>=instBox.x&&x<=instBox.x+instBox.w&&y>=instBox.y&&y<=instBox.y+instBox.h,
+      msg:'Instance = 複数の Device をまとめた実行単位。今回のワークショップは trn2.3xlarge (単一 Device) を使う。'}
+  ];
+
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // Instance 枠
+    ct.setLineDash([6,4]);
+    ct.strokeStyle= selected==='instance' ? '#8fb8f0' : 'rgba(143,184,240,0.5)';
+    ct.lineWidth= selected==='instance' ? 3 : 1.5;
+    rr(instBox.x,instBox.y,instBox.w,instBox.h,14);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#8fb8f0';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('Instance (複数 Device。例: 16 Device)',instBox.x+14,instBox.y+22);
+    ct.font='12px sans-serif';ct.fillStyle='#9fb7d4';
+    ct.fillText('本ワークショップは trn2.3xlarge = 単一 Device を使用',instBox.x+14,instBox.y+42);
+    // 小さい Device アイコンを並べて「複数」を示す
+    for(let i=0;i<5;i++){
+      const dx=instBox.x+14+i*70, dy=instBox.y+58, dw=54, dh=34;
+      ct.fillStyle = i===0 ? '#3a231c' : 'rgba(224,122,95,0.18)';
+      ct.strokeStyle = i===0 ? '#e07a5f' : 'rgba(224,122,95,0.35)';
+      ct.lineWidth=1.5; rr(dx,dy,dw,dh,6);ct.fill();ct.stroke();
+      if(i===0){ct.fillStyle='#eaf7f0';ct.font='10px sans-serif';ct.textAlign='center';ct.fillText('Device',dx+dw/2,dy+dh/2+4);}
+    }
+    ct.fillStyle='#6b7d8a';ct.font='16px sans-serif';ct.textAlign='left';ct.fillText('...',instBox.x+14+5*70,instBox.y+58+24);
+
+    // 接続線 (instance -> device)
+    ct.strokeStyle='rgba(143,214,180,0.4)';ct.lineWidth=1.5;
+    ct.beginPath();ct.moveTo(instBox.x+40,instBox.y+92);ct.lineTo(devBox.x+40,devBox.y);ct.stroke();
+
+    // Device 枠
+    ct.strokeStyle= selected==='device' ? '#e07a5f' : 'rgba(224,122,95,0.6)';
+    ct.lineWidth= selected==='device' ? 3 : 1.5;
+    rr(devBox.x,devBox.y,devBox.w,devBox.h,14);ct.stroke();
+    ct.fillStyle='#e07a5f';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('Device (1 チップ) ― 96 GiB HBM (4 スタック)・8 NeuronCore-v3・FP8 約1.3 PFLOPS',devBox.x+14,devBox.y+18);
+
+    // pair 背景 (HBM bank 共有)
+    pairs.forEach((p,pi)=>{
+      const a=cores[p[0]], b=cores[p[1]];
+      const bx=a.x-8, by=a.y-8, bw=(b.x+b.w)-a.x+16, bh=a.h+16;
+      ct.setLineDash([4,3]);
+      ct.strokeStyle = selected==='bank' ? '#3d7dca' : 'rgba(61,125,202,0.45)';
+      ct.lineWidth=1.5; rr(bx,by,bw,bh,10);ct.stroke();ct.setLineDash([]);
+    });
+    ct.fillStyle='#8fb0d6';ct.font='11px sans-serif';ct.textAlign='left';
+    ct.fillText('点線の枠 = 2コアで1 HBMバンクを共有 (計4バンク)',devBox.x+14,devBox.y+devBox.h-8);
+
+    // NeuronCore 小箱 x8
+    cores.forEach(c=>{
+      ct.fillStyle= selected==='core' ? '#173a26' : '#12321f';
+      ct.strokeStyle= selected==='core' ? '#43b581' : '#2f7a54';
+      ct.lineWidth= selected==='core' ? 2.5 : 1.5;
+      rr(c.x,c.y,c.w,c.h,8);ct.fill();ct.stroke();
+      ct.fillStyle='#d7f5e6';ct.font='11px sans-serif';ct.textAlign='center';
+      ct.fillText('Core'+c.idx,c.x+c.w/2,c.y+c.h/2+4);
+    });
+
+    // 接続線 (device -> core zoom)
+    ct.strokeStyle='rgba(143,214,180,0.4)';ct.lineWidth=1.5;
+    ct.beginPath();ct.moveTo(devBox.x+80,devBox.y+devBox.h);ct.lineTo(coreBox.x+80,coreBox.y);ct.stroke();
+
+    // NeuronCore 内部ズーム枠
+    ct.strokeStyle= selected==='core' ? '#43b581' : 'rgba(67,181,129,0.6)';
+    ct.lineWidth= selected==='core' ? 3 : 1.5;
+    rr(coreBox.x,coreBox.y,coreBox.w,coreBox.h,14);ct.stroke();
+    ct.fillStyle='#43b581';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('NeuronCore (物理1コア) の内側 ― Tensor / Vector / Scalar / GP-SIMD + SBUF 28MiB + PSUM 2MiB',coreBox.x+14,coreBox.y+18);
+    const innerLabels=[['Tensor Engine','#43b581'],['Vector Engine','#43b581'],['Scalar Engine','#43b581'],['GP-SIMD','#43b581'],['SBUF','#3d7dca'],['PSUM','#a06cd5']];
+    const innerW=(coreBox.w-14*2-5*10)/6;
+    innerLabels.forEach((lab,i)=>{
+      const ix=coreBox.x+14+i*(innerW+10), iy=coreBox.y+40, ih=48;
+      ct.fillStyle = lab[1]==='#43b581' ? '#173a26' : (lab[1]==='#3d7dca' ? '#1c2c3f' : '#2c1f3f');
+      ct.strokeStyle=lab[1]; ct.lineWidth=1.5; rr(ix,iy,innerW,ih,6);ct.fill();ct.stroke();
+      ct.fillStyle='#eaf7f0';ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(lab[0],ix+innerW/2,iy+ih/2+4);
+    });
+  }
+  cv.addEventListener('click', function(ev){
+    const r=cv.getBoundingClientRect();
+    const x=(ev.clientX-r.left)*(W/r.width), y=(ev.clientY-r.top)*(H/r.height);
+    const hitRegion=regions.find(rg=>rg.hit(x,y));
+    if(hitRegion){selected=hitRegion.key; document.getElementById('hierMsg').textContent=hitRegion.msg; draw();}
+  });
+  draw();
+})();
+
+// ============ デモf: Tensor Engine の systolic array データフロー ============
+(function(){
+  const cv=document.getElementById('cv_sys'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let t=0, playing=false;
+  const N=6; // 128x128 のうち一部を可視化 (実物はもっと大きい)
+  const gx=W/2-170, gy=90, cell=48;
+
+  function rr(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('Tensor Engine の systolic array (128×128 のうち 6×6 を可視化)',20,26);
+
+    // stationary 行列 (格子の左上に固定ロード済み、と示す薄い縁取り)
+    ct.strokeStyle='rgba(143,184,240,0.5)';ct.lineWidth=1.5;
+    rr(gx-4,gy-4,N*cell+8,N*cell+8,10);ct.stroke();
+
+    // PE 格子
+    for(let r=0;r<N;r++){
+      for(let c=0;c<N;c++){
+        const cx=gx+c*cell, cy=gy+r*cell;
+        // このセルに波 (t) が到達しているか: 波面は反対角線 r+c<=t
+        const wave=r+c;
+        const active = t>wave && t<wave+1.6;
+        const passed = t>=wave+1.6;
+        ct.fillStyle = active ? '#43b581' : (passed ? '#1c3d2c' : '#12321f');
+        ct.strokeStyle = active ? '#8fd6b4' : '#2f5c44';
+        ct.lineWidth = active ? 2.5 : 1.2;
+        rr(cx+3,cy+3,cell-6,cell-6,6);ct.fill();ct.stroke();
+        if(active){ct.fillStyle='#0d2b20';ct.font='10px sans-serif';ct.textAlign='center';ct.fillText('+=',cx+cell/2,cy+cell/2+4);}
+      }
+    }
+    // 左から入る moving データの粒 (行ごとに1粒、進むほど右へ)
+    for(let r=0;r<N;r++){
+      const localT=t-r*0.15;
+      if(localT>0 && localT<N){
+        const px=gx+Math.min(localT,N)*cell - cell/2;
+        const py=gy+r*cell+cell/2;
+        if(px>gx-10 && px<gx+N*cell+10){
+          ct.fillStyle='#f0a58e';ct.beginPath();ct.arc(gx-14,py,6,0,Math.PI*2);ct.fill();
+        }
+      }
+    }
+    ct.fillStyle='#f0a58e';ct.font='11px sans-serif';ct.textAlign='center';
+    for(let r=0;r<N;r++){ct.fillText('→',gx-14,gy+r*cell+cell/2+4);}
+    ct.save();ct.translate(gx+N*cell/2,gy-16);ct.fillStyle='#f0a58e';ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('↓ moving (流れ込む入力)',0,0);ct.restore();
+    ct.fillStyle='#8fb8f0';ct.font='11px sans-serif';ct.textAlign='left';
+    ct.fillText('stationary (格子に固定ロード)',gx,gy-30);
+
+    // PSUM への出力 (下端から結果が抜けていく)
+    const psumY=gy+N*cell+30, psumH=36;
+    ct.fillStyle= t>=N+1 ? '#3a2050' : '#2c1f3f';
+    ct.strokeStyle='#a06cd5';ct.lineWidth=2;
+    rr(gx,psumY,N*cell,psumH,8);ct.fill();ct.stroke();
+    ct.fillStyle='#eaf7f0';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('PSUM (部分和の出力先)',gx+N*cell/2,psumY+psumH/2+4);
+    if(t>=N){
+      ct.strokeStyle='rgba(160,108,213,0.6)';ct.lineWidth=1.5;
+      ct.beginPath();ct.moveTo(gx+N*cell/2,gy+N*cell);ct.lineTo(gx+N*cell/2,psumY);ct.stroke();
+    }
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='center';
+    const msg = t<=0 ? '再生を押すと、データが格子を波状に流れます' : (t<N+1.6 ? '各 PE で積和がリレーされていく (光っているセルが稼働中)' : '完了: 部分和が PSUM に出力された');
+    ct.fillText(msg, W/2, H-14);
+  }
+  function loop(){if(!playing)return;t+=0.045;if(t>=N+2.2){t=N+2.2;playing=false;document.getElementById('sysPlay').textContent='流れを再生';}draw();if(playing)requestAnimationFrame(loop);}
+  document.getElementById('sysPlay').onclick=function(){if(t>=N+2.2)t=0;playing=!playing;this.textContent=playing?'一時停止':'流れを再生';if(playing)loop();};
+  document.getElementById('sysReset').onclick=function(){playing=false;t=0;document.getElementById('sysPlay').textContent='流れを再生';draw();};
+  draw();
+})();
 
 // ============ デモ0: NeuronCore 全体アーキテクチャ + データフロー ============
 (function(){
@@ -383,19 +609,20 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
   // フロー定義: 各ステップ [from, to, color, label]
   function center(b){return [b.x+b.w/2,b.y+b.h/2];}
   const steps=[
-    {a:[hbm.x+hbm.w, 240], b:[sbuf.x, 240], col:'#f0a58e', lbl:'① DMA: HBM → SBUF'},
-    {a:[sbuf.x+sbuf.w, 230], b:[engines.x, 150], col:'#8fd6b4', lbl:'② Tensor Engine が SBUF を読む'},
-    {a:[engines.x+engines.w/2, engines.y+engines.h], b:[psum.x+psum.w/2, psum.y], col:'#c9a0f0', lbl:'③ 結果を PSUM に蓄積'},
-    {a:[psum.x, psum.y+psum.h/2], b:[sbuf.x+sbuf.w, 300], col:'#8fb8f0', lbl:'④ Vector/Scalar が PSUM→SBUF 退避'},
-    {a:[sbuf.x, 300], b:[hbm.x+hbm.w, 260], col:'#f0a58e', lbl:'⑤ DMA: SBUF → HBM 書き戻し'}
+    {a:[hbm.x+hbm.w, 240], b:[sbuf.x, 240], col:'#f0a58e', lbl:'① DMA: 重みタイル W と 活性タイル X を HBM → SBUF へ運ぶ', tag:'W, X'},
+    {a:[sbuf.x+sbuf.w, 230], b:[engines.x, 150], col:'#8fd6b4', lbl:'② Tensor Engine が SBUF の2入力 (W と X) を読む', tag:'W, X'},
+    {a:[engines.x+engines.w/2, engines.y+engines.h], b:[psum.x+psum.w/2, psum.y], col:'#c9a0f0', lbl:'③ 結果の部分和 (partial sum) を PSUM に蓄積', tag:'部分和'},
+    {a:[psum.x, psum.y+psum.h/2], b:[sbuf.x+sbuf.w, 300], col:'#8fb8f0', lbl:'④ Vector/Scalar が部分和を PSUM→SBUF へ退避 (=出力 Y)', tag:'Y'},
+    {a:[sbuf.x, 300], b:[hbm.x+hbm.w, 260], col:'#f0a58e', lbl:'⑤ DMA: 出力 Y を SBUF → HBM へ書き戻す', tag:'Y'}
   ];
 
-  function drawArrow(a,b,col,prog,active){
+  function drawArrow(a,b,col,prog,active,tag){
     ct.strokeStyle=active?col:'rgba(120,140,160,0.25)';ct.lineWidth=active?2.5:1.5;
     ct.beginPath();ct.moveTo(a[0],a[1]);ct.lineTo(b[0],b[1]);ct.stroke();
     if(active && prog!=null){
       const px=a[0]+(b[0]-a[0])*prog, py=a[1]+(b[1]-a[1])*prog;
       ct.fillStyle=col;ct.beginPath();ct.arc(px,py,7,0,7);ct.fill();
+      if(tag){ct.fillStyle='#eaf7f0';ct.font='bold 11px sans-serif';ct.textAlign='center';ct.fillText(tag,px,py-12);}
     }
     // 矢じり
     const ang=Math.atan2(b[1]-a[1],b[0]-a[0]);
@@ -416,7 +643,7 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
     const pos=Math.min(t,nSteps), idx=Math.floor(pos), frac=pos-idx;
 
     // 矢印 (現ステップだけ active)
-    steps.forEach((s,i)=>drawArrow(s.a,s.b,s.col, i===idx?frac:null, i===idx || (playing===false && t>=nSteps)));
+    steps.forEach((s,i)=>drawArrow(s.a,s.b,s.col, i===idx?frac:null, i===idx || (playing===false && t>=nSteps), s.tag));
 
     // ボックス群
     box(hbm.x,hbm.y,hbm.w,hbm.h,'#3a231c','#e07a5f','HBM','96 GiB・1D・DMAのみ');
