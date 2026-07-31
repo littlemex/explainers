@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NKI Workshop - 02: Roofline とカーネル融合</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hbm:#e07a5f; --sbuf:#3d7dca; --te:#198754; --mem:#e0a35f;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .math .r{color:#f0a58e}
+  .math .b{color:#8fb8f0}
+  .math .y{color:#ffd98f}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:200px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:140px;text-align:center}
+  .cost .box .big{font-size:23px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  details{background:#f3f9f6;border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin:14px 0}
+  summary{cursor:pointer;font-weight:600;color:var(--g1)}
+  .back{display:inline-block;margin:0 0 4px;color:#cfeede;text-decoration:none;font-size:14px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">NKI WORKSHOP ・ 02</p>
+  <h1>Roofline とカーネル融合 ― なぜ手でカーネルを書くのか</h1>
+  <p>理論上限を「測り」、メモリ往復を「消す」。その実例として RMSNorm と QKV 射影の融合まで</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この記事の狙い</h2>
+  <p class="lead">第 1 回でハードウェアの階層 (速いオンチップ / 遅い HBM) を学びました。今回は「その地図の上で、なぜわざわざ手でカーネルを書くのか」を一歩深掘りします。答えになる実測を先に見せます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    高速化の鍵は<b>「遅い HBM への往復を減らす」</b>の一点です。それを (A) ギャップを測る物差し <b>Roofline</b>、(B) 往復を消す手法 <b>カーネル融合</b>、(C) 実例 <b>RMSNorm と QKV 射影の融合</b>、の順で解き明かします。同じ数式・同じ答えでも、往復を消すだけで<b>桁違いに速くなる</b> ― それが手でカーネルを書く理由です。
+  </div>
+  <div class="key" style="background:#f3f9f6">
+    <b>先に結論 (NKI Workshop の実測)。</b>小さな Llama 風モデルの推論で、同じ計算を 3 通りの実装で回すと:<br>
+    ・素の PyTorch 演算 (base): <b>24 tok/s</b><br>
+    ・NKI カーネル化 (core): <b>78 tok/s</b><br>
+    ・<b>RMSNorm + QKV 射影 + RoPE + Attention + KV cache + 出力射影を 1 つのカーネルに融合</b> (megakernel): <b>410 tok/s</b> (base 比 <b>約 17 倍</b>)<br>
+    <span style="font-size:14px;color:var(--sub)">(small モデル・128 プロンプト・greedy・torch.compile・Trn2.3xlarge)</span>
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 【体験】Roofline ― 計算律速かメモリ律速か</a>
+    <a href="#s2">2. ハードウェアエンタイトルメント ― 理論と実測のギャップ</a>
+    <a href="#s3">3. ギャップの正体 ― メモリ往復</a>
+    <a href="#s4">4. 【体験】カーネル融合 ― 往復を消す</a>
+    <a href="#s5">5. 実例 ― RMSNorm と QKV 射影の融合</a>
+    <a href="#s6">6. まとめ ― なぜ手でカーネルを書くのか</a>
+  </div>
+  <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値は NKI Workshop の講義・実測に基づく概算です。<a href="./01-hardware-hierarchy.html">前提となる第 1 回「ハードウェア階層」</a>を先に読むと理解が早いです。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>【体験】Roofline ― 計算律速かメモリ律速か</h2>
+  <p class="lead">最適化の第一歩は「今どっちで詰まっているか」を知ること。それを 1 枚で示すのが Roofline モデルです。</p>
+  <p>処理の速さの上限は 2 つの要因で決まります。<b>計算エンジンの速さ</b>(compute)と<b>メモリからデータを運ぶ速さ</b>(memory)。どちらが上限になるかは、<b>演算強度 (Arithmetic Intensity)</b> = 「運んだ 1 バイトあたり何回演算するか」で決まります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv1" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">演算強度 (FLOP/byte) <input id="p1ai" type="range" min="1" max="600" value="30" step="1"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--mem)"></span>メモリ律速の坂 (帯域で頭打ち)</span>
+    <span><span class="dot" style="background:var(--te)"></span>計算律速の天井 (演算器で頭打ち)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>いまの処理</span>
+  </div>
+  <p>スライダーで演算強度を動かすと、赤い点が屋根の上を移動します。<b>ridge point (折れ点) より左</b>は<b>メモリ律速</b> ― データ待ちで演算器が遊んでいる。<b>右</b>は<b>計算律速</b> ― 演算器を使い切っている。左にいるなら打ち手は「データ移動を減らす」、右にいるなら「演算そのものを速く/減らす」。<b>どっちのゾーンにいるかで、やるべきことが正反対</b>になります。だからまず Roofline で現在地を知るのです。</p>
+  <div class="key">
+    演算強度が低い処理 (要素ごとの演算・正規化・小さな行列積) は左=メモリ律速に落ちやすい。演算強度が高い処理 (大きな行列積) は右=計算律速になりやすい。<b>ridge point はハードウェアが決める</b>ので、プロファイラが「あなたの処理の演算強度」と「ridge point」を教えてくれます。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>ハードウェアエンタイトルメント ― 理論と実測のギャップ</h2>
+  <p class="lead">Roofline の「天井」は、紙と鉛筆で数値として見積もれます。これがハードウェアエンタイトルメント (理論上限) です。</p>
+  <p>やり方は物理の「距離 ÷ 速さ = 時間」と同じ。<b>やるべき仕事量 (FLOP) ÷ ハードウェアの速さ (FLOPS) = かかるべき時間</b>です。</p>
+  <div class="math">
+    <span class="c"># 例: 4096×1024 と 1024×4096 の行列積 (BF16, Tensor Engine)</span><br>
+    仕事量 = 4096 × 1024 × 4096 × <span class="y">2</span> ≈ 34 GFLOP&nbsp;&nbsp;<span class="c"># ×2 は 乗算+加算</span><br>
+    速さ   = 78.6 TFLOPS&nbsp;&nbsp;<span class="c"># Tensor Engine の bf16 ピーク (第1回)</span><br>
+    時間   = 34e9 / 78.6e12 ≈ <span class="b">437 マイクロ秒</span>&nbsp;&nbsp;<span class="c"># これが理論上限</span>
+  </div>
+  <p>この見積もりは「本来これくらいで終わるはず」という<b>ターゲット</b>を与えます。実測がこれに近ければ、もう触る必要はありません。遠ければ、そのギャップが<b>「手で最適化する余地」そのもの</b>です。</p>
+  <p>この「仕事量 ÷ 速度 = 時間」の計算過程を可視化します。行列積 A (M×K) × B (K×N) のサイズをスライダーで変えると、① 仕事量 (FLOP) の数え方、② それを 78.6 TFLOPS で割る、③ 出てくる理論上限時間、が連動します。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv0" width="840" height="360"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">M <input id="p0m" type="range" min="512" max="8192" value="4096" step="512"></div>
+    <div class="slider">K <input id="p0k" type="range" min="256" max="4096" value="1024" step="256"></div>
+    <div class="slider">N <input id="p0n" type="range" min="512" max="8192" value="4096" step="512"></div>
+  </div>
+  <p>核心は「<b>出力の要素数 (M×N) それぞれに、K 回の積和 (=2K FLOP) がかかる</b>」= <b>2·M·K·N FLOP</b>。これをハードの速さ 78.6 TFLOPS で割れば時間が出ます。行列を大きくすると仕事量が増え、時間も比例して伸びるのが見て取れます。この見積もりが「本来これくらいで終わるはず」というターゲットになり、実測との差が<b>手で最適化する余地</b>です。</p>
+  <div class="key">
+    <b>これが動機になる理由。</b>「なんとなく遅い」ではなく <b>「理論上 X μs のはずが実測 Y μs、ギャップ Z μs」</b>と言える。ワークショップの Attention チュートリアルでは、理論上限 ~150μs に対し素朴な実装が約 850μs。最適化を積んで約 240μs まで縮めました。<b>ギャップが数値で見えるから、どこまで縮むか・あと何をすべきかが分かる</b>のです。</p>
+  </div>
+  <details>
+    <summary>もう一つの例: Attention 全体の見積もり (クリックで展開)</summary>
+    <p style="font-size:15px">QKᵀ と (スコア)V の 2 つの行列積が各約 54μs (128×4096²×2 ÷ 78.6 TFLOPS)、合わせて約 109μs。さらに softmax を Vector Engine (bf16 で約 2 TFLOPS) で約 41μs。合計<b>約 150μs</b>がこの Attention のエンタイトルメント。matmul は Tensor Engine が速いので軽く、要素ごとの softmax が相対的に効くのが分かります。</p>
+  </details>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>ギャップの正体 ― メモリ往復</h2>
+  <p class="lead">「メモリ律速」と診断された。ではデータ移動を減らすには? ここでカーネル融合が登場します。</p>
+  <p>汎用フレームワークは演算を<b>1 つずつ別々に</b>実行します。各演算は「HBM から SBUF に読む → 計算 → HBM に書き戻す」を繰り返す。演算が 3 つあれば、中間結果が<b>3 回 HBM に降りて、また昇ってくる</b>。第 1 回で見たとおり HBM は遅く、この往復こそがギャップの主因です。</p>
+  <div class="math">
+    <span class="c"># 融合なし: 演算ごとに HBM を往復</span><br>
+    演算1 → <span class="r">HBM に中間結果を書く</span> → <span class="r">読み直す</span> → 演算2 → <span class="r">書く</span> → <span class="r">読む</span> → 演算3<br><br>
+    <span class="c"># 融合あり: 中間結果を SBUF に留めたまま繋げる</span><br>
+    演算1 → (SBUF 上) → 演算2 → (SBUF 上) → 演算3 → <span class="b">最後に1回だけ HBM へ</span>
+  </div>
+  <p><b>カーネル融合 (kernel fusion)</b> とは、複数の演算を 1 つのカーネルにまとめ、<b>中間結果を遅い HBM に書き戻さず、速い SBUF (オンチップ) に留めたまま次の演算に渡す</b>ことです。往復が消えるぶん、メモリ律速な処理が一気に速くなります。特に中間結果が SBUF に収まらず HBM へ<b>あふれる (spill)</b> のを防げるのが大きい。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】カーネル融合 ― 往復を消す</h2>
+  <p class="lead">この記事の「絵で覚えて帰ってほしい 1 枚」です。融合前後で、中間結果が HBM を往復するか SBUF に留まるかを見比べてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv2" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p2play">データを流す</button>
+    <button id="p2reset" class="ghost">最初から</button>
+    <button class="ghost active" data-k="unfused" id="kUnfused">融合なし</button>
+    <button class="ghost" data-k="fused" id="kFused">融合あり</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--hbm)"></span>HBM (遅い)</span>
+    <span><span class="dot" style="background:var(--sbuf)"></span>SBUF (速い・オンチップ)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>中間結果の移動</span>
+  </div>
+  <p><b>融合なし</b>では、演算 1・2・3 のあいだで中間結果が<b>HBM まで降りて、また昇る</b>のを繰り返します (赤い往復)。<b>融合あり</b>に切り替えると、入力を 1 回読んだあとは<b>SBUF の上だけで 3 演算を繋げ</b>、結果を 1 回書き戻すだけ。HBM 往復の回数が激減します。第 1 回の「HBM は遅い、SBUF は速い」がそのまま効いてくる場面です。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>実例 ― RMSNorm と QKV 射影の融合</h2>
+  <p class="lead">抽象論を、Transformer で実際に隣り合う 2 つの処理で具体化します。前章のアニメが、そのまま現実の層で起きます。</p>
+  <p>Transformer の各ブロックの入口では、<b>RMSNorm (正規化)</b> の直後に <b>QKV 射影 (行列積)</b> が続きます。RMSNorm の中身は 2 種類の処理でできています。</p>
+  <ol class="steps">
+    <li><b>reduction (集計)</b>: ベクトルの全要素の二乗を合計する (二乗平均平方根 RMS を出すため)。全要素を「なめて」1 つの値に畳む処理。</li>
+    <li><b>element-wise (要素ごとの演算)</b>: その RMS で各要素を割り、スケールを掛ける。要素ごとに独立。</li>
+  </ol>
+  <p>この RMSNorm は<b>演算強度が低く、単体ではメモリ律速</b> (第 1 章の Roofline で左側)。だから素朴に「RMSNorm を実行 → HBM に書く → 読み直して QKV 射影」とやると、往復で損をします。</p>
+  <div class="warn">
+    <b>やってはいけない例 (ワークショップの "bad" 実装)。</b>RMSNorm を <b>3 回に分けて</b> (3-pass: 二乗和 → 正規化 → スケール) それぞれ HBM 往復すると、遅い実装の見本になります。ワークショップではこれを「what not to do」として比較に使っています。
+  </div>
+  <div class="key">
+    <b>良い実装。</b>RMSNorm の reduction と element-wise を <b>1 パスで SBUF 上に済ませ、その出力を HBM に降ろさず、そのまま QKV 射影の行列積に流し込む</b>。正規化の結果という中間テンソルが HBM を往復しない。前章のアニメの「演算1→2→3 を SBUF 上で繋ぐ」が、まさに「RMSNorm → 射影」で起きています。
+  </div>
+  <p>数式で書くと、1 本のトークンベクトル <code>x</code> (d 次元) に対して次の流れです。融合とは、この一連の計算を<b>途中結果を書き出さずに左から右へ一気に通す</b>ことに他なりません。</p>
+  <div class="math">
+    <span class="c"># RMSNorm (reduction → element-wise)</span><br>
+    ms = (1/d) &sum;&#7522; x&#7522;&sup2;&nbsp;&nbsp;<span class="p">← reduction: 全要素の二乗を1つに畳む</span><br>
+    x&#770;&#7522; = x&#7522; / &radic;(ms + &epsilon;) &middot; g&#7522;&nbsp;&nbsp;<span class="y">← element-wise: 各要素を割ってスケール</span><br><br>
+    <span class="c"># QKV 射影 (行列積) ― 正規化後の x&#770; をそのまま入力に</span><br>
+    Q = x&#770; W<span class="b">_q</span> &nbsp; K = x&#770; W<span class="b">_k</span> &nbsp; V = x&#770; W<span class="b">_v</span>&nbsp;&nbsp;<span class="b">← matmul</span>
+  </div>
+  <p>下の図で、この数式が 1 ステップずつどう計算されるかを追えます。ボタンで進めると、二乗和 → RMS で割る → スケール g → 重み <code>W_q</code> との行列積で Q が出る、が順に光ります。<b>正規化後の x&#770; を HBM に書き出さず、そのまま行列積の入力にする</b>のが融合です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cv3" width="840" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <button id="p3next">計算を1ステップ進める</button>
+    <button id="p3play">自動再生</button>
+    <button id="p3reset" class="ghost">最初から</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>入力 x</span>
+    <span><span class="dot" style="background:#c9a0f0"></span>reduction (二乗和→RMS)</span>
+    <span><span class="dot" style="background:#ffd98f"></span>正規化後 x&#770;</span>
+    <span><span class="dot" style="background:#8fb8f0"></span>重み W_q と行列積 → Q</span>
+  </div>
+  <p>ここで効くのが第 1 章の Roofline です。RMSNorm は<b>演算強度が低くメモリ律速</b> (要素を 1〜2 回触るだけ) なので、途中結果を HBM に往復させると損が大きい。だから正規化の出力 x&#770; を降ろさず、演算強度の高い行列積 (QKV 射影) の入力に直結させる ― これが「融合」の中身です。</p>
+  <p>ワークショップの megakernel はこれをさらに推し進め、<b>RMSNorm + QKV 射影 + RoPE + Attention + KV cache 更新 + 出力射影</b>という 1 ブロック丸ごとを単一カーネルに融合しました。ブロック内の中間結果が一度も HBM に降りない。これが冒頭の <b>base 比 17 倍</b>の正体です。</p>
+  <details>
+    <summary>融合には工夫が要る (この先は後続の章で)</summary>
+    <p style="font-size:15px">reduction は「全要素を見ないと答えが出ない」ため、どのエンジンでどの順に計算し、どこで同期するかに設計が要ります。また行列積のタイルサイズ、レイアウト、bf16 の非結合性による数値誤差など、踏み込むべき論点が続きます。これらは第 3 回以降で扱います。この記事では「<b>隣り合う処理を融合すると往復が消えて速い</b>」という発想が現実の層でそのまま効く、という一点を持ち帰ってください。</p>
+  </details>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <p class="lead">「なぜ手でカーネルを書くのか」への答えを一枚に整理します。3 つの話が 1 本につながります。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>Roofline</td><td>演算強度 (FLOP/byte) で計算律速かメモリ律速かが分かる。ゾーンで打ち手が正反対</td></tr>
+    <tr><td>エンタイトルメント</td><td>仕事量 (FLOP) ÷ ハード速度 (FLOPS) = 理論上限。実測との差が最適化の余地</td></tr>
+    <tr><td>ギャップの正体</td><td>メモリ律速の主因は、遅い HBM への中間結果の往復</td></tr>
+    <tr><td>カーネル融合</td><td>複数演算を 1 カーネルにまとめ、中間結果を SBUF に留めて HBM 往復を消す</td></tr>
+    <tr><td>RMSNorm + QKV 射影の融合</td><td>正規化 (reduction + element-wise) の出力を降ろさず行列積へ。実際の隣接層で効く</td></tr>
+    <tr><td>実測インパクト</td><td>ブロック丸ごとの融合 (megakernel) で base 比 <b>約 17 倍</b> (410 vs 24 tok/s)</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>(A) <b>Roofline</b> で「理論上これだけ速いはず」というターゲットと実測のギャップを定量化する。ギャップの主因は<b>遅い HBM への往復</b> (メモリ律速)。(B) <b>カーネル融合</b>で、中間結果を SBUF に留めて往復を消す。(C) その発想は <b>RMSNorm + QKV 射影</b>のような現実の隣接処理でそのまま効き、ブロック丸ごとの融合で <b>17 倍</b>に届く。<br>
+    汎用フレームワークは演算を 1 つずつ実行するので、この往復を自動では消せない。<b>「理論上限が見えていて、原因も分かっているのに、自動では埋まらない」― そのギャップを自分の手で埋めるのが、カーネルを書く理由</b>です。次回はこの融合の本命 <b>FlashAttention</b> を掘り下げます。
+  </div>
+  <div class="fn">
+    出典: NKI Workshop (AWS Trainium2/Trainium3) の講義および native_nkilib_lab / microbenchmarking lab の実測。17 倍・410 tok/s 等は small モデル・特定条件での測定値。ワークショップが座学で扱う全トピックと今後の章立ては <a href="./syllabus.html">座学トピック一覧とロードマップ</a> を参照。<br>
+    注意: 本ページの図と数値は、Roofline とカーネル融合の考え方を直感的に伝えるための<b>模式的な可視化</b>です。実際の演算強度・帯域・達成値は世代・精度・カーネル実装・プロファイル条件に依存します。融合の実装上の難所 (reduction の同期、レイアウト、数値誤差) は後続の章で扱います。
+  </div>
+</section>
+
+</main>
+<script>
+function fmt(n){if(n>=1e12)return (n/1e12).toFixed(1)+'T';if(n>=1e9)return (n/1e9).toFixed(1)+'G';if(n>=1e6)return (n/1e6).toFixed(0)+'M';return ''+n;}
+
+// ============ デモ0: エンタイトルメントの計算過程 (仕事量 ÷ 速度 = 時間) ============
+(function(){
+  const cv=document.getElementById('cv0'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const PEAK=78.6e12; // FLOPS
+  let M=4096,K=1024,N=4096;
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // ---- 左: 行列積の図 A(M×K) × B(K×N) = C(M×N) ----
+    const gx=40, gy=70;
+    // スケール: 表示用に対数っぽく圧縮
+    function sz(v){return 26+Math.log2(v/256)*10;}
+    const aW=sz(K), aH=sz(M), bW=sz(N), bH=sz(K), cW=sz(N), cH=sz(M);
+    // A
+    ct.fillStyle='rgba(224,122,95,0.5)';ct.strokeStyle='#e07a5f';ct.lineWidth=2;
+    ct.fillRect(gx,gy,aW,aH);ct.strokeRect(gx,gy,aW,aH);
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('A',gx+aW/2,gy+aH/2);ct.fillText('M='+M,gx+aW/2,gy+aH+16);
+    ct.save();ct.translate(gx-8,gy+aH/2);ct.rotate(-Math.PI/2);ct.fillText('K='+K,0,0);ct.restore();
+    // ×
+    const bx=gx+aW+40;
+    ct.fillStyle='#8fd6b4';ct.font='20px sans-serif';ct.fillText('×',bx-20,gy+aH/2+6);
+    // B
+    ct.fillStyle='rgba(61,125,202,0.5)';ct.strokeStyle='#3d7dca';
+    ct.fillRect(bx,gy,bW,bH);ct.strokeRect(bx,gy,bW,bH);
+    ct.fillStyle='#d7f5e6';ct.fillText('B',bx+bW/2,gy+bH/2);ct.fillText('N='+N,bx+bW/2,gy+bH+16);
+    ct.save();ct.translate(bx-8,gy+bH/2);ct.rotate(-Math.PI/2);ct.fillText('K='+K,0,0);ct.restore();
+    // =
+    const cx=bx+bW+40;
+    ct.fillStyle='#8fd6b4';ct.font='20px sans-serif';ct.fillText('=',cx-20,gy+aH/2+6);
+    // C
+    ct.fillStyle='rgba(143,214,180,0.5)';ct.strokeStyle='#43b581';
+    ct.fillRect(cx,gy,cW,cH);ct.strokeRect(cx,gy,cW,cH);
+    ct.fillStyle='#d7f5e6';ct.fillText('C',cx+cW/2,cy2(gy,cH));ct.fillText('M×N',cx+cW/2,gy+cH+16);
+    function cy2(y,h){return y+h/2;}
+
+    // ---- 右下: 計算式の3ステップ ----
+    const flop=2*M*K*N;
+    const timeS=flop/PEAK;
+    const y0=H-140;
+    ct.textAlign='left';ct.font='14px monospace';
+    ct.fillStyle='#8fd6b4';ct.fillText('① 仕事量 = 出力要素数 (M×N) × 積和 (2K)',44,y0);
+    ct.fillStyle='#f0a58e';ct.font='bold 15px monospace';
+    ct.fillText('   = 2 × '+M+' × '+K+' × '+N+' = '+fmt(flop)+'FLOP',44,y0+24);
+    ct.fillStyle='#8fd6b4';ct.font='14px monospace';
+    ct.fillText('② ハードの速さ = 78.6 TFLOPS (Tensor Engine, bf16)',44,y0+52);
+    ct.fillStyle='#8fb8f0';ct.font='bold 15px monospace';
+    ct.fillText('③ 時間 = 仕事量 ÷ 速さ = '+fmt(flop)+'FLOP ÷ 78.6T',44,y0+80);
+    // 時間の強調表示
+    const us=timeS*1e6;
+    ct.fillStyle='#ffd98f';ct.font='bold 22px sans-serif';ct.textAlign='right';
+    ct.fillText('≈ '+(us>=1000?(us/1000).toFixed(2)+' ms':us.toFixed(0)+' μs'),W-40,y0+80);
+    ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
+    ct.fillText('理論上限 (エンタイトルメント)',W-40,y0+100);
+  }
+  ['p0m','p0k','p0n'].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=function(){
+    M=+document.getElementById('p0m').value;K=+document.getElementById('p0k').value;N=+document.getElementById('p0n').value;draw();};});
+  draw();
+})();
+
+// ============ デモ3: RMSNorm+QKV の数式を1ステップずつ可視化 ============
+(function(){
+  const cv=document.getElementById('cv3'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const D=6;                 // 表示する次元数
+  const x=[1.2,-0.8,0.5,1.6,-1.1,0.9];   // 入力ベクトル(固定)
+  const g=[1.0,1.1,0.9,1.0,1.2,0.95];    // スケール
+  const eps=1e-6;
+  const ms=x.reduce((a,v)=>a+v*v,0)/D;
+  const rms=Math.sqrt(ms+eps);
+  const xh=x.map((v,i)=>v/rms*g[i]);     // 正規化後
+  // W_q は D×2 の小行列(Q の2次元だけ見せる)
+  const Wq=[[0.5,-0.3],[0.2,0.4],[-0.1,0.6],[0.3,0.2],[0.4,-0.5],[-0.2,0.3]];
+  const Q=[0,1].map(j=>xh.reduce((a,v,i)=>a+v*Wq[i][j],0));
+  let step=0, playing=false;   // 0:入力 1:二乗和 2:RMS 3:正規化 4:行列積Q
+  const NS=5;
+  const cellW=52, cellH=30, x0=60, y0=90;
+  function cell(cx,cy,val,fill,stroke){
+    ct.fillStyle=fill;ct.strokeStyle=stroke;ct.lineWidth=1.5;
+    ct.fillRect(cx,cy,cellW,cellH);ct.strokeRect(cx,cy,cellW,cellH);
+    ct.fillStyle='#eaf7f0';ct.font='12px monospace';ct.textAlign='center';
+    ct.fillText(val,cx+cellW/2,cy+cellH/2+4);
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    // 入力ベクトル x
+    ct.fillText('入力 x (トークンベクトル, d 次元)',x0,y0-14);
+    for(let i=0;i<D;i++) cell(x0+i*cellW, y0, x[i].toFixed(1), '#12321f', step>=0?'#43b581':'#2c5c44');
+
+    // step1: 二乗和 (reduction)
+    if(step>=1){
+      ct.fillStyle='#c9a0f0';ct.font='13px monospace';
+      ct.fillText('① reduction: ms = (1/d) Σ xᵢ² = '+ms.toFixed(3),x0,y0+58);
+      // 各セルの下に二乗値を薄く
+      ct.font='11px monospace';ct.fillStyle='#c9a0f0';ct.textAlign='center';
+      for(let i=0;i<D;i++) ct.fillText(x[i].toFixed(1)+'²',x0+i*cellW+cellW/2,y0+42);
+    }
+    // step2: RMS
+    if(step>=2){
+      ct.fillStyle='#c9a0f0';ct.font='13px monospace';ct.textAlign='left';
+      ct.fillText('② RMS = √(ms+ε) = '+rms.toFixed(3),x0,y0+82);
+    }
+    // step3: 正規化後 x̂
+    const y3=y0+110;
+    if(step>=3){
+      ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+      ct.fillText('③ element-wise: x̂ᵢ = xᵢ / RMS × gᵢ',x0,y3-14);
+      for(let i=0;i<D;i++) cell(x0+i*cellW, y3, xh[i].toFixed(2), '#3a3212', '#ffd98f');
+    }
+    // step4: 行列積 x̂ Wq = Q
+    const y4=y3+70;
+    if(step>=4){
+      ct.fillStyle='#8fb8f0';ct.font='14px sans-serif';ct.textAlign='left';
+      ct.fillText('④ matmul: Q = x̂ · W_q  (x̂ の各要素と重みを掛けて和)',x0,y4-14);
+      // x̂ 再掲(小)
+      for(let i=0;i<D;i++) cell(x0+i*cellW, y4, xh[i].toFixed(2), '#1c2c3f', '#3d7dca');
+      // × Wq → Q (2要素)
+      const qx=x0+D*cellW+40;
+      ct.fillStyle='#8fb8f0';ct.font='16px sans-serif';ct.fillText('→',qx-30,y4+cellH/2+5);
+      cell(qx, y4, 'Q₀='+Q[0].toFixed(2), '#12321f', '#43b581');
+      cell(qx+ (cellW+30), y4, 'Q₁='+Q[1].toFixed(2), '#12321f', '#43b581');
+      ct.fillStyle='#8fd6b4';ct.font='11px sans-serif';ct.textAlign='left';
+      ct.fillText('(K,V も同様に W_k, W_v で)',qx,y4+cellH+16);
+    }
+    // フッタ
+    const labels=['入力 x を読む','① 二乗和 (reduction)','② RMS を出す','③ 正規化 x̂ (element-wise)','④ x̂ と W_q の行列積 → Q'];
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='center';
+    ct.fillText('ステップ '+(step+1)+' / '+NS+' : '+labels[step], W/2, H-16);
+    if(step>=4){ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';
+      ct.fillText('x̂ を HBM に書き出さず、そのまま行列積の入力にするのが「融合」', W/2, H-2);}
+  }
+  document.getElementById('p3next').onclick=function(){if(step<NS-1)step++;else step=0;draw();};
+  document.getElementById('p3reset').onclick=function(){playing=false;step=0;document.getElementById('p3play').textContent='自動再生';draw();};
+  let timer=null;
+  document.getElementById('p3play').onclick=function(){
+    playing=!playing;this.textContent=playing?'停止':'自動再生';
+    if(playing){const tick=()=>{if(!playing)return;step=(step+1)%NS;draw();timer=setTimeout(tick,1100);};timer=setTimeout(tick,1100);}
+  };
+  draw();
+})();
+
+// ============ デモ1: Roofline ============
+(function(){
+  const cv=document.getElementById('cv1'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  // モデル: peak compute = 78.6 TFLOPS, HBM BW = 約2.9 TB/s(1chip概念値) → ridge = peak/BW
+  const PEAK=78.6e12;      // FLOPS
+  const BW=2.9e12;         // bytes/s (概念値)
+  const RIDGE=PEAK/BW;     // FLOP/byte ≈ 27.1
+  let ai=30;
+  // 描画領域(対数x, 対数y)
+  const pad={l:70,r:30,t:40,b:60};
+  const plotW=W-pad.l-pad.r, plotH=H-pad.t-pad.b;
+  const aiMin=1, aiMax=600;
+  const perfMin=BW*aiMin;         // 一番左の性能
+  const perfMax=PEAK*1.15;
+  function xOf(a){return pad.l + (Math.log10(a)-Math.log10(aiMin))/(Math.log10(aiMax)-Math.log10(aiMin))*plotW;}
+  function yOf(p){return pad.t + plotH - (Math.log10(p)-Math.log10(perfMin))/(Math.log10(perfMax)-Math.log10(perfMin))*plotH;}
+  function perfAt(a){return Math.min(BW*a, PEAK);}  // roofline
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // 軸
+    ct.strokeStyle='rgba(215,245,230,0.3)';ct.lineWidth=1;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,pad.t+plotH);ct.lineTo(pad.l+plotW,pad.t+plotH);ct.stroke();
+    ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('演算強度 (FLOP/byte, 対数)',pad.l+plotW/2,H-16);
+    ct.save();ct.translate(18,pad.t+plotH/2);ct.rotate(-Math.PI/2);ct.fillText('達成性能 (FLOPS, 対数)',0,0);ct.restore();
+    // roofline: メモリ坂(左) と 計算天井(右)
+    // 坂
+    ct.strokeStyle='#e0a35f';ct.lineWidth=3;ct.beginPath();
+    let first=true;
+    for(let a=aiMin;a<=RIDGE;a*=1.05){const x=xOf(a),y=yOf(BW*a);if(first){ct.moveTo(x,y);first=false;}else ct.lineTo(x,y);}
+    ct.lineTo(xOf(RIDGE),yOf(PEAK));ct.stroke();
+    // 天井
+    ct.strokeStyle='#43b581';ct.lineWidth=3;ct.beginPath();
+    ct.moveTo(xOf(RIDGE),yOf(PEAK));ct.lineTo(xOf(aiMax),yOf(PEAK));ct.stroke();
+    // ridge point 縦線
+    ct.strokeStyle='rgba(215,245,230,0.25)';ct.lineWidth=1;ct.setLineDash([4,4]);
+    ct.beginPath();ct.moveTo(xOf(RIDGE),pad.t);ct.lineTo(xOf(RIDGE),pad.t+plotH);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('ridge point ('+RIDGE.toFixed(0)+')',xOf(RIDGE),pad.t-6);
+    // 天井ラベル
+    ct.fillStyle='#43b581';ct.textAlign='right';ct.fillText('計算の天井 78.6 TFLOPS',xOf(aiMax),yOf(PEAK)-8);
+    ct.fillStyle='#e0a35f';ct.textAlign='left';ct.fillText('メモリ坂',xOf(aiMin)+4,yOf(BW*aiMin)-8);
+    // 現在点
+    const p=perfAt(ai);
+    const bound = ai<RIDGE ? 'メモリ律速' : '計算律速';
+    ct.fillStyle='#f0a58e';ct.beginPath();ct.arc(xOf(ai),yOf(p),8,0,7);ct.fill();
+    // ゾーン網掛けの注記
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('演算強度 = '+ai+' FLOP/byte  →  '+bound,pad.l+6,pad.t+18);
+    ct.fillStyle= ai<RIDGE ? '#e0a35f' : '#43b581';ct.font='13px sans-serif';
+    ct.fillText(ai<RIDGE?'打ち手: データ移動を減らす (融合など)':'打ち手: 演算を速く/減らす',pad.l+6,pad.t+38);
+  }
+  document.getElementById('p1ai').oninput=function(){ai=+this.value;draw();};
+  draw();
+})();
+
+// ============ デモ2: カーネル融合 (HBM往復 vs SBUF留置) ============
+(function(){
+  const cv=document.getElementById('cv2'); if(!cv) return;
+  const ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let kind='unfused', playing=false, t=0;
+  function rr(x,y,w,h,r){ct.beginPath();ct.moveTo(x+r,y);ct.arcTo(x+w,y,x+w,y+h,r);
+    ct.arcTo(x+w,y+h,x,y+h,r);ct.arcTo(x,y+h,x,y,r);ct.arcTo(x,y,x+w,y,r);ct.closePath();}
+  function box(x,y,w,h,fill,stroke,lines){ct.fillStyle=fill;ct.strokeStyle=stroke;ct.lineWidth=2;
+    rr(x,y,w,h,10);ct.fill();ct.stroke();ct.fillStyle='#eaf7f0';ct.textAlign='center';ct.font='bold 14px sans-serif';
+    const a=Array.isArray(lines)?lines:[lines];const sy=y+h/2-(a.length-1)*9+5;a.forEach((l,i)=>ct.fillText(l,x+w/2,sy+i*18));}
+  // レイアウト: HBM(下), SBUF+3演算(上)
+  const hbm={x:W*0.30,y:H-90,w:W*0.40,h:56};
+  const sbufY=70, sbufH=60;
+  const ops=[{x:W*0.14},{x:W*0.42},{x:W*0.70}]; // 演算1,2,3 の x
+  const opW=W*0.16, opY=170, opH=60;
+  // 融合なしのステップ: 各演算ごとに HBM↕SBUF↕op で往復
+  const unfusedSeq=[
+    {label:'入力を HBM→SBUF'},
+    {label:'演算1 (SBUF上)'},
+    {label:'中間1 を SBUF→HBM (往復!)'},
+    {label:'中間1 を HBM→SBUF (往復!)'},
+    {label:'演算2 (SBUF上)'},
+    {label:'中間2 を SBUF→HBM (往復!)'},
+    {label:'中間2 を HBM→SBUF (往復!)'},
+    {label:'演算3 (SBUF上)'},
+    {label:'結果を SBUF→HBM'}
+  ];
+  const fusedSeq=[
+    {label:'入力を HBM→SBUF (1回だけ)'},
+    {label:'演算1 → 2 → 3 を SBUF 上で連続実行'},
+    {label:'結果を SBUF→HBM (1回だけ)'}
+  ];
+  function seq(){return kind==='unfused'?unfusedSeq:fusedSeq;}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const s=seq(),n=s.length,idx=Math.min(Math.floor(t),n-1);
+    // HBM / SBUF 帯
+    box(hbm.x,hbm.y,hbm.w,hbm.h,'#3a231c','#e07a5f','HBM (遅い)');
+    ct.fillStyle='rgba(61,125,202,0.12)';rr(40,sbufY,W-80,sbufH,10);ct.fill();
+    ct.strokeStyle='#3d7dca';ct.lineWidth=2;rr(40,sbufY,W-80,sbufH,10);ct.stroke();
+    ct.fillStyle='#8fb8f0';ct.font='bold 14px sans-serif';ct.textAlign='left';ct.fillText('SBUF (速い・オンチップ)',52,sbufY+34);
+    // 3 演算ボックス
+    ops.forEach((o,i)=>{const active=(kind==='fused'&&idx===1)||(kind==='unfused'&&s[idx].label.includes('演算'+(i+1)));
+      box(o.x,opY,opW,opH, active?'#12321f':'#0e2417', active?'#43b581':'#2c5c44', '演算'+(i+1));});
+    // 往復カウント
+    let rt=0; for(let i=0;i<=idx;i++) if(s[i].label.includes('往復')) rt++;
+    // 現ステップのデータ移動描画
+    const lab=s[idx].label;
+    ct.strokeStyle='#f0a58e';ct.lineWidth=3;
+    function arrow(x1,y1,x2,y2){ct.beginPath();ct.moveTo(x1,y1);ct.lineTo(x2,y2);ct.stroke();
+      const ang=Math.atan2(y2-y1,x2-x1);ct.beginPath();ct.moveTo(x2,y2);
+      ct.lineTo(x2-Math.cos(ang-0.5)*10,y2-Math.sin(ang-0.5)*10);ct.moveTo(x2,y2);
+      ct.lineTo(x2-Math.cos(ang+0.5)*10,y2-Math.sin(ang+0.5)*10);ct.stroke();}
+    if(lab.includes('HBM→SBUF')||lab.includes('HBM')&&lab.includes('→SBUF')){
+      arrow(hbm.x+hbm.w/2,hbm.y, hbm.x+hbm.w/2, sbufY+sbufH);
+    }
+    if(lab.includes('SBUF→HBM')){
+      arrow(hbm.x+hbm.w/2, sbufY+sbufH, hbm.x+hbm.w/2, hbm.y);
+    }
+    // 説明とカウンタ
+    ct.fillStyle='#d7f5e6';ct.font='16px sans-serif';ct.textAlign='center';
+    ct.fillText('ステップ '+(idx+1)+' / '+n+' : '+lab, W/2, H-16);
+    ct.font='14px sans-serif';
+    ct.fillStyle= kind==='fused' ? '#8fd6b4' : '#f0a58e';
+    ct.textAlign='left';
+    ct.fillText('HBM 往復 (中間結果): '+rt+' 回'+(kind==='fused'?'  ← ゼロ!':''), 52, 34);
+    ct.fillStyle='#d7f5e6';ct.textAlign='right';
+    ct.fillText(kind==='unfused'?'融合なし: 演算ごとに往復':'融合あり: SBUF に留めて繋ぐ', W-52, 34);
+  }
+  function loop(){if(!playing)return;t+=0.018;const n=seq().length;
+    if(t>=n){t=n-1e-6;playing=false;document.getElementById('p2play').textContent='データを流す';}draw();if(playing)requestAnimationFrame(loop);}
+  document.getElementById('p2play').onclick=function(){if(t>=seq().length-1e-6)t=0;playing=!playing;this.textContent=playing?'一時停止':'データを流す';if(playing)loop();};
+  document.getElementById('p2reset').onclick=function(){playing=false;t=0;document.getElementById('p2play').textContent='データを流す';draw();};
+  function setKind(k,btn){kind=k;document.querySelectorAll('[data-k]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');playing=false;t=0;document.getElementById('p2play').textContent='データを流す';draw();}
+  document.getElementById('kUnfused').onclick=function(){setKind('unfused',this);};
+  document.getElementById('kFused').onclick=function(){setKind('fused',this);};
+  draw();
+})();
+</script>
+</body>
+</html>
