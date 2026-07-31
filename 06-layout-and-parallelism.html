@@ -154,7 +154,7 @@
   </div>
 
   <h3>partition 軸をまたぐ集約が必要なら ― reduction を matmul に変換する</h3>
-  <p>ここまでの制約は「畳みたい軸を free に置けば reduction は素直に書ける」という話でした。では、そもそも<b>partition 軸をまたいで集約したい</b>場合 (128 本のレーンに分散した値を1つにまとめたい場合) はどうするのか。reduction 命令では直接できませんが、実務でよく使われる回避策があります。<b>全要素が 1 の行列 (all-ones 行列) を stationary 側に置いた nc_matmul</b> を使う、というものです。Tensor Engine の matmul は partition 軸に沿って内積を取る演算なので、stationary 側を全部 1 にしておけば、その内積はそのまま「partition 方向の足し算」になります。<b>reduction をそのまま matmul に変換してしまう</b>、という定石です。</p>
+  <p>ここまでの制約は「畳みたい軸を free に置けば reduction は素直に書ける」という話でした。ではどんな場面で困るのか。例えば layernorm の分散計算 (<b>E[X²] − E[X]²</b>) のように、<b>partition 軸をまたいで集約したい</b>場面 (128 本のレーンに分散した値を1つにまとめたい場合) があります。しかし reduction 命令は free 軸限定でした。だから reduction 命令では直接できないこの集約を、実務では別の手段に変換します。<b>全要素が 1 の行列 (all-ones 行列) を stationary 側に置いた nc_matmul</b> を使う、というものです。Tensor Engine の matmul は partition 軸に沿って内積を取る演算なので、stationary 側を全部 1 にしておけば、その内積はそのまま「partition 方向の足し算」になります。<b>reduction をそのまま matmul に変換してしまう</b>、という定石です。</p>
   <div class="math">
     <span class="c"># partition 軸をまたぐ集約を matmul で行う</span><br>
     stationary = <span class="b">all-ones 行列</span> (partition × 1、全要素 1)<br>
@@ -162,12 +162,15 @@
     nc_matmul(stationary, moving) = <span class="p">onesᵀ @ データ</span><br>
     &nbsp;&nbsp;→ <span class="r">free 軸ごとに、partition 方向 128 本分を足し合わせた結果</span> (1 × free)
   </div>
-  <p>この「ones 行列との matmul で partition 方向の総和を作る」という技法は、layernorm の分散計算 (<b>E[X²] − E[X]²</b>) のように、partition 方向にまとめた統計量が必要な場面でも同じ形で使われています。</p>
+  <p>この「ones 行列との matmul で partition 方向の総和を作る」という技法は、先に挙げた layernorm の分散計算のような、partition 方向にまとめた統計量が必要な場面で実際に使われています。</p>
 
   <h3>stationary と moving、どちらに何を割り当てるか</h3>
-  <p>いま出てきた nc_matmul の2つの引数 (stationary, moving) には、割り当ての実践ルールがあります。第 1 回で見た通り、Tensor Engine は内部で <b>LoadStationary</b> と <b>MultiplyMoving</b> という2つの命令に分けて動作し、<b>LoadStationary は MultiplyMoving より高速</b>というハードウェア上の非対称性を持ちます。この非対称性から導かれる実践ルールが、<b>free 軸が小さい方を stationary に、大きい方を moving に割り当てる</b>という判断です。stationary 側は一度ロードすれば以降の計算で使い回されるため、小さい方をそこに置くほど LoadStationary の速さを活かせます。<b>行列 × ベクトルの積</b> (autoregressive なトークン生成の decode で典型的に現れる、free 軸が極端に小さい形) では、ベクトル側を stationary に置くのが定石です。</p>
+  <p>いま出てきた nc_matmul の2つの引数 (stationary, moving) には、割り当ての実践ルールがあります。第 1 回で見た通り、Tensor Engine は内部で <b>LoadStationary</b> と <b>MultiplyMoving</b> という2つの命令に分けて動作し、<b>LoadStationary は MultiplyMoving より高速</b>というハードウェア上の非対称性を持ちます。この非対称性から導かれる実践ルールが、<b>free 軸が大きい方を stationary に、小さい方を moving に割り当てる</b>という判断です。LoadStationary は MultiplyMoving より速いので、<b>時間のかかる MultiplyMoving 側の free 軸を小さく</b>抑えた方が全体が速くなる ― だから大きい free 軸の側を(速い LoadStationary で運べる)stationary に回すわけです。<b>行列 × ベクトルの積</b> (autoregressive なトークン生成の decode で典型的に現れる、片側の free 軸が極端に小さい形) では、<b>行列側を stationary、ベクトル側を moving</b> に置くのが定石です。</p>
+  <div class="warn">
+    <b>先ほどの all-ones の例と混同しないこと。</b>上の「reduction を matmul に変換する」例では、all-ones 行列 (free 軸 = 1) をあえて stationary に置きました。あれは<b>「partition 方向の集約という機能を実現する」</b>のが目的で、速度最適化のルールとは別の話です。ここで述べている<b>「大きい free 軸を stationary に」は、機能ではなく速度</b>を最適化するときの割り当て指針です。同じ stationary/moving の話でも、<b>何を最適化したいか (機能の実現か、速度か) で最適な割り当ては変わる</b> ― その両方を Tensor Engine の非対称構造から逆算するのがこの節の主旨です。
+  </div>
   <div class="key">
-    <b>この節のもう一つの合言葉。</b>reduction が partition 軸をまたぐなら<b>all-ones 行列との matmul</b>に変換する。nc_matmul の2引数を割り当てるときは<b>free 軸が小さい方を stationary に</b>置く。どちらも「Tensor Engine の非対称な内部構造 (LoadStationary/MultiplyMoving) を逆算して使う」という、この章に一貫する発想の具体例です。
+    <b>この節のもう一つの合言葉。</b>reduction が partition 軸をまたぐなら<b>all-ones 行列との matmul</b>に変換する。nc_matmul の2引数を割り当てるときは<b>free 軸が大きい方を stationary に</b>置く。どちらも「Tensor Engine の非対称な内部構造 (LoadStationary/MultiplyMoving) を逆算して使う」という、この章に一貫する発想の具体例です。
   </div>
 </section>
 

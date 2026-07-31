@@ -106,9 +106,9 @@
   <p class="lead">まず用語を揃えます。「デバイス」「コア」「インスタンス」は別物です。</p>
   <p>Trainium は階層で数えます。一番外から見ると:</p>
   <ol class="steps">
-    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(後述の実測ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされています。</span></li>
+    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(後述の実測ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされ、<b>いずれも物理コア 1 個あたりの値</b>です。だから物理 8 コアぶんを単純に足すだけで求まり、LNC(論理コアの束ね方)には依存しません ― どちらの精度で数えるかだけが効きます。</span></li>
     <li><b>NeuronCore (物理コア)</b>: 1 デバイスの中に <b>8 個の物理コア</b>があります (TRN2/TRN3)。2 コアが 1 つの HBM バンクを共有します。</li>
-    <li><b>LNC (Logical NeuronCore)</b>: 既定は <b>LNC2</b> で、<b>2 つの物理コアを 1 つの論理コアとして扱います</b>。だから <code>neuron-ls</code> は 8 でなく 4 コアと表示します。</li>
+    <li><b>LNC (Logical NeuronCore)</b>: 既定は <b>LNC2</b> で、<b>2 つの物理コアを 1 つの論理コアとして扱います</b>。だから <code>neuron-ls</code> は 8 でなく 4 コアと表示します。なぜ束ねるのかは 06 章で扱います。</li>
     <li><b>Instance</b>: 複数デバイスをまとめたもの (例: 16 デバイス)。今回のワークショップは <b>trn2.3xlarge (単一デバイス)</b> を使います。</li>
   </ol>
   <div class="key">
@@ -128,7 +128,7 @@
     <tr><td><b>GP-SIMD Engine</b></td><td>カスタム演算・descriptor 生成など</td><td>8 個の SIMD プロセッサ。汎用の受け皿</td></tr>
   </table>
   <div class="key">
-    <b>Tensor Engine の内部は 2 命令に分かれる。</b>128&times;128 systolic array を動かす実際の ISA 命令は <b>LoadStationary</b> (片方の行列をアレイに固定ロード) と <b>MultiplyMoving</b> (もう片方を流し込んで乗算) の 2 つです。ハードウェア的には <b>LoadStationary が MultiplyMoving より最大で約 4 倍速い</b>という非対称があり、この差が「free 軸が小さい方の行列を stationary 側に置く」という最適化の定石 (06 章で詳述) の根拠になります。行列&times;ベクトル積 (自己回帰的なトークン生成で頻出) では、この割り当てが特に効きます。
+    <b>Tensor Engine の内部は 2 命令に分かれる。</b>128&times;128 systolic array を動かす実際の ISA 命令は <b>LoadStationary</b> (片方の行列をアレイに固定ロード) と <b>MultiplyMoving</b> (もう片方を流し込んで乗算) の 2 つです。ハードウェア的には <b>LoadStationary が MultiplyMoving より最大で約 4 倍速い</b>という非対称があり、この差が「free 軸が大きい方の行列を stationary 側に置く (遅い MultiplyMoving 側の free 軸を小さく抑える)」という最適化の定石 (06 章で詳述) の根拠になります。行列&times;ベクトル積 (自己回帰的なトークン生成で頻出) では行列側を stationary に置くのが効きます。
   </div>
   <div class="key">
     <b>設計思想。</b>これらは<b>独立にスケジュールされ、並列に動きます</b>。Tensor Engine でタイル行列積をしている「その裏で」Vector Engine が別の reduction を回す ― という<b>エンジン間パイプライン</b>でチップを使い切るのが狙いです。だから「1 つのエンジンだけ速くする」のではなく「全エンジンを同時に働かせる」のが性能の鍵になります。
@@ -255,7 +255,7 @@
   <div class="key">
     <b>退避はフュージョンのチャンス。</b>PSUM から SBUF へコピーする「ついで」に、活性化関数や reduction を<b>一緒に済ませられます</b>。Tensor Engine が matmul した結果を SBUF に戻す途中で活性化を掛ければ、別途エンジンを回す往復が消える ― これが NKI で手書きカーネルを書く大きな動機の一つです。
   </div>
-  <p>なお「8 バンクを全部埋めれば速い」は誤解になりがちで、実際は<b>バンクを早く空ける (drain) 方が速い</b>ことが多いです (この詳細は別記事のマイクロベンチマークで扱います)。</p>
+  <p>なお「8 バンクを全部埋めれば速い」は誤解になりがちで、実際は<b>バンクを早く空ける (drain) 方が速い</b>ことが多いです (この詳細は別記事のマイクロベンチマークで扱います。07 章で回収)。</p>
 </section>
 
 <section id="s8">

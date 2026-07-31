@@ -88,16 +88,12 @@
   <div class="key">
     <b>一言でいうと</b><br>
     最適化は当て推量ではできません。<b>プロファイラで「いま何が起きているか」を測ってから、初めて手を動かす</b> ― これが measure before optimize の原則です。この章では (A) <b>Eager → Compile → Compile+NKI</b> の 3 段階比較で host 側のオーバーヘッドを切り分ける方法、(B) <b>エンジン別の稼働率</b>を読んでボトルネックのエンジンを見分ける方法、(C) 第 2 回の <b>hardware entitlement</b> と実測のギャップを数値化して最適化の出発点にする流れ、の 3 つを扱います。
-  </div>
-  <div class="key" style="background:#f3f9f6">
+    <br><br>
     <b>先に結論(NKI Workshop の実測の傾向)。</b>同じ処理を 3 段階の実装で回すと、プロファイル上の見え方が段階的に変わっていきます。<br>
     ・<b>Eager 実行</b>: 演算 1 つひとつが個別に dispatch (確保→起動→書き込み→host 復帰) され、実演算そのものより<b>dispatch のオーバーヘッド</b>が支配的になりやすい。<br>
     ・<b>torch.compile</b>: グラフ全体を融合してから実行するため、host 側の dispatch オーバーヘッドの大半が消える。<br>
     ・<b>Compile + NKI (カーネル融合)</b>: カーネル境界そのものを減らす (megakernel 化) ため、境界ごとの sync 待ちと DMA の再ステージングまで縮む。<br>
     <span style="font-size:14px;color:var(--sub)">(傾向はワークショップの実測に基づく概算。絶対値は条件により変わるため本文では相対的な傾向として扱います)</span>
-  </div>
-  <div class="key" style="background:#f3f9f6">
-    <b>この章の題材になっている実装の系譜。</b>ワークショップの llama decode 実装には base(素朴な eager 実装)→ core(torch.compile + NKI 化)→ experimental(megakernel 化) という<b>進化の軸</b>があり、これが本章の 3 段階比較の元ネタです。加えて、core から RMSNorm の実装だけを意図的に劣化させた bad という分岐があり、これは<b>品質の軸</b>(進化の軸とは直交)に属します。「bad は一番遅いから進化の一番手前」ではなく、<b>core の 1 箇所だけを悪くした比較用の枝</b>だと捉えてください。
   </div>
   <div class="toc">
     <a href="#s1">1. 【体験】Eager → Compile → Compile+NKI ― host overhead を消す</a>
@@ -115,6 +111,7 @@
 <section id="s1">
   <h2><span class="num">1</span>【体験】Eager → Compile → Compile+NKI ― host overhead を消す</h2>
   <p class="lead">最初の一歩は、同じ処理を 3 段階の実装で回し、プロファイル上の見え方の違いを比較することです。「刑事の捜査」のように段階を踏みます。</p>
+  <p style="font-size:15px"><b>この章の題材になっている実装の系譜。</b>ワークショップの llama decode 実装には base(素朴な eager 実装)→ core(torch.compile + NKI 化)→ experimental(megakernel 化) という<b>進化の軸</b>があり、これが本章の 3 段階比較の元ネタです。加えて、core から RMSNorm の実装だけを意図的に劣化させた bad という分岐があり、これは<b>品質の軸</b>(進化の軸とは直交)に属します。「bad は一番遅いから進化の一番手前」ではなく、<b>core の 1 箇所だけを悪くした比較用の枝</b>だと捉えてください。</p>
   <ol class="steps">
     <li><b>Eager 実行</b>: 各演算 (op) が個別に dispatch されます。確保 (alloc) → 起動 (launch) → HBM への書き込み → host への復帰、という手続きを演算ごとに繰り返す。この alloc / copy / kernel launch のオーバーヘッドが、実際の演算そのものより支配的になりやすい。</li>
     <li><b>torch.compile(backend="neuron")</b>: グラフ全体を融合してから実行するため、host 側の dispatch オーバーヘッドの大半が消えます。ただし、コンパイル境界を跨ぐ eager 処理 (例: KV cache へのスライス代入) が <code>aten::copy_</code> として残ることがあり、これは <code>scatter_</code> 等で in-graph 化すると解消できます。</li>
@@ -152,8 +149,17 @@
     <b>格言的な整理。</b><b>システムプロファイラ</b>は「時間がどこへ行ったか」を教えます (host 側、CPU から見た視点)。<b>デバイスプロファイラ</b>は「ハードウェアが何をしているか」を教えます (NeuronCore の内部、エンジンごとの視点)。前者を「空港の出発ロビー」(手続きと待ち時間)、後者を「実際に飛んでいる飛行機の中」(内部の稼働率) に例えられます。
   </div>
   <p>システムプロファイラは PyTorch の <code>torch.profiler.profile(...)</code> で取得します。CPU と NeuronCore 両方のアクティビティを記録し、<code>key_averages()</code> で alloc / copy / kernel launch などに分類して集計できます。第 1 段の「Eager vs Compile」の違いは、主にこのシステムプロファイラで見えます。</p>
-  <p>デバイスプロファイラは、NKI カーネル単体、あるいはモデル全体を実行したときにデバイス上で生成されるトレース (<code>profile.ntff</code> 等) を読みます。UI (Neuron Explorer) で可視化するだけでなく、ディスク上の parquet ファイルを直接 pandas 等で読み込む方法もあり、これによりエージェントがプロファイルの数値を読み取って反復的に最適化するワークフローが可能になります。<code>total_time</code>、<code>dma_active_time</code>、<code>tensor_engine_active_time</code>、<code>sync_engine_instruction_count</code>、<code>dma_transfer_count</code> といったフィールドがそこに含まれます。</p>
-  <p style="font-size:15px">実務での取得手順はおおむね次のとおりです。まず環境変数でコンパイル済みの NEFF を保存し、次に <code>capture</code> コマンドでトレース (NTFF) を採取、最後に <code>view</code> で開きます。ここで一点だけ実務上のコツがあります。<b><code>--profile-nth-exec=2</code></b> のように 2 回目以降の実行を対象に指定すると、初回実行に混ざるウォームアップ (キャッシュが温まっていない状態) の影響を除外でき、再現性のある数値が取れます。</p>
+  <p>デバイスプロファイラは、NKI カーネル単体、あるいはモデル全体を実行したときにデバイス上で生成されるトレース (<code>profile.ntff</code> 等) を読みます。UI (Neuron Explorer) で可視化するだけでなく、ディスク上の parquet ファイルを直接 pandas 等で読み込む方法もあり、これによりエージェントがプロファイルの数値を読み取って反復的に最適化するワークフローが可能になります。</p>
+  <div class="math">
+    <span class="c"># システムプロファイラの主な API</span><br>
+    torch.profiler.profile(...)&nbsp;&nbsp;<span class="c"># CPU/NeuronCore のアクティビティを記録</span><br>
+    key_averages()&nbsp;&nbsp;<span class="c"># alloc/copy/kernel launch などに分類して集計</span><br><br>
+    <span class="c"># デバイスプロファイラのトレースと主なフィールド</span><br>
+    profile.ntff&nbsp;&nbsp;<span class="c"># デバイス上で生成されるトレース</span><br>
+    total_time, dma_active_time, tensor_engine_active_time,<br>
+    sync_engine_instruction_count, dma_transfer_count
+  </div>
+  <p style="font-size:15px">実務での取得手順はおおむね次のとおりです。まず環境変数でコンパイル済みの NEFF を保存し、次に <code>capture</code> コマンドでトレース (NTFF) を採取、最後に <code>view</code> で開きます。ここで一点だけ実務上のコツがあります。2 回目以降の実行を対象に指定する <b><code>--profile-nth-exec=2</code></b> のような CLI フラグを使うと、初回実行に混ざるウォームアップ (キャッシュが温まっていない状態) の影響を除外でき、再現性のある数値が取れます。</p>
   <div class="warn">
     <b>見た目の落とし穴。</b>HBM スループットのグラフが「途切れる/存在しない」区間は、転送が無かった (ゼロ) と解釈してよいことが多いです。また、エンジンの実行区間の前後に現れるランダムな短いバーは、多くの場合ウォームアップであり、実計算ではありません。プロファイルを読むときはこの 2 点に注意すると誤読を避けられます。
   </div>
@@ -173,7 +179,7 @@
   </div>
   <p>この見積もりと、プロファイラが返す実測時間を並べると、<b>「理論上 X のはずが実測 Y、ギャップは Z」</b>という言い方ができるようになります。ギャップが大きいほど、まだ最適化の余地があるということです。第 3 回の FlashAttention のように、素朴な実装から始めて何段階か最適化を積むと、このギャップが徐々に縮んでいく ― という進み方になります。</p>
   <h3>複数の理論値を梯子状に並べる ― バウンドの梯子</h3>
-  <p>実務では、entitlement は「1 本の理論値」だけでは終わりません。仕事量÷速度という単一の理論値は最も緩い下限であり、これをさらに何段かに分けて<b>梯子状</b>に並べることで、隙間ごとに別々の原因を対応させられます。memory-bound 系列なら、実測時間 → (理論上の転送量ぴったりで動いた場合の時間) → (不要な再読み込み=reload が無かった場合の時間)、という具合に理論値を段階的に厳しくしていきます。compute-bound 系列も同様に、実測時間 → (理論 FLOP 数ぴったりの時間) → (無駄な FLOP が無い場合の時間)、と段階を踏みます。</p>
+  <p>実務では、entitlement は「1 本の理論値」だけでは終わりません。例えば 03 章で見た QKᵀ のような matmul を考えると、「理論上限どおりに動いた場合の時間」だけでなく「不要な再読み込みを除いた場合の時間」「タイル効率まで含めた場合の時間」と、複数の"あるべき時間"を段階的に置けます。仕事量÷速度という単一の理論値は最も緩い下限であり、これをさらに何段かに分けて<b>梯子状</b>に並べることで、隙間ごとに別々の原因を対応させられます。memory-bound 系列なら、実測時間 → (理論上の転送量ぴったりで動いた場合の時間) → (不要な再読み込み=reload が無かった場合の時間)、という具合に理論値を段階的に厳しくしていきます。compute-bound 系列も同様に、実測時間 → (理論 FLOP 数ぴったりの時間) → (無駄な FLOP が無い場合の時間)、と段階を踏みます。</p>
   <div class="math">
     <span class="c"># memory-bound 系列(緩い→厳しい、右へ行くほど理論値が厳しくなる)</span><br>
     実測時間 &gt; memory_bound(理論転送量 &divide; 帯域) &gt; memory_bound_no_reloads(reload 除去後)<br><br>
@@ -261,7 +267,7 @@
 
 <section id="s7">
   <h2><span class="num">7</span>よくあるエラーと対処 ― チートシート</h2>
-  <p class="lead">プロファイラで測る前の段階で、コンパイルや実行が止まってしまうこともあります。エラーコードを丸暗記する必要はありませんが、<b>分類</b>を知っておくと、どの章の知識で対処すべきかが素早く分かります。</p>
+  <p class="lead">プロファイラで測る前の段階で、コンパイルや実行が止まってしまうこともあります。エラーコードを丸暗記する必要はありません。<b>これは実務で詰まったときに辞書的に見返す表であり、通読は不要です。</b>分類だけ知っておくと、どの章の知識で対処すべきかが素早く分かります。</p>
   <table>
     <tr><th>分類</th><th>典型的な症状</th><th>対処の方向</th></tr>
     <tr><td>EOOM 系(メモリ超過)</td><td>SBUF や PSUM の確保に失敗する</td><td>タイルサイズを縮小する、allocation (第 7 回) の使い方を見直す</td></tr>
