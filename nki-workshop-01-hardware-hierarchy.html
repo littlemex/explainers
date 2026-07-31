@@ -106,8 +106,8 @@
   <p class="lead">まず用語を揃えます。「デバイス」「コア」「インスタンス」は別物です。</p>
   <p>Trainium は階層で数えます。一番外から見ると:</p>
   <ol class="steps">
-    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GiB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(理論ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料 (<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/nki/arch/trainium2_arch.html" target="_blank" rel="noopener">NKI アーキテクチャガイド</a>) では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされ、<b>いずれも物理コア 1 個あたりの値</b>です。だから物理 8 コアぶんを単純に足すだけで求まり、LNC(論理コアの束ね方)には依存しません ― どちらの精度で数えるかだけが効きます。チップ全体の公称値は <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trainium2.html" target="_blank" rel="noopener">FP8 1,299 / BF16 667 TFLOPS</a>。</span></li>
-    <li><b>NeuronCore (物理コア)</b>: 1 デバイスの中に <b>8 個の物理コア</b>があります (TRN2/TRN3)。2 コアが 1 つの HBM バンクを共有します。</li>
+    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trainium2.html" target="_blank" rel="noopener">公式スペック</a>で <b>FP8 dense 約 1,299 TFLOPS (≈ 1.3 PFLOPS)</b>、<b>96 GiB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では約 667 TFLOPS (≈ 0.67 PFLOPS)</b>。1.3 PFLOPS と 0.67 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 か BF16 か) によるものです。<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/nki/arch/trainium2_arch.html" target="_blank" rel="noopener">NKI アーキテクチャガイド</a>では NeuronCore-v3 の Tensor Engine を <b>コアあたり FP8 158 / BF16 79 dense TFLOPS</b> としており、8 コアぶんにすると 158&times;8 ≈ 1,264、79&times;8 ≈ 632 とチップ公称値 (1,299 / 667) に<b>おおむね一致</b>します (端数はコアあたり値の丸めと集計条件の差)。要するに、値の大小は<b>どの精度で数えるか</b>で決まり、LNC の束ね方には依存しません。</span></li>
+    <li><b>NeuronCore (物理コア)</b>: 1 デバイスの中に <b>8 個の物理コア</b>があります (TRN2/TRN3)。2 コアが 1 つの HBM スタックを共有します。</li>
     <li><b>LNC (Logical NeuronCore)</b>: 既定は <b>LNC2</b> で、<b>2 つの物理コアを 1 つの論理コアとして扱います</b>。だから <code>neuron-ls</code> は 8 でなく 4 コアと表示します。なぜ束ねるのかは 06 章で扱います。</li>
     <li><b>Instance</b>: 複数デバイスをまとめたもの (例: 16 デバイス)。今回のワークショップは <b>trn2.3xlarge (単一デバイス)</b> を使います。</li>
   </ol>
@@ -119,7 +119,7 @@
     <span><span class="dot" style="background:#8fb8f0"></span>Instance</span>
     <span><span class="dot" style="background:var(--hbm)"></span>Device (チップ)</span>
     <span><span class="dot" style="background:var(--te)"></span>NeuronCore</span>
-    <span><span class="dot" style="background:var(--sbuf)"></span>2 コアで 1 HBM バンクを共有</span>
+    <span><span class="dot" style="background:var(--sbuf)"></span>2 コアで 1 HBM スタックを共有</span>
   </div>
   <p>クリックした階層の説明: <span id="hierMsg">図の各層をクリックしてみてください。</span></p>
   <div class="key">
@@ -133,7 +133,7 @@
   <table>
     <tr><th>エンジン</th><th>役割</th><th>ひとこと</th></tr>
     <tr><td><b>Tensor Engine</b></td><td>行列積 (MatMul)・transpose・broadcast</td><td>128&times;128 の systolic array。<b>FLOP の約 90% がここ</b></td></tr>
-    <tr><td><b>Vector Engine</b> (DVE)</td><td>reduction、要素ごと演算、tensor-tensor 演算</td><td>合計・max など。SBUF の partition に並列接続</td></tr>
+    <tr><td><b>Vector Engine</b> (profiler では Pool)</td><td>reduction、要素ごと演算、tensor-tensor 演算</td><td>合計・max など。SBUF の partition に並列接続</td></tr>
     <tr><td><b>Scalar Engine</b> (Act)</td><td>活性化関数、区分多項式</td><td>マイクロコードで機能追加できる</td></tr>
     <tr><td><b>GP-SIMD Engine</b></td><td>カスタム演算・descriptor 生成など</td><td>8 個の SIMD プロセッサ。汎用の受け皿</td></tr>
   </table>
@@ -194,7 +194,7 @@
     <tr><td><b style="color:var(--psum)">PSUM</b></td><td>オンチップ SRAM</td><td>128 part &times; 8 bank &times; 512 要素 (計 2 MiB)</td><td>最速・Tensor Engine 蓄積用</td><td>行列積の蓄積は TE 固有 / Vector・Scalar もアクセス可 (GpSimd 不可)</td></tr>
   </table>
   <div class="warn">
-    <b>ここが最重要の直感。</b>SBUF は HBM より<b>ずっと速いが、ずっと小さい</b> (容量は 96 GiB 対 28 MiB = 約 3400 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。<br>
+    <b>ここが最重要の直感。</b>SBUF は HBM より<b>ずっと速いが、ずっと小さい</b> (容量は 96 GiB 対 28 MiB = 約 3500 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。<br>
     <span style="font-size:14px;color:var(--sub)">注: 一般論として、HBM (DRAM) のアクセスは数百 ns オーダー、オンチップ SRAM (SBUF/PSUM) は ns オーダーで、レイテンシで 2 桁ほど差がある。帯域でもオンチップが大きく上回る。ここでの「速い/遅い」はこの意味で、具体的な絶対値は世代・アクセスパターンに依存する。</span>
   </div>
 </section>
@@ -220,13 +220,13 @@
 <section id="s5">
   <h2><span class="num">5</span>HBM ― 大きくて遅い倉庫</h2>
   <p class="lead">まず一番下の層、HBM から。</p>
-  <p><b>HBM (High Bandwidth Memory)</b> はデバイスの大容量メモリ (TRN2 で 96 GiB) で、モデルの重み・活性・入出力など<b>すべての大きなデータの置き場</b>です。PyTorch で <code>tensor.to("neuron")</code> するとデータはここに載ります。</p>
+  <p><b>HBM (High Bandwidth Memory)</b> はデバイスの大容量メモリ (TRN2 で 96 GiB) で、モデルの重み・活性・入出力など<b>すべての大きなデータの置き場</b>です。PyTorch (torch-neuronx / torch_xla) で <code>tensor.to(xm.xla_device())</code> のようにデバイスへ転送すると、データはここに載ります。</p>
   <div class="key">
     HBM の 2 つの重要な性質。<br>
     (1) <b>1D フラットメモリ</b> ― 単純な一次元の並び。<br>
     (2) <b>DMA エンジンからしかアクセスできない</b> ― 計算エンジン (Tensor / Vector など) は HBM を直接読めません。必ず一度 SBUF に運んでから計算します。
   </div>
-  <p>「高帯域」の名の通り帯域は大きいですが、オンチップ SRAM と比べれば遅い。デバイス全体の HBM 帯域は<b>チップ全体で約 3 TB/s</b> (8 コアぶんの合計)。この記事で扱う <b>435 GB/s は、単一 NeuronCore が 16 個の DMA エンジンを全部使い切って到達した実測上のピーク</b>で、デバイス全体の帯域とは別の階層の値です。1 コアぶんの帯域にどこまで近づけるかが、メモリバウンドなカーネルの成否を分けます (8 章)。</p>
+  <p>「高帯域」の名の通り帯域は大きいですが、オンチップ SRAM と比べれば遅い。デバイス全体の HBM 帯域は<a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trainium2.html" target="_blank" rel="noopener">公式値でチップ全体 約 2.9 TB/s</a>。この記事で扱う <b>435 GB/s は、他のコアがアイドルな条件で単一 NeuronCore が 16 個の DMA エンジンを全部使い切って到達した実測上のピーク</b>です。<b>8 コアが同時にこの値を出せるわけではなく、合計はチップ全体の 2.9 TB/s で頭打ち</b>になります (435&times;8 ≈ 3.5 TB/s は超えられない)。1 コアぶんの帯域にどこまで近づけるかが、メモリバウンドなカーネルの成否を分けます (8 章)。</p>
   <p>この 435 GB/s は 1 個のエンジンの値ではなく、<b>16 基の DMA エンジンの合計</b>です。内訳を式で見ると、なぜこの数字になるかが分かります。</p>
   <div class="math">
     <span class="c"># TRN2: DMA エンジン1基あたり約27.2GB/s &times; 16基</span><br>
@@ -241,6 +241,7 @@
   <h2><span class="num">6</span>SBUF ― 2D の作業台</h2>
   <p class="lead">SBUF は Trainium で最も「クセ」のあるメモリです。ここの構造がカーネル設計を強く縛ります。</p>
   <p><b>SBUF (State Buffer)</b> はオンチップの汎用スクラッチパッド (SRAM) で、計算エンジンが実際に読み書きする作業台です。HBM と違い <b>2D 構造</b>を持ちます。</p>
+  <p style="font-size:14px;color:var(--sub)">注: ここで挙げる 28 MiB / PSUM 2 MiB / 435 GB/s は<b>物理コアあたり</b>の値です。既定の LNC2 では NKI から見える 1 論理コアは物理 2 コア分で、これらのリソースはおおむね 2 倍見えます (詳細は 06 章)。</p>
   <div class="math">
     <span class="c"># SBUF の形 (TRN2)</span><br>
     partition 次元 (P) : <span class="b">128 レーン</span>  <span class="c"># 固定。ここが超重要</span><br>
@@ -262,7 +263,7 @@
     <tr><td>TRN2</td><td>224 KiB</td><td>約 28 MiB</td></tr>
     <tr><td>TRN3</td><td>256 KiB</td><td>約 32 MiB</td></tr>
   </table>
-  <p style="font-size:14px;color:var(--sub)">世代が 1 つ進むごとに合計でおよそ 4 MiB ずつ増える、という単調な傾向が見えます (概算値)。</p>
+  <p style="font-size:14px;color:var(--sub)">TRN2 の 28 MiB は公式値。TRN1/Inf2 の 24 MiB、TRN3 の 32 MiB は公開情報ベースの参考値で、世代とともに 1 レーンあたり容量が増える例として挙げています (将来世代の予測ではありません)。</p>
 </section>
 
 <section id="s7">
@@ -275,7 +276,7 @@
     型   : FP32 アキュムレータ<br>
     出力先 : <span class="r">Tensor Engine の行列積結果は PSUM にしか書けない</span><br>
     蓄積 : <span class="r">行列積結果を足し込める (accumulate) のは Tensor Engine 固有</span><br>
-    アクセス : <span class="b">Vector / Scalar エンジンも PSUM を読み書き可</span> (v3 では並列アクセス制約も緩和)。<span class="c"># GpSimd は PSUM 非対応</span>
+    アクセス : <span class="b">Vector / Scalar エンジンも PSUM を読み書き可</span>。<span class="c"># GpSimd は PSUM 非対応</span>
   </div>
   <p>行列積のデータの流れはこうです。Tensor Engine が SBUF の 2 つの入力を読んで計算し、結果を<b>PSUM に蓄積</b>。その後、Vector か Scalar エンジンが PSUM から SBUF へ<b>退避 (evict)</b> します。<b>PSUM そのものは各エンジンからアクセスでき</b>、Tensor Engine に固有なのは「行列積の結果をハードウェアで足し込める (accumulate できる)」点です。</p>
   <div class="key">
@@ -304,7 +305,7 @@
     ・128&times;512 の小タイル &rarr; 約 224 GB/s (ピークの約 52%)<br>
     ・128&times;8192 の大タイル &rarr; 約 424 GB/s (約 97%)<br>
     ・128&times;16384 &rarr; 約 427 GB/s (約 98%、この構成の実質上限)<br>
-    <b>タイルの形を変えるだけで帯域が約 1.9 倍</b>。DMA エンジンはどちらも約 90% 動いているのに、小さい転送は「忙しいのに遅い」。これが「geometry (形) が性能を決める」という Trainium の本質です。
+    <b>タイルの形を変えるだけで帯域が大きく変わる</b>。DMA エンジンはどちらの形でもほぼ動いているのに、小さい転送は「忙しいのに遅い」。これが「geometry (形) が性能を決める」という Trainium の本質です (数値は特定条件での実測例)。
   </div>
 </section>
 
@@ -358,9 +359,9 @@
   <p class="lead">Trainium のハードウェア階層を一枚に整理します。</p>
   <table>
     <tr><th>論点</th><th>要点</th></tr>
-    <tr><td>階層</td><td>Device (96GiB HBM) &gt; NeuronCore &times;8 (2コアで1 HBMバンク共有) &gt; 既定 LNC2 で論理4コア</td></tr>
+    <tr><td>階層</td><td>Device (96GiB HBM) &gt; NeuronCore &times;8 (2コアで1 HBMスタック共有) &gt; 既定 LNC2 で論理4コア</td></tr>
     <tr><td>エンジン</td><td>Tensor (matmul, FLOP の90%) / Vector / Scalar / GP-SIMD が並列動作</td></tr>
-    <tr><td>HBM</td><td>大容量 (96GiB)・1Dフラット・DMAのみ・ピーク約435GB/s(1コア)</td></tr>
+    <tr><td>HBM</td><td>大容量 (96GiB)・1Dフラット・DMAのみ・チップ全体2.9TB/s (1コア実測ピーク約435GB/s)</td></tr>
     <tr><td>SBUF</td><td>オンチップSRAM・2D (128 partition &times; 224KiB)・28MiB・全エンジン直結</td></tr>
     <tr><td>PSUM</td><td>128 part &times; 8 bank &times; 512 (計 2 MiB)・行列積の蓄積は TE 固有・Vector/Scalar もアクセス可・FP32 蓄積</td></tr>
     <tr><td>DMA</td><td>16エンジン。partition最大化 + 大きな連続転送で帯域を使い切る</td></tr>
@@ -406,7 +407,7 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
     const col=i%4, row=Math.floor(i/4);
     cores.push({x:coreStartX+col*(coreW+coreGapX), y:coreStartY+row*(coreH+coreGapY), w:coreW, h:coreH, idx:i});
   }
-  // ペア (2コアで1 HBM バンク共有): (0,1)(2,3)(4,5)(6,7)
+  // ペア (2コアで1 HBM スタック共有): (0,1)(2,3)(4,5)(6,7)
   const pairs=[[0,1],[2,3],[4,5],[6,7]];
 
   const regions=[
@@ -414,7 +415,7 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
       msg:'NeuronCore (物理コア) = 計算の主役。Tensor / Vector / Scalar / GP-SIMD の4エンジンと SBUF (28 MiB) / PSUM (2 MiB) を持つ。1 デバイスに 8 個。'},
     {key:'bank', hit:(x,y)=>pairs.some(p=>{const a=cores[p[0]],b=cores[p[1]];
         return x>=a.x-8&&x<=b.x+b.w+8&&y>=a.y-8&&y<=a.y+a.h+8;})&&!cores.some(c=>x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h),
-      msg:'2 つの NeuronCore が 1 つの HBM バンクを共有する。既定の LNC2 は、この2物理コアを1つの論理コアとして扱う設定 (neuron-ls では4コア表示)。'},
+      msg:'2 つの NeuronCore が 1 つの HBM スタックを共有する。既定の LNC2 は、この2物理コアを1つの論理コアとして扱う設定 (neuron-ls では4コア表示)。'},
     {key:'device', hit:(x,y)=>x>=devBox.x&&x<=devBox.x+devBox.w&&y>=devBox.y&&y<=devBox.y+devBox.h,
       msg:'Device = 1 枚の Trainium2 チップ。96 GiB HBM (4 スタック) と 8 個の NeuronCore-v3 を持つ。FP8 dense で約 1.3 PFLOPS。'},
     {key:'instance', hit:(x,y)=>x>=instBox.x&&x<=instBox.x+instBox.w&&y>=instBox.y&&y<=instBox.y+instBox.h,
@@ -462,7 +463,7 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
       ct.lineWidth=1.5; rr(bx,by,bw,bh,10);ct.stroke();ct.setLineDash([]);
     });
     ct.fillStyle='#8fb0d6';ct.font='11px sans-serif';ct.textAlign='left';
-    ct.fillText('点線の枠 = 2コアで1 HBMバンクを共有 (計4バンク)',devBox.x+14,devBox.y+devBox.h-8);
+    ct.fillText('点線の枠 = 2コアで1 HBMスタックを共有 (計4バンク)',devBox.x+14,devBox.y+devBox.h-8);
 
     // NeuronCore 小箱 x8
     cores.forEach(c=>{
