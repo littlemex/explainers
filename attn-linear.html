@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linear Attention — softmax を外して O(N) に</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --q:#e07a5f; --k:#3d7dca; --v:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px;text-align:center}
+  .cost .box .big{font-size:26px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">ATTENTION の系統と進化 ・ 06</p>
+  <a class="back" href="./attention-series-index.html">← シリーズ目次へ戻る</a>
+  <h1>Linear Attention — softmax を外して O(N) に</h1>
+  <p>ここから系統が分かれる。KV を減らす路線ではなく、softmax そのものを外し固定状態へ書き換える路線</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">この記事は Attention の基礎、および前章までの MHA の構造 (ヘッド分割・KV-Cache の式) を前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-mha.html">前章: MHA — マルチヘッドの構造と KV の重さ</a> を読んでください。</p>
+  <div class="warn">
+    <b>ここが系統の分岐点です。</b> MQA・GQA・MLA・SWA・DSA は、すべて MHA が持つ<b>KV-Cache という「参照するもの」を減らす・選ぶ</b>路線でした。KV は $N$ に比例して増え続けるという前提そのものは変えません。<b>Linear Attention</b> はこの前提を崩します。softmax を外すと、KV を全部持たなくても、<b>固定サイズの状態 $S$ に情報を畳み込んで持ち運べる</b>ことが分かります。ここから「線形 / 状態系」という第 2 の系統が始まります。
+  </div>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    softmax があるせいで $QK^\top$ という $N\times N$ の行列を作らざるを得ませんでした。<b>softmax を外し、カーネル内積 $\phi(q)^\top\phi(k)$ に置き換えると、行列積の結合則が使えるようになり</b>、$(\phi(K)^\top V)$ を先に $N$ に依らない固定サイズへ畳み込んでから $\phi(Q)$ を掛けられます。これで計算量が $O(N^2)$ から <b>$O(N)$</b> に落ち、KV-Cache の代わりに<b>状態行列 $S$ (サイズ固定)</b> を持てば十分になります。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 何を解決する手法か</a>
+    <a href="#s2">2. 数式で見る Linear Attention</a>
+    <a href="#s3">3. 計算量</a>
+    <a href="#s4">4. 【構成】softmax 版 vs 線形版</a>
+    <a href="#s5">5. 【体験】系列長を伸ばすと何が起きるか</a>
+    <a href="#s6">6. 代表モデルと系統上の位置</a>
+    <a href="#s7">7. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>何を解決する手法か</h2>
+  <p class="lead">softmax があるかぎり、$QK^\top$ を丸ごと作るしかない。</p>
+  <p>前章までの MQA・GQA・MLA・SWA・DSA は、いずれも「KV をどう減らす・選ぶか」という同じ土台の上で工夫していました。しかし、その土台自体 ― <b>KV-Cache が $N$ に比例して増え続ける</b>という構造 ― は誰も変えていません。素の Attention に戻って考えると、この構造は $\mathrm{softmax}(QK^\top/\sqrt d)V$ という式の $\mathrm{softmax}$ の存在に由来します。$\mathrm{softmax}$ は各クエリ $q_t$ について $\exp(q_t^\top k_s)$ を全キー $s\le t$ で計算してから正規化するため、<b>$Q$ と $K$ の間に他の演算を挟めず、$N\times N$ のスコア行列を必ず経由</b>してしまいます。だからこそ、これまでの章は「KV というデータそのもの」を削るしかなかったのです。</p>
+  <p>ここで問われる着想はシンプルです。<b>もし softmax がなければ、$QK^\top V$ の計算順序を変えられるのではないか</b>。実際、$\mathrm{softmax}$ を外して $\exp(q_t^\top k_s)$ をカーネル内積 $\phi(q_t)^\top \phi(k_s)$ で近似すると、行列積の結合則が使えるようになります。$(QK^\top)V$ を先に計算する代わりに、$Q(K^\top V)$ の順で計算してよくなり、$K^\top V$ は $N$ に依存しない固定サイズの行列に畳み込めます。<b>Katharopoulos et al. の "Transformers are RNNs" (arXiv:2006.16236)</b> が示したのは、まさにこの置き換えにより Attention が固定状態を持つ RNN と等価になるという事実です。</p>
+  <div class="key">
+    <b>KV を減らす路線と、KV をやめる路線。</b> これまでの章は「MHA の $2Nn_{kv}db_{\text{KV}}L$ という式のどの因子を叩くか」でした。Linear Attention はこの式自体を手放し、<b>$N$ 依存が消えた固定サイズの状態 $S$</b> に置き換えます。得るものは $O(N)$ の計算量と一定サイズのメモリ、失うものは「どんな遠いトークンでも厳密に参照できる」という素の Attention の強みです (この代償は次節以降で詳述します)。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>数式で見る Linear Attention</h2>
+  <p class="lead">$\mathrm{softmax}$ をカーネル内積に置換すると、Attention は状態の累積更新として書けます。記号は本シリーズ共通のものを使います。</p>
+  <p>素の Attention は $\mathrm{softmax}(QK^\top)V$ で、指数カーネル $\exp(q_t^\top k_s)$ を経由していました。これを特徴写像 $\phi(\cdot)$ の内積で近似します。</p>
+  $$ \exp(q_t^\top k_s) \;\longrightarrow\; \phi(q_t)^\top \phi(k_s) $$
+  <p>この置き換えにより、出力 $o_t$ は次のように書けます。</p>
+  $$ \mathrm{softmax}(QK^\top)V \;\approx\; \phi(Q)\big(\phi(K)^\top V\big) $$
+  <p>右辺の $\phi(K)^\top V$ は $d_k\times d_v$ の固定サイズの行列です。これを時刻ごとの累積として書き直すと、状態行列 $S_t$ の更新式になります。</p>
+  <div class="math">
+    <span class="c"># 状態 S_t は d_k×d_v の固定サイズ (系列長 N に依存しない)</span><br>
+    S_t = S_{t-1} + \phi(k_t)\, v_t^\top<br>
+    <span class="c"># 正規化項 z_t も同様に累積</span><br>
+    z_t = z_{t-1} + \phi(k_t)
+  </div>
+  $$ S_t = S_{t-1} + \phi(k_t)\, v_t^\top, \qquad z_t = z_{t-1} + \phi(k_t) $$
+  <p>出力 $o_t$ は、この状態 $S_t$ にクエリ側の特徴写像 $\phi(q_t)$ を掛けて正規化するだけで得られます。</p>
+  $$ o_t = \frac{\phi(q_t)^\top S_t}{\phi(q_t)^\top z_t} $$
+  <div class="key">
+    Attention が softmax という<b>非線形</b>を持つ間は、$Q$・$K$・$V$ の演算順序を変えられませんでした。カーネル近似で<b>線形</b>にした瞬間、結合則が使えるようになり、$(\phi(K)^\top V)$ を先に畳み込んで持ち運べる ― これが Linear Attention の核心です。$S_t$ が $d_k\times d_v$ の<b>固定サイズ</b>で、系列長 $N$ にまったく依存しない点に注目してください (以降の DeltaNet 系では分母 $z_t$ を落とし、正規化を別の形で行うのが主流です)。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>計算量</h2>
+  <p class="lead">KV-Cache という概念そのものが、$N$ に依存しない状態 $S$ に置き換わります。</p>
+  <h3>時間計算量 (prefill / 学習時)</h3>
+  <p>各時刻の状態更新 $S_t = S_{t-1} + \phi(k_t)v_t^\top$ は $\phi(k_t)$ ($d$ 次元) と $v_t$ ($d$ 次元) の外積で $O(d^2)$、これを $N$ ステップ繰り返すので、時間計算量は<b>$O(N d^2)$</b> です。素の Attention の $O(N^2 d)$ から $N$ の依存が二乗から線形に落ちます。</p>
+  <h3>Decode 時のボトルネック</h3>
+  <p>1 トークンを生成するたびに、素の Attention は過去 $N$ 件分の KV を HBM から読み直す必要がありました。Linear Attention では、次のトークンの出力を出すのに必要なのは<b>直前の状態 $S_{t-1}$ だけ</b>です。<b>KV を読み出す必要がなく、固定サイズの状態を更新するだけ</b>で decode が完結します。</p>
+  <h3>KV / 状態メモリの $N$ 依存</h3>
+  <p>状態 $S$ は $d_k\times d_v$ の固定サイズの行列であり、<b>系列長 $N$ が伸びても状態のサイズは変わりません</b>。これまでの章の $2Nn_{kv}db_{\text{KV}}L$ という式が $N$ について線形に増え続けるのに対し、Linear Attention はこの式ごと「$N$ 非依存の固定状態」に置き換えます。</p>
+  <div class="cost">
+    <div class="box"><span class="big">O(N d&sup2;)</span><span class="lbl">時間計算量</span></div>
+    <div class="box"><span class="big">固定サイズ</span><span class="lbl">状態 S (d_k&times;d_v)</span></div>
+    <div class="box"><span class="big">KV 読み出し不要</span><span class="lbl">decode は状態更新のみ</span></div>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【構成】softmax 版 vs 線形版</h2>
+  <p class="lead">softmax 版は $N\times N$ の行列を作り続けます。線形版は左から右へ、固定サイズの状態を再帰的に更新するだけです。トグルで切り替えてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvArch" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-v="softmax" id="btnSoftmax">softmax 版 (N&times;N 行列)</button>
+    <button class="ghost" data-v="linear" id="btnLinear">線形版 (固定状態の再帰)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--q)"></span>Query</span>
+    <span><span class="dot" style="background:var(--k)"></span>Key</span>
+    <span><span class="dot" style="background:var(--v)"></span>Value / 状態 S</span>
+  </div>
+  <p><b>softmax 版</b>は、各クエリが全キーとの内積を取るため、$N\times N$ のスコア行列 (系列長に応じて面積が増える) を経由します。<b>線形版</b>に切り替えると、代わりに固定サイズの箱 (状態 $S$) が左から右へ流れ、各トークンの $\phi(k_t)v_t^\top$ を通過するたびに<b>箱のサイズを変えずに</b>更新されていく様子が見えます。系列がどれだけ長くなっても、箱の大きさは変わりません。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】系列長を伸ばすと何が起きるか</h2>
+  <p class="lead">系列長 $N$ スライダを動かして、softmax 版のメモリ (KV-Cache, $N^2$ に近い挙動) と線形版のメモリ (状態 $S$, 常に一定) を比較します。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvDemo" width="840" height="340"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">系列長 $N$ <input id="demoN" type="range" min="512" max="65536" value="4096" step="512"></div>
+  </div>
+  <div class="cost">
+    <div class="box"><span class="big" id="demo_n">4096</span><span class="lbl">系列長 N</span></div>
+    <div class="box"><span class="big" id="demo_kv">—</span><span class="lbl">softmax 版 KV-Cache</span></div>
+    <div class="box"><span class="big" id="demo_state">一定</span><span class="lbl">線形版 状態 S</span></div>
+  </div>
+  <p>$N$ を伸ばすほど、softmax 版の KV-Cache (橙の棒) は<b>線形に伸び続け</b>ます。一方、線形版の状態 $S$ (緑の棒) は<b>$N$ に一切依存せず、常に同じ高さ</b>のままです。これが「KV を持つか、固定状態を持つか」という 2 系統の分岐点そのものです。ただし、この一定の状態には<b>有限の容量</b>という別の制約があり、それは次章 DeltaNet で詳しく扱います。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
+  <p class="lead">Linear Attention は「線形 / 状態系」という第 2 の系統の起点です。MHA から分岐し、RWKV・RetNet・GLA を経て DeltaNet 系へ精緻化されていきます。</p>
+  <p>Linear Attention の骨格は Katharopoulos et al. "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention" (arXiv:2006.16236, 2020-06) で示されました。実運用のモデルというより、<b>softmax をカーネル内積に置き換えると Attention が固定状態の RNN と等価になる</b>という理論的な転換点を示した論文実験が起点です。</p>
+  <p>この骨格を土台に、<b>RWKV</b> (arXiv:2305.13048)・<b>RetNet</b> (arXiv:2307.08621)・<b>GLA</b> (Gated Linear Attention, arXiv:2312.06635) が、状態更新に減衰やゲートを加えるなどの改良を重ねて実モデルのスケールに乗せました。これらを経て、状態更新を「誤差修正」の形に精緻化する <b>DeltaNet</b> (次章) へとつながります。</p>
+  <div class="key">
+    <b>系統上の位置。</b> Linear Attention の親は MHA (前々節までの「素の Attention」) ですが、そこから分岐する先は MQA・GQA・MLA・SWA・DSA とは<b>別の系統</b>です。MHA を起点に「KV を減らす・選ぶ」softmax 系と、「softmax を外し固定状態で再帰する」線形 / 状態系の 2 本の道に分かれる ― この章がその分岐点にあたります。次章 DeltaNet は、この固定状態の「書き込み方」を精緻化する最初の一手です。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>やること</td><td>$\mathrm{softmax}$ の指数カーネルを特徴写像 $\phi$ の内積で近似し、結合則で計算順序を変える</td></tr>
+    <tr><td>数式</td><td>$\mathrm{softmax}(QK^\top)V \approx \phi(Q)(\phi(K)^\top V)$。状態 $S_t=S_{t-1}+\phi(k_t)v_t^\top$、$o_t=\phi(q_t)^\top S_t/z_t$</td></tr>
+    <tr><td>時間計算量</td><td>$O(N d^2)$。素の Attention の $O(N^2 d)$ から $N$ が線形に</td></tr>
+    <tr><td>状態 / メモリ</td><td>状態 $S$ は $d_k\times d_v$ の固定サイズ。$N$ に依存しない</td></tr>
+    <tr><td>decode</td><td>状態更新のみで完結。KV の読み出しが不要</td></tr>
+    <tr><td>代表モデル</td><td>Katharopoulos et al. の論文実験。後継として RWKV・RetNet・GLA</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>Linear Attention は、これまでの章とは異なる手段で KV-Cache の重さに答えました。KV を減らす・選ぶのではなく、<b>softmax を外して結合則を使えるようにし、$N$ 依存そのものを固定サイズの状態 $S$ に畳み込んで消した</b>のです。ここから始まる「線形 / 状態系」は、RWKV・RetNet・GLA を経て、状態の書き込み方を精緻化する DeltaNet へと続きます。次章では、この固定状態が持つ弱点 (有限容量) と、それを「誤差修正」で克服する delta 則を見ます。
+  </div>
+  <div class="seriesnav">
+    前の章 ← <a href="./attn-dsa.html">05. DSA — top-k で疎に選ぶ</a><br>
+    次の章 → <a href="./attn-deltanet.html">07. DeltaNet / Gated DeltaNet — delta 則で状態を直す</a>
+  </div>
+  <div class="fn">
+    参考: Angelos Katharopoulos et al. "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention." arXiv:<a href="https://arxiv.org/abs/2006.16236" target="_blank" rel="noopener">2006.16236</a>, 2020。<br>
+    参考: Bo Peng et al. "RWKV: Reinventing RNNs for the Transformer Era." arXiv:<a href="https://arxiv.org/abs/2305.13048" target="_blank" rel="noopener">2305.13048</a>, 2023。<br>
+    参考: Yutao Sun et al. "Retentive Network: A Successor to Transformer for Large Language Models." arXiv:<a href="https://arxiv.org/abs/2307.08621" target="_blank" rel="noopener">2307.08621</a>, 2023。<br>
+    参考: Songlin Yang et al. "Gated Linear Attention Transformers with Hardware-Efficient Training." arXiv:<a href="https://arxiv.org/abs/2312.06635" target="_blank" rel="noopener">2312.06635</a>, 2023。<br>
+    注意: 本ページのアニメーションと概算値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ 構成図: softmax 版 vs 線形版 ============
+(function(){
+  const cv=document.getElementById('cvArch'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const Q='#e07a5f',K='#3d7dca',V='#198754';
+  let mode='softmax';
+
+  function drawSoftmax(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('softmax(QK^T)V — 各クエリが全キーとの N×N 行列を経由',20,28);
+    const N=10, gx=W*0.30, gy=54, cell=26;
+    // N x N グリッド (スコア行列)
+    for(let i=0;i<N;i++){
+      for(let j=0;j<N;j++){
+        const active=j<=i; // causal
+        ct.fillStyle=active?'rgba(224,122,95,0.55)':'rgba(255,255,255,0.05)';
+        ct.fillRect(gx+j*cell,gy+i*cell,cell-2,cell-2);
+      }
+    }
+    ct.strokeStyle='#8fd6b4';ct.lineWidth=1;ct.strokeRect(gx,gy,N*cell,N*cell);
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='center';
+    ct.fillText('スコア行列 QK^T (N×N)',gx+N*cell/2,gy-14);
+    // Q,K,V ラベル
+    ct.textAlign='left';
+    ct.fillStyle=Q;ct.fillText('Q (縦, 各行)',gx+N*cell+20,gy+20);
+    ct.fillStyle=K;ct.fillText('K (横, 各列)',gx+N*cell+20,gy+44);
+    ct.fillStyle=V;ct.fillText('→ V を加重和',gx+N*cell+20,gy+68);
+    ct.fillStyle='#ffd98f';ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText('系列長 N が伸びるほど、この行列は N² で大きくなる',W/2,H-16);
+  }
+
+  function drawLinear(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('状態 S_t = S_{t-1} + φ(k_t) v_t^T — 固定サイズの箱を左から右へ再帰更新',20,28);
+    const N=10, x0=60, y0=190, step=(W-140)/(N-1), boxW=52,boxH=52;
+    // タイムライン
+    ct.strokeStyle='rgba(215,245,230,0.25)';ct.lineWidth=1.5;
+    ct.beginPath();ct.moveTo(x0,y0);ct.lineTo(x0+(N-1)*step,y0);ct.stroke();
+    for(let t=0;t<N;t++){
+      const x=x0+t*step;
+      // トークン (k_t, v_t) の点
+      ct.fillStyle=K;ct.beginPath();ct.arc(x,y0-46,7,0,7);ct.fill();
+      ct.fillStyle=V;ct.beginPath();ct.arc(x,y0-24,7,0,7);ct.fill();
+      // 矢印 → 状態箱
+      ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+      ct.beginPath();ct.moveTo(x,y0-18);ct.lineTo(x,y0-boxH/2-2);ct.stroke();
+      // 状態箱 (固定サイズ)
+      ct.fillStyle='rgba(25,135,84,0.35)';ct.strokeStyle=V;ct.lineWidth=2;
+      ct.fillRect(x-boxW/2,y0,boxW,boxH);ct.strokeRect(x-boxW/2,y0,boxW,boxH);
+      ct.fillStyle='#eafaf1';ct.font='11px sans-serif';ct.textAlign='center';
+      ct.fillText('S_'+t,x,y0+boxH/2+4);
+      if(t<N-1){
+        ct.strokeStyle='#8fd6b4';ct.lineWidth=1.5;
+        ct.beginPath();ct.moveTo(x+boxW/2,y0+boxH/2);ct.lineTo(x+step-boxW/2,y0+boxH/2);ct.stroke();
+      }
+    }
+    ct.fillStyle=K;ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('k_t',x0-40,y0-43);
+    ct.fillStyle=V;ct.fillText('v_t',x0-40,y0-21);
+    ct.fillStyle='#ffd98f';ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText('状態 S の箱の大きさは d_k×d_v で固定。N が伸びても箱は増えない',W/2,H-16);
+  }
+
+  function draw(){ mode==='softmax'?drawSoftmax():drawLinear(); }
+  const bS=document.getElementById('btnSoftmax'),bL=document.getElementById('btnLinear');
+  bS.onclick=()=>{mode='softmax';bS.classList.add('active');bL.classList.remove('active');draw();};
+  bL.onclick=()=>{mode='linear';bL.classList.add('active');bS.classList.remove('active');draw();};
+  draw();
+})();
+
+// ============ 体験: 系列長を伸ばすと何が起きるか ============
+(function(){
+  const cv=document.getElementById('cvDemo'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const N_MAX=65536, d=128, bkv=2, nkv=8, L=32; // fp16, 概算パラメータ
+  function fmtBytes(b){if(b>=1e9)return (b/1e9).toFixed(2)+' GB';if(b>=1e6)return (b/1e6).toFixed(1)+' MB';if(b>=1e3)return (b/1e3).toFixed(0)+' KB';return b+' B';}
+  function fmtN(n){if(n>=1024)return (n/1024).toFixed(n%1024===0?0:1)+'K';return ''+n;}
+  function kvBytes(N){return 2*N*nkv*d*bkv*L;}
+  const STATE_BYTES=d*d*bkv; // 固定サイズの状態 (d_k=d_v=d と近似)
+  const maxKV=kvBytes(N_MAX);
+
+  function draw(N){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('softmax 版 KV-Cache (橙) は N に線形。線形版 状態 S (緑) は N に依存せず一定',20,28);
+    const baseY=H-76, maxH=H-150, bw=170, gap=110;
+    const x1=W*0.28, x2=x1+bw+gap;
+    // softmax 版 (KV-Cache)
+    const bytes=kvBytes(N);
+    const h1=maxH*Math.min(1,bytes/maxKV);
+    ct.fillStyle='#e07a5f';ct.fillRect(x1,baseY-h1,bw,h1);
+    ct.fillStyle='#f0c7b8';ct.font='bold 20px sans-serif';ct.textAlign='center';
+    ct.fillText(fmtBytes(bytes),x1+bw/2,baseY-h1-14);
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';
+    ct.fillText('softmax 版 KV-Cache',x1+bw/2,baseY+22);
+    ct.fillText('(N に比例して伸び続ける)',x1+bw/2,baseY+40);
+    // 線形版 (状態 S, 常に一定・小さい)
+    const h2=Math.max(10, maxH*0.06);
+    ct.fillStyle='#198754';ct.fillRect(x2,baseY-h2,bw,h2);
+    ct.fillStyle='#8fd6b4';ct.font='bold 20px sans-serif';ct.textAlign='center';
+    ct.fillText(fmtBytes(STATE_BYTES),x2+bw/2,baseY-h2-14);
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';
+    ct.fillText('線形版 状態 S',x2+bw/2,baseY+22);
+    ct.fillText('(N を変えても一定)',x2+bw/2,baseY+40);
+    ct.font='13px sans-serif';ct.fillStyle='#d7f5e6';ct.textAlign='left';
+    ct.fillText('概算: n_kv=8, d=128, L=32 層, fp16 (softmax 版)。状態は d_k×d_v×2byte (線形版)',20,H-14);
+  }
+  const sN=document.getElementById('demoN');
+  function upd(){
+    const N=+sN.value;
+    document.getElementById('demo_n').textContent=fmtN(N);
+    document.getElementById('demo_kv').textContent=fmtBytes(kvBytes(N));
+    draw(N);
+  }
+  sN.oninput=upd; upd();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body></html>

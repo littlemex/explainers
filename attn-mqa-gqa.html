@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MQA / GQA — KV ヘッドを共有して減らす</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --q:#e07a5f; --k:#3d7dca; --v:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px;text-align:center}
+  .cost .box .big{font-size:26px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">ATTENTION の系統と進化 ・ 02</p>
+  <a class="back" href="./attention-series-index.html">← シリーズ目次へ戻る</a>
+  <h1>MQA / GQA — KV ヘッドを共有して減らす</h1>
+  <p>MHA の「全ヘッドが自前の KV を持つ」構造から、KV ヘッド数そのものを削るという最初の一手</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">この記事は Attention の基礎、および前章 MHA の構造 (ヘッド分割・KV-Cache の式) を前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-mha.html">前章: MHA — マルチヘッドの構造と KV の重さ</a> を読んでください。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    前章で見た KV-Cache の式 $2 N n_{kv} d\, b_{\text{KV}} L$ のうち、MHA では $n_{kv}=h$ (Q ヘッドと同数) が最大でした。<b>MQA (Multi-Query Attention)</b> は思い切って <b>$n_{kv}=1$</b> にし、全 Q ヘッドが 1 組の Key・Value を共有します。<b>GQA (Grouped-Query Attention)</b> はその中間として、Q ヘッドを $g$ 個のグループに分け、<b>$n_{kv}=g$</b> 組の KV をグループ単位で共有します。どちらも「Q ヘッドは減らさず、KV ヘッドだけを減らす」のが共通の発想です。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. なぜ KV ヘッドだけを減らせるのか</a>
+    <a href="#s2">2. 数式で見る MQA / GQA</a>
+    <a href="#s3">3. 計算量とメモリ帯域</a>
+    <a href="#s4">4. 【構成】KV ヘッド共有のアーキテクチャ</a>
+    <a href="#s5">5. 【体験】グループ数と KV-Cache のトレードオフ</a>
+    <a href="#s6">6. 代表モデルと系統上の位置</a>
+    <a href="#s7">7. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ KV ヘッドだけを減らせるのか</h2>
+  <p class="lead">MHA が重いのは「表現力のために分けたヘッド」と「KV-Cache として保存するヘッド」が同じ本数に縛られていたからです。</p>
+  <p>前章で見たとおり、MHA は $h$ 本の Q ヘッドそれぞれに自前の Key・Value を持たせていました。これは表現力の観点では自然な設計ですが、推論時にキャッシュする量の観点では過剰です。Decode では毎トークン、過去 $N$ 件分の Key・Value を HBM から読み直しますが、<b>読み直す量は KV ヘッドの本数に比例して増える</b>のに対し、Query は 1 トークン分しか使いません。つまり Q ヘッドを $h$ 本のまま保っても、<b>各 Q ヘッドが厳密に別々の KV を持つ必要はない</b>のではないか、というのが着想の出発点です。</p>
+  <p>MQA (Shazeer, 2019) はこの発想を極端まで押し進め、<b>全ての Q ヘッドで Key・Value を 1 組だけ共有</b>します。KV ヘッド数は $n_{kv}=1$ まで落ち、KV-Cache は Q ヘッド数 $h$ に関係なく一定になります。ただし全ヘッドが同じ「見方」の KV しか参照できなくなるため、MHA が持っていた「ヘッドごとに違う観点」という表現力の一部を犠牲にします。</p>
+  <p>GQA (Ainslie et al., 2023) はこのトレードオフを緩めます。Q ヘッドを $g$ 個のグループに分け、<b>同じグループ内の Q ヘッドだけが KV を共有</b>する設計です。$g=1$ なら MQA に一致し、$g=h$ なら MHA に一致します。つまり GQA は MHA と MQA を両端に持つ連続的な設計空間で、$g$ を調整することで品質と KV の重さを天秤にかけられます。</p>
+  <div class="key">
+    ポイントは、<b>KV ヘッドを減らしても Q ヘッド数 $h$ は変えない</b>ことです。Attention の「観点の多さ」は Q 側の射影で保ちつつ、キャッシュする KV だけを間引く。これが MQA / GQA が計算量をほぼ変えずに KV-Cache だけを削れる理由です。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>数式で見る MQA / GQA</h2>
+  <p class="lead">MHA の式との差分は「どの Q ヘッドがどの KV を使うか」の対応関係だけです。統一ノーテーションでは $n_{kv}$ が MHA: $h$、GQA: $g$、MQA: $1$ に対応します。</p>
+  <p>入力を $X \in \mathbb{R}^{N\times d_{\text{model}}}$ とし、Q ヘッドは前章と同じく $h$ 本 ($i=1,\dots,h$) 持ちます。差はここからです。</p>
+  <h3>MQA ($n_{kv}=1$)</h3>
+  <p>Q ヘッドごとに射影行列 $W_i^Q$ は個別に持ちますが、Key・Value の射影行列 $W^K, W^V$ は<b>全ヘッド共通の 1 組だけ</b>です。</p>
+  <div class="math">
+    <span class="c"># Q はヘッドごと、K・V は共通の1組</span><br>
+    Q_i = X W_i^Q&nbsp;&nbsp; (i=1,\dots,h),&nbsp;&nbsp; K = X W^K,&nbsp;&nbsp; V = X W^V
+  </div>
+  $$ \mathrm{head}_i^{\text{MQA}} = \mathrm{softmax}\!\left(\frac{Q_i K^{\top}}{\sqrt{d}}\right) V \in \mathbb{R}^{N\times d} $$
+  <p>すべてのヘッド $i$ が同じ $K,V$ を参照します。キャッシュするのは $K,V$ 1 組分だけなので $n_{kv}=1$ です。</p>
+  <h3>GQA ($n_{kv}=g$)</h3>
+  <p>Q ヘッドを $g$ 個のグループに分け ($h/g$ 本ずつ)、グループ $j$ ($j=1,\dots,g$) が自前の $K_j, V_j$ を持ちます。ヘッド $i$ が属するグループを $j(i)$ と書くと、</p>
+  <div class="math">
+    <span class="c"># グループ j ごとに K,V を1組。同グループ内の Q ヘッドが共有</span><br>
+    K_j = X W_j^K,&nbsp;&nbsp; V_j = X W_j^V&nbsp;&nbsp; (j=1,\dots,g)
+  </div>
+  $$ \mathrm{head}_i^{\text{GQA}} = \mathrm{softmax}\!\left(\frac{Q_i K_{j(i)}^{\top}}{\sqrt{d}}\right) V_{j(i)} \in \mathbb{R}^{N\times d} $$
+  <p>いずれも最後は前章と同じく結合して出力射影をかけます。</p>
+  $$ \mathrm{Attn}(X) = \mathrm{Concat}(\mathrm{head}_1,\dots,\mathrm{head}_h)\, W^O $$
+  <div class="key">
+    3 つの手法は<b>同じ式の $n_{kv}$ が違うだけ</b>です。$n_{kv}=h$ で MHA (各ヘッドが専用 KV)、$n_{kv}=g$ で GQA (グループ共有)、$n_{kv}=1$ で MQA (全ヘッド共有)。$g$ を $1$ から $h$ まで動かすと、MQA から GQA、そして MHA まで連続的につながります。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>計算量とメモリ帯域</h2>
+  <p class="lead">時間計算量は MHA と変わりません。MQA / GQA が効くのは「メモリ帯域」であって「演算量」ではない、というのが本章最大のポイントです。</p>
+  <h3>時間計算量 (学習 / Prefill)</h3>
+  <p>スコア行列 $Q_i K_{j(i)}^\top$ の計算は各ヘッドで依然 $N\times N$ です。$K,V$ を共有していても、Q ヘッドの本数 $h$ 本分のスコア計算・softmax・重み付き和はそのまま必要なので、総計算量は MHA と同じ<b>$O(N^2 d_{\text{model}})$</b> です。KV ヘッドを減らしても演算量は 1 バイトも減りません。</p>
+  <h3>Decode 時のボトルネック</h3>
+  <p>MHA の decode がキツかったのは、1 トークン生成ごとに<b>$h$ 本分の Key・Value を HBM から読む</b>ことでした。MQA / GQA では読むべき KV ヘッドが $n_{kv}$ 本 ($1$ または $g$) に減るので、<b>同じ演算量に対して読み出すメモリ量が $h/n_{kv}$ 倍軽く</b>なります。Decode は依然 memory-bound ですが、その帯域負荷そのものを削れるのが MQA / GQA の効能です。</p>
+  <h3>KV メモリの大きさ</h3>
+  <p>KV バイト式は前章と同じですが、$n_{kv}$ が変わります。</p>
+  $$ \text{KV bytes} \approx 2 \cdot N \cdot n_{kv} \cdot d \cdot b_{\text{KV}} \cdot L $$
+  <p>MHA では $n_{kv}=h$ でしたが、GQA では $n_{kv}=g\;(1<g<h)$、MQA では $n_{kv}=1$ です。$h=32,\,g=8$ なら KV は $1/4$ に、MQA ($n_{kv}=1$) なら $1/32$ まで縮みます。$N$・$L$ への依存はそのまま線形ですが、<b>係数となる $n_{kv}$ を叩く</b>のがこの章の一手です。</p>
+  <div class="key">
+    覚えておく基準: MQA / GQA は<b>「計算量は不変、メモリ帯域と KV 容量だけを削る」</b>手法です。演算 (GEMM) 側は変わらないので TTFT への効きは薄く、KV 帯域と容量が支配する <b>decode の TPOT とバッチ上限</b>にほぼそのまま効きます。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【構成】KV ヘッド共有のアーキテクチャ</h2>
+  <p class="lead">Q ヘッドは $h$ 本のまま、KV ヘッドだけがグループ数 $g$ に減り、同じグループの Q ヘッドが同じ KV を指す様子を見ます。$g$ を動かすと MHA ($g=h$) から GQA、MQA ($g=1$) まで連続的に変わります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvArch" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">Q ヘッド数 $h$ <input id="archH" type="range" min="2" max="8" value="8" step="2"></div>
+    <div class="slider">KV グループ数 $g$ <input id="archG" type="range" min="1" max="8" value="8"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--q)"></span>Query ヘッド</span>
+    <span><span class="dot" style="background:var(--k)"></span>Key ヘッド (グループ)</span>
+    <span><span class="dot" style="background:var(--v)"></span>Value ヘッド (グループ)</span>
+  </div>
+  <p>上段の Q ヘッドは常に $h$ 本のまま並びます。下段の K・V は $g$ 本のグループに減り、同じ色の矢印でつながった Q ヘッドたちが 1 つのグループの KV を共有します。$g=h$ にすると 1 対 1 (MHA)、$g=1$ にすると全ヘッドが 1 つの KV に集まる (MQA) 様子が見えます。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】グループ数と KV-Cache のトレードオフ</h2>
+  <p class="lead">KV グループ数 $g$ (= $n_{kv}$) を動かして、KV-Cache のバイト数がどこまで縮むかを見ます。文脈長 $N$・層数 $L$・ヘッド次元 $d=128$、fp16 で概算します。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvKV" width="840" height="320"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">Q ヘッド数 $h$ <input id="kvH" type="range" min="8" max="64" value="32" step="8"></div>
+    <div class="slider">KV グループ数 $g$ <input id="kvG" type="range" min="1" max="64" value="32"></div>
+    <div class="slider">文脈長 $N$ <input id="kvN" type="range" min="4096" max="131072" value="32768" step="4096"></div>
+  </div>
+  <div class="cost">
+    <div class="box"><span class="big" id="kv_mode">MHA</span><span class="lbl">現在の構成</span></div>
+    <div class="box"><span class="big" id="kv_bytes">—</span><span class="lbl">KV-Cache (fp16)</span></div>
+    <div class="box"><span class="big" id="kv_ratio">—</span><span class="lbl">MHA 比</span></div>
+  </div>
+  <p>棒グラフは $g$ を動かしたときの KV-Cache サイズです。$g=h$ (MHA) から $g$ を下げるほど KV は<b>$h/g$ 倍</b>軽くなり、$g=1$ (MQA) で最小になります。ただし $g$ を下げるほど、各 KV グループがより多くの Q ヘッドの「代表」を務めることになり、<b>ヘッドごとに違う観点を持つという MHA の表現力を犠牲にします</b>。実務では $g=8$ 前後 (Llama 2 70B など) のように、KV を大きく削りつつ品質劣化を小さく抑える中間点が好まれます。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
+  <p class="lead">MQA と GQA は登場時期も系譜も異なりますが、どちらも「MHA の KV ヘッドを減らす」という同じ軸の上にあります。</p>
+  <p><b>MQA</b> (Shazeer, "Fast Transformer Decoding: One Write-Head is All You Need", 2019-11) は PaLM や Falcon などで採用され、decode を軽くする古典的な一手として先行しました。ただし $n_{kv}=1$ まで削ると品質劣化が目立つ場合があり、これを緩めたのが <b>GQA</b> (Ainslie et al., "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints", 2023-05) です。GQA は Llama 2 や Mistral 7B で採用され、2023 年以降ほぼすべての dense モデルの標準装備になりました。</p>
+  <p>系統としては、<b>MHA → MQA → GQA</b> という順に登場しましたが、設計空間としては GQA が $g$ の値で MHA ($g=h$) と MQA ($g=1$) の両方を内包する上位概念にあたります。次章の MLA は、この GQA の延長線上で「KV をグループ単位で持つ」のではなく「KV を低ランクの潜在表現に圧縮して 1 つだけ持つ」ところまで進めます。</p>
+  <div class="key">
+    覚えておく系譜: <b>MQA が先行し、GQA がその品質劣化を緩めた中間案として広く普及</b>しました。次章 MLA は GQA と同じ「KV ヘッドを減らす」動機から出発しつつ、削り方を「グループ化」から「低ランク圧縮」へ質的に変えます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>やること</td><td>Q ヘッドは $h$ 本のまま、KV ヘッドだけを $n_{kv}$ 本に減らして共有する</td></tr>
+    <tr><td>MQA</td><td>$n_{kv}=1$。全 Q ヘッドが 1 組の $K,V$ を共有</td></tr>
+    <tr><td>GQA</td><td>$n_{kv}=g$。$g$ グループ内の Q ヘッドが KV を共有 ($1<g<h$ で MHA と MQA の中間)</td></tr>
+    <tr><td>時間計算量</td><td>$O(N^2 d_{\text{model}})$。MHA と不変 (演算量は減らない)</td></tr>
+    <tr><td>KV-Cache</td><td>$\approx 2 N n_{kv} d\, b_{\text{KV}} L$。$n_{kv}$ を $h\to g\to 1$ と下げるほど線形に縮む</td></tr>
+    <tr><td>効くフェーズ</td><td>decode のメモリ帯域と KV 容量 (TPOT・同時実行数上限)。prefill の演算量には効かない</td></tr>
+    <tr><td>代表モデル</td><td>MQA: PaLM, Falcon / GQA: Llama 2, Mistral 7B</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>MQA / GQA は、KV バイト式 $2Nn_{kv}d\,b_{\text{KV}}L$ の中で <b>$n_{kv}$ という 1 つの因子だけ</b>を狙い撃ちで叩く、最初にして最も普及した KV 削減策です。計算量には手を付けず、Q ヘッド数による表現力もほぼ保ったまま、decode のメモリ帯域と KV 容量を大きく軽くします。次章の MLA は、この「$n_{kv}$ を減らす」発想をさらに進め、$n_{kv}\cdot d$ そのものを低ランクの潜在次元に圧縮します。
+  </div>
+  <div class="seriesnav">
+    前の章 ← <a href="./attn-mha.html">01. MHA — マルチヘッドの構造と KV の重さ</a><br>
+    次の章 → <a href="./attn-mla.html">03. MLA — KV を低ランク潜在に圧縮</a>
+  </div>
+  <div class="fn">
+    参考: Noam Shazeer. "Fast Transformer Decoding: One Write-Head is All You Need." 2019 (<a href="https://arxiv.org/abs/1911.02150" target="_blank" rel="noopener">arXiv:1911.02150</a>)。<br>
+    Joshua Ainslie et al. "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints." 2023 (<a href="https://arxiv.org/abs/2305.13245" target="_blank" rel="noopener">arXiv:2305.13245</a>)。<br>
+    注意: 本ページのアニメーションと概算値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ 構成図: KV ヘッド共有 ============
+(function(){
+  const cv=document.getElementById('cvArch'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const Q='#e07a5f',K='#3d7dca',V='#198754';
+  const colors=['#e07a5f','#3d7dca','#198754','#f2b134','#9b6bcc','#e0567a','#4bb8c4','#d19a3d'];
+  function label(h,g){
+    if(g===h) return 'MHA 相当 (g = h)';
+    if(g===1) return 'MQA 相当 (g = 1)';
+    return 'GQA (g = '+g+')';
+  }
+  function draw(h,g){
+    g=Math.min(g,h);
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('Q ヘッド '+h+' 本 → KV グループ '+g+' 本 ('+label(h,g)+')',20,26);
+
+    const qy=70,qh=34, kvy=260,kvh=40;
+    const ix=50, iw=W-100;
+    const qseg=iw/h, gseg=iw/g;
+
+    // Q ヘッド (上段)
+    ct.font='12px sans-serif';
+    for(let i=0;i<h;i++){
+      const x=ix+i*qseg;
+      const grp=Math.floor(i*g/h);
+      ct.fillStyle=colors[grp%colors.length];ct.globalAlpha=0.85;
+      ct.fillRect(x+3,qy,qseg-6,qh);
+      ct.globalAlpha=1;ct.strokeStyle='#0d2b20';ct.lineWidth=2;
+      ct.strokeRect(x+3,qy,qseg-6,qh);
+      ct.fillStyle='#fff';ct.textAlign='center';
+      ct.fillText('Q'+(i+1),x+qseg/2,qy+22);
+    }
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('Query ヘッド ×'+h,ix,qy-8);
+
+    // KV グループ (下段)
+    for(let j=0;j<g;j++){
+      const x=ix+j*gseg;
+      ct.fillStyle=colors[j%colors.length];ct.globalAlpha=0.85;
+      ct.fillRect(x+3,kvy,gseg-6,kvh);
+      ct.globalAlpha=1;ct.strokeStyle='#0d2b20';ct.lineWidth=2;
+      ct.strokeRect(x+3,kvy,gseg-6,kvh);
+      ct.fillStyle='#fff';ct.font='12px sans-serif';ct.textAlign='center';
+      ct.fillText('KV'+(j+1),x+gseg/2,kvy+24);
+    }
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('Key/Value グループ ×'+g,ix,kvy-8);
+
+    // 矢印: 各 Q ヘッド → 対応する KV グループ
+    ct.lineWidth=1.6;
+    for(let i=0;i<h;i++){
+      const grp=Math.floor(i*g/h);
+      const x1=ix+i*qseg+qseg/2, y1=qy+qh;
+      const x2=ix+grp*gseg+gseg/2, y2=kvy;
+      ct.strokeStyle=colors[grp%colors.length];ct.globalAlpha=0.55;
+      ct.beginPath();ct.moveTo(x1,y1);ct.lineTo(x2,y2);ct.stroke();
+      ct.globalAlpha=1;
+    }
+    ct.fillStyle='#ffd98f';ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText('n_kv = '+g+'  (Q ヘッド数 h='+h+' は不変)',W/2,H-16);
+  }
+  const sH=document.getElementById('archH'),sG=document.getElementById('archG');
+  function upd(){
+    const h=+sH.value;
+    if(+sG.value>h) sG.value=h;
+    draw(h,+sG.value);
+  }
+  sH.oninput=upd; sG.oninput=upd; upd();
+})();
+
+// ============ 体験: KV グループ数と KV-Cache サイズ ============
+(function(){
+  const cv=document.getElementById('cvKV'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const d=128, bkv=2, L=64; // head dim, fp16, 層数固定
+  function fmtBytes(b){if(b>=1e9)return (b/1e9).toFixed(2)+' GB';if(b>=1e6)return (b/1e6).toFixed(0)+' MB';if(b>=1e3)return (b/1e3).toFixed(0)+' KB';return b+' B';}
+  function fmtN(n){if(n>=1024*1024)return (n/1024/1024).toFixed(0)+'M';if(n>=1024)return (n/1024).toFixed(0)+'K';return ''+n;}
+  const N_MAX=131072,H_MAX=64;
+  const maxBytes=2*N_MAX*H_MAX*d*bkv*L;
+  function kvBytes(N,g,L){return 2*N*g*d*bkv*L;}
+  function draw(N,h,g){
+    ct.clearRect(0,0,W,H);
+    const bytesMHA=kvBytes(N,h,L);
+    const bytesCur=kvBytes(N,g,L);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('KV-Cache = 2 · N · n_kv · d · b_KV · L   (d=128, fp16, L=64, 1 シーケンス)',20,26);
+
+    const baseY=H-56, maxH=H-118, bw=140;
+    const x1=W*0.28, x2=W*0.60;
+    const h1=maxH*Math.min(1,bytesMHA/maxBytes);
+    const h2=maxH*Math.min(1,bytesCur/maxBytes);
+
+    // MHA 参照棒 (常に n_kv=h)
+    ct.fillStyle='#3d7dca';ct.globalAlpha=0.55;
+    ct.fillRect(x1,baseY-h1,bw,h1);ct.globalAlpha=1;
+    ct.strokeStyle='#3d7dca';ct.lineWidth=1.5;ct.strokeRect(x1,baseY-h1,bw,h1);
+    ct.fillStyle='#a9c9ef';ct.font='bold 18px sans-serif';ct.textAlign='center';
+    ct.fillText(fmtBytes(bytesMHA),x1+bw/2,baseY-h1-12);
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';
+    ct.fillText('MHA (n_kv='+h+')',x1+bw/2,baseY+22);
+
+    // 現在の g の棒
+    ct.fillStyle='#198754';ct.fillRect(x2,baseY-h2,bw,h2);
+    ct.fillStyle='#8fd6b4';ct.font='bold 22px sans-serif';ct.textAlign='center';
+    ct.fillText(fmtBytes(bytesCur),x2+bw/2,baseY-h2-14);
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';
+    ct.fillText('現在 (n_kv='+g+')',x2+bw/2,baseY+22);
+
+    ct.font='13px sans-serif';ct.fillStyle='#d7f5e6';ct.textAlign='left';
+    ct.fillText('g を 1 (MQA) まで下げるほど KV は h/g 倍軽くなる。ただし表現力とのトレードオフがある',20,H-14);
+  }
+  const sH=document.getElementById('kvH'),sG=document.getElementById('kvG'),sN=document.getElementById('kvN');
+  function upd(){
+    const h=+sH.value;
+    if(+sG.value>h) sG.value=h;
+    sG.max=h;
+    const g=+sG.value,N=+sN.value;
+    document.getElementById('kv_mode').textContent = g===h?'MHA':(g===1?'MQA':'GQA (g='+g+')');
+    document.getElementById('kv_bytes').textContent=fmtBytes(kvBytes(N,g,L));
+    document.getElementById('kv_ratio').textContent=(g/h*100).toFixed(1)+'%';
+    draw(N,h,g);
+  }
+  sH.oninput=upd; sG.oninput=upd; sN.oninput=upd; upd();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

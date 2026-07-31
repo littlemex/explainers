@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attention の系統と進化 — MHA から線形・状態空間まで</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --sm:#198754;  /* softmax 系 (緑) */
+    --ln:#3d7dca;  /* 線形/状態系 (青) */
+    --q:#e07a5f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 50px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:34px;letter-spacing:.03em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:1000px;margin:0 auto;padding:32px 20px 80px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px;text-align:center}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:26px 26px;margin:22px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  .legend2{display:flex;gap:24px;flex-wrap:wrap;font-size:14px;color:var(--sub);margin:0 0 14px}
+  .legend2 b{color:var(--ink)}
+  .sw-chip{display:inline-block;width:13px;height:13px;border-radius:3px;background:var(--sm);vertical-align:middle;margin-right:6px}
+  .ln-chip{display:inline-block;width:13px;height:13px;border-radius:3px;background:var(--ln);vertical-align:middle;margin-right:6px}
+  /* 系統図 */
+  .tree-wrap{position:relative;overflow-x:auto}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .node{cursor:pointer;transition:.15s}
+  .node:hover{filter:brightness(1.08)}
+  .node rect{rx:9;stroke-width:2}
+  .node text{fill:#fff;font-weight:700;font-size:13.5px;text-anchor:middle;dominant-baseline:middle;pointer-events:none}
+  .node.dim rect{opacity:.42;stroke-dasharray:5 4}
+  .node.dim text{opacity:.7}
+  .edge{stroke:#b9cabf;stroke-width:2;fill:none}
+  .edge.sm{stroke:#8fc6a9}
+  .edge.ln{stroke:#9dbfe0}
+  /* 情報パネル */
+  .panel{margin-top:16px;background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:18px 20px;min-height:96px}
+  .panel h3{margin:0 0 4px;color:var(--g1);font-size:20px}
+  .panel .meta{font-size:13px;color:var(--sub);margin:0 0 8px}
+  .panel .desc{font-size:15px;margin:0 0 10px}
+  .panel .cx{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--sub);margin:0 0 10px}
+  .panel .cx b{color:var(--g1)}
+  .panel a.open{display:inline-block;background:var(--g2);color:#fff;text-decoration:none;border-radius:8px;padding:7px 16px;font-size:14px;font-weight:700}
+  .panel a.open.soon{background:#cfe0d7;color:#5a6b62;pointer-events:none}
+  .panel a.paper{margin-left:12px;font-size:14px;color:var(--g2)}
+  /* 表 */
+  table{width:100%;border-collapse:collapse;margin:6px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td .sys{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  /* 章カード */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;margin-top:6px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;
+    box-shadow:0 2px 12px rgba(15,81,50,.05);transition:.18s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 24px rgba(15,81,50,.14);border-color:var(--g3)}
+  .card .cat{display:inline-block;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:700;align-self:flex-start;margin-bottom:10px;color:#fff}
+  .card h3{margin:0 0 6px;font-size:18px;color:var(--g1);line-height:1.4}
+  .card p{margin:0;font-size:14px;color:var(--sub);flex:1}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}svg{min-width:680px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">EXPLAINERS ・ シリーズ</p>
+  <h1>Attention の系統と進化</h1>
+  <p>MHA から GQA・MLA・疎化、そして線形 Attention・状態空間モデルまでを一本の系統樹で</p>
+</header>
+<main>
+  <a class="back" href="../index.html">← explainers トップへ戻る</a>
+  <p class="intro">Attention の変種は数多くありますが、その多くは「1 トークンあたりの KV-Cache をどう軽くするか」という 1 つの問いへの別々の答えです。この系統樹で全体像を掴み、各ノードをクリックして個別の解説へ進んでください。前提となる基礎は <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> にあります。</p>
+
+  <section>
+    <h2>進化系統図</h2>
+    <div class="legend2">
+      <span><span class="sw-chip"></span><b>Softmax 系</b> — KV を減らす・選ぶ (計算は $O(N^2)$ を基本)</span>
+      <span><span class="ln-chip"></span><b>線形 / 状態系</b> — softmax を外し固定状態を再帰更新 ($O(N)$)</span>
+      <span style="opacity:.6">破線 = 一次資料が限定的 / 未確認のノード</span>
+    </div>
+    <p style="font-size:14px;color:var(--sub);margin:0 0 10px">ノードをクリックすると下に概要が出ます。</p>
+    <div class="tree-wrap">
+      <svg id="tree" viewBox="0 0 1140 540" role="img" aria-label="Attention 手法の進化系統図 (横軸=公開時期)">
+        <g id="axis"></g>
+        <g id="edges"></g>
+        <g id="nodes"></g>
+      </svg>
+    </div>
+    <div class="panel" id="panel">
+      <h3>系統樹のノードをクリックしてください</h3>
+      <p class="desc" style="color:var(--sub)">各手法の一言・公開時期・代表モデル・計算量・論文リンクと、詳しい解説記事への入口が表示されます。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>一覧表 (時系列)</h2>
+    <table>
+      <tr><th>手法</th><th>公開時期</th><th>代表モデル</th><th>時間計算量</th><th>KV / 状態</th><th>論文</th></tr>
+      <tbody id="tbl"></tbody>
+    </table>
+    <p style="font-size:13px;color:var(--sub);margin:10px 0 0">(※) の付いた CSA / HCA / Mamba3 は 2026 年前後の新しい話題で、本稿執筆時点で一次資料が限定的、または正式論文を特定できていません。系統上の位置づけのみ示しています。</p>
+  </section>
+
+  <section>
+    <h2>各章へ</h2>
+    <div class="grid" id="cards"></div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+// ===== データ (CANON 準拠) =====
+const SM='#198754', LN='#3d7dca';
+const NODES = {
+  mha:{label:'MHA', year:2017.5, lane:1, sys:'sm', file:'attn-mha.html', ch:'01',
+    title:'MHA — Multi-Head Attention', time:'2017-06', model:'Transformer 原論文, 初期 GPT/BERT', arxiv:'1706.03762',
+    O:'$O(N^2 d)$', kv:'KV 線形 (圧縮なし)', desc:'Q/K/V を複数ヘッドに分けて並列に注意。すべての出発点で、KV-Cache が最も重い基準構成。'},
+  mqa:{label:'MQA', year:2019.9, lane:1, sys:'sm', file:'attn-mqa-gqa.html', ch:'02',
+    title:'MQA — Multi-Query Attention', time:'2019-11', model:'PaLM, Falcon', arxiv:'1911.02150',
+    O:'$O(N^2 d)$', kv:'KV は 1 ヘッド分', desc:'全 Query ヘッドで KV を 1 つだけ共有し、KV ヘッド数を 1 に。'},
+  gqa:{label:'GQA', year:2023.4, lane:1, sys:'sm', file:'attn-mqa-gqa.html', ch:'02',
+    title:'GQA — Grouped-Query Attention', time:'2023-05', model:'Llama 2, Mistral 7B', arxiv:'2305.13245',
+    O:'$O(N^2 d)$', kv:'KV はグループ数比例', desc:'KV をグループ単位で共有。MHA と MQA の中間で、品質と KV 削減のバランスを取る。'},
+  mla:{label:'MLA', year:2024.4, lane:1, sys:'sm', file:'attn-mla.html', ch:'03',
+    title:'MLA — Multi-head Latent Attention', time:'2024-05', model:'DeepSeek-V2 / V3', arxiv:'2405.04434',
+    O:'$O(N^2 d)$', kv:'KV は潜在次元 $d_c$ (ヘッド非依存)', desc:'KV を低ランク潜在ベクトルに圧縮して保存。ヘッド削減とは別の圧縮アプローチ。'},
+  dsa:{label:'DSA', year:2025.75, lane:1, sys:'sm', file:'attn-dsa.html', ch:'05',
+    title:'DSA — DeepSeek Sparse Attention', time:'2025-09 / 2025-12', model:'DeepSeek-V3.2', arxiv:'2512.02556',
+    O:'$O(N k)$ 級', kv:'KV は MLA 相当', desc:'MLA の上で軽量 Indexer が top-k を選び、疎に注意。内容依存の動的選択。'},
+  csa:{label:'CSA / HCA', year:2026.45, lane:1, sys:'sm', file:'attn-dsa.html', ch:'05', dim:true,
+    title:'CSA / HCA (DeepSeek-V4 系)', time:'2026-04 (※)', model:'DeepSeek-V4 (※)', arxiv:'2606.19348',
+    O:'(※一次資料限定)', kv:'(※)', desc:'圧縮 + top-k / 高圧縮密の 2 系統として提案。本稿執筆時点で一次資料が限定的。DSA 章内で位置づけのみ扱う。'},
+  swa:{label:'SWA', year:2020.3, lane:2, sys:'sm', file:'attn-swa.html', ch:'04',
+    title:'SWA — Sliding Window Attention', time:'2020-04 / 2023-10', model:'Mistral 7B (GQA 併用)', arxiv:'2004.05150',
+    O:'$O(N w)$', kv:'KV は窓 $w$ で頭打ち', desc:'各トークンが直近 $w$ トークンだけに注意。遠方は層のスタックで間接的に伝播。'},
+  gated:{label:'Gated Attn', year:2025.4, lane:3, sys:'sm', file:'attn-gated-attention.html', ch:'10',
+    title:'Gated Attention', time:'2025-05', model:'(15B MoE / 1.7B dense で検証)', arxiv:'2505.06708',
+    O:'$O(N^2)$', kv:'KV は素の Attention と同じ', desc:'softmax 出力にヘッド毎の sigmoid ゲートを掛け、attention sink を抑える。KV は不変。'},
+  linear:{label:'Linear Attn', year:2020.5, lane:1, sys:'ln', file:'attn-linear.html', ch:'06',
+    title:'Linear Attention', time:'2020-06', model:'(論文実験, 後の RWKV 等)', arxiv:'2006.16236',
+    O:'$O(N d^2)$', kv:'固定状態 ($N$ 非依存)', desc:'softmax をカーネル内積に置換し結合則で O(N) に。KV の代わりに固定サイズの状態を再帰更新。'},
+  deltanet:{label:'DeltaNet', year:2024.95, lane:1, sys:'ln', file:'attn-deltanet.html', ch:'07',
+    title:'DeltaNet / Gated DeltaNet', time:'2021-02 / 2024-12', model:'(論文モデル)', arxiv:'2406.06484',
+    O:'$O(N)$', kv:'固定状態', desc:'線形注意の加法更新を delta 則 (誤差修正) に置換。Gated 版は忘却ゲートを追加。'},
+  kda:{label:'KDA', year:2025.8, lane:1, sys:'ln', file:'attn-kda.html', ch:'09',
+    title:'KDA — Kimi Delta Attention', time:'2025-10', model:'Kimi Linear', arxiv:'2510.26692',
+    O:'$O(N)$', kv:'固定状態, 1M で decode 高速', desc:'Gated DeltaNet を細粒度ゲート + DPLR に拡張。MLA と層ごとにハイブリッド配置。'},
+  mamba:{label:'Mamba', year:2023.85, lane:2, sys:'ln', file:'attn-mamba.html', ch:'08',
+    title:'Mamba', time:'2023-12', model:'Mamba 3B, Jamba 等', arxiv:'2312.00752',
+    O:'$O(N)$', kv:'固定状態', desc:'状態空間モデル (SSM) を入力依存の「選択」で拡張。固定状態の再帰で系列を処理。'},
+  mamba2:{label:'Mamba2', year:2024.4, lane:2.5, sys:'ln', file:'attn-mamba.html', ch:'08',
+    title:'Mamba2', time:'2024-05', model:'Mamba-2, Nemotron 3', arxiv:'2405.21060',
+    O:'$O(N)$', kv:'固定状態', desc:'SSD 理論で Transformer と線形 Attention を統一。学習を高速化。'},
+  mamba3:{label:'Mamba3', year:2026.2, lane:2.5, sys:'ln', file:'attn-mamba.html', ch:'08', dim:true,
+    title:'Mamba3 (未確認)', time:'未確認 (※)', model:'未確認 (※)', arxiv:'',
+    O:'—', kv:'—', desc:'後継として言及されることがあるが、正式論文を特定できていない。系統図に将来ノードとしてのみ配置。'},
+};
+const EDGES = [
+  ['mha','mqa','sm'],['mqa','gqa','sm'],['gqa','mla','sm'],['mla','dsa','sm'],['dsa','csa','sm'],
+  ['mha','swa','sm'],['mha','gated','sm'],
+  ['linear','deltanet','ln'],['deltanet','kda','ln'],
+  ['linear','mamba','ln'],['mamba','mamba2','ln'],['mamba2','mamba3','ln'],
+];
+const NW=96, NH=40;
+const svgNS='http://www.w3.org/2000/svg';
+const gAxis=document.getElementById('axis');
+const gEdges=document.getElementById('edges'), gNodes=document.getElementById('nodes');
+
+// ---- 横軸=公開時期のレイアウト ----
+const Y0=2017, Y1=2027;              // 時間軸の範囲
+const PADL=70, PADR=26, VW=1140;     // 左右余白と viewBox 幅
+const plotW=VW-PADL-PADR;
+function xOf(year){return PADL + (year-Y0)/(Y1-Y0)*plotW;}  // ノード左端 x
+// 系統バンド: sm=上, ln=下。各バンド内は lane で行を分ける
+const BAND={sm:{top:60,laneH:78}, ln:{top:320,laneH:78}};
+function yOf(n){return BAND[n.sys].top + (n.lane-1)*BAND[n.sys].laneH;}  // ノード上端 y
+// 各ノードの矩形位置を確定
+Object.values(NODES).forEach(n=>{n._x=xOf(n.year); n._y=yOf(n);});
+function leftC(k){const n=NODES[k];return [n._x, n._y+NH/2];}
+function rightC(k){const n=NODES[k];return [n._x+NW, n._y+NH/2];}
+
+// ---- 時間軸目盛り ----
+for(let y=Y0;y<=2026;y++){
+  const x=xOf(y);
+  const ln=document.createElementNS(svgNS,'line');
+  ln.setAttribute('x1',x);ln.setAttribute('y1',44);ln.setAttribute('x2',x);ln.setAttribute('y2',512);
+  ln.setAttribute('stroke','#e2ece7');ln.setAttribute('stroke-width','1');
+  gAxis.appendChild(ln);
+  const tx=document.createElementNS(svgNS,'text');
+  tx.setAttribute('x',x);tx.setAttribute('y',528);tx.setAttribute('text-anchor','middle');
+  tx.setAttribute('fill','#9aa');tx.setAttribute('font-size','13');tx.textContent=y;
+  gAxis.appendChild(tx);
+}
+// バンド見出し
+[['sm','Softmax 系',BAND.sm.top-26,SM],['ln','線形 / 状態系',BAND.ln.top-26,LN]].forEach(([,lab,yy,col])=>{
+  const t=document.createElementNS(svgNS,'text');
+  t.setAttribute('x',PADL);t.setAttribute('y',yy);t.setAttribute('fill',col);
+  t.setAttribute('font-size','14');t.setAttribute('font-weight','700');t.textContent=lab;
+  gAxis.appendChild(t);
+});
+
+// ---- edges: 親の右辺 → 子の左辺 (右向き, 時間順) ----
+EDGES.forEach(([a,b,sys])=>{
+  const [x1,y1]=rightC(a), [x2,y2]=leftC(b);
+  const p=document.createElementNS(svgNS,'path');
+  const dx=Math.max(24,(x2-x1)/2);
+  const d=`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
+  p.setAttribute('d',d); p.setAttribute('class','edge '+sys);
+  gEdges.appendChild(p);
+});
+// nodes
+Object.entries(NODES).forEach(([k,n])=>{
+  const g=document.createElementNS(svgNS,'g');
+  g.setAttribute('class','node'+(n.dim?' dim':'')); g.dataset.k=k;
+  const r=document.createElementNS(svgNS,'rect');
+  r.setAttribute('x',n._x);r.setAttribute('y',n._y);r.setAttribute('width',NW);r.setAttribute('height',NH);
+  r.setAttribute('rx',9);
+  const col=n.sys==='sm'?SM:LN;
+  r.setAttribute('fill',col);r.setAttribute('stroke',n.sys==='sm'?'#0f5132':'#2b5f96');
+  const t=document.createElementNS(svgNS,'text');
+  t.setAttribute('x',n._x+NW/2);t.setAttribute('y',n._y+NH/2+1);t.textContent=n.label;
+  g.appendChild(r);g.appendChild(t);
+  g.addEventListener('click',()=>select(k));
+  gNodes.appendChild(g);
+});
+// panel
+const panel=document.getElementById('panel');
+function select(k){
+  const n=NODES[k];
+  const paper = n.arxiv? `<a class="paper" href="https://arxiv.org/abs/${n.arxiv}" target="_blank" rel="noopener">arXiv:${n.arxiv} ↗</a>`:'';
+  const openBtn = n.dim
+    ? `<a class="open soon">${n.ch} 章内で言及</a>`
+    : `<a class="open" href="./${n.file}">${n.ch}. 解説を開く →</a>`;
+  panel.innerHTML=`
+    <h3>${n.title}</h3>
+    <p class="meta">${n.sys==='sm'?'Softmax 系':'線形 / 状態系'} ・ 公開 ${n.time}</p>
+    <p class="desc">${n.desc}</p>
+    <div class="cx"><span><b>代表モデル:</b> ${n.model}</span><span><b>時間計算量:</b> ${n.O}</span><span><b>KV / 状態:</b> ${n.kv}</span></div>
+    <div>${openBtn}${paper}</div>`;
+  if(window.MathJax&&MathJax.typesetPromise)MathJax.typesetPromise([panel]);
+  gNodes.querySelectorAll('.node rect').forEach(rr=>rr.setAttribute('stroke-width','2'));
+  gNodes.querySelector(`[data-k="${k}"] rect`).setAttribute('stroke-width','4');
+}
+// 表: 時系列順
+const ORDER=['mha','mqa','swa','linear','deltanet','gqa','mamba','mla','mamba2','gated','dsa','kda','csa','mamba3'];
+const tbl=document.getElementById('tbl');
+ORDER.forEach(k=>{const n=NODES[k];
+  const paper=n.arxiv?`<a href="https://arxiv.org/abs/${n.arxiv}" target="_blank" rel="noopener">${n.arxiv}</a>`:'—';
+  const link=n.dim?n.label:`<a href="./${n.file}">${n.label}</a>`;
+  tbl.insertAdjacentHTML('beforeend',
+    `<tr><td><span class="sys" style="background:${n.sys==='sm'?SM:LN}"></span>${link}</td>`+
+    `<td>${n.time}</td><td>${n.model}</td><td>${n.O}</td><td>${n.kv}</td><td>${paper}</td></tr>`);
+});
+// 章カード (dim でない代表章のみ, 章番号順)
+const CH=[
+  ['01','mha','MHA — マルチヘッドの構造と KV の重さ',SM],
+  ['02','mqa','MQA / GQA — KV ヘッドを共有して減らす',SM],
+  ['03','mla','MLA — KV を低ランク潜在に圧縮',SM],
+  ['04','swa','SWA — 窓で見る範囲を絞る',SM],
+  ['05','dsa','DSA — top-k で疎に選ぶ',SM],
+  ['06','linear','Linear Attention — softmax を外して O(N) に',LN],
+  ['07','deltanet','DeltaNet / Gated DeltaNet — delta 則で状態を直す',LN],
+  ['08','mamba','Mamba / Mamba2 — 選択的状態空間モデル',LN],
+  ['09','kda','KDA — Kimi Delta Attention',LN],
+  ['10','gated','Gated Attention — softmax にゲートを足す',SM],
+];
+const cards=document.getElementById('cards');
+CH.forEach(([ch,k,title,col])=>{const n=NODES[k];
+  cards.insertAdjacentHTML('beforeend',
+    `<a class="card" href="./${n.file}"><span class="cat" style="background:${col}">${ch} ・ ${col===SM?'Softmax 系':'線形 / 状態系'}</span>`+
+    `<h3>${title}</h3><p>${n.desc}</p></a>`);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeltaNet / Gated DeltaNet — delta 則で状態を直す</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --q:#e07a5f; --k:#3d7dca; --v:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px;text-align:center}
+  .cost .box .big{font-size:26px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">ATTENTION の系統と進化 ・ 07</p>
+  <a class="back" href="./attention-series-index.html">← シリーズ目次へ戻る</a>
+  <h1>DeltaNet / Gated DeltaNet — delta 則で状態を直す</h1>
+  <p>固定状態への「加算」は古い記憶を壊す。だから誤差だけを見て直す</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">この記事は Attention の基礎、そして前章 <a href="./attn-linear.html">Linear Attention</a> の固定状態 $S_t$ による再帰更新を前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-linear.html">前章: Linear Attention — softmax を外して O(N) に</a> を読んでください。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    前章の Linear Attention は、状態 $S_t$ に $\phi(k_t)v_t^\top$ を<b>無条件に足し込む</b>だけでした。似たキーが繰り返し来ると値が上書きされ続け、状態が飽和して古い連想が壊れます。<b>DeltaNet</b> は、この加算を「予測してから、誤差の分だけ直す」delta 則 (Widrow–Hoff の最小二乗則) に置き換えます。さらに <b>Gated DeltaNet</b> は、状態を毎ステップ一律に減衰させる忘却ゲート $g_t$ (Mamba-2 由来) を加え、delta 則と選択的忘却を統合します。固定状態という土台は変えず、<b>「何を・どれだけ書き込むか」を精緻化する</b>のがこの章です。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 何を解決する手法か</a>
+    <a href="#s2">2. 数式で見る DeltaNet / Gated DeltaNet</a>
+    <a href="#s3">3. 計算量</a>
+    <a href="#s4">4. 【構成】加法更新 vs delta 更新</a>
+    <a href="#s5">5. 【体験】書き込み強度と忘却ゲートを動かす</a>
+    <a href="#s6">6. 代表モデルと系統上の位置</a>
+    <a href="#s7">7. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>何を解決する手法か</h2>
+  <p class="lead">固定状態は有限容量の連想記憶。無条件に加算し続けると、いずれ壊れる。</p>
+  <p>前章の Linear Attention は、状態 $S_t$ を「キーが来たら値を足す」という単純な累積更新 $S_t = S_{t-1} + \phi(k_t)v_t^\top$ で更新していました。$S$ を「キーを入れると値を返す」線形連想記憶とみなすと、これは常に無条件で書き込む操作です。しかし、似たキーが繰り返し来ると、そのたびに値が無条件に足し込まれ、状態が飽和して古い連想が壊れていきます。固定サイズの状態は、書き続ければ古い記述が上書きされる容量固定のホワイトボードのようなもので、この飽和は避けられません。</p>
+  <p>ここで問われる着想はシンプルです。<b>今の状態がすでに知っている分は書き直さず、知らない分 (誤差) だけを書き込めばいい</b>。状態 $S_{t-1}$ を連想記憶とみなすと、キー $k_t$ に対する現在の予測値は $\hat v_t = S_{t-1}^\top k_t$ と読み出せます。新しい値 $v_t$ との<b>予測誤差</b> $v_t - \hat v_t$ だけを、書き込み強度 $\beta_t$ でキー方向に足す ― これが Schlag らの arXiv:2102.11174 "Linear Transformers Are Secretly Fast Weight Programmers" が持ち込んだ、Widrow–Hoff の古典的な delta 則 (least mean squares) です。単なる加算が「無条件に足す」のに対し、delta 則は「必要な差分だけ足す」ので、有限容量の状態を効率よく使えます。</p>
+  <p>もう一つの課題は並列化です。delta 則の更新は各ステップで $(I-\beta_t k_t k_t^\top)$ という行列が左から挟まる形になり、加算更新のような単純な累積和には畳めません。これを chunk 単位の行列演算に展開して GPU で並列化する道を開いたのが arXiv:2406.06484 "Parallelizing Linear Transformers with the Delta Rule over Sequence Length" で、DeltaNet が実モデルのスケールに乗る転機になりました。さらに arXiv:2412.06464 Gated Delta Networks は、状態を一律に減衰させる忘却ゲート $g_t \in (0,1)$ を掛け、Mamba-2 流の選択的忘却と delta 則を統合しました。</p>
+  <div class="key">
+    <b>着想を1行で。</b> 「加算更新」→「予測して、誤差だけ直す (delta 則)」→「さらに忘却ゲートで状態全体を減衰させる (Gated DeltaNet)」。固定状態という前章からの土台は変えず、<b>書き込み方だけを精緻化</b>していく流れがこの章です。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>数式で見る DeltaNet / Gated DeltaNet</h2>
+  <p class="lead">状態 $S_{t-1}$ からの予測値と実際の値 $v_t$ の差 (delta) だけを書き込みます。記号は本シリーズ共通のものを使います。</p>
+  <p>状態 $S_{t-1}$ を線形連想記憶とみなすと、キー $k_t$ に対する現在の予測値はこう読み出せます。</p>
+  $$ \hat v_t = S_{t-1}^\top k_t $$
+  <p>新しい値 $v_t$ との予測誤差 $v_t - \hat v_t$ を、書き込み強度 $\beta_t$ でキー方向に足し込むのが DeltaNet の状態更新です。</p>
+  $$ S_t = S_{t-1} + \beta_t\, k_t\,(v_t - \hat v_t)^\top = \big(I - \beta_t\, k_t k_t^\top\big)\,S_{t-1} + \beta_t\, k_t v_t^\top $$
+  <div class="math">
+    <span class="c"># v_hat_t は状態からの読み出し (予測値)</span><br>
+    v_hat_t = S_{t-1}^T k_t<br>
+    <span class="c"># 予測誤差の分だけ書き込む (delta 則)</span><br>
+    S_t = S_{t-1} + beta_t * k_t * (v_t - v_hat_t)^T
+  </div>
+  <p>この更新は、二乗誤差 $\mathcal{L}_t = \frac{1}{2}\lVert S^\top k_t - v_t \rVert^2$ を状態について 1 ステップ勾配降下したもの ($S_t = S_{t-1} - \beta_t \nabla_S \mathcal{L}_t$) にちょうど一致します。$\beta_t$ は入力からトークンごとに学習される学習率で、実装では sigmoid を通して $(0,1)$ に収めることが多く、大きく取れば $k_t$ 方向の既存成分を強く消してから上書きし、小さく取れば緩やかに混ぜます。</p>
+  <p>Gated DeltaNet は、この更新に状態全体を一律に減衰させる忘却ゲート $g_t \in (0,1)$ (Mamba-2 由来の選択的忘却) を掛けます。</p>
+  $$ S_t = g_t\big(I - \beta_t\, k_t k_t^\top\big)\,S_{t-1} + \beta_t\, k_t v_t^\top $$
+  <div class="key">
+    $\beta_t$ は「<b>この差分をどれだけ強く書き込むか</b>」、$g_t$ は「<b>今までの状態全体をどれだけ残すか</b>」という別の役割です。$g_t=1$ とすれば DeltaNet に一致するので、Gated DeltaNet は DeltaNet を包含する拡張になっています。次章 KDA では、この $g_t$ をさらにチャネルごとの対角ゲートへ細粒度化します。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>計算量</h2>
+  <p class="lead">状態が固定サイズという前章からの性質は変わりません。delta 則そのもののコストは、chunk 化アルゴリズムで並列に吸収されます。</p>
+  <h3>時間計算量 (prefill / 学習時)</h3>
+  <p>delta 則の更新は各ステップで $(I-\beta_t k_t k_t^\top)$ が左から挟まるため、単純な累積和には畳めず素朴には系列方向に逐次的です。arXiv:2406.06484 の chunk 化アルゴリズムは、これを chunk 単位の行列演算に展開して GPU 上で並列に処理し、系列長 $N$ に対して<b>$O(N)$</b> の chunk 並列で計算できるようにしました。$N^2$ のスコア行列は作りません。</p>
+  <h3>Decode 時のボトルネック</h3>
+  <p>前章と同じく、1 トークンを生成するのに必要なのは<b>直前の状態 $S_{t-1}$ だけ</b>です。予測 $\hat v_t = S_{t-1}^\top k_t$ を計算し、誤差の分だけ状態を更新すれば完結するため、KV-Cache のように過去 $N$ 件を読み直す必要はありません。</p>
+  <h3>KV / 状態メモリの $N$ 依存</h3>
+  <p>状態 $S_t$ は前章と同じ<b>固定サイズ</b>で、系列長 $N$ には依存しません。delta 則と忘却ゲートは「固定容量をどう使うか」を精緻化するものであり、状態のサイズそのものを変える仕組みではありません。</p>
+  <div class="cost">
+    <div class="box"><span class="big">O(N)</span><span class="lbl">時間計算量 (chunk 並列)</span></div>
+    <div class="box"><span class="big">固定</span><span class="lbl">状態サイズ (N 非依存)</span></div>
+    <div class="box"><span class="big">誤差分だけ</span><span class="lbl">書き込み量 (delta 則)</span></div>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【構成】加法更新 vs delta 更新</h2>
+  <p class="lead">左は前章の加法更新 (無条件に足し込む)、右は DeltaNet の delta 更新 (予測して誤差だけ直す) です。トグルで切り替えてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvArch" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-v="add" id="btnAdd">加法更新 (Linear Attention)</button>
+    <button class="ghost" data-v="delta" id="btnDelta">delta 更新 (DeltaNet)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--k)"></span>キー $k_t$</span>
+    <span><span class="dot" style="background:var(--v)"></span>値 $v_t$ / 状態 $S$</span>
+    <span><span class="dot" style="background:var(--q)"></span>予測誤差</span>
+  </div>
+  <p><b>加法更新</b>に切り替えると、似たキーが来るたびに状態のマス目が無条件に濃く塗り重ねられ、やがて飽和 (衝突) することが分かります。<b>delta 更新</b>に切り替えると、まず現在の状態から予測値を読み出し、実際の値との誤差だけを計算し、<b>その差分だけ</b>を状態に書き込む 3 ステップが流れます。同じキーが繰り返し来ても、すでに予測できている分は書き直さないため、状態が無駄に飽和しません。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】書き込み強度と忘却ゲートを動かす</h2>
+  <p class="lead">書き込み強度 $\beta_t$ と忘却ゲート $g_t$ を動かして、簡単な数値例で連想記憶 $S$ (ここでは 1 つのスカラー成分として単純化) が誤差修正と減衰でどう変化するかを見ます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvDemo" width="840" height="300"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">書き込み強度 $\beta_t$ <input id="demoBeta" type="range" min="0" max="100" value="50"></div>
+    <div class="slider">忘却ゲート $g_t$ <input id="demoG" type="range" min="0" max="100" value="100"></div>
+  </div>
+  <div class="cost">
+    <div class="box"><span class="big" id="demo_beta">0.50</span><span class="lbl">$\beta_t$</span></div>
+    <div class="box"><span class="big" id="demo_g">1.00</span><span class="lbl">$g_t$</span></div>
+  </div>
+  <p>この例では、目標値 $v=1.0$ に対して状態が毎ステップ $\hat v_t = S_{t-1}$ を予測し、誤差 $v-\hat v_t$ を $\beta_t$倍だけ足し込み、その前に $g_t$ 倍だけ状態を減衰させます。$\beta_t$ を大きくすると数ステップで目標値に近づくのが速くなり (収束が速い)、小さくすると緩やかに混ざります。$g_t$ を 1 未満に下げると、書き込みがなくても状態が徐々に減衰していく様子が見えます。DeltaNet は $g_t=1$ 固定、Gated DeltaNet は $g_t$ を学習してこの減衰を選択的に使います。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
+  <p class="lead">DeltaNet は Linear Attention の子で、Gated DeltaNet はその直接の拡張です。</p>
+  <p>DeltaNet の理論的な骨格は Schlag et al. "Linear Transformers Are Secretly Fast Weight Programmers" (arXiv:2102.11174, 2021-02) が示しました。線形 Attention の fast weight 更新に Widrow–Hoff の delta 則を持ち込み、状態を連想記憶としてオンライン学習する更新に置き換えたものです。この更新を系列方向に並列化し、実モデルのスケールに乗せたのが Yang et al. "Parallelizing Linear Transformers with the Delta Rule over Sequence Length" (arXiv:2406.06484, 2024-06) で、論文では 1.3B パラメータ規模のモデルで検証されています。</p>
+  <p>Gated DeltaNet は Yang et al. "Gated Delta Networks: Improving Mamba2 with Delta Rule" (arXiv:2412.06464, 2024-12) で提案され、Mamba-2 由来の選択的忘却ゲート $g_t$ を delta 則に統合しました。実運用の例としては、Qwen3.5 が Gated DeltaNet (線形) と GQA (全結合系) と MoE を組み合わせるハイブリッド構成を採っていると報告されています ([報告])。</p>
+  <div class="key">
+    <b>系統上の位置。</b> 親は前章の <b>Linear Attention</b> です。加法更新を delta 則に置き換えるという最小限の変更で、固定状態という土台はそのまま引き継ぎます。系譜としては RWKV・RetNet・GLA を経て精緻化された流れの先に DeltaNet が位置し、そこから Gated DeltaNet、さらに次々章の <b>KDA</b> (忘却ゲートをチャネルごとの対角ゲートへ細粒度化) へと続きます。次章では系統をもう一本、Linear Attention と同じ「固定状態の再帰」という骨格を別の理論 (選択的状態空間モデル) から導いた <b>Mamba / Mamba2</b> を見ます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>やること</td><td>状態からの予測値 $\hat v_t=S_{t-1}^\top k_t$ と実際の値の誤差だけを、書き込み強度 $\beta_t$ で書き込む (delta 則)</td></tr>
+    <tr><td>数式</td><td>$S_t=(I-\beta_t k_t k_t^\top)S_{t-1}+\beta_t k_t v_t^\top$。Gated 版は忘却ゲート $g_t$ を左から掛ける</td></tr>
+    <tr><td>時間計算量</td><td>$O(N)$。chunk 化アルゴリズムで GPU 上を並列に処理</td></tr>
+    <tr><td>状態 / メモリ</td><td>前章と同じ固定サイズ。$N$ に依存しない</td></tr>
+    <tr><td>代表モデル</td><td>DeltaNet (理論・並列化の論文モデル)、Gated DeltaNet (論文)。実運用例: Qwen3.5 のハイブリッド構成</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>DeltaNet は、固定状態への書き込みを「無条件の加算」から「予測誤差だけを直す delta 則」に置き換え、有限容量の状態をより効率よく使えるようにしました。Gated DeltaNet はさらに、Mamba-2 由来の忘却ゲートで状態全体を選択的に減衰させ、delta 則と忘却を統合します。固定状態という Linear Attention からの土台は変えず、<b>「何を書き込み、何を残すか」を精緻化する</b>のがこの章の一手でした。次章は同じ「固定状態の再帰」という骨格を、選択的状態空間モデルという別の理論から導いた <b>Mamba / Mamba2</b> へ進みます。
+  </div>
+  <div class="seriesnav">
+    前の章 ← <a href="./attn-linear.html">06. Linear Attention — softmax を外して O(N) に</a><br>
+    次の章 → <a href="./attn-mamba.html">08. Mamba / Mamba2 — 選択的状態空間モデル</a>
+  </div>
+  <div class="fn">
+    参考: Imanol Schlag et al. "Linear Transformers Are Secretly Fast Weight Programmers." arXiv:<a href="https://arxiv.org/abs/2102.11174" target="_blank" rel="noopener">2102.11174</a>, 2021。<br>
+    参考: Songlin Yang et al. "Parallelizing Linear Transformers with the Delta Rule over Sequence Length." arXiv:<a href="https://arxiv.org/abs/2406.06484" target="_blank" rel="noopener">2406.06484</a>, 2024。<br>
+    参考: Songlin Yang et al. "Gated Delta Networks: Improving Mamba2 with Delta Rule." arXiv:<a href="https://arxiv.org/abs/2412.06464" target="_blank" rel="noopener">2412.06464</a>, 2024。<br>
+    注意: 本ページのアニメーションと数値例は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ 構成図: 加法更新 vs delta 更新 ============
+(function(){
+  const cv=document.getElementById('cvArch'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const K='#3d7dca',V='#198754',Q='#e07a5f';
+  let mode='add';
+
+  function drawAdd(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('加法更新: S_t = S_{t-1} + k_t v_t^T — 似たキーが来るたび無条件に足し込む',20,28);
+    const rows=4, cols=8, cellW=(W-120)/cols, cellH=48, x0=60, y0=60;
+    // 同じキー方向(列2)に繰り返し書き込みが起きて飽和する様子
+    const hitCol=2;
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const isHit = c===hitCol;
+        const intensity = isHit ? Math.min(1, 0.28*(r+1)) : 0.12;
+        ct.fillStyle = isHit ? `rgba(224,122,95,${0.25+intensity*0.6})` : `rgba(61,125,202,0.18)`;
+        ct.fillRect(x0+c*cellW+3, y0+r*cellH+3, cellW-6, cellH-6);
+        ct.strokeStyle='#0d2b20';ct.lineWidth=1.5;
+        ct.strokeRect(x0+c*cellW+3, y0+r*cellH+3, cellW-6, cellH-6);
+      }
+    }
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('状態 S の各マス (列=キー方向, 行=書き込み時刻)',W/2,y0-14);
+    ct.fillStyle=Q;ct.font='bold 13px sans-serif';
+    ct.fillText('同じキー方向 (橙の列) に繰り返し無条件加算 → 濃く塗り重なり飽和',W/2,y0+rows*cellH+26);
+    ct.fillStyle='#ffd98f';ct.font='13px sans-serif';
+    ct.fillText('飽和すると、この方向にあった古い連想 (前の値) は読み出せなくなる',W/2,H-16);
+  }
+
+  function drawDelta(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('delta 更新: 予測 → 誤差 → 誤差分だけ補正 (DeltaNet)',20,28);
+    const stepW=(W-120)/3, y0=70, boxW=190, boxH=90, gap=30;
+    const labels=[
+      ['1. 予測', 'v_hat_t = S_{t-1}^T k_t', K],
+      ['2. 誤差', 'delta = v_t - v_hat_t', Q],
+      ['3. 補正', 'S_t += beta_t * k_t * delta^T', V],
+    ];
+    labels.forEach(([title,expr,col],i)=>{
+      const x=60+i*(boxW+gap);
+      ct.fillStyle='rgba(255,255,255,0.06)';ct.fillRect(x,y0,boxW,boxH);
+      ct.strokeStyle=col;ct.lineWidth=2;ct.strokeRect(x,y0,boxW,boxH);
+      ct.fillStyle=col;ct.font='bold 15px sans-serif';ct.textAlign='center';
+      ct.fillText(title,x+boxW/2,y0+28);
+      ct.fillStyle='#d7f5e6';ct.font='12px "SF Mono",monospace';
+      ct.fillText(expr,x+boxW/2,y0+56);
+      if(i<2){
+        ct.strokeStyle='#8fd6b4';ct.lineWidth=2;
+        ct.beginPath();ct.moveTo(x+boxW,y0+boxH/2);ct.lineTo(x+boxW+gap,y0+boxH/2);ct.stroke();
+        ct.beginPath();ct.moveTo(x+boxW+gap-8,y0+boxH/2-6);ct.lineTo(x+boxW+gap,y0+boxH/2);ct.lineTo(x+boxW+gap-8,y0+boxH/2+6);ct.stroke();
+      }
+    });
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='center';
+    ct.fillText('すでに予測できている分は書き直さない。誤差 (足りない分) だけをキー方向に書き込む',W/2,y0+boxH+40);
+    ct.fillStyle='#ffd98f';ct.font='13px sans-serif';
+    ct.fillText('同じキーが繰り返し来ても、予測が正確なら誤差はゼロに近く、状態はほぼ更新されない',W/2,H-16);
+  }
+
+  function draw(){ mode==='add'?drawAdd():drawDelta(); }
+  const bA=document.getElementById('btnAdd'),bD=document.getElementById('btnDelta');
+  bA.onclick=()=>{mode='add';bA.classList.add('active');bD.classList.remove('active');draw();};
+  bD.onclick=()=>{mode='delta';bD.classList.add('active');bA.classList.remove('active');draw();};
+  draw();
+})();
+
+// ============ 体験: 書き込み強度 beta と忘却ゲート g ============
+(function(){
+  const cv=document.getElementById('cvDemo'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const TARGET=1.0, STEPS=10;
+  function series(beta,g){
+    let S=0; const out=[S];
+    for(let t=0;t<STEPS;t++){
+      S = g*S; // 忘却
+      const vhat = S;
+      const err = TARGET - vhat;
+      S = S + beta*err; // delta 則の書き込み
+      out.push(S);
+    }
+    return out;
+  }
+  function draw(beta,g){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('目標値 v=1.0 への状態 S の収束 (簡略化した 1 成分の数値例)',20,28);
+    const pad=60, plotW=W-pad*2, plotH=H-110, x0=pad, y0=60;
+    // 軸
+    ct.strokeStyle='rgba(215,245,230,0.3)';ct.lineWidth=1;
+    ct.beginPath();ct.moveTo(x0,y0);ct.lineTo(x0,y0+plotH);ct.lineTo(x0+plotW,y0+plotH);ct.stroke();
+    // 目標値の点線
+    const yTarget=y0+plotH*(1-TARGET/1.4);
+    ct.strokeStyle='rgba(255,217,143,0.6)';ct.setLineDash([5,4]);
+    ct.beginPath();ct.moveTo(x0,yTarget);ct.lineTo(x0+plotW,yTarget);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#ffd98f';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('目標値 v=1.0',x0+plotW-110,yTarget-8);
+    // 系列を折れ線で
+    const data=series(beta,g);
+    const stepX=plotW/STEPS;
+    ct.strokeStyle='#43b581';ct.lineWidth=2.5;ct.beginPath();
+    data.forEach((s,i)=>{
+      const x=x0+i*stepX;
+      const y=y0+plotH*(1-Math.max(-0.2,Math.min(1.4,s))/1.4);
+      if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+    });
+    ct.stroke();
+    data.forEach((s,i)=>{
+      const x=x0+i*stepX;
+      const y=y0+plotH*(1-Math.max(-0.2,Math.min(1.4,s))/1.4);
+      ct.fillStyle='#198754';ct.beginPath();ct.arc(x,y,4,0,7);ct.fill();
+    });
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('更新ステップ t (0 → '+STEPS+')',x0+plotW/2,y0+plotH+34);
+    ct.font='13px sans-serif';ct.fillStyle='#8fd6b4';ct.textAlign='left';
+    ct.fillText('beta_t が大きいほど目標値に速く収束。g_t が小さいほど書き込み前に状態が減衰する',20,H-14);
+  }
+  const sB=document.getElementById('demoBeta'),sG=document.getElementById('demoG');
+  function upd(){
+    const beta=+sB.value/100, g=+sG.value/100;
+    document.getElementById('demo_beta').textContent=beta.toFixed(2);
+    document.getElementById('demo_g').textContent=g.toFixed(2);
+    draw(beta,g);
+  }
+  sB.oninput=upd; sG.oninput=upd; upd();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body></html>

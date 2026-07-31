@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gated Attention — softmax にゲートを足す</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --q:#e07a5f; --k:#3d7dca; --v:#198754;
+    --accent:#0f5132; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:150px;text-align:center}
+  .cost .box .big{font-size:26px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">ATTENTION の系統と進化 ・ 10</p>
+  <a class="back" href="./attention-series-index.html">← シリーズ目次へ戻る</a>
+  <h1>Gated Attention — softmax にゲートを足す</h1>
+  <p>KV を削るのではなく、出力にゲートを掛けて「無理な注意」を抑える、最終章</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">この記事は Attention の基礎、そして第 1 章 <a href="./attn-mha.html">MHA</a> のヘッド構造を前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-mha.html">MHA — マルチヘッドの構造と KV の重さ</a> を読んでください。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>Gated Attention</b> は、素の Attention (softmax の出力) に対して<b>ヘッドごとの sigmoid ゲート</b>を掛け算し、どれだけ通すかを入力依存で学習させる手法です。これまでの MQA・GQA・MLA・SWA・DSA が「KV そのものをどう削るか」を戦っていたのに対し、Gated Attention は<b>KV を一切変えません</b>。狙うのは別の問題 ― softmax が必ず合計 1 に正規化されることで生まれる<b>attention sink</b> (意味のないトークンへの過剰な注意集中) です。本シリーズ最終章として、この「KV 削減系」とは独立な軸を扱います。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. 何を解決する手法か</a>
+    <a href="#s2">2. 数式で見る Gated Attention</a>
+    <a href="#s3">3. 計算量</a>
+    <a href="#s4">4. 【構成】ヘッド毎ゲートの構造</a>
+    <a href="#s5">5. 【体験】ゲート値で通過量と sink を見る</a>
+    <a href="#s6">6. 代表モデルと系統上の位置</a>
+    <a href="#s7">7. まとめ ― シリーズ全体の振り返り</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>何を解決する手法か</h2>
+  <p class="lead">softmax は「何も見たくない」ときでも、必ずどこかに注意を割り当ててしまう。</p>
+  <p>素の Attention の出力は $\mathrm{softmax}(QK^\top/\sqrt d)V$ です。ここで softmax の性質を思い出してください ― <b>出力される重み $a_i$ は必ず合計 1 になります</b>。これは、そのクエリにとって参照すべき情報が本当にどこかに存在する場合には自然な仕組みです。しかし、<b>参照すべき情報が実質どこにもない</b>クエリであっても、softmax は合計 1 になるようにどこかのトークンへ重みを配らなければなりません。</p>
+  <p>この「行き場のない注意」は、多くの場合、系列の先頭付近など特定のトークンに集中して溜まっていく傾向が観測されています。これが <b>attention sink</b> です。系列が長くなるほど、この意味のない重みの集中は無視できない存在になり、長文脈での外挿性能を損なう一因になると報告されています。</p>
+  <div class="key">
+    ここまでの MQA・GQA・MLA・SWA・DSA は、すべて「<b>KV をどう減らすか</b>」で戦ってきました。Gated Attention の着想はまったく別の場所にあります ― <b>KV は素の Attention のまま一切変えず、その代わり Attention の出力そのものにゲートを掛けて、どれだけ通すかを制御する</b>。ゲートが小さければ「この注意はほぼ捨てる」、大きければ「そのまま通す」という弁を、ヘッドごとに入力から学習させます。attention sink 的な無理な注意の割り当てが起きても、その出力への影響をゲートで絞り込めるという発想です。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>数式で見る Gated Attention</h2>
+  <p class="lead">MHA の各ヘッドの出力に、そのヘッド専用の sigmoid ゲートを要素ごとに掛けるだけです。記号は本シリーズ共通のものを使います。</p>
+  <p>入力を $X\in\mathbb{R}^{N\times d_{\text{model}}}$、ヘッド $i$ の素の Attention 出力を第 1 章と同じ $\mathrm{head}_i$ とします。</p>
+  <div class="math">
+    <span class="c"># ヘッド i の素の Attention (第1章 MHA と同じ)</span><br>
+    head_i = softmax(Q_i K_i^T / sqrt(d)) V_i&nbsp;&nbsp;<span class="c">∈ R^(N×d)</span>
+  </div>
+  <p>ここに、入力 $X$ から作るヘッド専用の sigmoid ゲート $g_i$ を要素ごとに掛けます。</p>
+  $$ g_i = \sigma\!\left(X W_i^{G}\right) \in \mathbb{R}^{N\times d}, \qquad W_i^{G}\in\mathbb{R}^{d_{\text{model}}\times d} $$
+  $$ \mathrm{head}_i^{\text{gated}} = g_i \odot \mathrm{head}_i $$
+  <p>全ヘッドを結合して出力射影を掛ける最後の一歩は MHA と変わりません。</p>
+  $$ \mathrm{GatedAttn}(X) = \mathrm{Concat}\!\left(\mathrm{head}_1^{\text{gated}},\dots,\mathrm{head}_h^{\text{gated}}\right) W^O $$
+  <div class="key">
+    <b>素の MHA との差分はこれだけです。</b>$g_i=\mathbf{1}$ (ゲート常時全開) にすれば第 1 章の MHA にそのまま戻ります。追加されたパラメータもヘッド数分の $W_i^{G}$ だけで、$Q,K,V$ の計算・KV-Cache には何も触れません。$\odot$ (要素積) による非線形なスケーリングが、素の Attention には無かった「出力を選んで絞る」自由度を与えます。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>計算量</h2>
+  <p class="lead">計算量の骨格は素の Attention と同じです。変わるのは KV ではなく出力側だけ。</p>
+  <h3>時間計算量 (prefill / 学習時)</h3>
+  <p>スコア行列 $QK^\top$ の計算は変わらず<b>$O(N^2 d_{\text{model}})$</b> です。ゲート $g_i=\sigma(XW_i^G)$ の計算とヘッド出力への要素積は $O(N d_{\text{model}})$ で、$N^2$ の項に比べて無視できるほど軽い追加コストです。</p>
+  <h3>Decode 時のボトルネック</h3>
+  <p>1 トークン生成ごとに読む KV の量は、<b>素の Attention (MHA・GQA など、ベースにした構造)とまったく同じ</b>です。ゲートは Attention の出力を絞るだけで、どの KV を読むか・どれだけ読むかには一切関与しません。</p>
+  <h3>KV メモリの $N$ 依存</h3>
+  <p>KV-Cache は<b>ベースの Attention 構造 (MHA なら $2Nhd\,b_{\text{KV}}L$) のまま不変</b>です。Gated Attention が追加するのは、ヘッド数 $h$ に比例するごく小さな射影行列 $W_i^G$ のパラメータだけで、系列長 $N$ には依存しません。</p>
+  <div class="cost">
+    <div class="box"><span class="big">O(N&sup2;d)</span><span class="lbl">時間計算量 (不変)</span></div>
+    <div class="box"><span class="big">KV 不変</span><span class="lbl">ベース構造のまま</span></div>
+    <div class="box"><span class="big">+h 個</span><span class="lbl">追加パラメータ (ゲート射影)</span></div>
+  </div>
+  <p>この章で得られる利得は、計算量やメモリの削減ではなく<b>品質側</b>です。ゲートが sink 的な無駄な注意を出力レベルで抑えることで、長文脈での外挿性能が改善すると報告されています。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【構成】ヘッド毎ゲートの構造</h2>
+  <p class="lead">各ヘッドの Attention 出力の後ろに、そのヘッド専用の弁 (ゲート) が接続されている様子です。ゲート値スライダで弁の開き具合が変わります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvArch" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">ヘッド毎ゲート値 <input id="archG" type="range" min="0" max="100" value="60"></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--q)"></span>Query / Key / Value (素の Attention, KV は不変)</span>
+    <span><span class="dot" style="background:var(--v)"></span>ゲート後の出力 (通過量がゲートで変化)</span>
+  </div>
+  <p>左側は第 1 章と同じ、素の Attention の計算経路です。<b>ここには一切手を加えません</b>。右側で、各ヘッドの出力 $\mathrm{head}_i$ に専用のゲート $g_i=\sigma(XW_i^G)$ が要素ごとに掛かり、結合されて $W^O$ に渡ります。ゲート値を下げると、そのヘッドの出力が (sink を含んでいたとしても) 弱められて最終出力への影響が小さくなる様子を表しています。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】ゲート値で通過量と sink を見る</h2>
+  <p class="lead">あるヘッドの Attention 重みが、先頭トークンに偏って集中している (sink) 状態を模式的に固定し、ゲート値スライダでその出力がどれだけ最終出力に影響するかを見ます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvGate" width="840" height="320"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">ゲート値 g <input id="gateVal" type="range" min="0" max="100" value="70"></div>
+  </div>
+  <div class="cost">
+    <div class="box"><span class="big" id="g_val">0.70</span><span class="lbl">ゲート値 g</span></div>
+    <div class="box"><span class="big" id="g_sink">—</span><span class="lbl">出力に残る sink 成分</span></div>
+    <div class="box"><span class="big" id="g_signal">—</span><span class="lbl">出力に残る有用成分</span></div>
+  </div>
+  <p>左の帯は、あるクエリの素の Attention 重み (模式値) で、先頭トークンに大きな重みが集中しています ― これが attention sink です。この重みで作られた出力を、右のゲート $g$ で減衰させます。$g$ を下げるほど、<b>sink 成分も有用成分も一緒に絞られます</b>が、そもそもこのヘッドの出力の大部分が sink に食われている場合、ゲートを絞ることで「この出力はほとんど信用しない」という判断を下せます。他のヘッドが $g\approx 1$ で開いていれば、有用な情報の流れはそちらから維持されます。<b>数値と重み分布は仕組みを直感的に伝えるための模式的な可視化であり、実測値ではありません。</b></p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
+  <p class="lead">Gated Attention は MHA (および GQA 等の派生) の出力側に足す、独立した一手です。</p>
+  <p>Gated Attention は Qiu et al. "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free" (arXiv:2505.06708, 2025-05) で提案されました。論文では、Scaled Dot-Product Attention の出力にヘッド専用の sigmoid ゲートを掛けるという単純な変更が、3.5兆トークンで学習した <b>15B MoE モデルおよび 1.7B dense モデルの 30 種類以上のバリアント</b>にわたって一貫して性能を改善したと報告されています。この疎なゲート機構が attention sink を軽減し、長文脈での外挿性能を高めることも確認されたとされています。</p>
+  <div class="warn">
+    <b>ヘッジ (重要)。</b>本論文の著者には Qwen チームに所属するメンバーが含まれていますが、これは<b>公開されている Qwen 系モデル (例: Qwen3 など) がこの Gated Attention をそのまま採用しているという確認ではありません</b>。本稿執筆時点で、特定の公開モデルのアーキテクチャがこの論文の手法を実装していると一次資料で確認できたわけではないため、<b>対応関係は断定せず「著者の一部が Qwen チームに所属」という事実のみ</b>を述べます。
+  </div>
+  <p>系統上、Gated Attention は<b>MHA (第 1 章) の直接の子</b>ですが、これまでの章とは軸が異なります。MQA・GQA・MLA・SWA・DSA は KV バイト式 $2Nn_{kv}d\,b_{\text{KV}}L$ のどこかの因子を削る「KV 削減系」でした。Linear・DeltaNet・Mamba 系は softmax を外して固定状態にする「$N$ 依存を消す系」でした。Gated Attention は<b>KV にも $N$ 依存にも触れず、出力の非線形なスケーリングで品質を上げる</b>、いわば横軸の一手です。実装上は GQA や MLA の上にも同じゲートを重ねられる、独立した拡張だと理解してください。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ ― シリーズ全体の振り返り</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>やること</td><td>MHA の各ヘッド出力 $\mathrm{head}_i$ に、ヘッド専用の sigmoid ゲート $g_i=\sigma(XW_i^G)$ を要素積で掛ける</td></tr>
+    <tr><td>数式</td><td>$\mathrm{head}_i^{\text{gated}}=g_i\odot\mathrm{head}_i$、結合して $W^O$ (ゲート全開なら素の MHA に一致)</td></tr>
+    <tr><td>時間計算量</td><td>$O(N^2 d_{\text{model}})$。素の Attention と同じ (ゲート計算は無視できるほど軽い)</td></tr>
+    <tr><td>KV</td><td>不変。削減系ではなく、出力側の品質改善策</td></tr>
+    <tr><td>効果</td><td>attention sink の軽減、長文脈外挿性能の向上 (報告値)</td></tr>
+    <tr><td>代表モデル</td><td>15B MoE / 1.7B dense 検証 (Qiu et al. 2025)。公開モデルでの採用対応は未確認</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>Gated Attention は、KV を減らす戦いとは別の軸から、<b>softmax の「必ず合計1」という制約が生む無理な注意配分</b>に出力側のゲートで対処する手法でした。これで本シリーズの 10 章が揃います。
+  </div>
+  <h3>シリーズ全体の振り返り ― 2 つの系統</h3>
+  <p>全 10 章を通して、Attention の進化は大きく <b>2 つの系統</b>に整理できます。</p>
+  <table>
+    <tr><th>系統</th><th>戦い方</th><th>代表的な章</th></tr>
+    <tr><td>Softmax 系</td><td>$N^2$ の Attention は保ったまま、<b>KV バイト式 $2Nn_{kv}d\,b_{\text{KV}}L$ の因子を削る/選ぶ</b> (KV ヘッド共有・低ランク圧縮・窓・top-k 選択)、あるいは出力側にゲートを足す</td><td>01 MHA → 02 MQA/GQA → 03 MLA → 05 DSA、04 SWA、10 Gated Attention</td></tr>
+    <tr><td>線形 / 状態再帰系</td><td>softmax を外し、<b>KV そのものを持たず固定サイズの状態を再帰更新</b>することで $N$ 依存を消し $O(N)$ にする</td><td>06 Linear Attention → 07 DeltaNet/Gated DeltaNet → 09 KDA、08 Mamba/Mamba2</td></tr>
+  </table>
+  <p>MHA という同じ起点から、一方は「KV を削っても表現力を保つ工夫」を積み重ね、もう一方は「KV という発想自体を捨てて固定状態に置き換える」道を進みました。Gated Attention はその両方とも異なる第三の軸 ― <b>出力の非線形なゲーティングで品質を上げる</b> ― を示し、本シリーズを締めくくります。全体の系統図は <a href="./attention-series-index.html">シリーズ目次</a> のインタラクティブな図で確認できます。</p>
+  <div class="seriesnav">
+    前の章 ← <a href="./attn-kda.html">09. KDA — Kimi Delta Attention</a><br>
+    シリーズ目次へ → <a href="./attention-series-index.html">Attention の系統と進化 ― 全 10 章</a>
+  </div>
+  <div class="fn">
+    参考: Qiu et al. "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free." arXiv:2505.06708, 2025 (<a href="https://arxiv.org/abs/2505.06708" target="_blank" rel="noopener">arXiv:2505.06708</a>)。<br>
+    参考: Vaswani et al. "Attention Is All You Need." NeurIPS 2017 (<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">arXiv:1706.03762</a>)。<br>
+    注意: 本ページのアニメーションと数値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
+  </div>
+</section>
+
+</main>
+<script>
+// ============ 構成図: ヘッド毎ゲートの構造 ============
+(function(){
+  const cv=document.getElementById('cvArch'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const Q='#e07a5f',K='#3d7dca',V='#198754';
+  const HN=4; // ヘッド数 (表示用に固定)
+  function draw(gPct){
+    const g=gPct/100;
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('素の Attention (KV 不変) → ヘッド毎ゲート g = '+g.toFixed(2)+' → 出力',20,26);
+
+    // 左: 素の Attention 入力バー
+    const ix=40,iy=50,iw=260,ih=26;
+    ct.fillStyle='#20443a';ct.strokeStyle='#8fd6b4';ct.lineWidth=1.5;
+    ct.fillRect(ix,iy,iw,ih);ct.strokeRect(ix,iy,iw,ih);
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('入力 X (d_model)',ix+iw/2,iy+18);
+
+    // ヘッド分割 (Q/K/V, 素のAttention, 変更なし)
+    const seg=iw/HN;
+    const rows=[['Q',Q,110],['K',K,168],['V',V,226]];
+    rows.forEach(([lbl,col,ry])=>{
+      ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='left';
+      ct.fillText(lbl+' ヘッド ×'+HN,ix,ry-8);
+      for(let i=0;i<HN;i++){
+        const x=ix+i*seg;
+        ct.fillStyle=col;ct.globalAlpha=0.82;
+        ct.fillRect(x+3,ry,seg-6,28);
+        ct.globalAlpha=1;ct.strokeStyle='#0d2b20';ct.lineWidth=1.5;
+        ct.strokeRect(x+3,ry,seg-6,28);
+      }
+    });
+    ct.fillStyle='#8fb8f0';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('↑ 素の Attention softmax(QK^T/√d)V (KV そのまま)',ix,290);
+
+    // 矢印 → ヘッド出力 → ゲート → 最終出力
+    const midx=ix+iw+40, midy=110, gapY=58;
+    for(let i=0;i<HN;i++){
+      const y=midy+i*gapY;
+      // head_i 出力ボックス
+      ct.fillStyle='#20443a';ct.strokeStyle='#8fd6b4';ct.lineWidth=1.2;
+      ct.fillRect(midx,y,90,34);ct.strokeRect(midx,y,90,34);
+      ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
+      ct.fillText('head_'+(i+1),midx+45,y+21);
+      // 矢印
+      ct.strokeStyle='#8fd6b4';ct.lineWidth=2;
+      ct.beginPath();ct.moveTo(midx+90,y+17);ct.lineTo(midx+140,y+17);ct.stroke();
+      ct.beginPath();ct.moveTo(midx+140,y+17);ct.lineTo(midx+132,y+12);ct.lineTo(midx+132,y+22);ct.closePath();ct.fillStyle='#8fd6b4';ct.fill();
+      // ゲート弁 (円, 開き具合を扇形で表現)
+      const gx=midx+165, gy=y+17, gr=15;
+      ct.beginPath();ct.arc(gx,gy,gr,0,Math.PI*2);ct.fillStyle='#12251d';ct.fill();
+      ct.strokeStyle='#ffd98f';ct.lineWidth=2;ct.stroke();
+      ct.beginPath();ct.moveTo(gx,gy);
+      ct.arc(gx,gy,gr-3,-Math.PI/2,-Math.PI/2+g*Math.PI*2);
+      ct.closePath();ct.fillStyle='#ffd98f';ct.globalAlpha=0.85;ct.fill();ct.globalAlpha=1;
+      // 出力バー幅をゲート値で
+      const outX=gx+gr+18, outW=100*g;
+      ct.fillStyle=V;ct.globalAlpha=0.85;ct.fillRect(outX,y+8,Math.max(2,outW),18);ct.globalAlpha=1;
+      ct.strokeStyle='#0d2b20';ct.lineWidth=1;ct.strokeRect(outX,y+8,100,18);
+      ct.fillStyle='#d7f5e6';ct.font='11px sans-serif';ct.textAlign='left';
+      ct.fillText('g_'+(i+1)+'⊙head_'+(i+1),outX,y+2);
+    }
+    ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('弁 (ゲート) の開き具合 = g。開くほど出力バーが長く残る → Concat → W^O',midx,midy+HN*gapY+6);
+  }
+  const s=document.getElementById('archG');
+  s.oninput=()=>draw(+s.value);
+  draw(+s.value);
+})();
+
+// ============ 体験: ゲート値で sink 成分を絞る ============
+(function(){
+  const cv=document.getElementById('cvGate'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NTOK=16;
+  // 模式的な attention 重み: 先頭トークンに強く偏った sink + 残りに薄く分散
+  const weights=(()=>{
+    const w=new Array(NTOK).fill(0);
+    w[0]=0.62; // sink
+    let rest=1-w[0];
+    for(let i=1;i<NTOK;i++) w[i]=rest/(NTOK-1);
+    return w;
+  })();
+  function draw(g){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6';ct.font='14px sans-serif';ct.textAlign='left';
+    ct.fillText('あるヘッドの Attention 重み (先頭トークンに sink が集中, 模式値)',20,24);
+    // 重み帯
+    const bx=30,by=44,bw=W-60,bh=40;
+    let x=bx;
+    for(let i=0;i<NTOK;i++){
+      const wseg=weights[i]*bw;
+      ct.fillStyle= i===0 ? '#e07a5f' : '#3d7dca';
+      ct.globalAlpha= i===0 ? 0.9 : 0.55;
+      ct.fillRect(x,by,Math.max(1,wseg),bh);
+      ct.globalAlpha=1;
+      x+=wseg;
+    }
+    ct.strokeStyle='#0d2b20';ct.lineWidth=1.5;ct.strokeRect(bx,by,bw,bh);
+    ct.fillStyle='#ffd98f';ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('橙 = sink (先頭トークン, 重み '+weights[0].toFixed(2)+')　青 = 他トークン (合計 '+(1-weights[0]).toFixed(2)+')',bx,by+bh+18);
+
+    // ゲート後の出力 (sink成分・有用成分をそれぞれgでスケール)
+    const oy=150, ow=bw, oh=60;
+    const sinkW=weights[0]*g*ow, sigW=(1-weights[0])*g*ow;
+    ct.fillStyle='#12251d';ct.fillRect(bx,oy,ow,oh);
+    ct.strokeStyle='#8fd6b4';ct.lineWidth=1;ct.strokeRect(bx,oy,ow,oh);
+    ct.fillStyle='#e07a5f';ct.globalAlpha=0.85;ct.fillRect(bx,oy,Math.max(0,sinkW),oh);ct.globalAlpha=1;
+    ct.fillStyle='#3d7dca';ct.globalAlpha=0.65;ct.fillRect(bx+sinkW,oy,Math.max(0,sigW),oh);ct.globalAlpha=1;
+    ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';ct.textAlign='left';
+    ct.fillText('ゲート後にこのヘッドが最終出力に渡す量 (g で全体を減衰)',bx,oy-8);
+    ct.fillText('g = '+g.toFixed(2)+' な残り '+((1-g)*100).toFixed(0)+'% は弁で遮断',bx,oy+oh+20);
+
+    document.getElementById('g_val').textContent=g.toFixed(2);
+    document.getElementById('g_sink').textContent=(weights[0]*g*100).toFixed(1)+'%';
+    document.getElementById('g_signal').textContent=((1-weights[0])*g*100).toFixed(1)+'%';
+  }
+  const s=document.getElementById('gateVal');
+  s.oninput=()=>draw(+s.value/100);
+  draw(+s.value/100);
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body></html>
