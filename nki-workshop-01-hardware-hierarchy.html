@@ -106,14 +106,13 @@
   <p class="lead">まず用語を揃えます。「デバイス」「コア」「インスタンス」は別物です。</p>
   <p>Trainium は階層で数えます。一番外から見ると:</p>
   <ol class="steps">
-    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(後述の実測ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされ、<b>いずれも物理コア 1 個あたりの値</b>です。だから物理 8 コアぶんを単純に足すだけで求まり、LNC(論理コアの束ね方)には依存しません ― どちらの精度で数えるかだけが効きます。</span></li>
+    <li><b>Device (チップ)</b>: 1 枚の Trainium2 チップ。<b>FP8 dense で約 1.3 PFLOPS の計算</b> (単一コアの公称 158 TFLOPS(FP8 dense)× 8 コア ≈ 1.26 PFLOPS)、<b>96 GiB の HBM</b> を持ちます。<span style="font-size:13px;color:var(--sub)">※ <b>BF16 (dense) では単一コア 78.6 TFLOPS(理論ピーク)× 8 コア ≈ 0.63 PFLOPS</b> です。1.3 PFLOPS と 0.63 PFLOPS の差は LNC・クロック等の集計基準の違いではなく、<b>精度 (データ型) の違い</b> (FP8 dense か BF16 dense か) によるものです。公称アーキ資料では NeuronCore-v3 の Tensor Engine は FP8 158 / BF16 79 dense TFLOPS とされ、<b>いずれも物理コア 1 個あたりの値</b>です。だから物理 8 コアぶんを単純に足すだけで求まり、LNC(論理コアの束ね方)には依存しません ― どちらの精度で数えるかだけが効きます。</span></li>
     <li><b>NeuronCore (物理コア)</b>: 1 デバイスの中に <b>8 個の物理コア</b>があります (TRN2/TRN3)。2 コアが 1 つの HBM バンクを共有します。</li>
     <li><b>LNC (Logical NeuronCore)</b>: 既定は <b>LNC2</b> で、<b>2 つの物理コアを 1 つの論理コアとして扱います</b>。だから <code>neuron-ls</code> は 8 でなく 4 コアと表示します。なぜ束ねるのかは 06 章で扱います。</li>
     <li><b>Instance</b>: 複数デバイスをまとめたもの (例: 16 デバイス)。今回のワークショップは <b>trn2.3xlarge (単一デバイス)</b> を使います。</li>
   </ol>
   <div class="key">
-    この記事で主役になるのは <b>1 つの NeuronCore の内側</b>です。カーネルは基本この単位で動き、メモリ (SBUF / PSUM) も計算エンジンもこのコアに属します。「まず 1 コアを使い切る」がカーネル最適化の出発点です。
-  </div>
+    この記事で主役になるのは <b>1 つの NeuronCore の内側</b>です。カーネルは基本この単位で動き、メモリ (SBUF / PSUM) も計算エンジンもこのコアに属します。「まず 1 コアを使い切る」がカーネル最適化の出発点です。以降、この記事で「1 コア」と書くときは<b>物理 NeuronCore</b>を指します (LNC でまとめた論理コアではありません)。</div>
 </section>
 
 <section id="s2">
@@ -128,7 +127,7 @@
     <tr><td><b>GP-SIMD Engine</b></td><td>カスタム演算・descriptor 生成など</td><td>8 個の SIMD プロセッサ。汎用の受け皿</td></tr>
   </table>
   <div class="key">
-    <b>Tensor Engine の内部は 2 命令に分かれる。</b>128&times;128 systolic array を動かす実際の ISA 命令は <b>LoadStationary</b> (片方の行列をアレイに固定ロード) と <b>MultiplyMoving</b> (もう片方を流し込んで乗算) の 2 つです。ハードウェア的には <b>LoadStationary が MultiplyMoving より最大で約 4 倍速い</b>という非対称があり、この差が「free 軸が大きい方の行列を stationary 側に置く (遅い MultiplyMoving 側の free 軸を小さく抑える)」という最適化の定石 (06 章で詳述) の根拠になります。行列&times;ベクトル積 (自己回帰的なトークン生成で頻出) では行列側を stationary に置くのが効きます。
+    <b>Tensor Engine の内部は 2 命令に分かれる。</b>128&times;128 systolic array を動かす実際の ISA 命令は <b>LoadStationary</b> (片方の行列をアレイに固定ロード) と <b>MultiplyMoving</b> (もう片方を流し込んで乗算) の 2 つです。ハードウェア的には <b>LoadStationary が MultiplyMoving より最大で約 4 倍速い</b>という非対称があり、この差が「<b>両者の free 軸がともに 128 以下に収まる範囲で</b>、free 軸が大きい方の行列を stationary 側に置く (遅い MultiplyMoving 側の free 軸を小さく抑える)」という最適化の定石 (06 章で詳述) の根拠になります。行列&times;ベクトル積 (自己回帰的なトークン生成で頻出) では行列側を stationary に置くのが効きます。LoadStationary / MultiplyMoving はハードウェア内部の下位 ISA 命令で、NKI からは <code>nki.isa.nc_matmul</code> という 1 つの行列積命令として露出します。
   </div>
   <div class="key">
     <b>設計思想。</b>これらは<b>独立にスケジュールされ、並列に動きます</b>。Tensor Engine でタイル行列積をしている「その裏で」Vector Engine が別の reduction を回す ― という<b>エンジン間パイプライン</b>でチップを使い切るのが狙いです。だから「1 つのエンジンだけ速くする」のではなく「全エンジンを同時に働かせる」のが性能の鍵になります。
@@ -156,8 +155,8 @@
   <h2><span class="num">3</span>3 層メモリ階層 ― HBM / SBUF / PSUM</h2>
   <p class="lead">Trainium のメモリは 3 層。上に行くほど小さく速く、下に行くほど大きく遅い ― この非対称が全ての制約の源です。</p>
   <div class="math">
-    <span class="p">PSUM</span>  <span class="c"># Tensor Engine 専用の集計台。最小・最速・書込はTEのみ</span><br>
-      &#8597; (Vector / Scalar エンジンで退避)<br>
+    <span class="p">PSUM</span>  <span class="c"># Tensor Engine 専用の集計台。最小・最速・2 MiB。TE出力先はPSUMのみ、蓄積はTE固有</span><br>
+      &#8597; (Vector / Scalar も並列アクセス可。GpSimd は非対応)<br>
     <span class="b">SBUF</span>  <span class="c"># オンチップの作業台 (SRAM)。2D。全エンジンが直結</span><br>
       &#8597; (<span class="r">DMA エンジン</span>が運ぶ)<br>
     <span class="r">HBM</span>   <span class="c"># 大きな倉庫。1D フラット。DMA しかアクセスできない</span>
@@ -165,12 +164,12 @@
   <p>3 つの「大きさ」と「速さ」の関係を、TRN2 の実数で並べます。</p>
   <table>
     <tr><th>メモリ</th><th>種類</th><th>容量 (TRN2)</th><th>速さ / アクセス</th><th>誰が触れる</th></tr>
-    <tr><td><b style="color:var(--hbm)">HBM</b></td><td>大容量 DRAM</td><td>96 GB / デバイス</td><td>DMA ピーク 約 435 GB/s (1コア)</td><td>DMA エンジンのみ</td></tr>
-    <tr><td><b style="color:var(--sbuf)">SBUF</b></td><td>オンチップ SRAM</td><td>28 MB / コア (224 KiB &times; 128 partition)</td><td>桁違いに高速・全エンジン直結</td><td>全 compute engine + DMA</td></tr>
+    <tr><td><b style="color:var(--hbm)">HBM</b></td><td>大容量 DRAM</td><td>96 GiB / デバイス</td><td>DMA ピーク 約 435 GB/s (1コア)</td><td>DMA エンジンのみ</td></tr>
+    <tr><td><b style="color:var(--sbuf)">SBUF</b></td><td>オンチップ SRAM</td><td>28 MiB / コア (224 KiB &times; 128 partition)</td><td>桁違いに高速・全エンジン直結</td><td>全 compute engine + DMA</td></tr>
     <tr><td><b style="color:var(--psum)">PSUM</b></td><td>オンチップ SRAM</td><td>128 part &times; 8 bank &times; 512 要素 (計 2 MiB)</td><td>最速・Tensor Engine 蓄積用</td><td>行列積の蓄積は TE 固有 / Vector・Scalar もアクセス可 (GpSimd 不可)</td></tr>
   </table>
   <div class="warn">
-    <b>ここが最重要の直感。</b>SBUF は HBM より<b>桁違いに速いが、桁違いに小さい</b> (96 GB 対 28 MB = 約 3400 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。
+    <b>ここが最重要の直感。</b>SBUF は HBM より<b>桁違いに速いが、桁違いに小さい</b> (96 GiB 対 28 MiB = 約 3400 倍の差)。だから「必要なデータだけを SBUF に載せ、計算し、書き戻す」というやりくりが要る。<b>この容量と帯域の非対称こそが、カーネル最適化で戦う相手</b>です。次章で地図として体感します。
   </div>
 </section>
 
@@ -189,19 +188,19 @@
     <span><span class="dot" style="background:var(--sbuf)"></span>SBUF</span>
     <span><span class="dot" style="background:var(--psum)"></span>PSUM</span>
   </div>
-  <p>「容量で見る」と HBM (96 GB) が圧倒的に大きく、SBUF・PSUM はごくわずか。「速さで見る」と関係が逆転し、オンチップの SBUF / PSUM が HBM を大きく上回ります。<b>大きい所は遅く、速い所は小さい</b> ― この綱引きが、後続のすべてのカーネル最適化テクニック (タイリング、SBUF 常駐、フュージョン) の動機になります。</p>
+  <p>「容量で見る」と HBM (96 GiB) が圧倒的に大きく、SBUF・PSUM はごくわずか。「速さで見る」と関係が逆転し、オンチップの SBUF / PSUM が HBM を大きく上回ります。<b>大きい所は遅く、速い所は小さい</b> ― この綱引きが、後続のすべてのカーネル最適化テクニック (タイリング、SBUF 常駐、フュージョン) の動機になります。</p>
 </section>
 
 <section id="s5">
   <h2><span class="num">5</span>HBM ― 大きくて遅い倉庫</h2>
   <p class="lead">まず一番下の層、HBM から。</p>
-  <p><b>HBM (High Bandwidth Memory)</b> はデバイスの大容量メモリ (TRN2 で 96 GB) で、モデルの重み・活性・入出力など<b>すべての大きなデータの置き場</b>です。PyTorch で <code>tensor.to("neuron")</code> するとデータはここに載ります。</p>
+  <p><b>HBM (High Bandwidth Memory)</b> はデバイスの大容量メモリ (TRN2 で 96 GiB) で、モデルの重み・活性・入出力など<b>すべての大きなデータの置き場</b>です。PyTorch で <code>tensor.to("neuron")</code> するとデータはここに載ります。</p>
   <div class="key">
     HBM の 2 つの重要な性質。<br>
     (1) <b>1D フラットメモリ</b> ― 単純な一次元の並び。<br>
     (2) <b>DMA エンジンからしかアクセスできない</b> ― 計算エンジン (Tensor / Vector など) は HBM を直接読めません。必ず一度 SBUF に運んでから計算します。
   </div>
-  <p>「高帯域」の名の通り帯域は大きいですが、オンチップ SRAM と比べれば遅い。実測では、単一 NeuronCore の 16 個の DMA エンジンを全部使い切って <b>ピーク約 435 GB/s</b>。ここに近づけるかどうかが、メモリバウンドなカーネルの成否を分けます (8 章)。</p>
+  <p>「高帯域」の名の通り帯域は大きいですが、オンチップ SRAM と比べれば遅い。デバイス全体の HBM 帯域は<b>チップ全体で約 3 TB/s</b> (8 コアぶんの合計)。この記事で扱う <b>435 GB/s は、単一 NeuronCore が 16 個の DMA エンジンを全部使い切って到達した実測上のピーク</b>で、デバイス全体の帯域とは別の階層の値です。1 コアぶんの帯域にどこまで近づけるかが、メモリバウンドなカーネルの成否を分けます (8 章)。</p>
   <p>この 435 GB/s は 1 個のエンジンの値ではなく、<b>16 基の DMA エンジンの合計</b>です。内訳を式で見ると、なぜこの数字になるかが分かります。</p>
   <div class="math">
     <span class="c"># TRN2: DMA エンジン1基あたり約27.2GB/s &times; 16基</span><br>
@@ -220,7 +219,7 @@
     <span class="c"># SBUF の形 (TRN2)</span><br>
     partition 次元 (P) : <span class="b">128 レーン</span>  <span class="c"># 固定。ここが超重要</span><br>
     free 次元 (F)      : 各レーン <span class="b">224 KiB</span> 連続  <span class="c"># TRN3 は 256 KiB</span><br>
-    合計               : 約 <span class="b">28 MB</span> / コア  <span class="c"># TRN3 は 32 MB</span>
+    合計               : 約 <span class="b">28 MiB</span> / コア  <span class="c"># TRN3 は 32 MiB</span>
   </div>
   <p>この <b>128 という partition 次元</b>が Trainium の随所に効いてきます。理由は 2 つ:</p>
   <ol class="steps">
@@ -272,7 +271,7 @@
   <div class="key">
     <b>DMA を速くする 2 つの鉄則。</b><br>
     (1) <b>partition 次元を最大化 (128)</b> ― 16 個の DMA エンジンを全部働かせる。<br>
-    (2) <b>free 次元を大きく (連続転送を大きく)</b> ― 転送あたり 32 KiB 以上、128 partition なら合計 512 KiB 以上でオーバーヘッドを償却。
+    (2) <b>free 次元を大きく (連続転送を大きく)</b> ― partition あたり 4 KiB 以上 (DMA エンジン1基は8 partition 分を担当) を目安に、128 partition なら合計 512 KiB 以上でオーバーヘッドを償却。
   </div>
   <div class="warn">
     <b>実測での効き方 (NKI Workshop の DMA ベンチ)。</b>同じ 256 MB のコピーでも、タイルの形で achieved 帯域が激変します。<br>
@@ -297,7 +296,7 @@
     <div class="box"><span class="big" id="c_dma">1 / 16</span><span class="lbl">働く DMA エンジン</span></div>
     <div class="box"><span class="big" id="c_pct">6%</span><span class="lbl">DMA 帯域の利用率(概念)</span></div>
   </div>
-  <p>スライダーを動かすと、使う partition 次元に応じて<b>働く DMA エンジンの数</b>が変わります。4 partition しか使わないと DMA エンジンは 1 個しか動かず、<b>帯域を 16 分の 1 に絞って</b>しまう。128 partition まで広げると 16 個全部が働き、帯域を使い切れます。同じ 16K 要素のテンソルでも、<b>4&times;4096 か 128&times;128 かで achieved 帯域が桁違い</b>になる ― これが「partition を使い切れ」の意味です。</p>
+  <p>スライダーを動かすと、使う partition 次元に応じて<b>働く DMA エンジンの数</b>が変わります。4 partition しか使わないと DMA エンジンは 1 個しか動かず、<b>帯域を 16 分の 1 に絞って</b>しまう。128 partition まで広げると 16 個全部が働き、帯域を使い切れます。free 次元を 4096 要素に固定したまま partition だけを <b>4&times;4096 から 128&times;4096 に広げる</b>と achieved 帯域が桁違いになる ― これが「partition を使い切れ」の意味です (free 次元が小さいと、たとえ 128 partition を使っても 8 章の転送サイズの目安に届かず帯域を使い切れません)。</p>
   <p style="font-size:14px;color:var(--sub)">補足: 図の「利用率」は partition の使い方が帯域に効くことを示す概念値で、実測の絶対値ではありません。実際は free 次元の大きさ (8 章) も同時に効きます。</p>
 </section>
 
@@ -309,7 +308,8 @@
     <b>用語を正確に。</b>「SBUF はオンチップ SRAM なんだから、GPU の L2 キャッシュと同じでは?」と思うかもしれません。<b>物理的な素材 (SRAM) は同じですが、管理方式が根本的に違います。</b><br>
     ・<b>キャッシュ (cache)</b>: ハードウェアが自動で中身を出し入れする。どのデータが載っているかはタグで管理され、ヒット/ミスはプログラムから<b>透過的</b> (見えない)。ソフトは「どこに何を置くか」を指定できない。<br>
     ・<b>スクラッチパッド (scratchpad)</b>: 番地を持つ普通のメモリで、<b>載せる・降ろすを全部ソフトが明示的に命令する</b>。自動のヒット/ミスは無い。<br>
-    SBUF / PSUM は<b>後者 (スクラッチパッド)</b>です。だから正しくは「<b>Trainium はキャッシュを持たない</b>」ではなく「<b>ハードウェア管理のキャッシュを持たず、代わりにソフトウェア管理のスクラッチパッドを持つ</b>」です。
+    SBUF / PSUM は<b>後者 (スクラッチパッド)</b>です。だから正しくは「<b>Trainium はキャッシュを持たない</b>」ではなく「<b>ハードウェア管理のキャッシュを持たず、代わりにソフトウェア管理のスクラッチパッドを持つ</b>」です。<br>
+    補足: GPU にも shared memory (scratchpad) はあり、「GPU=キャッシュのみ」ではありません。違いは、GPU では L1/L2 キャッシュ+ハードウェア prefetch が併存するのに対し、<b>Trainium は全メモリ移動が DMA として明示的</b>で、ハードウェア管理キャッシュそのものを持たない点です。
   </div>
   <table>
     <tr><th>観点</th><th>GPU (一般論)</th><th>Trainium</th></tr>
@@ -331,10 +331,10 @@
   <p class="lead">Trainium のハードウェア階層を一枚に整理します。</p>
   <table>
     <tr><th>論点</th><th>要点</th></tr>
-    <tr><td>階層</td><td>Device (96GB HBM) &gt; NeuronCore &times;8 (2コアで1 HBMバンク共有) &gt; 既定 LNC2 で論理4コア</td></tr>
+    <tr><td>階層</td><td>Device (96GiB HBM) &gt; NeuronCore &times;8 (2コアで1 HBMバンク共有) &gt; 既定 LNC2 で論理4コア</td></tr>
     <tr><td>エンジン</td><td>Tensor (matmul, FLOP の90%) / Vector / Scalar / GP-SIMD が並列動作</td></tr>
-    <tr><td>HBM</td><td>大容量 (96GB)・1Dフラット・DMAのみ・ピーク約435GB/s(1コア)</td></tr>
-    <tr><td>SBUF</td><td>オンチップSRAM・2D (128 partition &times; 224KiB)・28MB・全エンジン直結</td></tr>
+    <tr><td>HBM</td><td>大容量 (96GiB)・1Dフラット・DMAのみ・ピーク約435GB/s(1コア)</td></tr>
+    <tr><td>SBUF</td><td>オンチップSRAM・2D (128 partition &times; 224KiB)・28MiB・全エンジン直結</td></tr>
     <tr><td>PSUM</td><td>128 part &times; 8 bank &times; 512 (計 2 MiB)・行列積の蓄積は TE 固有・Vector/Scalar もアクセス可・FP32 蓄積</td></tr>
     <tr><td>DMA</td><td>16エンジン。partition最大化 + 大きな連続転送で帯域を使い切る</td></tr>
     <tr><td>GPUとの違い</td><td>ハードウェア管理キャッシュを持たず、ソフト管理スクラッチパッド (SBUF/PSUM)。データの置き場と移動を全部ソフトで明示管理</td></tr>
@@ -419,10 +419,10 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
     steps.forEach((s,i)=>drawArrow(s.a,s.b,s.col, i===idx?frac:null, i===idx || (playing===false && t>=nSteps)));
 
     // ボックス群
-    box(hbm.x,hbm.y,hbm.w,hbm.h,'#3a231c','#e07a5f','HBM','96 GB・1D・DMAのみ');
-    box(sbuf.x,sbuf.y,sbuf.w,sbuf.h,'#1c2c3f','#3d7dca',['SBUF'],'28MB・2D・128 part');
+    box(hbm.x,hbm.y,hbm.w,hbm.h,'#3a231c','#e07a5f','HBM','96 GiB・1D・DMAのみ');
+    box(sbuf.x,sbuf.y,sbuf.w,sbuf.h,'#1c2c3f','#3d7dca',['SBUF'],'28MiB・2D・128 part');
     box(engines.x,engines.y,engines.w,engines.h,'#12321f','#43b581',['Tensor / Vector','Scalar / GP-SIMD'],'計算エンジン (並列)');
-    box(psum.x,psum.y,psum.w,psum.h,'#2c1f3f','#a06cd5','PSUM','TE蓄積・8 bank');
+    box(psum.x,psum.y,psum.w,psum.h,'#2c1f3f','#a06cd5','PSUM','2MiB・8 bank・TE書込先');
     // DMA ラベル (HBM<->SBUF 間)
     ct.fillStyle='#f0a58e';ct.font='bold 12px sans-serif';ct.textAlign='center';
     ct.fillText('DMA',dmaMid.x,150);ct.fillText('16基',dmaMid.x,166);
@@ -443,12 +443,11 @@ function fmt(n){if(n>=1e9)return (n/1e9)+'G';if(n>=1e6)return (n/1e6)+'M';if(n>=
   const cv=document.getElementById('cv1'),ct=cv.getContext('2d');
   const W=cv.width,H=cv.height;
   let view='cap';
-  // 相対値 (対数スケールで見せる)。容量: HBM 96GB, SBUF 28MB, PSUM ~0.5MB(128*8*512*4B/... 概算 2MB弱→小さく)
-  // PSUM 128*8*512*4byte = 2.1MB 相当だがバッファ用途なので概念的に小さく表現
+  // 相対値 (対数スケールで見せる)。容量: HBM 96GiB, SBUF 28MiB, PSUM 2MiB(128*8*512*4byte=2,097,152byte=2MiBちょうど)
   const data={
     cap:{ // bytes 相当
       HBM:96*1024*1024*1024, SBUF:28*1024*1024, PSUM:128*8*512*4,
-      unit:'容量 (bytes, 対数)', label:{HBM:'96 GB',SBUF:'28 MB',PSUM:'約 2 MB'}
+      unit:'容量 (bytes, 対数)', label:{HBM:'96 GiB',SBUF:'28 MiB',PSUM:'約 2 MiB'}
     },
     speed:{ // 相対的な速さ(概念)。HBM 435GB/s を基準に、オンチップは桁上
       HBM:435, SBUF:435*20, PSUM:435*40,
