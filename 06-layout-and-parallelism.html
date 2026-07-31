@@ -152,6 +152,23 @@
   <div class="key">
     <b>レイアウト設計の二段判定。</b>(1) 後続の matmul が<b>どの軸を縮約するか</b> → その軸を partition に。(2) 後続の reduction が<b>どの軸を畳みたいか</b> → その軸を free に。<b>2 つの要求が同じテンソルの中で競合することもある</b> (縮約したい軸と reduction したい軸が両方 partition を欲しがる、等)。そのときは「どちらのコストが大きいか」を見て、片方に transpose という妥協を払う判断になります。
   </div>
+
+  <h3>partition 軸をまたぐ集約が必要なら ― reduction を matmul に変換する</h3>
+  <p>ここまでの制約は「畳みたい軸を free に置けば reduction は素直に書ける」という話でした。では、そもそも<b>partition 軸をまたいで集約したい</b>場合 (128 本のレーンに分散した値を1つにまとめたい場合) はどうするのか。reduction 命令では直接できませんが、実務でよく使われる回避策があります。<b>全要素が 1 の行列 (all-ones 行列) を stationary 側に置いた nc_matmul</b> を使う、というものです。Tensor Engine の matmul は partition 軸に沿って内積を取る演算なので、stationary 側を全部 1 にしておけば、その内積はそのまま「partition 方向の足し算」になります。<b>reduction をそのまま matmul に変換してしまう</b>、という定石です。</p>
+  <div class="math">
+    <span class="c"># partition 軸をまたぐ集約を matmul で行う</span><br>
+    stationary = <span class="b">all-ones 行列</span> (partition × 1、全要素 1)<br>
+    moving&nbsp;&nbsp;&nbsp;&nbsp;= <span class="y">データ</span> (partition × free)<br>
+    nc_matmul(stationary, moving) = <span class="p">onesᵀ @ データ</span><br>
+    &nbsp;&nbsp;→ <span class="r">free 軸ごとに、partition 方向 128 本分を足し合わせた結果</span> (1 × free)
+  </div>
+  <p>この「ones 行列との matmul で partition 方向の総和を作る」という技法は、layernorm の分散計算 (<b>E[X²] − E[X]²</b>) のように、partition 方向にまとめた統計量が必要な場面でも同じ形で使われています。</p>
+
+  <h3>stationary と moving、どちらに何を割り当てるか</h3>
+  <p>いま出てきた nc_matmul の2つの引数 (stationary, moving) には、割り当ての実践ルールがあります。第 1 回で見た通り、Tensor Engine は内部で <b>LoadStationary</b> と <b>MultiplyMoving</b> という2つの命令に分けて動作し、<b>LoadStationary は MultiplyMoving より高速</b>というハードウェア上の非対称性を持ちます。この非対称性から導かれる実践ルールが、<b>free 軸が小さい方を stationary に、大きい方を moving に割り当てる</b>という判断です。stationary 側は一度ロードすれば以降の計算で使い回されるため、小さい方をそこに置くほど LoadStationary の速さを活かせます。<b>行列 × ベクトルの積</b> (autoregressive なトークン生成の decode で典型的に現れる、free 軸が極端に小さい形) では、ベクトル側を stationary に置くのが定石です。</p>
+  <div class="key">
+    <b>この節のもう一つの合言葉。</b>reduction が partition 軸をまたぐなら<b>all-ones 行列との matmul</b>に変換する。nc_matmul の2引数を割り当てるときは<b>free 軸が小さい方を stationary に</b>置く。どちらも「Tensor Engine の非対称な内部構造 (LoadStationary/MultiplyMoving) を逆算して使う」という、この章に一貫する発想の具体例です。
+  </div>
 </section>
 
 <section id="s4">

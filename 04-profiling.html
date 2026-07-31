@@ -96,6 +96,9 @@
     ・<b>Compile + NKI (カーネル融合)</b>: カーネル境界そのものを減らす (megakernel 化) ため、境界ごとの sync 待ちと DMA の再ステージングまで縮む。<br>
     <span style="font-size:14px;color:var(--sub)">(傾向はワークショップの実測に基づく概算。絶対値は条件により変わるため本文では相対的な傾向として扱います)</span>
   </div>
+  <div class="key" style="background:#f3f9f6">
+    <b>この章の題材になっている実装の系譜。</b>ワークショップの llama decode 実装には base(素朴な eager 実装)→ core(torch.compile + NKI 化)→ experimental(megakernel 化) という<b>進化の軸</b>があり、これが本章の 3 段階比較の元ネタです。加えて、core から RMSNorm の実装だけを意図的に劣化させた bad という分岐があり、これは<b>品質の軸</b>(進化の軸とは直交)に属します。「bad は一番遅いから進化の一番手前」ではなく、<b>core の 1 箇所だけを悪くした比較用の枝</b>だと捉えてください。
+  </div>
   <div class="toc">
     <a href="#s1">1. 【体験】Eager → Compile → Compile+NKI ― host overhead を消す</a>
     <a href="#s2">2. プロファイラの二階層 ― システムとデバイス</a>
@@ -103,7 +106,8 @@
     <a href="#s4">4. 【体験】エンジン別稼働率を読む</a>
     <a href="#s5">5. DMA キューと sync ― トレースの中身</a>
     <a href="#s6">6. 反復ループの実演 ― ビジーなエンジン、アイドルなエンジン</a>
-    <a href="#s7">7. まとめ ― 測ってから最適化する</a>
+    <a href="#s7">7. よくあるエラーと対処 ― チートシート</a>
+    <a href="#s8">8. まとめ ― 測ってから最適化する</a>
   </div>
   <p style="font-size:14px;color:var(--sub)">対象は AWS Trainium2。数値はワークショップの講義・実測に基づく概算です。<a href="./02-roofline-and-fusion.html">第 2 回「Roofline とカーネル融合」</a>と<a href="./03-flash-attention.html">第 3 回「FlashAttention」</a>を先に読むと理解が早いです。</p>
 </section>
@@ -116,6 +120,7 @@
     <li><b>torch.compile(backend="neuron")</b>: グラフ全体を融合してから実行するため、host 側の dispatch オーバーヘッドの大半が消えます。ただし、コンパイル境界を跨ぐ eager 処理 (例: KV cache へのスライス代入) が <code>aten::copy_</code> として残ることがあり、これは <code>scatter_</code> 等で in-graph 化すると解消できます。</li>
     <li><b>Compile + NKI (カーネル融合)</b>: 別々の NKI カーネルを呼ぶたびに sync drain と DMA の re-staging (HBM 往復) が発生します。カーネル境界そのものを減らす (megakernel 化) と、この sync 待ちと re-staging が縮み、Arithmetic Intensity (演算/バイト) が跳ね上がります。</li>
   </ol>
+  <p style="font-size:15px"><b>megakernel 化の融合範囲。</b>素朴な decode 1 step は RMSNorm・QKV 射影・RoPE・Attention・KV cache 更新・出力射影・MLP といった段が、それぞれ別々のカーネルとして呼ばれる多段構成です。ワークショップの実測(概算)では、これを「attention サブレイヤー全体を 1 カーネルに融合」+「MLP は別カーネルのまま」という<b>2 カーネル構成</b>に減らしています。「ブロック全部が 1 個に」ではなく、<b>融合の範囲は attention 部分であり、MLP は独立したまま</b>という粒度を正確に捉えておくと、カーネル境界の数え方を誤解しません。</p>
   <div class="canvas-wrap">
     <canvas id="cv1" width="840" height="360"></canvas>
   </div>
@@ -136,6 +141,8 @@
   <div class="key">
     <b>読み方の原則。</b>プロファイラの表は「次に何を直すべきか」を教えてくれます。<code>aten::copy_</code> が支配的なら、コンパイル境界をまたぐ演算をグラフの内側に移す番。逆に <code>model_default</code> (NEFF の dispatch) が支配的で他がすべて小さいなら、host 側はもう十分に速く、<b>デバイス側 (カーネルの内部) を見る番</b>です。この判断がプロファイラの一番基本的な使い方になります。
   </div>
+  <p style="font-size:15px">補足として、NKI カーネルを <code>torch.compile</code> のグラフの内側に持ち込むには、2 段のラップが要ります。<b><code>@wrap_nki</code></b> がカーネルをトレース可能な形にし、<b><code>@nki_op</code></b> がそれをカスタム op として登録して TorchDynamo に認識させる ― という役割分離です。この 2 段ラップがあるからこそ、NKI カーネルの呼び出しがグラフ融合の対象になり、Eager 段で見えていた host dispatch のオーバーヘッドがそのまま消えます。</p>
+  <p style="font-size:15px">もう 1 つの実務レシピが<b>「shape 安定化」</b>です。RoPE の位置や attention mask、KV cache の書き込み位置といった動的な値をそのままコンパイル済み関数に渡すと、値が変わるたびに再コンパイルが走ってしまいます。そこで、これらの動的な値を Python 側であらかじめ固定 shape のテンソルとして計算 (precompute) しておき、コンパイル済み関数には「形の変わらないテンソル」だけを渡す ― という設計にすると、再コンパイルそのものを避けられます。これも host 側オーバーヘッドを消すという、この節の主題の延長にある工夫です。</p>
 </section>
 
 <section id="s2">
@@ -146,6 +153,7 @@
   </div>
   <p>システムプロファイラは PyTorch の <code>torch.profiler.profile(...)</code> で取得します。CPU と NeuronCore 両方のアクティビティを記録し、<code>key_averages()</code> で alloc / copy / kernel launch などに分類して集計できます。第 1 段の「Eager vs Compile」の違いは、主にこのシステムプロファイラで見えます。</p>
   <p>デバイスプロファイラは、NKI カーネル単体、あるいはモデル全体を実行したときにデバイス上で生成されるトレース (<code>profile.ntff</code> 等) を読みます。UI (Neuron Explorer) で可視化するだけでなく、ディスク上の parquet ファイルを直接 pandas 等で読み込む方法もあり、これによりエージェントがプロファイルの数値を読み取って反復的に最適化するワークフローが可能になります。<code>total_time</code>、<code>dma_active_time</code>、<code>tensor_engine_active_time</code>、<code>sync_engine_instruction_count</code>、<code>dma_transfer_count</code> といったフィールドがそこに含まれます。</p>
+  <p style="font-size:15px">実務での取得手順はおおむね次のとおりです。まず環境変数でコンパイル済みの NEFF を保存し、次に <code>capture</code> コマンドでトレース (NTFF) を採取、最後に <code>view</code> で開きます。ここで一点だけ実務上のコツがあります。<b><code>--profile-nth-exec=2</code></b> のように 2 回目以降の実行を対象に指定すると、初回実行に混ざるウォームアップ (キャッシュが温まっていない状態) の影響を除外でき、再現性のある数値が取れます。</p>
   <div class="warn">
     <b>見た目の落とし穴。</b>HBM スループットのグラフが「途切れる/存在しない」区間は、転送が無かった (ゼロ) と解釈してよいことが多いです。また、エンジンの実行区間の前後に現れるランダムな短いバーは、多くの場合ウォームアップであり、実計算ではありません。プロファイルを読むときはこの 2 点に注意すると誤読を避けられます。
   </div>
@@ -164,6 +172,19 @@
     推定時間 &asymp; QK matmul の時間 + PV matmul の時間 + softmax の時間&nbsp;&nbsp;<span class="p">← 3項を単純加算</span>
   </div>
   <p>この見積もりと、プロファイラが返す実測時間を並べると、<b>「理論上 X のはずが実測 Y、ギャップは Z」</b>という言い方ができるようになります。ギャップが大きいほど、まだ最適化の余地があるということです。第 3 回の FlashAttention のように、素朴な実装から始めて何段階か最適化を積むと、このギャップが徐々に縮んでいく ― という進み方になります。</p>
+  <h3>複数の理論値を梯子状に並べる ― バウンドの梯子</h3>
+  <p>実務では、entitlement は「1 本の理論値」だけでは終わりません。仕事量÷速度という単一の理論値は最も緩い下限であり、これをさらに何段かに分けて<b>梯子状</b>に並べることで、隙間ごとに別々の原因を対応させられます。memory-bound 系列なら、実測時間 → (理論上の転送量ぴったりで動いた場合の時間) → (不要な再読み込み=reload が無かった場合の時間)、という具合に理論値を段階的に厳しくしていきます。compute-bound 系列も同様に、実測時間 → (理論 FLOP 数ぴったりの時間) → (無駄な FLOP が無い場合の時間)、と段階を踏みます。</p>
+  <div class="math">
+    <span class="c"># memory-bound 系列(緩い→厳しい、右へ行くほど理論値が厳しくなる)</span><br>
+    実測時間 &gt; memory_bound(理論転送量 &divide; 帯域) &gt; memory_bound_no_reloads(reload 除去後)<br><br>
+    <span class="c"># compute-bound 系列(緩い→厳しい)</span><br>
+    実測時間 &gt; compute_bound(理論FLOP &divide; 速度) &gt; compute_bound_useful_flops(無駄FLOP除去後)<br><br>
+    <span class="c"># 隙間ごとに原因が変わる(例)</span><br>
+    実測 ― memory_bound の隙間&nbsp;&nbsp;<span class="p">&larr; DMA非効率・タイルサイズ不足</span><br>
+    memory_bound ― no_reloads の隙間&nbsp;&nbsp;<span class="p">&larr; 余剰トラフィック(不要な再読み込み)</span><br>
+    compute_bound ― useful_flops の隙間&nbsp;&nbsp;<span class="p">&larr; transpose過多・無駄な演算</span>
+  </div>
+  <p>この梯子を使う利点は、「遅い」という 1 つの事実を、原因の異なる複数の隙間に切り分けられることです。ワークショップの実測(概算)では、素朴な実装から段階的に最適化を積むと、実測と理論値の比(excess ratio)が例えば 12 倍程度から段階を追うごとに縮んでいく、という傾向が見られました。1 段直しただけで全部の隙間が消えるわけではなく、<b>どの段の隙間が一番大きいか</b>を見て、そこに対応する対策(DMA効率化・reload削減・タイリング見直し・transpose削減)を選ぶのが実務的な進め方です。</p>
   <div class="key">
     <b>Roofline との接続。</b>第 2 回の Roofline も、実はこの entitlement と同じ道具の別の見せ方です。<b>演算強度 (Arithmetic Intensity = FLOP ÷ 転送バイト数)</b> を見て、ridge point (ハードウェア固有の折れ点) より低いか高いかで、compute-bound か memory-bound かを判定できます。ridge point の値自体もプロファイラから直接取得できるため、「紙と鉛筆の概算」と「実測のプロファイル」を同じ図の上で比較できます。
   </div>
@@ -202,6 +223,12 @@
   <h2><span class="num">5</span>DMA キューと sync ― トレースの中身</h2>
   <p class="lead">エンジンの稼働率の裏側で、DMA と sync が具体的に何を記録しているかをもう少し具体的に見ておきます。</p>
   <p>第 1 回で見た DMA subsystem の内部動作をおさらいすると、DMA は<b>トリガー → descriptor 生成 → キュー投入 → DMA 実行</b>という手順を踏みます。プロファイラの DMA タイムラインは、このキューに何がどれだけ溜まっているか、転送 (transfer) が何件あったかを記録します。<b>DMA transfer 数が多い</b>ことは、それ自体が悪いわけではありませんが、転送 1 件あたりのサイズが小さい (DMA フラグメンテーション) 場合は、固定オーバーヘッドの償却が効かず、achieved 帯域が落ちます。第 5 回のタイリングで、この転送サイズの設計を掘り下げます。</p>
+  <div class="math">
+    <span class="c"># achieved bandwidth の算出式</span><br>
+    achieved_bw = DMA 転送バイト数の合計 &divide; DMA が稼働していた時間<br>
+    %peak = achieved_bw &divide; peak_bw&nbsp;&nbsp;<span class="c"># peak_bw もプロファイラが実測環境から自己校正する値</span>
+  </div>
+  <p>第 1 回で見た「ピーク帯域」の実測値は、この式で算出された achieved_bw の積み上げです。<b>%peak が低い</b>状態は、DMA フラグメンテーション (転送が小さく分かれて固定オーバーヘッドが償却されない) か、そもそも転送すべきでないデータまで運んでいる (余剰トラフィック) かのいずれかを疑うきっかけになります。</p>
   <p><b>sync 命令数</b>は、カーネル境界やエンジン間の待ち合わせのたびに挿入される同期の回数です。複数の NKI カーネルを個別に呼ぶ構成 (例: 4 つのカーネルに分かれた構成) と、単一の融合カーネル (megakernel) を比較すると、sync 命令数・カーネル境界の数・DMA フラグメンテーション・GP-SIMD のプロローグ (起動準備) の回数のいずれも、境界を減らした側で明確に少なくなります。</p>
   <div class="math">
     <span class="c"># Arithmetic Intensity (AI) = 演算数 ÷ 転送バイト数</span><br>
@@ -233,7 +260,19 @@
 </section>
 
 <section id="s7">
-  <h2><span class="num">7</span>まとめ</h2>
+  <h2><span class="num">7</span>よくあるエラーと対処 ― チートシート</h2>
+  <p class="lead">プロファイラで測る前の段階で、コンパイルや実行が止まってしまうこともあります。エラーコードを丸暗記する必要はありませんが、<b>分類</b>を知っておくと、どの章の知識で対処すべきかが素早く分かります。</p>
+  <table>
+    <tr><th>分類</th><th>典型的な症状</th><th>対処の方向</th></tr>
+    <tr><td>EOOM 系(メモリ超過)</td><td>SBUF や PSUM の確保に失敗する</td><td>タイルサイズを縮小する、allocation (第 7 回) の使い方を見直す</td></tr>
+    <tr><td>EVRF 系(検証エラー)</td><td>指定した dtype や演算子がその命令に非対応</td><td>対応している dtype/演算子の組み合わせに変更する。世代 (gen) によって対応状況が異なる点にも注意</td></tr>
+    <tr><td>EARG 系(引数不整合、例: EARG001)</td><td>LNC (Logical NeuronCore) の指定が世代の上限と食い違う</td><td>世代ごとの LNC 上限を確認して指定し直す (第 6 回のレイアウト/並列化の議論と直結)</td></tr>
+  </table>
+  <p style="font-size:15px">いずれの分類も、<b>「何が」ではなく「なぜ」超過・非対応・不整合になったか</b>を見るのがコツです。EOOM ならタイルの敷き詰め方 (第 5 回)、EVRF なら精度階段のどの段を使っているか (第 8 回)、EARG001 なら LNC の並列構成 (第 6 回) ― それぞれ前後の章の知識に戻って原因を探ると解決が早くなります。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>まとめ</h2>
   <p class="lead">「測ってから最適化する」という原則を一枚に整理します。</p>
   <table>
     <tr><th>論点</th><th>要点</th></tr>
@@ -243,6 +282,7 @@
     <tr><td>エンジン別稼働率</td><td>ビジーなエンジンとアイドルなエンジンを両方見る。アイドルの原因は多くの場合 structural hazard(他エンジン待ち)</td></tr>
     <tr><td>DMA/sync</td><td>DMA フラグメンテーション(小転送の多発)と sync 命令数(カーネル境界のたび)は、境界を減らす(融合)ほど縮む</td></tr>
     <tr><td>反復ループ</td><td>ボトルネックを1つずつ潰し、直すたびに再度測る。一度に全部を直そうとしない</td></tr>
+    <tr><td>よくあるエラー</td><td>EOOM(メモリ超過)/EVRF(非対応dtype・演算子)/EARG(LNC不整合)。分類で捉え、前後の章の知識に戻って対処する</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>プロファイラは当て推量を消す道具です。(A) <b>Eager→Compile→Compile+NKI</b> の 3 段階比較で host 側のオーバーヘッドを切り分け、(B) <b>エンジン別稼働率</b>を読んでビジーなエンジンとアイドルなエンジンを見分け、(C) 第 2 回の <b>hardware entitlement</b> と実測のギャップを数値化してターゲットを持つ。この 3 つがあれば、「なんとなく遅い」から「理論上 X のはずが実測 Y、ギャップは Z、原因はこのエンジン」と言えるようになります。<br>
