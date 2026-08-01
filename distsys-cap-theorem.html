@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAP定理 ― 分断時に何を諦めるかをビジュアルに</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ シリーズ</p>
+  <h1>CAP定理 ― 分断時に何を諦めるかをビジュアルに</h1>
+  <p>「3つから2つを選ぶ」は誤解。ネットワーク分断が起きた瞬間に、CかAのどちらを諦めるかが問われる</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム基礎 シリーズ目次へ</a>
+  <p class="intro">分散システムに複数のノードを置くと、ネットワークはいつか必ず分断します。CAP定理は、その分断が起きた瞬間に「一貫性」と「可用性」のどちらを諦めるかを迫る定理です。よくある「3つから2つを選ぶ」という説明は不正確で、分断が起きていない平常時にはCもAも両立します。ここでは正確な定義と、分断時に実際に何が起きるかを図で確認します。</p>
+
+  <!-- ===== 解説パート 1: C・A・P の正確な定義 ===== -->
+  <section>
+    <h2>1. C・A・P の正確な定義</h2>
+    <p>CAP定理は Eric Brewer が提唱し、Gilbert と Lynch が形式的に証明した定理です。3つの性質はそれぞれ次のように<b>厳密に</b>定義されます。曖昧な「一貫性」「可用性」という日常語のイメージで捉えると、この先の議論を誤解します。</p>
+    <p><b>C (Consistency, 一貫性)</b> ― ここでの一貫性は<b>線形化可能性 (linearizability)</b> を指します。どのノードに読みに行っても、直前に確定した最新の書き込み結果を必ず返す、という強い保証です。</p>
+    <p><b>A (Availability, 可用性)</b> ― 故障していないノードに送られたすべての要求は、有限時間内に<b>必ず何らかの応答を返す</b>という保証です。応答の内容が古くてもよいが、無応答やエラーは許されません。</p>
+    <p><b>P (Partition tolerance, 分断耐性)</b> ― ノード間の通信メッセージが失われても、システムは<b>動作を続ける</b>という性質です。物理的にネットワークが分断された状態そのものではなく、「分断が起きても機能し続けようとする」という設計上の性質を指します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 260" role="img" aria-label="Pを前提として分断発生時にC/Aへ分岐する図">
+        <rect x="150" y="16" width="300" height="50" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="40" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">P: ネットワーク分断はいつか必ず起きる</text>
+        <text x="300" y="58" font-size="12.5" text-anchor="middle" fill="#0f5132">(選択肢ではなく前提)</text>
+        <line x1="300" y1="66" x2="300" y2="104" stroke="#0f5132" stroke-width="2"/>
+        <line x1="300" y1="104" x2="170" y2="122" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="300" y1="104" x2="430" y2="122" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="60" y="126" width="220" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="170" y="152" font-size="14" text-anchor="middle" fill="#1f4a68" font-weight="700">C: 一貫性を優先</text>
+        <text x="170" y="170" font-size="12.5" text-anchor="middle" fill="#12211a">応答を拒否/エラーを返す</text>
+        <rect x="320" y="126" width="220" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="430" y="152" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">A: 可用性を優先</text>
+        <text x="430" y="170" font-size="12.5" text-anchor="middle" fill="#12211a">古い値のまま応答する</text>
+        <text x="300" y="220" font-size="13.5" text-anchor="middle" fill="#12211a">C/Aの分岐が生じるのは「分断が実際に起きている間」だけ</text>
+        <text x="300" y="240" font-size="13" text-anchor="middle" fill="#4a5d54">分断が無い平常時はCとAは問題なく両立する</text>
+      </svg>
+      <p class="cap">図: Pは「3つから選ぶ選択肢」ではなく前提。分岐が生じるのはPが実際に起きた瞬間だけ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: 「3つから2つ選ぶ」誤解の否定と、分断時に何が起きるか ===== -->
+  <section>
+    <h2>2. 「3つから2つを選ぶ」は誤解</h2>
+    <p>CAP定理はよく「C・A・P の3つから2つしか同時に満たせない」と説明されますが、これは不正確です。正しくは<b>「ネットワーク分断 (P) が実際に起きている間だけ、CとAのどちらかを諦めなければならない」</b>という定理です。分断が起きていない平常時は、CとAは何の問題もなく両立します。</p>
+    <p>なぜそうなるかは簡単です。2つのノード $N_1, N_2$ がレプリカを持ち、その間の通信が切れたとします。クライアントが $N_1$ に書き込んでも、その更新は $N_2$ に届きません。ここで $N_2$ への読み取り要求が来たとき、選べる道は2つしかありません。</p>
+    <ul>
+      <li><b>Cを優先する (CP)</b> ― $N_2$ は「最新かどうか確認できない」ため、応答を拒否するかエラーを返す。一貫性は守るが、可用性を失う。</li>
+      <li><b>Aを優先する (AP)</b> ― $N_2$ は手元にある古い値をそのまま返す。応答はするが、一貫性を失う (結果整合性に留まる)。</li>
+    </ul>
+    <p>「CもAも両方諦めない」という第3の道は、分断が続いている間は存在しません。これがCAP定理の核心です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 260" role="img" aria-label="ネットワーク分断でCP/APに分岐する図">
+        <rect x="20" y="20" width="130" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="50" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">Node N1</text>
+        <text x="85" y="70" font-size="13" text-anchor="middle" fill="#12211a">write(x=2)</text>
+        <rect x="470" y="20" width="130" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="535" y="50" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">Node N2</text>
+        <text x="535" y="70" font-size="13" text-anchor="middle" fill="#12211a">x=1 (旧値)</text>
+        <line x1="150" y1="55" x2="470" y2="55" stroke="#c0492f" stroke-width="3" stroke-dasharray="6 6"/>
+        <text x="310" y="42" font-size="14" text-anchor="middle" fill="#c0492f" font-weight="700">通信断 (P)</text>
+        <line x1="535" y1="90" x2="230" y2="115" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="535" y1="90" x2="450" y2="115" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="120" y="115" width="150" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="195" y="140" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">CP: 応答拒否</text>
+        <text x="195" y="158" font-size="13" text-anchor="middle" fill="#12211a">「確認できない」と拒否</text>
+        <rect x="350" y="115" width="150" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="425" y="140" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">AP: 古い値を返す</text>
+        <text x="425" y="158" font-size="13" text-anchor="middle" fill="#12211a">read(x) → 1 (stale)</text>
+        <text x="310" y="215" font-size="13.5" text-anchor="middle" fill="#12211a">分断中に N2 が read(x) を受けたら、この2択しかない</text>
+        <text x="310" y="235" font-size="13.5" text-anchor="middle" fill="#4a5d54">(分断が解消すれば通常はCもAも両立する)</text>
+      </svg>
+      <p class="cap">図: 分断中の N2 への読み取りは、応答拒否 (CP) か古い値を返す (AP) の2択しかない。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: CP/AP の具体例とクォーラム ===== -->
+  <section>
+    <h2>3. CP系・AP系の具体例とクォーラム</h2>
+    <p>実際のシステムは設計方針として「分断時にCP側に倒す」か「AP側に倒す」かをあらかじめ選んでいます。</p>
+    <p><b>CP系の例</b>: ZooKeeper、etcd、HBase (強一貫性のメタデータ管理)。多数派 (quorum) と通信できないノードは書き込みも読み取りも拒否し、可用性を犠牲にします。</p>
+    <p><b>AP系の例</b>: Cassandra、DynamoDB (デフォルト設定)、Riak。分断中でも各ノードが応答を続け、後で値を収束させます。可用性を優先し一貫性は結果整合性に留めます。</p>
+    <p>「クォーラム (quorum)」という言葉は、CP系とAP(Dynamo)系で異なる使われ方をします。ZooKeeper/etcdのようなCP系は、Raft/ZABといった合意アルゴリズムで<b>多数派 (majority)</b> の同意を必須とし、多数派に届かない側は書き込みも読み取りも一律に拒否します。一方、CassandraやRiakのような<b>Dynamo系のAP系</b>システムは、レプリカ数を $N$、書き込みに必要な確認数を $W$、読み取りに必要な確認数を $R$ として、この2値を運用者が調整できる<b>可変クォーラム</b>を採用しています。次の条件を満たせば、書き込み集合と読み取り集合が少なくとも1ノードで重なります。</p>
+    $$ R + W > N $$
+    <p>この不等式はあくまで集合が重なるための<b>必要条件</b>であり、それ単独で「読み取りが必ず最新の書き込みを含む」ことまでは保証しません。書き込みの部分的失敗や並行書き込み、sloppy quorumなどの運用上の緩和策が絡むと、重なりがあっても古い値を返す余地が残ります。可変クォーラムで必要な重なりを確保できない側は、条件を緩めて古い値を返す (AP寄りの振る舞い) ことで応答を継続するのが一般的です。</p>
+    <p>分断が無い平常時にも、実は別のトレードオフが残ります。これを整理したのが <b>PACELC</b> という拡張です。「Partition の時はAとCのどちらか (PAC)、Else (分断が無い時) はLatency (待ち時間) とConsistency のどちらか (EL)」を選ぶ、という考え方です。強い一貫性を取るほど確認応答を待つ必要が増え、レイテンシが伸びるトレードオフが平常時にも存在します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="PACELCの分岐図">
+        <rect x="20" y="80" width="140" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="90" y="115" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">PACELC</text>
+        <line x1="160" y1="95" x2="240" y2="45" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="160" y1="125" x2="240" y2="175" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="240" y="15" width="170" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="325" y="40" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">P: 分断時</text>
+        <text x="325" y="58" font-size="13" text-anchor="middle" fill="#12211a">A (可用性) か C (一貫性)</text>
+        <rect x="240" y="145" width="170" height="60" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="325" y="170" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">E: 平常時</text>
+        <text x="325" y="188" font-size="13" text-anchor="middle" fill="#12211a">L (低遅延) か C (一貫性)</text>
+        <line x1="410" y1="45" x2="470" y2="45" stroke="#9aa" stroke-width="1.5"/>
+        <text x="545" y="50" font-size="13" text-anchor="middle" fill="#12211a">CP / AP</text>
+        <line x1="410" y1="175" x2="470" y2="175" stroke="#9aa" stroke-width="1.5"/>
+        <text x="545" y="180" font-size="13" text-anchor="middle" fill="#12211a">同期 / 非同期複製</text>
+      </svg>
+      <p class="cap">図: PACELC ― 分断時 (PAC) だけでなく平常時 (ELC) にもレイテンシと一貫性のトレードオフがある。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'CAP定理における C (Consistency) の正確な定義として最も適切なものは？',
+    opts: [
+      'すべてのレプリカが完全に同じハードウェア構成（CPU・ストレージ）を持っていること',
+      'そのトランザクションが ACID の原子性・分離性など4特性をすべて満たしていること',
+      '分散環境の全ノードが同時刻に同期した同一のクロックを持っていること',
+      'どのノードで読んでも直前に確定した最新の書き込みを必ず返す強い一貫性（線形化可能性）を持つこと',
+      'データが暗号化された状態で保存され、改ざんされないよう保護されていること'
+    ],
+    ans: 3,
+    exps: [
+      'ハードウェア構成の話ではない。CAPの一貫性はデータの読み書きの整合性に関する保証であり、物理構成とは無関係。',
+      'ACIDのトランザクション分離性・原子性などとは別軸の概念。CAPの一貫性はレプリカ間のデータ可視性の話であり、ACID全体を指すものではない。よくある混同。',
+      '分散システムでの時刻同期 (NTP など) は別の課題であり、CAPの一貫性の定義には含まれない。',
+      '<b>これが正解。</b>CAPでの一貫性は線形化可能性 (linearizability) を指し、どのノードに読みに行っても直前に確定した最新の書き込みを必ず返すという強い保証。',
+      '暗号化やセキュリティとは無関係の軸。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>線形化可能性は「どのノードに聞いても、直前の書き込み後は必ず新しい値が返る」という保証です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="線形化可能性の図"><rect x="20" y="30" width="200" height="40" rx="8" fill="#198754" opacity="0.25" stroke="#0f5132" stroke-width="2"/><text x="120" y="55" font-size="13.5" text-anchor="middle" fill="#12211a">write(x=2) 確定</text><line x1="220" y1="50" x2="340" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr1)"/><rect x="340" y="30" width="200" height="40" rx="8" fill="#3d7dca" opacity="0.25" stroke="#0f5132" stroke-width="2"/><text x="440" y="55" font-size="13.5" text-anchor="middle" fill="#12211a">read(x) → 2 (必ず新値)</text><text x="280" y="110" font-size="13.5" text-anchor="middle" fill="#4a5d54">確定後はどのノードで読んでも新値だけが見える</text><defs><marker id="arr1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 線形化可能性 ― 書き込み確定後は、どのノードで読んでも旧値が見えない。</p></div>'
+    }
+  },
+  {
+    q: '「CAP定理は C・A・P の3つのうち2つしか同時に満たせない」という説明について、最も正確な指摘はどれか？',
+    opts: [
+      'ネットワーク分断が発生していない平常時であれば C と A は両立でき、選択を迫られるのは分断が実際に起きている間だけである',
+      'その説明は正しく、システムは常にどれか1つの性質を完全に放棄しなければならない',
+      '3つの性質は互いに独立でなく、C を満たせば自動的に A と P も満たされる',
+      'P は選択可能な性質であり、P を選ばなければ CAP定理自体が適用されない',
+      'この定理は NoSQL データベースにのみ適用され、RDBMSには関係がない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>CAP定理の核心は「ネットワーク分断が起きている間だけ、C と A のどちらかを諦めざるを得ない」という条件付きの主張。平常時には両立しうる。',
+      '誤り。平常時には C と A は問題なく両立するため、「常にどれか1つを完全に放棄」という説明は不正確。',
+      '3性質は独立した保証であり、1つを満たせば他が自動的に保証される関係にはない。',
+      'Pは分散ネットワークでは分断が発生し得るという現実の前提であり、実用上は「常に成り立つとみなす」対象。ただし理論上は分断が起きない特殊なネットワークを仮定すればPが問題化しない状況は考えられ、P自体を完全に「選択肢ではない」と全否定するのは言い過ぎ。ここで問われている本質的な誤りは、あくまで分断発生時にのみCとAの選択が生じるという条件を無視した点にある。',
+      'CAP定理は分散データストア全般に適用される一般的な考え方で、複数ノードに複製を持つ限りRDBMSでも同じ制約が生じる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>正しい構図は「2択から1つ選ぶ」ではなく「分断中だけ2択が生じる」条件付きの構図です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="条件付き選択の図"><rect x="20" y="20" width="220" height="130" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">平常時 (分断なし)</text><text x="130" y="70" font-size="13.5" text-anchor="middle" fill="#12211a">C と A は両立可能</text><rect x="320" y="20" width="220" height="130" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="430" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">分断発生時</text><text x="430" y="70" font-size="13.5" text-anchor="middle" fill="#12211a">C か A のどちらかのみ</text></svg>'
+          + '<p class="cap">図: トレードオフが生じるのは分断発生時だけ。</p></div>'
+    }
+  },
+  {
+    q: 'ネットワーク分断が実際に発生している間、多数派と通信できない少数派側のノードが読み取り要求を受けた場合、取れる選択は？',
+    opts: [
+      '通信できない状態でも、内部計算だけで常に最新の値を確実に導き出せる方法がある',
+      '分断中であっても他ノードに問い合わせて必ず最新値を取得できる仕組みが標準で備わっている',
+      '分断を検知した時点で自動的にデータを暗号化し、安全な状態に保管してから応答する',
+      'クライアントに対して、接続先ノードを再起動するよう指示を出して解決を委ねる',
+      '応答を拒否またはエラーを返す（一貫性優先）か、手元にある古い値をそのまま返す（可用性優先）のいずれかしかない'
+    ],
+    ans: 4,
+    exps: [
+      '分断中は他ノードと通信できないため、値が最新かどうかを確認する手段が無い。内部計算だけで最新性を保証することはできず、「常に返せる」は分断の定義上不可能。',
+      '分断とは通信が切れている状態を指すため、「問い合わせて必ず取得できる仕組みが標準で備わっている」は前提と矛盾する。そもそも問い合わせができないのが分断。',
+      '暗号化は一貫性・可用性のトレードオフとは無関係の話題であり、分断時の応答方針の選択肢にはならない。',
+      '再起動してもネットワーク経路そのものの問題は解消しない場合が多く、的外れな対処。分断はクライアント側の操作では解決しない。',
+      '<b>これが正解。</b>分断中の少数派ノードにできることは、確認できないことを理由に応答を拒否する (CP) か、手元の古い値のまま応答する (AP) かの二択のみ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の分断図を思い出してください。少数派ノードの選択肢は常に2つだけです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="二択の図"><rect x="30" y="20" width="220" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="55" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">CP: 応答拒否/エラー</text><rect x="310" y="20" width="220" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="55" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">AP: 古い値を返す</text><text x="280" y="115" font-size="13.5" text-anchor="middle" fill="#4a5d54">第3の道（常に新値を返す）は分断中は存在しない</text></svg>'
+          + '<p class="cap">図: 分断中の少数派ノードに残る選択肢は2つだけ。</p></div>'
+    }
+  },
+  {
+    q: '次のうち、一般に「CP系（一貫性優先）」に分類されるシステムはどれか？',
+    opts: [
+      'Amazon DynamoDB（デフォルト設定）',
+      'ZooKeeper / etcd（合意アルゴリズムベースのメタデータストア）',
+      'Apache Cassandra',
+      'Riak',
+      '単純な DNS ラウンドロビン'
+    ],
+    ans: 1,
+    exps: [
+      'DynamoDBはデフォルトで結果整合性の読み取りを提供し、分断時も可用性を優先するAP系寄りの設計。',
+      '<b>これが正解。</b>ZooKeeper/etcdは合意アルゴリズム (ZAB/Raft) で多数派の同意が取れない限り書き込みや読み取りを拒否する、一貫性優先 (CP) の代表例。',
+      'Cassandraは分断時にも書き込み・読み取りを継続できるよう設計されたAP系の代表例。',
+      'RiakはDynamo論文の影響を強く受けたAP系のキーバリューストア。',
+      'DNSラウンドロビンはCAPの文脈で語られるデータ一貫性保証を持つデータストアではなく、単純な負荷分散の仕組み。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>CP系は「多数派に届かない側は止まる」、AP系は「届かない側も動き続ける」という設計方針の違いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="CP系とAP系の代表例"><rect x="30" y="20" width="220" height="90" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">CP系</text><text x="140" y="68" font-size="13" text-anchor="middle" fill="#12211a">ZooKeeper / etcd</text><text x="140" y="88" font-size="13" text-anchor="middle" fill="#12211a">HBase</text><rect x="310" y="20" width="220" height="90" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">AP系</text><text x="420" y="68" font-size="13" text-anchor="middle" fill="#12211a">Cassandra / Riak</text><text x="420" y="88" font-size="13" text-anchor="middle" fill="#12211a">DynamoDB (default)</text></svg>'
+          + '<p class="cap">図: 合意ベースのメタデータストアはCP系、Dynamo系KVSはAP系に寄る傾向がある。</p></div>'
+    }
+  },
+  {
+    q: 'レプリカ数 $N=5$、書き込みクォーラム $W=3$、読み取りクォーラム $R$ について、読み取りが必ず最新の書き込みを含むための条件は？',
+    opts: [
+      '$R \\ge 1$ であればよい',
+      '$R = N$ である必要がある（全ノードから読む必要がある）',
+      '$R + W > N$ を満たす必要があるので、$R \\ge 3$ であればよい',
+      '$W$ の値に関係なく、$R \\ge N/2$ であれば十分',
+      '$R + W = N$ ちょうどであることが必要'
+    ],
+    ans: 2,
+    exps: [
+      '$R=1$ では読み取り先が書き込みクォーラムに含まれない可能性があり、古い値を読む恐れがある。$R+W>N$ ($1+3=4 \\le 5$) を満たさない。',
+      '全ノードから読む必要はなく、クォーラム条件 $R+W>N$ を満たせば十分。$R=N$は過剰。',
+      '<b>これが正解。</b>$R+W>N$ すなわち $R+3>5$ より $R>2$、つまり $R\\ge3$ であれば書き込み集合と読み取り集合が必ず1ノード以上重なり、最新値を含む。',
+      '条件は$W$との組み合わせで決まる相対的な式であり、$W$を無視した固定の閾値では判定できない。',
+      '$R+W=N$ (この例では5) だと重なりがゼロになる可能性が残り、最新値を保証できない。厳密に $>N$ が必要。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>書き込み集合と読み取り集合が重ならないと、最新値を読めない可能性が出ます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="クォーラムの重なりの図"><text x="280" y="20" font-size="13.5" text-anchor="middle" fill="#12211a">N=5 ノード</text><rect x="30" y="40" width="45" height="45" fill="#198754" opacity="0.3" stroke="#0f5132"/><rect x="85" y="40" width="45" height="45" fill="#198754" opacity="0.3" stroke="#0f5132"/><rect x="140" y="40" width="45" height="45" fill="#8fd6b4" opacity="0.6" stroke="#0f5132"/><rect x="195" y="40" width="45" height="45" fill="#3d7dca" opacity="0.3" stroke="#0f5132"/><rect x="250" y="40" width="45" height="45" fill="#3d7dca" opacity="0.3" stroke="#0f5132"/><text x="97" y="105" font-size="13" text-anchor="middle" fill="#0f5132">W=3 (書込確認)</text><text x="222" y="125" font-size="13" text-anchor="middle" fill="#3d7dca">R=3 (読取確認)</text><text x="162" y="145" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">重なり1ノード → 最新値を必ず含む</text></svg>'
+          + '<p class="cap">図: R+W>N なら書込集合と読取集合が必ず重なる。</p></div>'
+    }
+  },
+  {
+    q: '「線形化可能性 (linearizability)」と「結果整合性 (eventual consistency)」の違いを最も正確に表しているものは？',
+    opts: [
+      '線形化可能性は即時に最新値が見える強い保証、結果整合性は伝播後にいつか一致する弱い保証である',
+      '両者は同じ強さの保証を表す言葉であり、単に呼び方だけが異なる同義語にすぎない',
+      '結果整合性の方が線形化可能性よりも強く、より厳密な一貫性を提供する保証である',
+      '線形化可能性はネットワークが分断していても、常にどのノードでも変わらず成立し続ける',
+      '結果整合性を採用したシステムは、分断時にも一貫性(C)を犠牲にせず満たし続けられる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>線形化可能性は「書き込み確定後は即座にどこからでも新値が見える」強い保証、結果整合性は「更新の伝播が完了すればいつか一致する」ことしか約束しない弱い保証。',
+      '保証の強さは明確に異なり、両者を同一視するのは誤り。厳密さの度合いが根本的に異なる、よくある誤解。',
+      '逆である。線形化可能性の方が強い保証で、結果整合性はそれより弱い保証にとどまる、という点を取り違えている。',
+      '線形化可能性を維持するには分断中に応答を制限する必要があり、「分断していても常に成立する」は誤り（成立させるにはAを犠牲にする）。',
+      '結果整合性はまさに一貫性(C)を弱めて可用性(A)を優先する設計であり、「Cを犠牲にせず満たす」という説明は矛盾する、典型的な誤認。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>時間軸上でどこまで「新しい値が見える」かの違いを図示します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="線形化可能性と結果整合性の違い"><line x1="30" y1="50" x2="530" y2="50" stroke="#9aa" stroke-width="2"/><circle cx="150" cy="50" r="6" fill="#0f5132"/><text x="150" y="35" font-size="13" text-anchor="middle" fill="#0f5132">write確定</text><text x="150" y="75" font-size="13" text-anchor="middle" fill="#198754">直後から全読取=新値(線形化可能性)</text><line x1="30" y1="120" x2="530" y2="120" stroke="#9aa" stroke-width="2"/><circle cx="150" cy="120" r="6" fill="#3d7dca"/><text x="150" y="105" font-size="13" text-anchor="middle" fill="#3d7dca">write確定</text><text x="350" y="105" font-size="13" text-anchor="middle" fill="#3d7dca">伝播完了</text><text x="350" y="140" font-size="13" text-anchor="middle" fill="#4a5d54">この間は旧値が見えうる(結果整合性)</text></svg>'
+          + '<p class="cap">図: 線形化可能性は即時、結果整合性は伝播完了までの間、古い値が見える可能性がある。</p></div>'
+    }
+  },
+  {
+    q: 'PACELC の考え方に基づくと、ネットワーク分断が発生していない「平常時」に依然として残るトレードオフは何か？',
+    opts: [
+      '一貫性(C)と分断耐性(P)の間で常に発生し続けるトレードオフ',
+      '可用性(A)と分断耐性(P)の間で常に発生し続けるトレードオフ',
+      '平常時にはいかなるトレードオフも一切存在しないというのがPACELCの立場',
+      'レイテンシ(Latency)と一貫性(Consistency)のトレードオフ',
+      'セキュリティ対策の強度と可用性の高さの間のトレードオフ'
+    ],
+    ans: 3,
+    exps: [
+      '平常時はPが問題化しないため、この組み合わせは的外れ。PACELCが指摘するのは別の軸の話である。',
+      'AとPのトレードオフは分断時 (PACの部分) の話であり、平常時の残存トレードオフの説明にはならない。',
+      '実際には平常時にもレイテンシと一貫性の間にトレードオフが残るため、「一切存在しない」という立場は誤り。',
+      '<b>これが正解。</b>PACELCの Else 部分 (ELC) は「分断が無い平常時でも、強い一貫性を得るには複数ノードの確認応答を待つ必要があり、その分レイテンシが増える」というトレードオフを指す。',
+      'セキュリティはPACELCの議論の対象外であり、この観点は元の理論には含まれない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>強い一貫性を得るには複数ノードの確認を待つ必要があり、待つほどレイテンシが伸びます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="レイテンシと一貫性のトレードオフ"><line x1="60" y1="120" x2="500" y2="120" stroke="#9aa" stroke-width="2"/><line x1="60" y1="120" x2="60" y2="20" stroke="#9aa" stroke-width="2"/><text x="30" y="20" font-size="13" fill="#12211a">一貫性強</text><text x="500" y="140" font-size="13" fill="#12211a">レイテンシ大</text><path d="M70,110 C200,90 350,50 480,30" stroke="#198754" stroke-width="3" fill="none"/><text x="300" y="70" font-size="13.5" fill="#0f5132" font-weight="700">強い一貫性ほど確認待ちが増える</text></svg>'
+          + '<p class="cap">図: 平常時でも、一貫性を強めるほど確認応答待ちでレイテンシが増える。</p></div>'
+    }
+  },
+  {
+    q: '「CA（一貫性も可用性も両方満たす）システムを作れば分断も気にせず両方得られる」という主張について、最も正確な批判はどれか？',
+    opts: [
+      'CAという組み合わせは理論上どんな条件下でも決して成立せず、常に不可能である',
+      'CAシステムを名乗れば可用性が常に100%になることが数学的に証明されている',
+      '分断はいつか必ず発生する。その瞬間にCとAの両立は崩れ、「常にCA」を名乗るシステムは分断時の検証を欠いているだけ',
+      'CAはCPより一貫性が強く、APより可用性が高い、あらゆる面で優れた最強の組み合わせである',
+      'CAシステムは分断が発生してもCとAを自動的に両立し続けられる、特別な実装方式が存在する'
+    ],
+    ans: 2,
+    exps: [
+      '分断が発生していない間はCとAは普通に両立できる（理論上、分断が起きないネットワークを仮定すればCAは成立する）ため「どんな条件下でも決して成立しない」は言い過ぎ。問題は現実には分断がいつか必ず発生する点にある。',
+      '可用性100%を数学的に保証する仕組みはCAという分類名から自動的に導かれるものではなく、そのような証明は存在しない。',
+      '<b>これが正解。</b>単一ノードやLANの分断がまず起きない特殊な前提でなければ「常にCA」を保証できない。実用上は分断がいつか必ず起きる前提を置くべきで、分断が起きた瞬間にCとAのどちらかを諦める設計 (CP or AP) が必要になる。',
+      'CP/APはそれぞれ別のトレードオフの選択であり、「CAが最強」という優劣関係は成立しない。分断時に何を優先するかという設計判断の違いに過ぎない。',
+      '誤り。CAP定理が示すのはまさにその逆で、分断発生時にはCとAの両立は不可能というのが定理の核心。「自動的に両立し続けられる」実装方式は存在しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>分断が発生しない前提を置けばCAは成立しますが、複数ノードをまたぐ分散システムでは分断はいつか必ず起きます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="CAが崩れる図"><rect x="40" y="30" width="480" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132">分断が起きない間は CA (両立) が続く</text><rect x="230" y="80" width="100" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="280" y="100" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">分断発生</text><text x="280" y="135" font-size="13.5" text-anchor="middle" fill="#12211a">この瞬間にCAは維持できずCP/APへ分岐する</text></svg>'
+          + '<p class="cap">図: 「常にCA」は分断が来るまでの見せかけであり、分断発生時に破綻する。</p></div>'
+    }
+  },
+  {
+    q: 'CAP定理の「A (Availability)」の定義に最も忠実な記述はどれか？',
+    opts: [
+      'サービスのアップタイムがSLA上99.99%以上を維持していること（運用指標としての稼働率）',
+      'クライアントが読み取り要求のたびに常に最新の確定値を取得できること（データの新しさの保証）',
+      'システムが負荷に応じて自動的にスケールアウトし続けられること（キャパシティ拡張性）',
+      '障害が起きても人手を介さず自動的に検知・復旧できること（セルフヒーリング能力）',
+      '故障していないノードが受けたすべての要求に対し、有限時間内に何らかの応答（エラーではない有効な応答）を返すこと'
+    ],
+    ans: 4,
+    exps: [
+      'SLAのアップタイム指標とCAPの可用性は異なる概念。CAPの可用性は個々の要求に対する応答の保証を指し、稼働率の統計値とは別軸。',
+      'それは可用性ではなく一貫性(C)の定義であり、混同されやすい典型的な誤り。可用性は「応答するか」だけを問う。',
+      'オートスケーリングは可用性を助ける運用上の手段の一つだが、CAPの可用性の定義そのものではない。',
+      '自動復旧（セルフヒーリング）は運用上望ましい特性だが、CAPの可用性の定義とは別の話題であり定義に含まれない。',
+      '<b>これが正解。</b>CAPにおける可用性は「故障していないノードが受け取った要求には、有限時間内に必ず（内容が古くてもよいので）応答を返す」という保証。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>可用性は「応答するかどうか」の保証であり、「その内容が最新かどうか」は一貫性の話です。両者を混同しないことが重要です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="可用性と一貫性の切り分け"><rect x="40" y="30" width="220" height="80" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="150" y="60" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">可用性 (A)</text><text x="150" y="85" font-size="13" text-anchor="middle" fill="#12211a">「応答するか」だけを問う</text><rect x="300" y="30" width="220" height="80" rx="10" fill="#eaf5ef" stroke="#3d7dca" stroke-width="2"/><text x="410" y="60" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">一貫性 (C)</text><text x="410" y="85" font-size="13" text-anchor="middle" fill="#12211a">「その値が最新か」を問う</text></svg>'
+          + '<p class="cap">図: 「応答するか」と「その内容が最新か」は独立した別の軸。</p></div>'
+    }
+  },
+  {
+    q: 'ある通販サイトが「在庫数の表示は多少古くてもよいが、注文ボタンは分断中も絶対に押せてほしい（売上を止めたくない）」と要件を出した。分断時にとるべき方針として最も適切なのは？',
+    opts: [
+      '在庫サービスはCP方針にして、分断中は注文自体をすべて拒否する',
+      '在庫サービスはAP方針にして、分断中も応答を続け、古い在庫数の表示や注文受付を許容しつつ後で整合を取る',
+      'CAP定理は在庫管理には適用されないので方針を決める必要はない',
+      '分断が起きないようネットワーク機器を二重化すれば、この判断自体が不要になる',
+      'PACELCではなくACID特性だけを検討すればよい'
+    ],
+    ans: 1,
+    exps: [
+      '要件は「注文ボタンを絶対に押せる（可用性優先）」なので、分断中に注文を全拒否するCP方針は要件と正反対。',
+      '<b>これが正解。</b>「多少古くてもよいが常に応答してほしい」という要件はAP方針そのもの。分断中も応答を続け、在庫の整合は後で（結果整合性で）取るのが適切。ただし古い在庫数のまま注文を受け続けると売り越し (oversell) が発生しうるため、キャンセル通知や返金といった補償処理のコストを別途見込む必要がある。',
+      '複数ノードにレプリカを持つ在庫管理システムにもCAP定理の考え方は当てはまる。適用外という判断は誤り。',
+      '二重化は分断の発生確率を下げる対策にはなるが、分断が起きた場合の挙動をどうするかという設計判断そのものを不要にはしない。分断はゼロにはできないという前提が重要。',
+      'ACIDはトランザクションの性質であり、分散環境での分断時のCP/AP方針の判断とは別の軸。PACELCの視点を無視するのは不十分。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>要件（可用性優先）とCAPの分類（AP方針）を対応させると設計判断がしやすくなりますが、AP方針には後処理のコストが伴うことも合わせて把握してください。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="要件からAP方針を導く図"><rect x="30" y="20" width="230" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="50" font-size="13" text-anchor="middle" fill="#12211a">要件: 常に応答してほしい</text><line x1="260" y1="45" x2="330" y2="45" stroke="#0f5132" stroke-width="2" marker-end="url(#arr2)"/><rect x="330" y="20" width="200" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="430" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">AP方針を選ぶ</text><rect x="140" y="100" width="280" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="280" y="130" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">代償: 売り越しの補償処理コスト</text><line x1="280" y1="70" x2="280" y2="100" stroke="#9aa" stroke-width="1.5"/></svg>'
+          + '<p class="cap">図: ビジネス要件（可用性優先）からAP方針への対応づけ。ただし補償処理のコストが発生する。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
