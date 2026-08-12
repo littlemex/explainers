@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM検証器 研究シリーズ 第2回 — 検算器で「直す・振り分ける・育てる」</title>
+<style>
+  :root{
+    --g900:#0b3d24; --g800:#0f5132; --g700:#198754; --g600:#1f9d63;
+    --g500:#43b581; --g200:#8fd6b4; --g100:#c8ebd8; --g50:#eef7f2;
+    --ink:#12211a; --muted:#4a5d54; --paper:#ffffff; --line:#d9e5df;
+    --warn:#9a5400; --warnbg:#fff3e0; --bad:#b3261e; --badbg:#fbeaea;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    color:var(--ink); background:#f4f7f5; line-height:1.85; font-size:18px;}
+  .wrap{max-width:960px; margin:0 auto; padding:0 22px 96px;}
+  .topbar{max-width:960px; margin:0 auto; padding:14px 22px; font-size:14px;}
+  .topbar a{color:var(--g700); text-decoration:none; font-weight:600;}
+  .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500)); color:#fff; padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;}
+  header h1{font-size:31px; margin:0 0 10px; line-height:1.35;}
+  header p{font-size:19px; margin:0; opacity:.95;}
+  .tag{display:inline-block; background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.55);
+    padding:4px 12px; border-radius:999px; font-size:14px; margin-top:16px;}
+  section{background:var(--paper); border:1px solid var(--line); border-radius:16px;
+    padding:28px 30px; margin:22px 0; box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px; color:var(--g800); margin:0 0 6px; display:flex; align-items:center; gap:14px;}
+  h2 .num{background:var(--g700); color:#fff; width:40px; height:40px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center; font-size:20px; flex:0 0 40px;}
+  h2 .sub{font-size:15px; color:var(--muted); font-weight:400;}
+  h3{font-size:19px; color:var(--g700); margin:22px 0 8px;}
+  p{margin:10px 0;}
+  .lead{font-size:19px;}
+  strong{color:var(--g900);}
+  .callout{border-radius:12px; padding:18px 20px; margin:18px 0; border-left:6px solid;}
+  .callout.good{background:var(--g50); border-color:var(--g600);}
+  .callout.warn{background:var(--warnbg); border-color:var(--warn);}
+  .callout .h{font-weight:700; margin-bottom:4px; font-size:17px;}
+  .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:16px;}
+  th,td{border:1px solid var(--line); padding:11px 13px; text-align:left; vertical-align:top;}
+  th{background:var(--g700); color:#fff; font-weight:600;}
+  tr:nth-child(even) td{background:#f6fbf8;}
+  .metric{font-weight:800; color:var(--g700);}
+  .flow{display:flex; flex-wrap:wrap; align-items:stretch; gap:10px; margin:20px 0; justify-content:center;}
+  .node{background:var(--g50); border:2px solid var(--g200); border-radius:12px; padding:12px 14px; text-align:center; min-width:110px; flex:0 1 auto;}
+  .node .t{font-weight:700; color:var(--g800); font-size:15px;}
+  .node .d{font-size:12.5px; color:var(--muted); margin-top:3px;}
+  .node.key{background:var(--g700); border-color:var(--g700);} .node.key .t{color:#fff;} .node.key .d{color:var(--g100);}
+  .arrow{display:flex; align-items:center; font-size:24px; color:var(--g600); font-weight:700;}
+  .small{font-size:14px; color:var(--muted);}
+  /* bars */
+  .bars{margin:14px 0;}
+  .bar-row{display:flex; align-items:center; gap:12px; margin:10px 0;}
+  .bar-label{width:180px; font-size:15px; text-align:right; color:var(--muted);}
+  .bar-track{flex:1; background:#eef2ef; border-radius:8px; height:34px; position:relative; overflow:hidden;}
+  .bar-fill{height:100%; display:flex; align-items:center; padding:0 12px; color:#fff; font-weight:700; border-radius:8px; white-space:nowrap;}
+  .bar-fill.bad{background:linear-gradient(90deg,#c0392b,#e05747);}
+  .bar-fill.good{background:linear-gradient(90deg,var(--g700),var(--g500)); min-width:44px;}
+  /* demo */
+  .demo{border:1px solid var(--line); border-radius:14px; padding:18px; margin:16px 0; background:#fbfefc;}
+  .twocol{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  .panel{border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:#fff;}
+  .panel h4{margin:0 0 8px; font-size:16px;}
+  .panel.aim h4{color:var(--g700);} .panel.blind h4{color:var(--warn);}
+  .btn{font:inherit; font-size:14px; cursor:pointer; border:1.5px solid var(--g500); background:#fff; color:var(--g800);
+    border-radius:999px; padding:7px 14px; margin:2px 0 10px;}
+  .btn:hover{background:var(--g50);}
+  .log{font-family:ui-monospace,Menlo,monospace; font-size:13.5px; background:#0b3d24; color:#dff5e6;
+    border-radius:10px; padding:12px 14px; min-height:120px; white-space:pre-wrap; line-height:1.6;}
+  .state{font-family:ui-monospace,Menlo,monospace; font-size:13.5px; margin:6px 0;}
+  .ok{color:var(--g700); font-weight:700;} .ng{color:var(--bad); font-weight:700;}
+  ol.steps{counter-reset:s; padding-left:0; list-style:none;}
+  ol.steps li{position:relative; padding:10px 0 10px 46px; border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s; content:counter(s); position:absolute; left:0; top:9px; width:30px; height:30px;
+    background:var(--g100); color:var(--g800); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700;}
+  @media(max-width:640px){ .twocol{grid-template-columns:1fr;} header h1{font-size:24px;} .arrow{transform:rotate(90deg);} .bar-label{width:120px;} }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">VLM検証器シリーズ 目次</a> ｜ <a href="./vlm-verifier-01-overview.html">第1回</a></div>
+<header>
+  <div class="wrap">
+    <h1>検算器で「直す・振り分ける・育てる」<br>— 研究シリーズ 第2回</h1>
+    <p>検算器は合否判定で終わらない。「どこが違反か」が分かるから、修正・振り分け・データ生成・育成のループに使える。</p>
+    <span class="tag">研究過程シリーズ 第2回 ｜ 2026-08-12 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <h2><span class="num">1</span> 前回のおさらい</h2>
+    <p>第1回では、AIの読み取りを信じず<strong>検算器で機械的に検証</strong>する仕組みを見ました。実データでは検出率は
+    <span class="metric">15.5〜64.8%</span>、さらに「計算の辻褄まで合わせた誤読(整合的誤読)」が
+    <span class="metric">35.2%</span>あり、算術検算では原理的に捕まえられない死角がある、という現実も確認しました。
+    <a href="./vlm-verifier-01-overview.html">(第1回はこちら)</a></p>
+    <p class="lead">今回の主役は <strong>「どこが違反したか分かる」ことの威力</strong>です。合否だけでなく「どのルールが・どのフィールドで」違反したかが返るので、次の4つに使えます。</p>
+    <div class="flow">
+      <div class="node key"><div class="t">違反の在処</div><div class="d">ルール＋フィールド</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">直す</div><div class="d">狙い撃ち修正</div></div>
+      <div class="node"><div class="t">振り分ける</div><div class="d">安/高モデル</div></div>
+      <div class="node"><div class="t">データ化</div><div class="d">上質な教師</div></div>
+      <div class="node"><div class="t">育てる</div><div class="d">死角に新ルール</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> 直す <span class="sub">エージェントの狙い撃ち修正</span></h2>
+    <p>「不合格」だけだと、どこを直せばいいか分からず全体を作り直すしかありません。でも検算器は<strong>違反したフィールドを教える</strong>ので、エージェントはそこだけ直せます。下で比べてみてください。</p>
+    <div class="demo">
+      <div class="twocol">
+        <div class="panel aim">
+          <h4>違反箇所を狙って直す</h4>
+          <button class="btn" id="aimBtn">1ステップずつ直す</button>
+          <div class="state" id="aimState"></div>
+          <div class="log" id="aimLog"></div>
+        </div>
+        <div class="panel blind">
+          <h4>闇雲に全体を作り直す (イメージ)</h4>
+          <button class="btn" id="blindBtn">もう一度やり直す</button>
+          <div class="state" id="blindState"></div>
+          <div class="log" id="blindLog"></div>
+        </div>
+      </div>
+      <p class="small">狙い撃ちは違反フィールドを制約が示す値へ直すので数手で収束。闇雲な再生成は「どこが悪いか」を見ないため非効率で、直った所を壊すこともあります。</p>
+    </div>
+    <div class="callout good">
+      <div class="h">なぜ精度が上がるか</div>
+      違反の在処が分かる = <strong>探索範囲が一気に狭まる</strong>。エージェントのループも、闇雲な再試行ではなく「違反フィールドだけ再確認・再質問」にできるので、少ない手数で確実に良くなります。
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> 振り分ける <span class="sub">安いモデルでどこまで、を安全に</span></h2>
+    <p>安いモデルでまず処理し、<strong>検算器を通らなければ高性能モデルへ escalate</strong>。検算器の合否がそのまま「振り分けの信号」になります。安いモデルの失敗を確実に検知できるので、cheap-first を安全に回せます。</p>
+    <div class="flow">
+      <div class="node"><div class="t">入力</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">安いモデル</div><div class="d">まず処理</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">検算器</div><div class="d">合否＝振り分け信号</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">合格</div><div class="d">そのまま採用(安い)</div></div>
+      <div class="node"><div class="t">不合格</div><div class="d">高モデルへescalate</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> 実験: 検算ルール自体をAIに書かせる <span class="sub">書き方を縛ると何が変わるか</span></h2>
+    <p>検算器のルールをAIに書かせ、2つの書かせ方を比べました。<b>自由記述</b>(好きに書く) と <b>枠にはめる</b>(決まった文法で書く)。
+    そして「<strong>間違っている検算器が、動くふりをして黙って採用されてしまう数</strong>」を数えました(普通レベルのAI・各20回)。</p>
+    <div class="bars">
+      <div class="bar-row">
+        <div class="bar-label">自由記述</div>
+        <div class="bar-track"><div class="bar-fill bad" style="width:35%">7 個 が黙って通過</div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">枠にはめる</div>
+        <div class="bar-track"><div class="bar-fill good" style="width:2%">0 個</div></div>
+      </div>
+    </div>
+    <p>枠にはめると、間違った検算器は<strong>登録される前に自動で門前払い</strong>されます(読む範囲の逸脱・空回り・正しい伝票で誤発火などを機械チェック)。高性能AIはどちらでも忠実だったので、<strong>この効果は「間違えやすい普通のAI」ほど大きい</strong>のがポイントです。</p>
+    <table>
+      <tr><th>AI</th><th>自由記述: 黙って通る欠陥検算器</th><th>枠にはめる: 同</th></tr>
+      <tr><td>普通レベル (Gemma 3 4B)</td><td><span class="metric" style="color:var(--bad)">7 / 20</span></td><td><span class="metric">0 / 20</span></td></tr>
+      <tr><td>高性能 (2種)</td><td>0</td><td>0</td></tr>
+    </table>
+    <div class="callout good">
+      <div class="h">この実験が示すこと</div>
+      「書き方を縛る」ことはAIを賢くはしません。でも<strong>間違った検算器が黙って使われるのを防ぎます</strong>。だから安いAIに検算器づくりを任せても安全に回せる = 前節の振り分けが成立します。
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 上質データが生まれる <span class="sub">振り分けが学習データを作る</span></h2>
+    <p>escalate された(=安いモデルが検算器を通せなかった)ケースは、安いモデルの<strong>弱点そのもの</strong>。そこに高性能モデルが出し、検算器を通った答えは<strong>難しくて質の高い教師データ</strong>になります。これで安いモデルを鍛えると、escalate が減っていきます。</p>
+    <div class="flow">
+      <div class="node"><div class="t">安いモデル失敗</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">高モデル＋検算器</div><div class="d">verified な正解</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">上質な教師データ</div><div class="d">難問＋品質フィルタ済</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">安いモデルを蒸留</div><div class="d">底上げ→escalate↓</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span> 育てる <span class="sub">死角は人が拾い、検算器に還す</span></h2>
+    <p>整合的誤読(算術では捕まらない死角)は、<strong>人(HITL)</strong>が拾います。そして人の指摘を、算術の微調整ではなく
+    <strong>独立した別種のルール</strong>(例: 単価は商品マスタと一致するか)として検算器に足す。すると死角が縮みます。
+    足すルールも第4節と同じ<strong>枠にはめて自動チェック</strong>してから採用するので、育成ループが暴走しません。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">7</span> 正直な注意 と 全体像</h2>
+    <div class="callout warn">
+      <div class="h">「検算器を通った」≠「正しい」</div>
+      整合的誤読は検算器を素通りします。だから振り分けや学習データ化を回すときは、<strong>自動で合格したものからも一部を抜き取って人が監査</strong>しないと、死角が学習データに混ざって増えてしまいます。ここは省けません。
+    </div>
+    <div class="flow">
+      <div class="node"><div class="t">安いモデル</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">検算器</div><div class="d">直す/振り分け</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">高モデル</div><div class="d">verifiedデータ</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">蒸留</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">人(HITL)＋監査</div><div class="d">死角→新ルール</div></div>
+    </div>
+    <p class="small">検算器を中心に、直す・振り分ける・データ化・育てるが1本のループになる。安いAIの守備範囲は学習で広がり、人は死角だけを見る。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">8</span> まとめと次回</h2>
+    <ol class="steps">
+      <li>違反の在処が分かるから、エージェントは狙い撃ちで直せる(闇雲な再試行より速い)</li>
+      <li>検算器の合否が「振り分け信号」になり、安いモデルを安全に主戦力にできる</li>
+      <li>検算ルールを書かせる実験: 枠にはめると欠陥検算器の黙認が 7→0(普通レベルのAIほど効く)</li>
+      <li>escalate 分は上質な教師データ → 蒸留で底上げ、死角は人が拾って新ルールに</li>
+    </ol>
+    <p class="small">次回予告: 実際に「安いモデルの守備範囲が学習で広がる(escalate 率が下がる)」を測る、あるいは検算では捕まらない死角を独立ルール(マスタ照合など)でどこまで塞げるかを試します。</p>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  var F={q0:2,u0:1500,a1:2000,tax:0}; // fixed
+  function el(id){return document.getElementById(id);}
+
+  // ---- aim (targeted repair): deterministic, converges ----
+  var aim;
+  function aimReset(){ aim={a0:3200,t:5200,log:[]}; renderAim("開始: A金額=3200, 合計=5200"); }
+  function violations(s){
+    var v=[];
+    if(F.q0*F.u0!==s.a0) v.push({f:'a0',msg:'A金額の違反 (2×1500=3000 ≠ '+s.a0+')',fix:F.q0*F.u0});
+    var sum=s.a0+F.a1+F.tax;
+    if(s.t!==sum) v.push({f:'t',msg:'合計の違反 (金額の和='+sum+' ≠ '+s.t+')',fix:sum});
+    return v;
+  }
+  function renderAim(head){
+    var v=violations(aim);
+    el('aimState').innerHTML='A金額='+aim.a0+' / 合計='+aim.t+' → '+
+      (v.length? '<span class="ng">不合格('+v.length+'件)</span>':'<span class="ok">合格</span>');
+    el('aimLog').textContent=(head?head+"\n":"")+aim.log.join("\n");
+  }
+  function aimStep(){
+    var v=violations(aim);
+    if(v.length===0){ aim.log.push("すべて合格。修正完了。"); renderAim(); return; }
+    var t=v[0];
+    aim.log.push("検出: "+t.msg);
+    aim.log.push(" → "+ (t.f==='a0'?'A金額':'合計') +" を "+t.fix+" に修正(違反箇所だけ)");
+    aim[t.f]=t.fix;
+    renderAim();
+  }
+
+  // ---- blind (whole re-generation): illustrative, non-targeting ----
+  var blindStates=[
+    {a0:3000,t:5200,note:"再生成1回目: A金額は直ったが合計をまた誤読"},
+    {a0:3100,t:5000,note:"再生成2回目: 合計は直ったが今度はA金額を誤読"},
+    {a0:3200,t:5200,note:"再生成3回目: 元に戻ってしまった"},
+  ];
+  var bi=0;
+  function blindRender(){
+    var s=blindStates[bi%blindStates.length];
+    var ok=(F.q0*F.u0===s.a0)&&(s.t===s.a0+F.a1+F.tax);
+    el('blindState').innerHTML='A金額='+s.a0+' / 合計='+s.t+' → '+(ok?'<span class="ok">合格</span>':'<span class="ng">まだ不合格</span>');
+    el('blindLog').textContent="どこが悪いか見ずに全体を作り直す:\n"+s.note+"\n(違反箇所を狙わないので運任せ)";
+    bi++;
+  }
+
+  el('aimBtn').addEventListener('click',aimStep);
+  el('blindBtn').addEventListener('click',blindRender);
+  aimReset();
+  el('blindState').textContent=''; el('blindLog').textContent="「もう一度やり直す」を押してください。";
+})();
+</script>
+</body>
+</html>
