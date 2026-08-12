@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM検証器 研究シリーズ 第6回 — 死角を塞ぐ挑戦と、正直な負の結果</title>
+<style>
+  :root{--g900:#0b3d24;--g800:#0f5132;--g700:#198754;--g600:#1f9d63;--g500:#43b581;--g200:#8fd6b4;--g100:#c8ebd8;--g50:#eef7f2;
+    --ink:#12211a;--muted:#4a5d54;--paper:#fff;--line:#d9e5df;--warn:#9a5400;--warnbg:#fff3e0;--bad:#b3261e;--badbg:#fbeaea;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#f4f7f5;line-height:1.85;font-size:18px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px 96px;}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 22px;font-size:14px;}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600;} .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500));color:#fff;padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;} header h1{font-size:29px;margin:0 0 10px;line-height:1.35;} header p{font-size:19px;margin:0;opacity:.95;}
+  .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.55);padding:4px 12px;border-radius:999px;font-size:14px;margin-top:16px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:22px 0;box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px;color:var(--g800);margin:0 0 6px;display:flex;align-items:center;gap:14px;}
+  h2 .num{background:var(--g700);color:#fff;width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px;}
+  h2 .sub{font-size:15px;color:var(--muted);font-weight:400;}
+  h3{font-size:19px;color:var(--g700);margin:22px 0 8px;} p{margin:10px 0;} .lead{font-size:19px;} strong{color:var(--g900);}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:20px 0;justify-content:center;}
+  .node{background:var(--g50);border:2px solid var(--g200);border-radius:12px;padding:12px 14px;text-align:center;min-width:120px;flex:0 1 auto;}
+  .node .t{font-weight:700;color:var(--g800);font-size:15px;} .node .d{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .node.key{background:var(--g700);border-color:var(--g700);} .node.key .t{color:#fff;} .node.key .d{color:var(--g100);}
+  .arrow{display:flex;align-items:center;font-size:24px;color:var(--g600);font-weight:700;}
+  .callout{border-radius:12px;padding:18px 20px;margin:18px 0;border-left:6px solid;}
+  .callout.good{background:var(--g50);border-color:var(--g600);} .callout.warn{background:var(--warnbg);border-color:var(--warn);} .callout.bad{background:var(--badbg);border-color:var(--bad);}
+  .callout .h{font-weight:700;margin-bottom:4px;font-size:17px;} .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);} .callout.bad .h{color:var(--bad);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:16px;} th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top;}
+  th{background:var(--g700);color:#fff;font-weight:600;} tr:nth-child(even) td{background:#f6fbf8;} .metric{font-weight:800;color:var(--g700);}
+  .bars{margin:12px 0;} .bar-row{display:flex;align-items:center;gap:12px;margin:9px 0;}
+  .bar-label{width:170px;font-size:15px;text-align:right;color:var(--muted);} .bar-track{flex:1;background:#eef2ef;border-radius:8px;height:32px;overflow:hidden;}
+  .bar-fill{height:100%;display:flex;align-items:center;padding:0 12px;color:#fff;font-weight:700;border-radius:8px;white-space:nowrap;font-size:14px;}
+  .bar-fill.bad{background:linear-gradient(90deg,#c0392b,#e05747);} .bar-fill.mid{background:linear-gradient(90deg,#c98a00,#e0a72b);}
+  .demo{border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0;background:#fbfefc;}
+  .rcpt{font-family:ui-monospace,Menlo,monospace;font-size:14px;background:#0b3d24;color:#dff5e6;border-radius:10px;padding:14px 16px;white-space:pre;line-height:1.7;margin-bottom:12px;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+  .chip{font:inherit;font-size:14px;cursor:pointer;border:1.5px solid var(--g500);background:#fff;color:var(--g800);border-radius:999px;padding:7px 13px;}
+  .chip:hover{background:var(--g50);} .chip.active{background:var(--g700);color:#fff;border-color:var(--g700);}
+  .verdict{border-radius:10px;padding:14px 16px;font-size:16px;} .verdict.ok{background:var(--g50);border:1px solid var(--g500);color:var(--g800);} .verdict.ng{background:var(--badbg);border:1px solid var(--bad);color:var(--bad);}
+  .small{font-size:14px;color:var(--muted);} ol.steps{counter-reset:s;padding-left:0;list-style:none;}
+  ol.steps li{position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:30px;height:30px;background:var(--g100);color:var(--g800);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  @media(max-width:640px){header h1{font-size:22px;} .arrow{transform:rotate(90deg);} .bar-label{width:120px;}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">目次</a> ｜ <a href="./vlm-verifier-05-ledgermind.html">第5回</a></div>
+<header>
+  <div class="wrap">
+    <h1>死角を塞ぐ挑戦と、正直な負の結果<br>— 研究シリーズ 第6回</h1>
+    <p>「算術では捕まらない誤読」を独立の目(OCR)で塞ごうとした。素直な方法は、理想条件でもほとんど効かなかった。なぜか、そして何を学んだか。</p>
+    <span class="tag">研究過程シリーズ 第6回 ｜ 2026-08-13 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2><span class="num">1</span> 残っていた宿題</h2>
+    <p>これまでの検算器は「計算の辻褄」を見ます。でも<strong>計算は合っているのに読んだ数字が違う</strong>誤り(整合的誤読)は、算術では原理的に捕まりません。実データではこれが <span class="metric">35.2%</span> ありました。今回はこれを<strong>実際に塞げるか</strong>に挑みます。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> 素直な発想: 独立の目で照合する</h2>
+    <p>アイデアはシンプルです。VLM が読んだ数字を、<strong>別系統の OCR で元画像をもう一度読んだ結果</strong>と突き合わせる。「その数字は本当に紙に書いてあった?」を独立にチェックする。</p>
+    <div class="flow">
+      <div class="node"><div class="t">元画像</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">VLM</div><div class="d">数字を抽出</div></div>
+      <div class="arrow">＋</div>
+      <div class="node"><div class="t">独立OCR</div><div class="d">同じ画像を別系統で再読(証拠)</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">照合</div><div class="d">抽出値は証拠にある?</div></div>
+    </div>
+    <p class="small">OCR は VLM の後処理ではなく、<strong>独立した第二の目</strong>。同じ読み手を使うと循環して意味がないので、必ず別系統にします。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> やってみた（理想条件で）</h2>
+    <p>まず<strong>証拠が完璧な場合の天井</strong>を測りました(証拠＝正解テキスト)。期待は「ほぼ全部捕まる」。結果は逆でした。</p>
+    <div class="bars">
+      <div class="bar-row"><div class="bar-label">誤り全体の検出</div><div class="bar-track"><div class="bar-fill mid" style="width:24.6%">24.6%</div></div></div>
+      <div class="bar-row"><div class="bar-label">狙いの死角の検出</div><div class="bar-track"><div class="bar-fill bad" style="width:12.5%">12.5%</div></div></div>
+    </div>
+    <p>理想条件(証拠は完璧)でも、狙っていた死角の <strong>1/8 しか</strong>捕まえられない。正しい値を誤って弾く率は 0% でしたが、これは<strong>照合が緩いことの当然の結果</strong>で、良さの証拠にはなりません。<strong>素直な照合は死角を塞ぐ機構ではない</strong>——これが正直な結論です。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> なぜ? 触って確かめる</h2>
+    <p>原因は「<strong>その数字が紙のどこかにあるか</strong>」しか見ていないこと。別の欄の正しい数字と偶然一致すると、間違いでも通ってしまう。下で体験してください。</p>
+    <div class="demo">
+      <div class="rcpt">正しい伝票            AIの読み取り(税を誤読)
+小計 = 5,000          小計 = 5,000
+税   =   500          税   = 5,000   ← 本当は500(小計をコピー)
+合計 = 5,500          合計 = 5,500</div>
+      <p class="small">AI は「税」を 5,000 と誤読(小計の値をコピー)。これを2つの照合方法でチェック:</p>
+      <div class="chips" id="chips">
+        <button data-k="presence">どこかにある?(素直な照合)</button>
+        <button data-k="bound">正しい欄にある?(場所に束縛)</button>
+      </div>
+      <div id="gv" class="verdict"></div>
+    </div>
+    <p class="small">「どこかにある?」だと、5,000 は小計として紙にあるので通ってしまう。「正しい欄(税)にある?」なら、税の証拠は 500 なので弾ける。</p>
+    <h3>監査でわかった内訳(見逃した誤りの原因)</h3>
+    <table>
+      <tr><th>原因</th><th>割合</th><th>直し方</th></tr>
+      <tr><td>別の欄の正しい値を流用(上のデモと同型)</td><td><span class="metric">51%</span></td><td>値を<strong>正しい欄・場所に束縛</strong>する(構造化)</td></tr>
+      <tr><td>許容誤差が緩すぎて通過</td><td><span class="metric">24%</span></td><td>許容誤差を締める(構造化とは別の処方)</td></tr>
+      <tr><td>文書内の他の数字と偶然一致</td><td>18%</td><td>場所束縛で改善見込み</td></tr>
+      <tr><td>読み取り不能など</td><td>6%</td><td>—</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 学んだこと</h2>
+    <div class="callout good"><div class="h">「どこかにある」でなく「正しい場所にある」</div>
+      証拠は数字の袋ではなく、<strong>どの数字がどの欄・どの位置から来たか</strong>を構造化して持つ必要がある(第5回の LedgerMind と同じ発想)。監査によれば、この場所束縛で塞げる誤りは最大 <strong>約69%</strong>。ただし<strong>100%ではない</strong>(許容誤差や読み取り不能の分は残る)。過大な期待はしません。</div>
+    <div class="callout warn"><div class="h">負の結果こそ次の設計を決めた</div>
+      「素直な照合ではダメ」という負の結果を、仮説でなく<strong>データ(監査)</strong>で確かめたからこそ、次に作るべきもの(場所に束縛した構造化証拠＋許容誤差の見直し)が具体的に決まりました。うまくいかなかった実験も、正直に測れば道標になります。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span> だから今どうするか</h2>
+    <p>派手な機能を盛るより、<strong>小さく確実に信用できる形</strong>を先に固めます。</p>
+    <ol class="steps">
+      <li><strong>v0.1 は「算術チェック＋検証器の登録ゲート」で凍結</strong>。これは実データで確実に効くと確認済み(第3・4回)</li>
+      <li>今回の弱かった証拠照合は<strong>「実験中」ラベル</strong>で正直に同梱(「死角を塞いだ」とは言わない)</li>
+      <li>「正しい場所に束縛した構造化証拠」は <strong>v0.2 の目玉</strong>として、独立OCRでの本番評価とともに作る</li>
+    </ol>
+    <div class="callout good"><div class="h">まとめ</div>
+      算術では捕まらない誤読を、独立の目で塞ごうとした。素直な方法は理想条件でも1/8しか届かなかったが、<strong>原因を監査して「正しい場所への束縛が要る」と分かった</strong>。うまくいかない結果を正直に出すことが、良い OSS への一番の近道です。</div>
+  </section>
+</div>
+
+<script>
+(function(){
+  // 税=5000(誤読, 本当は500)。 小計=5000 が「どこかにある」ので presence は通す。
+  var docNumbers=[5000,500,5500]; // 紙にある数字(小計/税/合計)
+  var taxEvidence=500;            // 税欄の正しい証拠
+  var claimTax=5000;             // AIの誤読
+  var V={
+    presence:{ ok:(docNumbers.indexOf(claimTax)>=0),
+      msg:"5,000 は紙のどこかにある(小計として)。だから『どこかにある?』は<b>通してしまう</b>。間違い(税=5,000)を見逃す。" },
+    bound:{ ok:(claimTax===taxEvidence),
+      msg:"税欄の証拠は 500。5,000 ≠ 500 なので<b>弾ける</b>。値を正しい欄に束縛すると、別欄の値の流用を捕まえられる。" }
+  };
+  function show(k){
+    var v=V[k], el=document.getElementById('gv');
+    // presence: 通す=見逃し(悪い) → ng色で「見逃し」。 bound: 弾く=捕捉(良い) → ok色。
+    var caught = !v.ok; // ok(一致して通す)なら見逃し
+    el.className='verdict '+(k==='bound'?'ok':'ng');
+    var verdict = v.ok ? 'PASS(通す)' : 'FAIL(弾く)';
+    el.innerHTML='<b>'+verdict+'</b> — '+v.msg;
+    document.querySelectorAll('#chips button').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-k')===k);});
+  }
+  document.querySelectorAll('#chips button').forEach(function(b){b.addEventListener('click',function(){show(b.getAttribute('data-k'));});});
+  show('presence');
+})();
+</script>
+</body>
+</html>
