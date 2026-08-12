@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM検証器 研究シリーズ 第1回 — 全体像</title>
+<style>
+  :root{
+    --g900:#0b3d24; --g800:#0f5132; --g700:#198754; --g600:#1f9d63;
+    --g500:#43b581; --g200:#8fd6b4; --g100:#c8ebd8; --g50:#eef7f2;
+    --ink:#12211a; --muted:#4a5d54; --paper:#ffffff; --line:#d9e5df;
+    --warn:#9a5400; --warnbg:#fff3e0; --bad:#9a2020; --badbg:#fbeaea;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    color:var(--ink); background:#f4f7f5; line-height:1.85; font-size:18px;}
+  .wrap{max-width:960px; margin:0 auto; padding:0 22px 96px;}
+  .topbar{max-width:960px; margin:0 auto; padding:14px 22px; font-size:14px;}
+  .topbar a{color:var(--g700); text-decoration:none; font-weight:600;}
+  .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500)); color:#fff; padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;}
+  header h1{font-size:33px; margin:0 0 10px; line-height:1.35;}
+  header p{font-size:19px; margin:0; opacity:.95;}
+  .tag{display:inline-block; background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.55);
+    padding:4px 12px; border-radius:999px; font-size:14px; margin-top:16px;}
+  section{background:var(--paper); border:1px solid var(--line); border-radius:16px;
+    padding:28px 30px; margin:22px 0; box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:25px; color:var(--g800); margin:0 0 6px; display:flex; align-items:center; gap:14px;}
+  h2 .num{background:var(--g700); color:#fff; width:40px; height:40px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center; font-size:20px; flex:0 0 40px;}
+  h2 .sub{font-size:15px; color:var(--muted); font-weight:400;}
+  h3{font-size:19px; color:var(--g700); margin:22px 0 8px;}
+  p{margin:10px 0;}
+  .lead{font-size:19px;}
+  strong{color:var(--g900);}
+  .flow{display:flex; flex-wrap:wrap; align-items:stretch; gap:10px; margin:20px 0; justify-content:center;}
+  .node{background:var(--g50); border:2px solid var(--g200); border-radius:12px; padding:14px 16px;
+    text-align:center; min-width:120px; flex:1 1 120px;}
+  .node .t{font-weight:700; color:var(--g800); font-size:16px;}
+  .node .d{font-size:13px; color:var(--muted); margin-top:4px;}
+  .node.key{background:var(--g700); border-color:var(--g700);}
+  .node.key .t{color:#fff;} .node.key .d{color:var(--g100);}
+  .arrow{display:flex; align-items:center; font-size:26px; color:var(--g600); font-weight:700;}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; margin:18px 0;}
+  .card{border:1px solid var(--line); border-radius:12px; padding:16px 18px; background:#fbfefc;}
+  .card .h{font-weight:700; color:var(--g700); font-size:17px; margin-bottom:6px;}
+  .card .s{font-size:15px; color:var(--muted);}
+  .callout{border-radius:12px; padding:18px 20px; margin:18px 0; border-left:6px solid;}
+  .callout.good{background:var(--g50); border-color:var(--g600);}
+  .callout.warn{background:var(--warnbg); border-color:var(--warn);}
+  .callout.bad{background:var(--badbg); border-color:var(--bad);}
+  .callout .h{font-weight:700; margin-bottom:4px; font-size:17px;}
+  .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);} .callout.bad .h{color:var(--bad);}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:16px;}
+  th,td{border:1px solid var(--line); padding:11px 13px; text-align:left; vertical-align:top;}
+  th{background:var(--g700); color:#fff; font-weight:600;}
+  tr:nth-child(even) td{background:#f6fbf8;}
+  .metric{display:inline-block; font-weight:800; color:var(--g700);}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:16px 0;}
+  .receipt{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:14px; background:#0b3d24; color:#dff5e6;
+    border-radius:12px; padding:16px 18px; line-height:1.7; white-space:pre; overflow-x:auto;}
+  .verdict{background:linear-gradient(135deg,var(--g800),var(--g600)); color:#fff; border-radius:16px; padding:26px 28px; margin:24px 0;}
+  .verdict h2{color:#fff;} .verdict h2 .num{background:#fff; color:var(--g800);}
+  .verdict strong{color:#fff;} .verdict a{color:#dff5e6;}
+  .steps{counter-reset:s; padding-left:0; list-style:none;}
+  .steps li{position:relative; padding:10px 0 10px 46px; border-bottom:1px dashed var(--line);}
+  .steps li:before{counter-increment:s; content:counter(s); position:absolute; left:0; top:9px;
+    width:30px; height:30px; background:var(--g100); color:var(--g800); border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-weight:700;}
+  .small{font-size:14px; color:var(--muted);}
+  @media(max-width:640px){ .grid2{grid-template-columns:1fr;} header h1{font-size:25px;} .arrow{transform:rotate(90deg);} }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">VLM検証器シリーズ 目次</a></div>
+<header>
+  <div class="wrap">
+    <h1>AIの読み取りを「検算する仕組み」を作る<br>— 研究シリーズ 第1回: 全体像</h1>
+    <p>画像を読むAI(VLM)は間違える。だから信じずに、機械的に検算する。その検算器を強くしていく研究の記録。</p>
+    <span class="tag">研究過程シリーズ 第1回 ｜ 2026-08-12 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <h2><span class="num">1</span> ひとことで言うと <span class="sub">中心アイデア</span></h2>
+    <p class="lead">AIに請求書やレシートの画像を読ませると、たまに数字を読み間違えます。
+    その間違いを「AIをもっと賢くして直す」のではなく、<strong>読み取り結果が計算として辻褄が合うかを、後段の機械的な検算器でチェックする</strong>という発想です。</p>
+    <p>たとえるなら、AIが伝票を書き、<strong>経理担当(検算器)</strong>が「単価×個数＝金額になってる? 合計は合ってる?」と検算し、合わなければ差し戻す。AIを鵜呑みにせず、世界のルールで答え合わせします。</p>
+    <div class="flow">
+      <div class="node"><div class="t">画像 / PDF</div><div class="d">請求書・レシート</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">AI (VLM)</div><div class="d">読み取って候補を出す</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">JSON</div><div class="d">構造化データ</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">検算器</div><div class="d">ルールで検証(主役)</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">合格 / 不合格</div><div class="d">＋どこが変か</div></div>
+    </div>
+    <p class="small">ポイント: 主役は「検算器」。AIは題材(入力を出す係)にすぎません。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> なぜ必要か <span class="sub">具体例で</span></h2>
+    <div class="grid2">
+      <div>
+        <h3>AIはこう間違える</h3>
+        <div class="receipt">Widget A  数量2 × 単価1500
+   金額 = 3200   ← 本当は3000
+Widget B  数量1 × 単価2000
+   金額 = 2000
+合計 = 5200      ← 本当は5000</div>
+      </div>
+      <div>
+        <h3>検算器が持つルール</h3>
+        <div class="receipt">金額 = 数量 × 単価
+合計 = すべての金額の和 + 税
+売り手 ≠ 買い手</div>
+        <p class="small">→ 2×1500=3000 なのに3200 → <strong>不合格</strong>。「3行目の金額が怪しい」と指摘できる。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> これまで作った道具 <span class="sub">全部オフラインで動く</span></h2>
+    <div class="cards">
+      <div class="card"><div class="h">基本の検算</div><div class="s">単価×個数=金額 / 合計 / 売り手≠買い手 を機械チェックし、違反を列挙。</div></div>
+      <div class="card"><div class="h">A: 候補から選ぶ</div><div class="s">AIに「自信がない数字は候補を複数出して」と言わせ、<strong>全ルールを同時に満たす組合せ</strong>を選ぶ。1個ずつ「一番自信のある値」を選ぶと全体で矛盾することがあり、それを救う。</div></div>
+      <div class="card"><div class="h">B: 犯人特定</div><div class="s">検算が失敗したとき、<strong>どの数字が原因か</strong>を「その値を正しく直すと違反が消えるか」で特定。どこを読み直すべきか分かる。</div></div>
+      <div class="card"><div class="h">検算器の強さテスト</div><div class="s">わざと壊した伝票を、検算器がどれだけ捕まえるか測る。自分の弱点を数値で把握。</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> ぶつかった壁 <span class="sub">実データで正直に測った</span></h2>
+    <p>本物のAI(Gemma 4B)がレシート35件を読んだ結果を検算しました。ここが一番大事な現実です。</p>
+    <table>
+      <tr><th>指標</th><th>数字</th><th>意味</th></tr>
+      <tr><td>ざっくりの検出率</td><td><span class="metric">64.8%</span></td><td>甘く数えたときの見かけ上の値</td></tr>
+      <tr><td>厳密に数え直すと</td><td><span class="metric">15.5%</span></td><td>犯人を正しく特定できた分だけ数えると激減</td></tr>
+      <tr><td>整合的な誤読(死角)</td><td><span class="metric">35.2%</span></td><td>AIが計算の辻褄まで合わせて間違えた分。算術検算では<strong>原理的に</strong>捕まえられない</td></tr>
+    </table>
+    <div class="callout warn">
+      <div class="h">正直な現実</div>
+      本当の検出力は <strong>15.5%〜64.8%の間</strong>(幅で報告するのが誠実)。そして「辻褄を合わせた間違い」は算術チェックでは絶対に捕まらない天井がある。つまり<strong>検算だけで品質保証はできない</strong>。
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 方向転換 <span class="sub">道具から「作り方の規律」へ</span></h2>
+    <p>ここで発想を変えました。個別のOCRツールを磨くのではなく、<strong>「検算器そのものをどう作るか」を規律する仕組み</strong>を作る方向へ。フォーマットが決まっている領域(帳票・回路図など)なら、「正しい形」を形式的に定義して適合を見られるからです。</p>
+    <div class="grid2">
+      <div class="callout bad"><div class="h">やめた方向</div>「汎用の適合チェック基盤を作る」だけ。→ これは JSON Schema や SHACL など<strong>既存技術の再発明</strong>で新しさゼロ。</div>
+      <div class="callout good"><div class="h">選んだ方向</div>検算器の<strong>書き方を型で縛る</strong>。「どのフィールドを読んでよいか(footprint)」「層(だれでも書ける算術／業界／個社)」「必ず反例を持つこと」を機械強制。犯人特定や弱点測定を<strong>言語の標準機能</strong>にする。</div>
+    </div>
+    <div class="callout good">
+      <div class="h">2つの独立AIが同じ結論</div>
+      戦略相談として <strong>Fable 5(3つの視点)</strong> と <strong>codex(GPT-5.5)</strong> に独立評価させたところ、全員が<strong>「PIVOT(方向を絞れば筋が良い)」</strong>で一致。「検算器の性質(読める範囲・強度・健全性)を第一級にする」ことが、既存ツールに無い本質的な差だと収束しました。
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span> 今回の実験と結果 <span class="sub">方向転換は正しいか?を数字で</span></h2>
+    <p>この新しい「検算器の書き方を縛る仕組み(DSL)」を作り、本物のレシートデータで4つのチェックをしました。</p>
+    <table>
+      <tr><th>試したこと</th><th>結果</th><th>やさしい意味</th></tr>
+      <tr><td>既存の4ルールを新方式で書けるか</td><td><span class="metric">0/4 が手抜き</span></td><td>全部きちんと書けた。表現力の壁に当たらなかった</td></tr>
+      <tr><td>昔の手書きルールと同じ判定をするか</td><td><span class="metric">35件中0件ズレ</span></td><td>完全に同じ挙動。おもちゃではなく本物の置き換え</td></tr>
+      <tr><td>健全性の自動チェック</td><td><span class="metric">4本すべて合格</span></td><td>「正しい伝票では黙る」「必ず反例を持つ」を機械が確認</td></tr>
+      <tr><td>読んではいけない場所を読むバグ</td><td><span class="metric">定義時に自動拒否</span></td><td><strong>既存ツール(SHACL/OPA)には無い能力</strong>。ここが差別化の証拠</td></tr>
+    </table>
+    <div class="callout good">
+      <div class="h">結論: 方向転換は「筋が良い」と実データで確認</div>
+      新方式は既存ルールを漏れなく表現でき、手書きと完全一致し、<strong>既存ツールにできない安全チェック(読む範囲の型強制)</strong>を実演できました。
+    </div>
+  </section>
+
+  <div class="verdict">
+    <h2><span class="num">7</span> 結局、いい状況なの?</h2>
+    <p class="lead">率直に言うと <strong>「エンジニアリングは健全、方向転換の手応えあり、ただし勝ち筋の完全証明はこれから」</strong>。</p>
+    <div class="grid2" style="margin-top:14px;">
+      <div>
+        <h3 style="color:#fff;">良い点</h3>
+        <ul>
+          <li>仕組みが設計どおり動いている</li>
+          <li>都合よく水増しせず、死角(35.2%)も正直に数値化</li>
+          <li>2つの独立AIが同じ方向を支持</li>
+          <li>既存ツールに無い能力を実データで実演</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color:#fff;">まだの点</h3>
+        <ul>
+          <li>「辻褄を合わせた間違い」は原理的に捕まらない → 価値は検出率でなく<strong>監査可能性</strong>に置く</li>
+          <li>AIに仕様まで書かせる案は「未信頼」扱いが必須(無限後退の危険)</li>
+          <li>本当に役立つ証明には、あと数個の実験が必要</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="num">8</span> 次にやること</h2>
+    <ol class="steps">
+      <li>メタ制約が「見逃していたバグ」を型レベルで弾く例を追加する</li>
+      <li>実データが1秒未満で解けるか測る(速いなら難しい理屈は捨てて単純化)</li>
+      <li><strong>AIが書いた仕様の「間違い率」が、制約を課すと下がるか</strong>を測る(方向転換の心臓部)</li>
+      <li>チェックデジットや個社ルールを試すため、合成請求書データを用意する</li>
+    </ol>
+    <p class="small">用語メモ: VLM=画像を読むAI / 検算器=ルールで検証する仕組み / footprint=そのルールが読んでよいフィールドの範囲 / 整合的誤読=計算の辻褄まで合った間違い(検算で捕まらない) / PIVOT=方向転換。</p>
+  </section>
+
+</div>
+</body>
+</html>
