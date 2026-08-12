@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>形式検証で世界を確かめる 研究シリーズ 第9回 — LLM-as-a-Verifier と比べる</title>
+<style>
+  :root{--g900:#0b3d24;--g800:#0f5132;--g700:#198754;--g600:#1f9d63;--g500:#43b581;--g200:#8fd6b4;--g100:#c8ebd8;--g50:#eef7f2;
+    --ink:#12211a;--muted:#4a5d54;--paper:#fff;--line:#d9e5df;--warn:#9a5400;--warnbg:#fff3e0;--bad:#b3261e;--badbg:#fbeaea;--blue:#1c6ea4;--bluebg:#e9f3fa;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#f4f7f5;line-height:1.85;font-size:18px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px 96px;}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 22px;font-size:14px;}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600;} .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500));color:#fff;padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;} header h1{font-size:28px;margin:0 0 10px;line-height:1.35;} header p{font-size:19px;margin:0;opacity:.95;}
+  .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.55);padding:4px 12px;border-radius:999px;font-size:14px;margin-top:16px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:22px 0;box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px;color:var(--g800);margin:0 0 6px;display:flex;align-items:center;gap:14px;}
+  h2 .num{background:var(--g700);color:#fff;width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px;}
+  h2 .sub{font-size:15px;color:var(--muted);font-weight:400;}
+  h3{font-size:19px;color:var(--g700);margin:22px 0 8px;} p{margin:10px 0;} .lead{font-size:19px;} strong{color:var(--g900);}
+  .paperbox{background:var(--bluebg);border:1px solid #bcdcef;border-radius:12px;padding:16px 18px;margin:14px 0;font-size:15px;} .paperbox a{color:var(--blue);font-weight:600;}
+  .callout{border-radius:12px;padding:18px 20px;margin:18px 0;border-left:6px solid;}
+  .callout.good{background:var(--g50);border-color:var(--g600);} .callout.warn{background:var(--warnbg);border-color:var(--warn);} .callout.blue{background:var(--bluebg);border-color:var(--blue);}
+  .callout .h{font-weight:700;margin-bottom:4px;font-size:17px;} .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);} .callout.blue .h{color:var(--blue);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px;} th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top;}
+  th{background:var(--g700);color:#fff;font-weight:600;} tr:nth-child(even) td{background:#f6fbf8;}
+  .stack{display:flex;flex-direction:column;gap:10px;margin:18px 0;}
+  .layer{border:2px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;background:#fbfefc;transition:.15s;}
+  .layer:hover{border-color:var(--g500);} .layer.active{border-color:var(--g700);box-shadow:0 3px 12px rgba(15,81,50,.12);}
+  .layer .lt{font-weight:700;font-size:16px;} .layer.g .lt{color:var(--g800);} .layer.b .lt{color:var(--blue);} .layer.p .lt{color:#6a3d9a;}
+  .layer .ld{font-size:13.5px;color:var(--muted);margin-top:3px;}
+  #layerinfo{border-radius:10px;padding:14px 16px;background:var(--g50);border:1px solid var(--g200);font-size:15px;min-height:64px;}
+  .small{font-size:14px;color:var(--muted);} ol.steps{counter-reset:s;padding-left:0;list-style:none;}
+  ol.steps li{position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:30px;height:30px;background:var(--g100);color:var(--g800);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  @media(max-width:640px){header h1{font-size:22px;} table{font-size:13px;} th,td{padding:7px;}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">形式検証で世界を確かめる 目次</a> ｜ <a href="./vlm-verifier-08-scorecard-forge.html">第8回</a></div>
+<header>
+  <div class="wrap">
+    <h1>LLM-as-a-Verifier と比べる<br>— 研究シリーズ 第9回</h1>
+    <p>「検証をスケールさせる」最新の潮流(確率的なソフト検証)と、本研究の決定論的なハード検証を並べる。競合ではなく、層が違う。</p>
+    <span class="tag">研究過程シリーズ 第9回 ｜ 2026-08-13 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2><span class="num">1</span> 検証がボトルネックという時代認識</h2>
+    <p>生成AIは「正解を出せるが、複数の候補から正しいものを選べない」局面が増えています。そこで「生成を増やす」だけでなく「<strong>検証(verifier)そのものをスケールさせる</strong>」という潮流が出てきました。</p>
+    <div class="paperbox">
+      参照論文: <a href="https://arxiv.org/abs/2607.05391" target="_blank" rel="noopener">LLM-as-a-Verifier / Verification Scaling (arXiv:2607.05391)</a>。
+      LLM/VLM を採点器として使うが、1〜5点の最頻トークンでなく<strong>スコアトークンの確率分布の期待値</strong>を連続スコアにする。これで同点が減り、成功/失敗軌跡の分離が上がる。さらに「スコア粒度・反復評価・基準分解」で検証精度が単調に上がると実証し、その連続スコアを<strong>候補選択・進捗監視・強化学習の報酬</strong>に使う。
+    </div>
+    <p class="lead">要するに<strong>「確率的・連続的・スケールできる汎用ソフト検証器」</strong>。よく当てるが、検証器自体は AI の判断力に全面依存し、精度は 77〜87% で止まる(＝忠実性オラクルではない)。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> ソフト検証 と ハード検証 <span class="sub">よく当てる vs 確実に落とす</span></h2>
+    <table>
+      <tr><th></th><th>LLM-as-a-Verifier(論文)</th><th>本研究の形式ゲート</th></tr>
+      <tr><td>種類</td><td>確率的・連続スコア(AIの信念分布)</td><td>決定論的・pass/fail/inapplicable</td></tr>
+      <tr><td>目的</td><td>候補を<strong>よく当てて選ぶ</strong>・報酬にする</td><td>特定の欠陥を<strong>確実に落とす</strong>・落とせない範囲を明示</td></tr>
+      <tr><td>保証</td><td>統計的(精度%・分離度)</td><td>構造条件を機械強制(scope/空回り/正解で沈黙)</td></tr>
+      <tr><td>出力の使い道</td><td>ランキング・進捗・RL報酬</td><td>採用可否＋診断コード＋blame(犯人範囲)</td></tr>
+      <tr><td>検証の対象</td><td>解答・軌跡そのもの</td><td><strong>検証器(ルール)そのもの</strong>（一段メタ上）</td></tr>
+    </table>
+    <div class="callout blue"><div class="h">問題意識は共通、中身は直交</div>
+      「生成は強いが検証がボトルネック」「単一の粗い判定より構造化」という認識は共有。でも一方は<strong>実行時に答えを採点</strong>し、もう一方は<strong>登録時に検証器を監査</strong>する。対象の層が違うので、競合しません。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> 検証器は誰が検証するのか <span class="sub">この論文が埋めない空白</span></h2>
+    <p>ソフト検証器の精度は 77〜87% で頭打ち。そして重要なのは、<strong>その採点基準(ルーブリック)が正しいかを問う仕組みが無い</strong>ことです。もし基準自体が緩ければ、間違った答えに高スコアを出し続ける。第3回で見たとおり、AI に検算ルールを書かせると不忠実なルールが混じります(20回中7回)。</p>
+    <div class="callout good"><div class="h">ここが本研究の主戦場</div>
+      我々は「答え」でなく「<strong>検証器そのもの</strong>」を登録時に機械監査する(scope逸脱・空回り・正解で誤発火を落とす)。これは確率的検証器の枠組みには存在しない層です。</div>
+    <div class="callout warn"><div class="h">正直な死角(スケールでは越えられない)</div>
+      我々のゲートも忠実性オラクルではありません。「正解では黙るが論理は誤り(slipper)」はすり抜け、整合的誤読(35.2%)は算術では原理的に捕まらない。<strong>計算資源を積んでも越えられない構造的死角がある</strong>——これは「検証はスケールで上がる」物語への健全な対抗仮説です。だから構造化証拠(第6回)が要る。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> 取り込める学び / 主張してはいけないこと</h2>
+    <p>この論文は競合でなく<strong>土台</strong>。取り込むべきは、我々の「AIレビュー段」の強化です(第4回のゲート×レビュー二段のレビュー側)。</p>
+    <table>
+      <tr><th>取り込む</th><th>ただし主張してはいけない</th></tr>
+      <tr><td>連続スコア・同点率・分離度という<strong>評価語彙</strong>でレビュー段の品質を語る</td><td>「基準分解」「反復評価」は先行研究の知見。我々の新規性ではない</td></tr>
+      <tr><td><strong>反復評価＋基準分解</strong>でレビュー段の誤拒否(2/5)を下げる</td><td>「確率的検証器より正しい」とは言わない。我々は登録時の構造監査を担う</td></tr>
+      <tr><td>成功/失敗のソフト信号は細い(相関差わずか)→ <strong>構造化証拠(v0.2)を正当化する外部証拠</strong>として引用</td><td>ソフト信号だけで死角が埋まる、とは言わない</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 三層の分業図 <span class="sub">検証器OSSはどこを担うか</span></h2>
+    <p>これまで見てきた3つを積層として並べると、役割分担が見えます。層をクリックしてください。</p>
+    <div class="stack" id="stack">
+      <div class="layer g active" data-k="gate"><div class="lt">① 登録時ゲート（本研究）</div><div class="ld">決定論・検証器そのものを監査</div></div>
+      <div class="layer b" data-k="soft"><div class="lt">② 実行時ソフト検証（LLM-as-a-Verifier）</div><div class="ld">確率的・答え/軌跡を採点し選ぶ</div></div>
+      <div class="layer p" data-k="ledger"><div class="lt">③ 軌跡の状態機械（LedgerMind, 第5回）</div><div class="ld">provenance制約でagent軌跡を検証</div></div>
+    </div>
+    <div id="layerinfo"></div>
+    <p class="small">我々のOSSは①を担う。②③は「登録・監査されるべき成果物の一つ」として扱える。競合でなく積層。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span> まとめと次の一手</h2>
+    <ol class="steps">
+      <li>「検証をスケールさせる」潮流は、確率的ソフト検証器を強くする(よく当てる)方向</li>
+      <li>本研究は決定論的ハード検証で、答えでなく<strong>検証器そのもの</strong>を登録時に監査する(一段メタ上)</li>
+      <li>両者は直交。ソフト検証器も我々の登録監査の対象になり得る</li>
+      <li>取り込むのは「レビュー段の強化(反復・基準分解)」。主張は「登録時の構造監査を担う」に限定</li>
+      <li>次の一手: 確率的レビュー層(スケール版)＋決定論ゲート(登録時)の二段構成を、三層の中で実装・計測する</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+(function(){
+  var INFO={
+    gate:"<b>① 登録時ゲート（本研究）</b>：LLMが書いた検算ルールを、使う前に機械監査する。読む範囲の逸脱・空回り・正解での誤発火を決定論的に落とし、診断コードとblameを返す。対象は『検証器そのもの』で、確率でなく構造条件で判定する。ただし忠実性オラクルではない(slipperはすり抜ける)。",
+    soft:"<b>② 実行時ソフト検証（LLM-as-a-Verifier）</b>：AIの信念分布から連続スコアを作り、候補の答えや軌跡を採点・ランキング・RL報酬に使う。粒度・反復・基準分解でスケールし『よく当てる』が、基準が正しいかを問う仕組みは無く、精度は77〜87%で止まる。",
+    ledger:"<b>③ 軌跡の状態機械（LedgerMind, 第5回）</b>：agentの行動軌跡を provenance 制約付き状態機械として検証し、証拠に接地しない主張や修正時の増幅を機構で防ぐ。整合的誤読の死角を『証拠への接地』で塞ぐ方向で、我々が土台として使える先行実装。"
+  };
+  function show(k){
+    document.getElementById('layerinfo').innerHTML=INFO[k];
+    document.querySelectorAll('#stack .layer').forEach(function(l){l.classList.toggle('active',l.getAttribute('data-k')===k);});
+  }
+  document.querySelectorAll('#stack .layer').forEach(function(l){l.addEventListener('click',function(){show(l.getAttribute('data-k'));});});
+  show('gate');
+})();
+</script>
+</body>
+</html>
