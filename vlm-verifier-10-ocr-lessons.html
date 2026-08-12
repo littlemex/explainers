@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>形式検証で世界を確かめる 研究シリーズ 第10回 — 文書OCRから検証器が学ぶこと</title>
+<style>
+  :root{--g900:#0b3d24;--g800:#0f5132;--g700:#198754;--g600:#1f9d63;--g500:#43b581;--g200:#8fd6b4;--g100:#c8ebd8;--g50:#eef7f2;
+    --ink:#12211a;--muted:#4a5d54;--paper:#fff;--line:#d9e5df;--warn:#9a5400;--warnbg:#fff3e0;--bad:#b3261e;--badbg:#fbeaea;--blue:#1c6ea4;--bluebg:#e9f3fa;--purp:#6a3d9a;--purpbg:#f0eafa;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#f4f7f5;line-height:1.85;font-size:18px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px 96px;}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 22px;font-size:14px;}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600;} .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500));color:#fff;padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;} header h1{font-size:28px;margin:0 0 10px;line-height:1.35;} header p{font-size:19px;margin:0;opacity:.95;}
+  .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.55);padding:4px 12px;border-radius:999px;font-size:14px;margin-top:16px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:22px 0;box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px;color:var(--g800);margin:0 0 6px;display:flex;align-items:center;gap:14px;}
+  h2 .num{background:var(--g700);color:#fff;width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px;}
+  h2 .sub{font-size:15px;color:var(--muted);font-weight:400;}
+  h3{font-size:19px;color:var(--g700);margin:22px 0 8px;} p{margin:10px 0;} .lead{font-size:19px;} strong{color:var(--g900);}
+  .paperbox{background:var(--bluebg);border:1px solid #bcdcef;border-radius:12px;padding:14px 16px;margin:12px 0;font-size:14.5px;} .paperbox a{color:var(--blue);font-weight:600;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;} @media(max-width:640px){.grid2{grid-template-columns:1fr;}}
+  .card{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:#fbfefc;} .card .h{font-weight:700;font-size:17px;margin-bottom:6px;} .card.q .h{color:var(--g700);} .card.s .h{color:var(--blue);}
+  .callout{border-radius:12px;padding:18px 20px;margin:18px 0;border-left:6px solid;}
+  .callout.good{background:var(--g50);border-color:var(--g600);} .callout.warn{background:var(--warnbg);border-color:var(--warn);} .callout.blue{background:var(--bluebg);border-color:var(--blue);}
+  .callout .h{font-weight:700;margin-bottom:4px;font-size:17px;} .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);} .callout.blue .h{color:var(--blue);}
+  .demo{border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0;background:#fbfefc;}
+  .checks{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;}
+  .chk{border:1.5px solid var(--line);border-radius:10px;padding:11px 14px;cursor:pointer;background:#fff;transition:.15s;font-size:15px;}
+  .chk:hover{border-color:var(--g500);} .chk.active{box-shadow:0 3px 12px rgba(15,81,50,.12);}
+  .chk .badge{font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px;margin-left:8px;}
+  .chk.local .badge{background:var(--g100);color:var(--g800);} .chk.cross .badge{background:var(--purpbg);color:var(--purp);}
+  #chkinfo{border-radius:10px;padding:14px 16px;background:var(--g50);border:1px solid var(--g200);font-size:15px;min-height:60px;}
+  .small{font-size:14px;color:var(--muted);} ol.steps{counter-reset:s;padding-left:0;list-style:none;}
+  ol.steps li{position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:30px;height:30px;background:var(--g100);color:var(--g800);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  @media(max-width:640px){header h1{font-size:21px;}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">形式検証で世界を確かめる 目次</a> ｜ <a href="./vlm-verifier-09-llm-verifier.html">第9回</a></div>
+<header>
+  <div class="wrap">
+    <h1>文書OCRから検証器が学ぶこと<br>— 研究シリーズ 第10回</h1>
+    <p>最新の文書パース2本(OvisOCR2 / HPD-Parsing)を読む。目的はOCRの採用でなく、そこにある「証拠を構造化する」設計原理を検証器に持ち込むこと。</p>
+    <span class="tag">研究過程シリーズ 第10回 ｜ 2026-08-13 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2><span class="num">1</span> なぜ検証器研究でOCR論文を読むのか</h2>
+    <p>文書パースは、単なる文字起こしではなく「<strong>画像を、構造化された機械可読な表現に変える</strong>」技術です。我々の検証器も、AIの出力を「構造化された世界」として扱い制約で確かめるので、<strong>証拠の構造化という同じ問題</strong>を共有します。今回は品質と効率で対照的な2本を読み、設計原理を借ります。</p>
+    <div class="grid2">
+      <div class="card q"><div class="h">OvisOCR2（品質の道）</div>0.8B の end-to-end パーサで OmniDocBench SOTA(96.58)。<strong>画像と正解を同一ソースから合成</strong>、多成分報酬、弱→強蒸留、拒否/検証。<div class="paperbox"><a href="https://arxiv.org/abs/2607.13639" target="_blank" rel="noopener">arXiv:2607.13639</a></div></div>
+      <div class="card s"><div class="h">HPD-Parsing（構造・効率の道）</div>ページ全体を1本の逐次生成で吐くのをやめ、<strong>大域レイアウト枝＋局所内容枝を並列</strong>デコード(約3倍高速)。難易度層別のデータ設計。<div class="paperbox"><a href="https://arxiv.org/abs/2607.18839" target="_blank" rel="noopener">arXiv:2607.18839</a></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> 正しいラベルはどう作るか <span class="sub">2本に共通するデータ設計</span></h2>
+    <p><strong>OvisOCR2</strong>: HTML を1つのソースとして、そこから<strong>画像と正解(Markdown)を同時に生成</strong>。だからラベルが構成的に正しい。<strong>HPD-Parsing</strong>: 複数モデルの擬似ラベルと中間チェックポイントの<strong>乖離で難易度を推定</strong>し、Easy/Medium/Hard に層別、難例だけ強いモデルで反復修正、分布をバランスさせる。</p>
+    <div class="callout good"><div class="h">我々のテスト生成にそのまま効く</div>
+      前者は「入力と正解を同一ソースから作る＝構成的にラベルを保証」——我々の<strong>決定的 slipper 生成(種→変異→既知ラベル)</strong>と同じ原理。後者は「難易度で層別し難例に資源集中」——我々の slipper を<strong>易しい presence 失敗／中庸の field 入替／難しい整合的誤読</strong>に層別し、偏りを防ぐ指針になる。ただし最終ラベルは決定的/構成的に閉じ、AIの注釈に根を預けない。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> 「大域は逐次、局所は並列」 <span class="sub">分解が誤り伝播を止める</span></h2>
+    <p>HPD の核心は、<strong>レイアウト(大域)は逐次に確定し、各ブロックの内容(局所)は独立に並列生成できる</strong>という構造的洞察です。各内容枝は他ブロックの履歴から<strong>文脈隔離</strong>され、ある枝の暴走・誤読が他へ伝播しません。OvisOCR2 の<strong>多成分報酬</strong>(text/表/式を分けて採点、大域検査は独立項でなく「ガード」)も、同じ「単一に潰さない」方向です。</p>
+    <div class="callout blue"><div class="h">共通教訓: 単一スコア・単一列・単一証拠に潰さない</div>
+      潰すと失敗が見えなくなる。分解すると<strong>成分別に採点でき、失敗を局所に閉じ込められる</strong>。これは我々の設計(scorecard を4軸に分ける／登録ゲートは合否の admission ガード／証拠は field 単位)への、OCR 側からの独立した裏づけです。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> 我々への写像と、鋭い接続 <span class="sub">触って確かめる</span></h2>
+    <p>レイアウト枝＝我々の<strong>scope/footprint(どのフィールドを誰が見るか)</strong>、内容枝＝<strong>フィールド単位の個別チェック</strong>に対応します。でも重要な違いがある。文書は「局所は遠方に依存しない」が概ね成り立つのに対し、<strong>検算は「合計＝明細の和」のようにフィールド間依存がある</strong>。並列に分解して<strong>この依存を消すと、整合的誤読を見逃す</strong>——第6回の 35.2% の死角の構造そのものです。</p>
+    <div class="demo">
+      <p class="small">各チェックが「局所(独立枝に分けられる)」か「クロスフィールド(大域層に置く必要)」かを選んでみてください。</p>
+      <div class="checks" id="checks">
+        <div class="chk local" data-k="line">行の金額 = 数量 × 単価 <span class="badge">局所</span></div>
+        <div class="chk local" data-k="type">日付が日付の形式か <span class="badge">局所</span></div>
+        <div class="chk cross" data-k="sum">合計 = すべての明細金額の和 <span class="badge">クロスフィールド</span></div>
+        <div class="chk cross" data-k="tax">総額 = 小計 + 税 − 値引き <span class="badge">クロスフィールド</span></div>
+      </div>
+      <div id="chkinfo"></div>
+    </div>
+    <div class="callout warn"><div class="h">死角はクロスフィールド依存に宿る</div>
+      局所チェックは独立枝に分けられ誤りを隔離できる。だが<strong>クロスフィールド制約は大域層に明示的に置かねばならず</strong>、しかもそこは「複数フィールドを辻褄合わせに誤読される」=整合的誤読が起きる場所。HPD が速度のために並列化して消す依存が、我々にとっては<strong>最も検証が要る場所</strong>です。だから field-keyed 束縛＋独立証拠(第6・9回の v0.2)が要る。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 限界と次回予告</h2>
+    <ol class="steps">
+      <li>文書パースは「証拠を構造化する技術」。2本の設計原理(構成的合成データ・難易度層別・分解による誤り隔離・単一に潰さない)を検証器に借りる</li>
+      <li>写像: レイアウト枝=scope/footprint、内容枝=field単位チェック、多成分報酬=4軸scorecard</li>
+      <li>鋭い接続: 並列化で消える<strong>クロスフィールド依存</strong>こそ、整合的誤読35.2%の死角の在処</li>
+      <li>正直な限界: これはOCRドメイン内の知見で、検証器一般への外挿は「原理の同型性」まで。過大主張しない</li>
+    </ol>
+    <p class="small">次回予告: presence grounding は死角の12.5%しか塞げなかった(負の結果)。この写像を踏まえ、field-keyed 束縛＋独立証拠チャネルで死角をどこまで塞げるか(v0.2)を実測する。</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  var INFO={
+    line:"<b>局所チェック</b>：その行の中(数量・単価・金額)だけで完結。他のフィールドに依存しない。→ 独立枝に分けて並列に検査でき、この行の誤読が他行の判定を汚さない(誤り隔離)。HPDの内容枝に対応。",
+    type:"<b>局所チェック</b>：その値の形式だけを見る。独立。→ 同じく独立枝にでき、失敗は局所に閉じる。",
+    sum:"<b>クロスフィールド制約</b>：合計は『すべての明細』に依存する。独立枝に分解できない。→ 大域層に明示的に置く必要がある。そして複数の明細と合計を辻褄合わせに誤読されると、算術は通ってしまう=整合的誤読の死角。",
+    tax:"<b>クロスフィールド制約</b>：総額は小計・税・値引きに依存。ここも大域層。誤読が複数フィールドで整合すると見逃す。→ 独立証拠(field-keyed束縛)で外から照合しないと塞げない。"
+  };
+  function show(k){
+    document.getElementById('chkinfo').innerHTML=INFO[k];
+    document.querySelectorAll('#checks .chk').forEach(function(c){c.classList.toggle('active',c.getAttribute('data-k')===k);});
+  }
+  document.querySelectorAll('#checks .chk').forEach(function(c){c.addEventListener('click',function(){show(c.getAttribute('data-k'));});});
+  show('line');
+})();
+</script>
+</body>
+</html>
