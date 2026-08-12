@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM検証器 研究シリーズ 第4回 — 決定論ゲート vs AIレビュー、そしてOSSへ</title>
+<style>
+  :root{--g900:#0b3d24;--g800:#0f5132;--g700:#198754;--g600:#1f9d63;--g500:#43b581;--g200:#8fd6b4;--g100:#c8ebd8;--g50:#eef7f2;
+    --ink:#12211a;--muted:#4a5d54;--paper:#fff;--line:#d9e5df;--warn:#9a5400;--warnbg:#fff3e0;--bad:#b3261e;--badbg:#fbeaea;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#f4f7f5;line-height:1.85;font-size:18px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px 96px;}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 22px;font-size:14px;}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600;} .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500));color:#fff;padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;} header h1{font-size:29px;margin:0 0 10px;line-height:1.35;} header p{font-size:19px;margin:0;opacity:.95;}
+  .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.55);padding:4px 12px;border-radius:999px;font-size:14px;margin-top:16px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:22px 0;box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px;color:var(--g800);margin:0 0 6px;display:flex;align-items:center;gap:14px;}
+  h2 .num{background:var(--g700);color:#fff;width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px;}
+  h2 .sub{font-size:15px;color:var(--muted);font-weight:400;}
+  h3{font-size:19px;color:var(--g700);margin:22px 0 8px;} p{margin:10px 0;} .lead{font-size:19px;} strong{color:var(--g900);}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:20px 0;justify-content:center;}
+  .node{background:var(--g50);border:2px solid var(--g200);border-radius:12px;padding:12px 14px;text-align:center;min-width:110px;flex:0 1 auto;}
+  .node .t{font-weight:700;color:var(--g800);font-size:15px;} .node .d{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .node.key{background:var(--g700);border-color:var(--g700);} .node.key .t{color:#fff;} .node.key .d{color:var(--g100);}
+  .arrow{display:flex;align-items:center;font-size:24px;color:var(--g600);font-weight:700;}
+  .callout{border-radius:12px;padding:18px 20px;margin:18px 0;border-left:6px solid;}
+  .callout.good{background:var(--g50);border-color:var(--g600);} .callout.warn{background:var(--warnbg);border-color:var(--warn);}
+  .callout .h{font-weight:700;margin-bottom:4px;font-size:17px;} .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px;} th,td{border:1px solid var(--line);padding:9px 11px;text-align:center;vertical-align:middle;}
+  th{background:var(--g700);color:#fff;font-weight:600;} td.tag{text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:13.5px;}
+  .cell-ok{background:#e7f6ec;color:var(--g800);font-weight:700;} .cell-ng{background:#fbeaea;color:var(--bad);font-weight:700;}
+  .cell-slip{background:#fff3e0;color:var(--warn);font-weight:700;} .cell-fr{background:#fde7d8;color:var(--warn);font-weight:700;}
+  .metric{font-weight:800;color:var(--g700);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0;}
+  .small{font-size:14px;color:var(--muted);} ol.steps{counter-reset:s;padding-left:0;list-style:none;}
+  ol.steps li{position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:30px;height:30px;background:var(--g100);color:var(--g800);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  .legend{font-size:13px;color:var(--muted);margin-top:6px;} .legend span{display:inline-block;padding:1px 8px;border-radius:5px;margin-right:8px;}
+  @media(max-width:640px){header h1{font-size:22px;} .arrow{transform:rotate(90deg);} .grid2{grid-template-columns:1fr;} table{font-size:13px;} th,td{padding:6px;}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">目次</a> ｜ <a href="./vlm-verifier-03-two-stage.html">第3回</a></div>
+<header>
+  <div class="wrap">
+    <h1>決定論ゲート vs AIレビュー、そして OSS へ<br>— 研究シリーズ 第4回</h1>
+    <p>登録ゲートは万能ではない。「AIレビューで足りるのでは?」に、同じ土俵で答える。両者は競合でなく相補だった。</p>
+    <span class="tag">研究過程シリーズ 第4回 ｜ 2026-08-13 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2><span class="num">1</span> ゲートは万能ではない</h2>
+    <p>前回の登録ゲートは「読む範囲・空回り・正しい伝票で誤発火」という<strong>機械的な性質</strong>をチェックします。でもこれは<strong>「意図どおり正しいか」の保証ではありません</strong>。例えば「合計を単価の和と比べる(フィールド違い)」「許容誤差が緩すぎる」ようなルールは、機械的にはクリーンなので<strong>ゲートをすり抜ける</strong>可能性がある。</p>
+    <p class="lead">ではよくある反論「<strong>それ、AI にレビューさせれば足りるのでは?</strong>」は正しいのか。同じ土俵で比べました。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> 同じルールで対決 <span class="sub">正しい5本＋間違い6本</span></h2>
+    <p>well-formed(ちゃんと動く)な検算ルールを、正しい5本と間違い6本用意し、両方に判定させました。○=正しく通す/弾く、色付き=誤り。</p>
+    <table>
+      <tr><th>検算ルール</th><th>本当は</th><th>決定論ゲート</th><th>AIレビュー</th></tr>
+      <tr><td class="tag">正: 単価×個数=金額</td><td>正しい</td><td class="cell-ok">通す ○</td><td class="cell-ok">通す ○</td></tr>
+      <tr><td class="tag">正: Σ明細=小計</td><td>正しい</td><td class="cell-ok">通す ○</td><td class="cell-fr">誤って拒否</td></tr>
+      <tr><td class="tag">正: 小計+税=合計</td><td>正しい</td><td class="cell-ok">通す ○</td><td class="cell-ok">通す ○</td></tr>
+      <tr><td class="tag">正: 現金-合計=釣銭</td><td>正しい</td><td class="cell-ok">通す ○</td><td class="cell-ok">通す ○</td></tr>
+      <tr><td class="tag">正: Σ明細=小計(許容2)</td><td>正しい</td><td class="cell-ok">通す ○</td><td class="cell-fr">誤って拒否</td></tr>
+      <tr><td class="tag">誤: 単価+個数=金額</td><td>間違い</td><td class="cell-ok">弾く ○</td><td class="cell-ok">弾く ○</td></tr>
+      <tr><td class="tag">誤: 税を忘れる</td><td>間違い</td><td class="cell-ok">弾く ○</td><td class="cell-ok">弾く ○</td></tr>
+      <tr><td class="tag">誤: 釣銭の符号反転</td><td>間違い</td><td class="cell-ok">弾く ○</td><td class="cell-ok">弾く ○</td></tr>
+      <tr><td class="tag">誤: 合計を単価和と比較</td><td>間違い</td><td class="cell-slip">すり抜け</td><td class="cell-ok">弾く ○</td></tr>
+      <tr><td class="tag">誤: 自己比較で空回り</td><td>間違い</td><td class="cell-ok">弾く ○</td><td class="cell-ok">弾く ○</td></tr>
+      <tr><td class="tag">誤: 許容誤差ゆるすぎ</td><td>間違い</td><td class="cell-slip">すり抜け</td><td class="cell-ok">弾く ○</td></tr>
+    </table>
+    <div class="legend">
+      <span class="cell-ok">○ 正しい判定</span>
+      <span class="cell-slip">すり抜け(間違いを見逃し)</span>
+      <span class="cell-fr">誤って拒否(正しいのに弾く)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> 結果: 得意が正反対 <span class="sub">だから相補</span></h2>
+    <div class="grid2">
+      <div class="callout good"><div class="h">決定論ゲート</div>
+        正しいルールの誤拒否 <strong>0/5</strong>(完璧)。間違い検出 <strong>4/6</strong>。<br>
+        cheap・決定論・<strong>正しいルールを絶対に弾かない保証</strong>。ただし機械的にクリーンな論理誤りはすり抜ける(=万能な正しさ判定ではない)。</div>
+      <div class="callout warn"><div class="h">AIレビュー</div>
+        間違い検出 <strong>6/6</strong>(すり抜けた2つも捕捉)。正しいルールの誤拒否 <strong>2/5</strong>。<br>
+        論理誤りまで拾えるが、<strong>正しいルールを解釈の相違で誤拒否</strong>し、高コスト・確率的・保証なし。</div>
+    </div>
+    <div class="callout good"><div class="h">結論: 競合でなく二段で使う</div>
+      まず<strong>ゲート</strong>(cheap・決定論・誤拒否ゼロ)で構造的な欠陥を確実に落とす。残る論理的な正しさを<strong>レビュー</strong>で補う。「レビューで足りる」は誤り(正しいルールを2/5も誤拒否=ゲートとして信頼できない)。「ゲートは全部拒否では」も誤り(誤拒否ゼロで選別的)。</div>
+    <div class="flow">
+      <div class="node"><div class="t">AI製の検算ルール</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">決定論ゲート</div><div class="d">構造欠陥を確実に除去(保証)</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">レビュー(任意)</div><div class="d">残る論理誤りを補足</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">採用</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> OSS として出す</h2>
+    <p>この検証器を OSS で提供する計画です。核は派手な検出精度ではなく、<strong>「機械(AI)が書いた検算器を、登録時に機械的に監査する」</strong>こと。</p>
+    <h3>第一リリースに入れるもの</h3>
+    <p>制約を書くための小さな仕様言語(DSL)＋登録ゲート＋違反箇所の指摘。Python ライブラリ＋JSON 形式のルール＋薄い CLI。</p>
+    <h3>あえて入れないもの / 位置づけ</h3>
+    <p>研究的な追加機能は初回は外し、第一印象を絞ります。汎用バリデータや「OCR 精度ツール」としてではなく、<strong>AI 製検算器の登録時ゲート</strong>として提供します。「なぜ既存の Pydantic / SHACL / OPA でなく、これなのか」(＝それらは<strong>読む範囲・空回り・正しい伝票での沈黙を機械保証できない</strong>)は README で正面から説明します。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 正直な限界とまとめ</h2>
+    <div class="callout warn"><div class="h">この結果の限界</div>
+      比較はまだ小規模(正5本・誤6本、レビュアー1つ、1ドメイン)。より大きな規模・複数レビュアー・別ドメインでの再現が次の宿題です。レビューの誤拒否は「欠損値の扱い」という解釈の厳格さの差で、でたらめではありません。</div>
+    <ol class="steps">
+      <li>登録ゲートは正しさの万能判定ではない(機械的にクリーンな論理誤りはすり抜ける)</li>
+      <li>ゲート=誤拒否ゼロ・部分的検出、レビュー=全検出・誤拒否あり → <strong>相補</strong></li>
+      <li>だから二段(ゲート→レビュー)。「レビューで足りる/ゲートは全部拒否」の両反論を否定</li>
+      <li>OSS は「AI 製検算器の登録時ゲート」として最小構成で出す</li>
+    </ol>
+  </section>
+</div>
+</body>
+</html>

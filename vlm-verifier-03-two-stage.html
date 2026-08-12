@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM検証器 研究シリーズ 第3回 — 検算ルールをAIに書かせる(二段階評価)</title>
+<style>
+  :root{--g900:#0b3d24;--g800:#0f5132;--g700:#198754;--g600:#1f9d63;--g500:#43b581;--g200:#8fd6b4;--g100:#c8ebd8;--g50:#eef7f2;
+    --ink:#12211a;--muted:#4a5d54;--paper:#fff;--line:#d9e5df;--warn:#9a5400;--warnbg:#fff3e0;--bad:#b3261e;--badbg:#fbeaea;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#f4f7f5;line-height:1.85;font-size:18px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px 96px;}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 22px;font-size:14px;}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600;} .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500));color:#fff;padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;} header h1{font-size:30px;margin:0 0 10px;line-height:1.35;} header p{font-size:19px;margin:0;opacity:.95;}
+  .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.55);padding:4px 12px;border-radius:999px;font-size:14px;margin-top:16px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:22px 0;box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px;color:var(--g800);margin:0 0 6px;display:flex;align-items:center;gap:14px;}
+  h2 .num{background:var(--g700);color:#fff;width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px;}
+  h2 .sub{font-size:15px;color:var(--muted);font-weight:400;}
+  h3{font-size:19px;color:var(--g700);margin:22px 0 8px;} p{margin:10px 0;} .lead{font-size:19px;} strong{color:var(--g900);}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:20px 0;justify-content:center;}
+  .node{background:var(--g50);border:2px solid var(--g200);border-radius:12px;padding:12px 14px;text-align:center;min-width:110px;flex:0 1 auto;}
+  .node .t{font-weight:700;color:var(--g800);font-size:15px;} .node .d{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .node.key{background:var(--g700);border-color:var(--g700);} .node.key .t{color:#fff;} .node.key .d{color:var(--g100);}
+  .arrow{display:flex;align-items:center;font-size:24px;color:var(--g600);font-weight:700;}
+  .callout{border-radius:12px;padding:18px 20px;margin:18px 0;border-left:6px solid;}
+  .callout.good{background:var(--g50);border-color:var(--g600);} .callout.warn{background:var(--warnbg);border-color:var(--warn);}
+  .callout .h{font-weight:700;margin-bottom:4px;font-size:17px;} .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:16px;} th,td{border:1px solid var(--line);padding:11px 13px;text-align:left;vertical-align:top;}
+  th{background:var(--g700);color:#fff;font-weight:600;} tr:nth-child(even) td{background:#f6fbf8;} .metric{font-weight:800;color:var(--g700);}
+  .bars{margin:14px 0;} .bar-row{display:flex;align-items:center;gap:12px;margin:10px 0;}
+  .bar-label{width:150px;font-size:15px;text-align:right;color:var(--muted);} .bar-track{flex:1;background:#eef2ef;border-radius:8px;height:34px;overflow:hidden;}
+  .bar-fill{height:100%;display:flex;align-items:center;padding:0 12px;color:#fff;font-weight:700;border-radius:8px;white-space:nowrap;}
+  .bar-fill.bad{background:linear-gradient(90deg,#c0392b,#e05747);} .bar-fill.good{background:linear-gradient(90deg,var(--g700),var(--g500));min-width:44px;}
+  .demo{border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0;background:#fbfefc;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;} .chip{font:inherit;font-size:14px;cursor:pointer;border:1.5px solid var(--g500);background:#fff;color:var(--g800);border-radius:999px;padding:7px 12px;}
+  .chip:hover{background:var(--g50);} .chip.active{background:var(--g700);color:#fff;border-color:var(--g700);}
+  .verdict{border-radius:10px;padding:14px 16px;font-size:16px;} .verdict.ok{background:var(--g50);border:1px solid var(--g500);color:var(--g800);} .verdict.ng{background:var(--badbg);border:1px solid var(--bad);color:var(--bad);}
+  .small{font-size:14px;color:var(--muted);} ol.steps{counter-reset:s;padding-left:0;list-style:none;}
+  ol.steps li{position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:30px;height:30px;background:var(--g100);color:var(--g800);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  @media(max-width:640px){header h1{font-size:23px;} .arrow{transform:rotate(90deg);} .bar-label{width:110px;}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">目次</a> ｜ <a href="./vlm-verifier-02-loop.html">第2回</a></div>
+<header>
+  <div class="wrap">
+    <h1>検算ルール自体を AI に書かせる<br>— 研究シリーズ 第3回: 二段階評価</h1>
+    <p>データだけでなく「検算器そのもの」も AI に書かせられる。ただし今度は、その検算器が正しいかを検証する二段目が要る。</p>
+    <span class="tag">研究過程シリーズ 第3回 ｜ 2026-08-13 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2><span class="num">1</span> 今回の問い</h2>
+    <p>これまで検算ルール(単価×個数=金額 など)は人が書いていました。では<strong>検算ルール自体を AI に書かせたら</strong>? 便利ですが、新しい危険が生まれます。<strong>AI が間違った検算器を書いたら、間違った基準で「合格」を出し続ける</strong>。だから評価が二段階になります。</p>
+    <div class="flow">
+      <div class="node"><div class="t">AI</div><div class="d">検算ルールを書く</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">二段目の検証</div><div class="d">その検算器は正しい?</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">検算器</div><div class="d">データを検算</div></div>
+    </div>
+    <p class="small">一段目=データの検算(前回まで)。二段目=<strong>AI が書いた検算器の検証</strong>(今回)。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> 実験: 自由記述 vs 枠にはめる <span class="sub">書かせ方を変える</span></h2>
+    <p>普通レベルの AI に検算ルールを書かせ、2つの書かせ方を比較しました。数えたのは「<strong>間違った検算器が、動くふりをして黙って採用されてしまう数</strong>」(各20回)。</p>
+    <div class="bars">
+      <div class="bar-row"><div class="bar-label">自由記述</div><div class="bar-track"><div class="bar-fill bad" style="width:35%">7 個 が黙って通過</div></div></div>
+      <div class="bar-row"><div class="bar-label">枠にはめる</div><div class="bar-track"><div class="bar-fill good" style="width:2%">0 個</div></div></div>
+    </div>
+    <table>
+      <tr><th>AI</th><th>自由記述: 黙って通る欠陥検算器</th><th>枠にはめる</th></tr>
+      <tr><td>普通レベル (Gemma 3 4B)</td><td><span class="metric" style="color:var(--bad)">7 / 20</span></td><td><span class="metric">0 / 20</span></td></tr>
+      <tr><td>高性能 (2種)</td><td>0</td><td>0</td></tr>
+    </table>
+    <div class="callout good"><div class="h">効果は「間違えやすい AI」ほど大きい</div>
+      高性能 AI はどちらの書かせ方でも忠実でした。枠の価値が出るのは<strong>普通レベルの AI</strong>。安いモデルに検算器づくりを任せたいときこそ効きます。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> なぜ枠にはめると防げるか <span class="sub">登録ゲート</span></h2>
+    <p>「枠にはめる」= 検算ルールを決まった形で書かせ、登録する前に機械が3つの健全性を自動チェックします。触って確かめてください。</p>
+    <div class="demo">
+      <div class="chips" id="chips">
+        <button data-k="good">正しいルール</button>
+        <button data-k="scope">読む範囲を逸脱</button>
+        <button data-k="noop">綴りミスで空回り</button>
+        <button data-k="wrongop">計算を取り違え</button>
+      </div>
+      <div id="gv" class="verdict"></div>
+    </div>
+    <p class="small">3つの登録ゲート: (1)読んでよいフィールドの範囲を超えない (2)必ず「間違いを見つけられる」= 空回りでない (3)正しい伝票では黙る。どれか破ると登録拒否。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> 別スキーマでも成立</h2>
+    <p>この登録ゲートはレシート(CORD)専用ではありません。まったく別の帳票スキーマ(発注: 明細→小計→合計)でも、正しいルールは通り、範囲逸脱・空回りは同じく登録拒否できました。<strong>ゲートの安全チェックはスキーマに依存しません</strong>。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> まとめと次回</h2>
+    <ol class="steps">
+      <li>検算器も AI に書かせられるが、AI 製の検算器を検証する二段目が要る</li>
+      <li>枠にはめる(登録ゲート)と、普通レベル AI の欠陥検算器の黙認が 7→0</li>
+      <li>効果は間違えやすい AI ほど大きい。別スキーマでも成立</li>
+    </ol>
+    <p class="small">次回(第4回): この登録ゲートは万能ではありません。「AI レビューで足りるのでは?」に対し、ゲート vs レビューを同じ土俵で比べます。</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  var V={
+    good:{ok:true,msg:"合格 — 登録OK。読む範囲を守り、正しい伝票では黙り、間違いも見つけられる。"},
+    scope:{ok:false,msg:"登録拒否 — 宣言した範囲外のフィールドを読んでいる(読む範囲の逸脱)。どこを見て判断したか追跡できなくなるため門前払い。"},
+    noop:{ok:false,msg:"登録拒否 — フィールド名の綴りミスで常に『判定不能』になり、どんな間違いも見つけられない空回り(no-op)。一見動くが何も検算しない危険なルール。"},
+    wrongop:{ok:false,msg:"登録拒否 — 正しい伝票なのに『不合格』を出す(誤発火)。計算を取り違えている証拠なので登録前に弾く。"}
+  };
+  function show(k){
+    var v=V[k], el=document.getElementById('gv');
+    el.className='verdict '+(v.ok?'ok':'ng');
+    el.innerHTML='<b>'+(v.ok?'ACCEPT':'REJECT')+'</b> — '+v.msg;
+    document.querySelectorAll('#chips button').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-k')===k);});
+  }
+  document.querySelectorAll('#chips button').forEach(function(b){b.addEventListener('click',function(){show(b.getAttribute('data-k'));});});
+  show('good');
+})();
+</script>
+</body>
+</html>
