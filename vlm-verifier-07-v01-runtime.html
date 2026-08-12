@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM検証器 研究シリーズ 第7回 — 作ったもの: 登録時監査ランタイム v0.1</title>
+<style>
+  :root{--g900:#0b3d24;--g800:#0f5132;--g700:#198754;--g600:#1f9d63;--g500:#43b581;--g200:#8fd6b4;--g100:#c8ebd8;--g50:#eef7f2;
+    --ink:#12211a;--muted:#4a5d54;--paper:#fff;--line:#d9e5df;--warn:#9a5400;--warnbg:#fff3e0;--bad:#b3261e;--badbg:#fbeaea;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#f4f7f5;line-height:1.85;font-size:18px;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px 96px;}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 22px;font-size:14px;}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600;} .topbar a:hover{text-decoration:underline;}
+  header{background:linear-gradient(135deg,var(--g800),var(--g500));color:#fff;padding:48px 22px 40px;}
+  header .wrap{padding-bottom:0;} header h1{font-size:29px;margin:0 0 10px;line-height:1.35;} header p{font-size:19px;margin:0;opacity:.95;}
+  .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.55);padding:4px 12px;border-radius:999px;font-size:14px;margin-top:16px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin:22px 0;box-shadow:0 2px 12px rgba(15,81,50,.05);}
+  h2{font-size:24px;color:var(--g800);margin:0 0 6px;display:flex;align-items:center;gap:14px;}
+  h2 .num{background:var(--g700);color:#fff;width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px;}
+  h2 .sub{font-size:15px;color:var(--muted);font-weight:400;}
+  h3{font-size:19px;color:var(--g700);margin:22px 0 8px;} p{margin:10px 0;} .lead{font-size:19px;} strong{color:var(--g900);}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:20px 0;justify-content:center;}
+  .node{background:var(--g50);border:2px solid var(--g200);border-radius:12px;padding:12px 14px;text-align:center;min-width:120px;flex:0 1 auto;}
+  .node .t{font-weight:700;color:var(--g800);font-size:15px;} .node .d{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .node.key{background:var(--g700);border-color:var(--g700);} .node.key .t{color:#fff;} .node.key .d{color:var(--g100);}
+  .arrow{display:flex;align-items:center;font-size:24px;color:var(--g600);font-weight:700;}
+  .callout{border-radius:12px;padding:18px 20px;margin:18px 0;border-left:6px solid;}
+  .callout.good{background:var(--g50);border-color:var(--g600);} .callout.warn{background:var(--warnbg);border-color:var(--warn);}
+  .callout .h{font-weight:700;margin-bottom:4px;font-size:17px;} .callout.good .h{color:var(--g800);} .callout.warn .h{color:var(--warn);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px;} th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top;}
+  th{background:var(--g700);color:#fff;font-weight:600;} tr:nth-child(even) td{background:#f6fbf8;} code{background:#eef2ef;padding:1px 6px;border-radius:5px;font-size:14px;}
+  .demo{border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0;background:#fbfefc;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;} .chip{font:inherit;font-size:14px;cursor:pointer;border:1.5px solid var(--g500);background:#fff;color:var(--g800);border-radius:999px;padding:7px 12px;} .chip:hover{background:var(--g50);} .chip.active{background:var(--g700);color:#fff;border-color:var(--g700);}
+  .term{font-family:ui-monospace,Menlo,monospace;font-size:13.5px;background:#0b3d24;color:#dff5e6;border-radius:10px;padding:14px 16px;white-space:pre-wrap;line-height:1.6;}
+  .term .k{color:#8fd6b4;} .term .ok{color:#7ee2a8;font-weight:700;} .term .ng{color:#ff9a8a;font-weight:700;}
+  .small{font-size:14px;color:var(--muted);} ol.steps{counter-reset:s;padding-left:0;list-style:none;}
+  ol.steps li{position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line);}
+  ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:30px;height:30px;background:var(--g100);color:var(--g800);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;}
+  @media(max-width:640px){header h1{font-size:22px;} .arrow{transform:rotate(90deg);}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a> ｜ <a href="./vlm-verifier-index.html">目次</a> ｜ <a href="./vlm-verifier-06-grounding.html">第6回</a></div>
+<header>
+  <div class="wrap">
+    <h1>作ったもの: 登録時監査ランタイム v0.1<br>— 研究シリーズ 第7回</h1>
+    <p>これまでの学びを、実際に動くソフトウェアにした。「機械(AI)が書いた検算器を、使う前に機械が監査する」小さなランタイムの解説。</p>
+    <span class="tag">研究過程シリーズ 第7回 ｜ 2026-08-13 時点</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2><span class="num">1</span> 何を作ったか</h2>
+    <p class="lead">一言でいうと <strong>「AI が書いた検算ルールを、採用する前に機械が審査する仕組み」</strong>。汎用の入力チェッカーでも OCR ツールでもありません。</p>
+    <div class="flow">
+      <div class="node"><div class="t">AIが検算ルールを書く</div><div class="d">決まった形(DSL)で</div></div>
+      <div class="arrow">→</div>
+      <div class="node key"><div class="t">登録ゲート</div><div class="d">使う前に機械が審査</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">合格→採用 / 不合格→理由コード</div></div>
+    </div>
+    <p>審査は3点。①<strong>読む範囲を守っているか</strong>(宣言した欄以外を見ない) ②<strong>空回りでないか</strong>(どんな間違いも見つけられない飾りルールを拒否) ③<strong>正しい伝票で黙るか</strong>(正解データで誤発火しない)。全部機械が判定します。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span> 触ってみる: 登録ゲート</h2>
+    <p>ルールを選ぶと、審査結果(実際のコマンド出力に相当)が出ます。合格は緑、不合格は理由コード付き。</p>
+    <div class="demo">
+      <div class="chips" id="chips">
+        <button data-k="good">正しいルール</button>
+        <button data-k="scope">読む範囲を逸脱</button>
+        <button data-k="vacuous">空回り(自己比較)</button>
+        <button data-k="golden">正解で誤発火</button>
+        <button data-k="malformed">形式が壊れている</button>
+      </div>
+      <div class="term" id="term"></div>
+    </div>
+    <p class="small">これは実装した CLI <code>vgv check rules.json golden.json</code> が返す JSON を模したものです。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span> 2つのコマンド</h2>
+    <table>
+      <tr><th>コマンド</th><th>役割</th><th>返すもの</th></tr>
+      <tr><td><code>vgv check ルール 正解データ</code></td><td>ルールを採用前に審査</td><td>ルールごとに ACCEPT / REJECT＋診断コード(不合格があれば終了コード1)</td></tr>
+      <tr><td><code>vgv apply ルール 伝票</code></td><td>伝票にルールを適用</td><td>pass / fail / inapplicable と、fail 時は<strong>犯人の範囲(blame)</strong></td></tr>
+    </table>
+    <p>不合格の理由は、人にもプログラムにも読める<strong>安定した診断コード</strong>で返します。AI がこのコードを読んで自分のルールを直す、という自己修正ループに使えます。</p>
+    <table>
+      <tr><th>コード</th><th>意味</th></tr>
+      <tr><td><code>SCOPE_VIOLATION</code></td><td>宣言した範囲外のフィールドを読んだ</td></tr>
+      <tr><td><code>VACUOUS</code></td><td>どんな入力でも発火しない空回りルール</td></tr>
+      <tr><td><code>GOLDEN_FIRE</code></td><td>正しい伝票で誤発火した(仕様バグ)</td></tr>
+      <tr><td><code>MALFORMED</code></td><td>JSON/文法が壊れている</td></tr>
+      <tr><td><code>TYPE_MISMATCH</code></td><td>フィールドが期待する型(数値等)に解決できない</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span> 保証すること / しないこと</h2>
+    <div class="callout good"><div class="h">保証する(決定論的)</div>
+      構造的な欠陥——読む範囲の逸脱・空回り・正解での誤発火——は<strong>確実に落とす</strong>。そして<strong>正しいルールを誤って弾かない</strong>(統制実験で誤拒否0)。安価で、毎回同じ答え。</div>
+    <div class="callout warn"><div class="h">保証しない(正直に)</div>
+      <strong>忠実性オラクルではない</strong>。「論理は間違いだが構造的にはクリーン」なルールは通ってしまう(第4回)。OCR/VLM の誤読そのものも解かない(第6回)。だから最後は人やレビューと二段で使う。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span> 今の状態</h2>
+    <ol class="steps">
+      <li>動く核ができた: 制約DSL＋登録ゲート＋2コマンドのCLI＋診断コード</li>
+      <li>受け入れテスト8本すべて green(直列化往復・三値・各ゲートのコード・忠実誤拒否0)</li>
+      <li>依存は最小(コアはほぼ標準ライブラリのみ)</li>
+    </ol>
+    <div class="callout good"><div class="h">OSS 公開はまだ先</div>
+      公開は<strong>「本当に役に立つと確定してから」</strong>。今は小さく確実な核を固め、正直な限界を明記した段階です。次の研究(正しい場所に束縛した構造化証拠=第6回の宿題)で価値が確認できてから世に出します。</div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span> まとめ</h2>
+    <p class="lead">学び(検証する側も間違える)を、<strong>実際に動く「検算器の審査官」</strong>にした。派手さより、何を確実に落とせて何を落とせないかを正直に線引きした小さな核です。</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  var R={
+    good:{v:"ACCEPT",code:null,detail:null,note:"読む範囲を守り、空回りでなく、正しい伝票で黙る。採用OK。"},
+    scope:{v:"REJECT",code:"SCOPE_VIOLATION",detail:"rule reads ['total'] outside footprint ['items.*.price']",note:"宣言した範囲外(合計)を読んでいる。"},
+    vacuous:{v:"REJECT",code:"VACUOUS",detail:"no witness makes it fail (vacuous)",note:"自己比較などで、どんな間違いでも発火しない飾りルール。"},
+    golden:{v:"REJECT",code:"GOLDEN_FIRE",detail:"fires on golden record #0",note:"正しい伝票で不合格を出した。計算の取り違えの証拠。"},
+    malformed:{v:"REJECT",code:"MALFORMED",detail:"unknown constraint type 'foo'",note:"文法が壊れている、または判定可能な形でない。"}
+  };
+  function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+  function show(k){
+    var r=R[k], el=document.getElementById('term');
+    var lines='<span class="k">$ vgv check rule.json golden.json</span>\n{\n  "dsl_version": "0.1",\n  "results": [\n';
+    if(r.v==="ACCEPT"){
+      lines+='    { "id": "MY_RULE", "verdict": <span class="ok">"ACCEPT"</span> }\n';
+    }else{
+      lines+='    { "id": "MY_RULE", "verdict": <span class="ng">"REJECT"</span>,\n      "code": "'+r.code+'",\n      "detail": "'+esc(r.detail)+'" }\n';
+    }
+    lines+='  ]\n}\n\n# '+r.note;
+    el.innerHTML=lines;
+    document.querySelectorAll('#chips button').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-k')===k);});
+  }
+  document.querySelectorAll('#chips button').forEach(function(b){b.addEventListener('click',function(){show(b.getAttribute('data-k'));});});
+  show('good');
+})();
+</script>
+</body>
+</html>
