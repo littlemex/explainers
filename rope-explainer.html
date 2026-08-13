@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>位置をどう教えるか — RoPE と NoPE をゼロから</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --q:#e07a5f;   /* query 系 (橙) */
+    --k:#3d7dca;   /* key 系 (青) */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .math .c{color:#8fd6b4}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:170px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">ML 基礎シリーズ ・ 第 5 回 ・ 位置符号化</p>
+  <h1>位置をどう教えるか — RoPE と NoPE をゼロから</h1>
+  <p>Attention は語順を見ない。ではどうやって「何番目か」を教えるのかを、回転で動かしながら理解する</p>
+</header>
+<main>
+  <a class="back" href="./ml-basics-index.html">← ML 基礎シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>なぜ「位置」を教えないといけないのか</h2>
+  <p class="lead">まず問題意識を揃えます。Attention は、実は語の順番をまったく見ていません。</p>
+  <p>Self-Attention は、各トークンが他のトークンとの内積で「どれだけ注目するか」を決める仕組みでした (第 1 回参照)。ところがこの計算は、<b>入力の順番を入れ替えても (出力も同じ順で並び替わるだけで) 本質的に変わらない</b>という性質 (置換同変性) を持ちます。つまり素の Attention にとって「猫が犬を追う」と「犬が猫を追う」は<b>区別できません</b> (※ 後述する因果マスク付き (§9) はこの限りではありません)。</p>
+  <div class="key">
+    <b>位置符号化 (positional encoding) とは</b>、この「順番を見ない」Attention に対して<b>「あなたは何番目のトークンか」という情報を注入する</b>仕組みのことです。やり方は大きく 3 系統 (＋ スコアに距離のバイアスを足し引きする ALiBi 系。§9 末尾で触れます) あり、この記事ではその設計思想と進化を追います。
+  </div>
+  <table>
+    <tr><th>系統</th><th>考え方</th><th>代表</th></tr>
+    <tr><td>絶対位置を<b>足す</b></td><td>位置ごとに決まったベクトルを埋め込みに加算</td><td>Sinusoidal (原論文), 学習型 APE</td></tr>
+    <tr><td>相対位置を<b>回す</b></td><td>Q/K を位置に応じて回転させ、内積が相対距離だけに効くようにする</td><td><b>RoPE</b> (本記事の主役)</td></tr>
+    <tr><td>そもそも<b>足さない</b></td><td>因果マスクだけで順序が漏れるので、明示的な符号化を省く</td><td><b>NoPE</b></td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 素朴な方法 — 絶対位置を「足す」</a>
+    <a href="#s2">2. RoPE の発想 — 足さずに「回す」</a>
+    <a href="#s3">3. 【体験】位置で回転する Q/K</a>
+    <a href="#s4">4. なぜ回転が効くのか — 相対位置だけに効く</a>
+    <a href="#s5">5. 【体験】ずらしても形が変わらない</a>
+    <a href="#s6">6. 周波数の階層 — 近くも遠くも見る</a>
+    <a href="#s7">7. 学習長を超えると壊れる — 文脈長の拡張</a>
+    <a href="#s8">8. 【体験】外挿 vs 内挿 (PI/NTK/YaRN)</a>
+    <a href="#s9">9. NoPE — そもそも要らない説</a>
+    <a href="#s10">10. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>素朴な方法 — 絶対位置を「足す」</h2>
+  <p class="lead">最初の Transformer (Vaswani ら 2017) が採った方法から見ます。</p>
+  <p>元祖の発想はシンプルで、<b>位置 $m$ ごとに固有の「位置ベクトル」を作り、単語埋め込みにそのまま足す</b>だけです。位置ベクトルは、次元ごとに波長の違う sin/cos で作ります。</p>
+  <div class="mj">$$ PE_{(m,2i)} = \sin\!\left(\frac{m}{10000^{2i/d}}\right),\qquad PE_{(m,2i+1)} = \cos\!\left(\frac{m}{10000^{2i/d}}\right) $$</div>
+  <p>次元の番号 $i$ が大きいほど波長が長く (ゆっくり変化) なります。こうして「位置 3 の単語」と「位置 50 の単語」に異なる指紋を付けます。学習型 (APE) は、この波の代わりに<b>位置ごとの学習可能ベクトル</b>を持たせる変種です。</p>
+  <div class="warn">
+    <b>足す方式の弱点。</b>(1) <b>学習型 APE</b> は学習で見た位置までしか埋め込みを持たず、それより長い文に対応できない (sinusoidal は任意の位置を計算できるが、学習で見ていない長さでは実際には性能が劣化しやすい)。(2) 本当に効かせたいのは「単語 A と B が<b>何個離れているか</b>」という<b>相対</b>距離なのに、埋め込みに絶対位置を足す方式では、射影と単語内容が混ざった後の Attention スコアに相対距離がきれいな形で残りません。この 2 つの不満が、次の RoPE を生みます。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>RoPE の発想 — 足さずに「回す」</h2>
+  <p class="lead">RoPE (Rotary Position Embedding, Su ら 2021) の一言はこれです。<b>位置ベクトルを足すのをやめ、Q と K を位置に応じて「回転」させる。</b></p>
+  <p>Q/K ベクトルの成分を<b>2 個ずつのペア</b> $(x_{2i}, x_{2i+1})$ に分けます。そして<b>ペア $i$ を、位置 $m$ に比例した角度 $m\theta_i$ だけ回転</b>させます。回転は平面上のふつうの回転行列です。</p>
+  <div class="mj">$$ \begin{pmatrix}x'_{2i}\\ x'_{2i+1}\end{pmatrix} = \begin{pmatrix}\cos m\theta_i & -\sin m\theta_i\\ \sin m\theta_i & \cos m\theta_i\end{pmatrix}\begin{pmatrix}x_{2i}\\ x_{2i+1}\end{pmatrix},\qquad \theta_i = 10000^{-2i/d} $$</div>
+  <p>回転の速さ (角速度) $\theta_i$ は、ペアの番号 $i$ ごとに違います。$i=0$ の最初のペアは速く回り (高周波)、番号が大きいペアはゆっくり回ります (低周波)。ここは第 1 節の sin/cos の波長と同じ発想ですが、<b>足すのではなく回す</b>のが決定的な違いです。</p>
+  <div class="key">
+    <b>回すと何が嬉しいのか。</b>回転はベクトルの<b>長さを変えず向きだけ</b>変えます。そして次章で見るように、<b>回した Q と回した K の内積の位置依存性は「2 つの位置の差 $m-n$」だけ</b>になります (もちろん Q/K の内容にも依存しますが、位置に関しては差だけ)。「絶対何番目か」ではなく「<b>何個離れているか</b>」が自動的に効く ― これが足す方式にできなかったことです。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【体験】位置で回転する Q/K</h2>
+  <p class="lead">まず「位置に応じて回る」を目で見ます。同じベクトルでも、置かれた位置が違えば違う向きを向きます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRot" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">トークン位置 m <input id="rotM" type="range" min="0" max="64" value="8"><span id="rotMv">8</span></div>
+    <div class="slider">回転の速さ θ (周波数) <input id="rotT" type="range" min="5" max="100" value="45"><span id="rotTv"></span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>元のベクトル (位置 0)</span>
+    <span><span class="dot" style="background:#e07a5f"></span>位置 m まで回した後</span>
+  </div>
+  <p>スライダーで<b>位置 m</b> を進めると、ベクトルが時計の針のように回ります。<b>回転の速さ θ</b> を上げると、同じ位置でもぐるぐる速く回る (高周波) ペアになります。RoPE ではこの回転盤が、ヘッドあたりペアの本数だけ (数十枚) 別々の速さで同時に回っている、とイメージしてください。次章で、この回転が内積にどう効くかを見ます。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>なぜ回転が効くのか — 相対位置だけに効く</h2>
+  <p class="lead">RoPE の心臓部です。少しだけ式を追いますが、結論は「引き算 $m-n$ だけが残る」の一点です。</p>
+  <p>Attention のスコアは、Query と Key の<b>内積</b>でした。位置 $m$ の Query を $R_m q$、位置 $n$ の Key を $R_n k$ と書きます ($R$ は前章の回転)。その内積を計算すると、2 つの回転が<b>差し引き</b>されて、$m-n$ による 1 回の回転にまとまります。</p>
+  <div class="mj">$$ \langle R_m\, q,\; R_n\, k\rangle \;=\; q^{\top} R_m^{\top} R_n\, k \;=\; q^{\top} R_{\,n-m}\, k $$</div>
+  <p>回転行列には $R_m^{\top}R_n = R_{n-m}$ という性質があります (同じ平面の回転は角度が足し引きされる)。だからスコアは<b>絶対位置 $m,n$ が消え、相対位置 $n-m$ だけの関数</b>になります。ペアごとに書き下すと、周波数 $\theta_i$ の cos と sin で相対距離を表す形になります (係数 $a_i,b_i$ は Q と K の<b>内容</b>から決まる量で、とくに $b_i$ が「前」と「後」の非対称性を担います)。</p>
+  <div class="mj">$$ \text{score}(m,n) \;=\; \sum_{i} \Big[ a_i \cos\big((n-m)\theta_i\big) + b_i \sin\big((n-m)\theta_i\big) \Big] $$</div>
+  <div class="key">
+    <b>ここが RoPE の勝ち筋。</b>「位置 5 の Query と位置 8 の Key」でも「位置 105 と位置 108」でも、<b>差が 3 なら内積は同じ</b>。モデルは絶対番地を覚える必要がなく、<b>「3 個左の単語」といった相対関係</b>を直接扱えます。しかも回転を掛けるだけなので<b>追加パラメータはゼロ</b>、埋め込みに足し込む必要もありません。次の体験でこの「差だけに効く」を確かめます。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】ずらしても形が変わらない</h2>
+  <p class="lead">Query を位置 m に固定し、Key の位置 n を左右に動かしたときのスコアを描きます。<b>m をずらしても曲線は平行移動するだけ</b>で、形は変わりません。これが「相対位置だけに効く」の見た目です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRel" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">Query の位置 m <input id="relM" type="range" min="0" max="60" value="10"><span id="relMv">10</span></div>
+    <button id="relSeed" class="ghost">別の Q で引き直す</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>スコア = ⟨R<sub>m</sub>q, R<sub>n</sub>q⟩ (Q と K の内容が同じ場合、n を横軸に)</span>
+    <span><span class="dot" style="background:#e07a5f"></span>Query の位置 m</span>
+  </div>
+  <p class="rdout" id="relOut"></p>
+  <p>ここでは Query と Key の内容が同じ場合を描いています。このとき<b>スコアは n = m (相対距離 0) で最大</b>になり、m を動かすと山ごと横にスライドするだけで形は不変です ― これが「<b>絶対位置でなく相対距離だけに効く</b>」ことの見た目です。ピーク付近では、離れるほど各周波数の位相がばらけてスコアが<b>波打ちながら小さく</b>なります。RoFormer 論文は<b>一定の仮定の下でこの依存の減衰 (long-term decay) を上界として示しました</b> (任意の Q/K で単調に減るわけではなく、周波数の少ない本デモでは単調には下がらず起伏が残ります)。なお Q と K の内容が同じこの図では $b_i$ が消えて<b>左右対称</b>になりますが、一般 (Q≠K) には $b_i$ が残るため、モデルは<b>「3 個前」と「3 個後」を区別</b>できます (§4 の $b_i$ がその役割)。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>周波数の階層 — 近くも遠くも見る</h2>
+  <p class="lead">なぜ 1 つの速さでなく、たくさんの周波数を混ぜるのかを押さえます。</p>
+  <p>回転の速さ $\theta_i = 10000^{-2i/d}$ は、ペア番号 $i$ とともに指数的に遅くなります。速いペア (高周波) は<b>約 6 トークンで一周</b>するので<b>ごく近い距離の違い</b>に敏感です。一方で遅いペア (低周波) は<b>数万トークンでやっと一周</b>するので、<b>文書全体のような長距離</b>を表せます。</p>
+  <div class="mj">$$ \text{波長}\;\lambda_i \;=\; \frac{2\pi}{\theta_i} \;=\; 2\pi\cdot 10000^{\,2i/d} \quad(\text{高周波は短く、低周波は長い}) $$</div>
+  <div class="key">
+    <b>周波数を混ぜる意味。</b>時計の秒針 (高周波) だけでは「何時か」が分からず、時針 (低周波) だけでは「何秒か」が分かりません。<b>複数の針を組み合わせて初めて時刻を一意に読める</b>のと同じで、RoPE は高周波から低周波までを束ねることで、<b>近距離の細かさと長距離の広がりを同時に</b>表現します。この「一番遅い針が学習中どこまでしか回っていないか」が、次章で見る文脈長拡張の鍵になります。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>学習長を超えると壊れる — 文脈長の拡張</h2>
+  <p class="lead">RoPE の最大の実務課題が「学習時より長い文を入れると急に性能が落ちる」問題です。まず理由を掴みます。</p>
+  <p>モデルを長さ $L_{\text{train}}$ まで学習したとします。低周波ペアは学習中せいぜい角度 $L_{\text{train}}\theta_i$ までしか回っていません。ところが推論で $L_{\text{train}}$ を超える位置を入れると、回転角が<b>学習中に一度も見たことのない領域</b>へ飛び出します。これが<b>外挿 (extrapolation)</b> で、モデルが混乱してスコアが暴れます。対策は 3 系統あります。</p>
+  <table>
+    <tr><th>手法</th><th>やること</th><th>一言</th></tr>
+    <tr><td><b>PI</b><br>(Position Interpolation)</td><td>位置を一律に $L_{\text{train}}/L_{\text{target}}$ 倍に<b>縮めて</b>から回す。全周波数を同じ比率で圧縮。</td><td>外挿を内挿に変える。少量の追加学習 (約 1000 step) で 32k まで拡張。</td></tr>
+    <tr><td><b>NTK-aware</b><br>(base 変更)</td><td>位置でなく<b>基数 10000 を大きく</b>する。高周波はほぼ据え置き、低周波ほど強く圧縮。</td><td>近距離の解像度を守れる。静的なら微調整なしでもそこそこ動く (Dynamic NTK は長さに応じて動的調整)。</td></tr>
+    <tr><td><b>YaRN</b></td><td>波長ごとに扱いを分け (短波長=そのまま/長波長=内挿/中間=なめらかに補間)、さらに Attention の<b>温度</b>を微調整。</td><td>従来法より<b>学習トークン 1/10・step 1/2.5</b> で高品質。長文モデルの定番。</td></tr>
+  </table>
+  <div class="key">
+    <b>直感。</b>PI は「地図全体を一律に縮小コピー」、NTK は「近所は原寸のまま、遠方だけ縮める」、YaRN は「NTK をさらに丁寧にやり、注目の鋭さも整える」。共通の狙いは、<b>推論時の回転角を「学習中に見た角度の範囲」に収める</b>ことです。ただし静的な NTK-aware では中間の周波数にわずかに学習範囲外の角度が残るため、実際には目標長より少し大きめの倍率が要ります ― YaRN はこの詰めも行います。次の体験でこの違いを見ます。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【体験】外挿 vs 内挿 (PI/NTK/YaRN)</h2>
+  <p class="lead">各手法が周波数ごとに回転速度 θ を何倍に落とすかのグラフです。1 = そのまま、1/s = 最大圧縮。下の 3 本を見比べてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvExt" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-ext="raw" id="extRaw">生 RoPE (外挿)</button>
+    <button class="ghost" data-ext="pi" id="extPI">PI (一律圧縮)</button>
+    <button class="ghost" data-ext="ntk" id="extNTK">NTK-aware (base 変更)</button>
+    <button class="ghost" data-ext="yarn" id="extYaRN">YaRN (帯域別)</button>
+    <div class="slider">拡張倍率 s = L<sub>target</sub>/L<sub>train</sub> <input id="extS" type="range" min="10" max="80" value="40"><span id="extSv"></span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>生 RoPE (圧縮なし)</span>
+    <span><span class="dot" style="background:#7fb2ec"></span>PI (一律圧縮)</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>NTK-aware</span>
+    <span><span class="dot" style="background:#ffd166"></span>YaRN (帯域別)</span>
+  </div>
+  <p class="rdout" id="extOut"></p>
+  <p>横軸は回転ペアの周波数で、<b>左が高周波 (秒針=近距離担当)・右が低周波 (時針=長距離担当)</b>。縦軸は各手法が回転速度 θ を<b>元の何倍に落とすか</b> (1 = そのまま、小さいほど強く圧縮) です。第 6 節の時計の比喩で読んでください。</p>
+  <ul>
+    <li><b>生 RoPE</b> は全周波が 1 のまま。<b>時針 (低周波) を圧縮しない</b>ので、学習長を超えると時針の角度が未知の領域へ伸びて破綻します。</li>
+    <li><b>PI</b> は全周波を一律 $1/s$ に圧縮。安全に収まりますが、<b>秒針 (高周波) まで一緒に鈍らせる</b>ため近距離の解像度が落ちます。</li>
+    <li><b>NTK-aware</b> (緑) は<b>秒針をほぼ 1 のまま残し、時針だけを $1/s$ まで落とす</b>なめらかな曲線。近距離の細かさを保ちながら長距離に対応します。</li>
+    <li><b>YaRN</b> (金) は<b>短波長 (高周波) はそのまま・長波長 (低周波) は $1/s$・中間の帯だけを補間</b>する「帯域別」の形。この波長帯ごとの扱いに加え、Attention の温度も微調整したものです。</li>
+  </ul>
+  <p>スライダーで拡張倍率 $s$ を上げると、圧縮の底 ($1/s$) が下がります。生 (平ら・上) → PI (平ら・下) → NTK (右下がりの曲線) の 3 本を見比べると、「長距離だけ賢く圧縮する」という NTK の狙いが一目で分かります。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>NoPE — そもそも要らない説</h2>
+  <p class="lead">最後に、逆張りの発想を紹介します。「位置符号化なんて、実は無くても動くのでは?」という NoPE です。</p>
+  <p>0 章で「Attention は順序を見ない」と言いましたが、それは<b>双方向</b>の場合の話です。GPT のような<b>デコーダ専用モデルは因果マスク (causal mask)</b> を使い、各トークンは<b>自分より前だけ</b>を見ます。この<b>非対称性そのものが順序の情報を漏らします</b>。たとえば「先頭のトークンは自分自身しか見えない」「$k$ 番目は自分を含めて $k$ 個しか見えない」— この「見える個数」から、モデルは実質的に位置を復元できるのです。</p>
+  <p>Kazemnejad ら (2023) は、この<b>NoPE (No Positional Encoding)</b> を理論と実験の両面で調べ、次を示しました。</p>
+  <ul>
+    <li>NoPE は理論上、<b>絶対位置も相対位置も表現できる</b> (表現力の面で不利ではない)。</li>
+    <li>学習後の Attention は、自然と <b>T5 型の相対位置</b> (距離ごとに学習したバイアスをスコアに足す方式) に似たパターンになる。</li>
+    <li>彼らの推論・アルゴリズム系タスクでは、<b>学習より長い入力への汎化 (length generalization) が ALiBi・RoPE・絶対 PE より良かった</b>。</li>
+  </ul>
+  <div class="warn">
+    <b>ただし万能ではありません。</b>この結果は主に<b>デコーダ専用</b>かつ<b>特定の推論系タスク</b>での話です。実運用の大規模 LLM の多くは、依然として RoPE (＋ YaRN 系の拡張) を採用しています。NoPE の教訓は「位置符号化を捨てよ」ではなく、<b>「因果マスクが既にかなりの位置情報を与えている」</b>という設計上の気づきにあります。
+  </div>
+  <h3>参考 ― もう 1 つの相対系: ALiBi</h3>
+  <p>RoPE と並んでよく比較されるのが <b>ALiBi</b> (Press ら 2021) です。こちらは回転もベクトル加算もせず、<b>Attention スコアに「距離が離れるほど大きくなるペナルティ」を直接引く</b>だけの手法です。実装が極めて単純で、学習長を超える外挿にも比較的強いのが売りでした。RoPE (回転で相対を表す) と ALiBi (減点で相対を表す) は、<b>「相対位置をどう注入するか」の 2 つの流儀</b>として覚えておくと整理できます。</p>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>まとめ</h2>
+  <p class="lead">位置符号化の系譜を一枚に畳みます。</p>
+  <table>
+    <tr><th>方式</th><th>注入の仕方</th><th>相対距離</th><th>長文への強さ</th></tr>
+    <tr><td>Sinusoidal / 学習型 APE</td><td>位置ベクトルを埋め込みに<b>足す</b></td><td>スコアに素直に出ない</td><td>弱い (学習型は学習長で頭打ち、sinusoidal も超えると劣化)</td></tr>
+    <tr><td><b>RoPE</b></td><td>Q/K を位置角で<b>回す</b> (追加パラメータ 0)</td><td>内積が $n-m$ だけの関数</td><td>拡張法 (PI/NTK/YaRN) で対応</td></tr>
+    <tr><td>ALiBi</td><td>スコアに距離ペナルティを<b>引く</b></td><td>ペナルティが距離に比例</td><td>外挿に比較的強い</td></tr>
+    <tr><td><b>NoPE</b></td><td><b>何も足さない</b> (因果マスク頼み)</td><td>暗黙に表現 (T5 相対に類似)</td><td>推論系タスクで良好との報告</td></tr>
+  </table>
+  <div class="key">
+    <b>持ち帰り。</b>位置符号化の歴史は<b>「絶対 → 相対 → いっそ暗黙に」</b>という流れで読めます。RoPE の核心は<b>「足すのでなく回す」</b>ことで内積を相対距離 $n-m$ の関数に変えた点にあり、長文対応の PI・NTK・YaRN はいずれも<b>「回転角を学習で見た範囲に収める」</b>工夫です。次に「このモデルは 128k コンテキスト対応」と聞いたら、<b>「RoPE の base をいじったの? YaRN で微調整したの?」</b>と中身を推測できるようになれば、この回は成功です。
+  </div>
+  <div class="fn">
+    主要参照: Vaswani et al. 2017 "Attention Is All You Need" (<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">arXiv:1706.03762</a>) / Su et al. 2021 RoFormer=RoPE (<a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener">arXiv:2104.09864</a>) / Press et al. 2021 ALiBi (<a href="https://arxiv.org/abs/2108.12409" target="_blank" rel="noopener">arXiv:2108.12409</a>) / Chen et al. 2023 Position Interpolation (<a href="https://arxiv.org/abs/2306.15595" target="_blank" rel="noopener">arXiv:2306.15595</a>) / Kazemnejad et al. 2023 NoPE (<a href="https://arxiv.org/abs/2305.19466" target="_blank" rel="noopener">arXiv:2305.19466</a>) / Peng et al. 2023 YaRN (<a href="https://arxiv.org/abs/2309.00071" target="_blank" rel="noopener">arXiv:2309.00071</a>)。NTK-aware scaling はコミュニティ (bloc97) 発の手法。<br>
+    注意: 本ページのアニメーションは直感を伝えるための<b>模式的な実装</b>で、次元数や係数は説明用に小さくしています。厳密な定義・数値は各原論文を参照してください。なお $\theta_i$ の添字は本記事では 0-indexed ($i=0,\dots,d/2-1$) で書いています (RoFormer 原論文は 1-indexed 表記)。
+  </div>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+// ============ デモ1: 位置で回転 ============
+(function(){
+  const cv=document.getElementById('cvRot'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,cx=W/2,cy=H/2,R=150;
+  let m=8,theta=0.45;
+  const bx=0.7,by=0.35; // 元ベクトル(単位化前)
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // 目盛り円
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let r=R/3;r<=R;r+=R/3){ct.beginPath();ct.arc(cx,cy,r,0,7);ct.stroke();}
+    ct.strokeStyle='rgba(143,214,180,0.3)';ct.beginPath();ct.moveTo(cx-R-20,cy);ct.lineTo(cx+R+20,cy);
+    ct.moveTo(cx,cy-R-20);ct.lineTo(cx,cy+R+20);ct.stroke();
+    const nrm=Math.hypot(bx,by),ux=bx/nrm,uy=by/nrm;
+    // 元ベクトル
+    arrow(cx,cy,cx+ux*R,cy-uy*R,'#8fd6b4',3);
+    // 回した後
+    const ang=m*theta;
+    const rx=ux*Math.cos(ang)-uy*Math.sin(ang), ry=ux*Math.sin(ang)+uy*Math.cos(ang);
+    // 軌跡(0→m)
+    ct.strokeStyle='rgba(224,122,95,0.35)';ct.lineWidth=1.5;ct.beginPath();
+    for(let s=0;s<=m;s+=0.25){const a=s*theta;const px=ux*Math.cos(a)-uy*Math.sin(a),py=ux*Math.sin(a)+uy*Math.cos(a);
+      const X=cx+px*R,Y=cy-py*R;(s===0)?ct.moveTo(X,Y):ct.lineTo(X,Y);}ct.stroke();
+    arrow(cx,cy,cx+rx*R,cy-ry*R,'#e07a5f',3.4);
+    ct.fillStyle=INK;ct.font='15px sans-serif';ct.textAlign='left';
+    ct.fillText('回転角 m·θ = '+(ang).toFixed(2)+' rad  ( ≈ '+(ang/Math.PI).toFixed(2)+'π )',20,30);
+    ct.fillStyle=SUBI;ct.fillText('長さは不変。向きだけが位置 m に応じて回る',20,H-20);
+  }
+  function arrow(x1,y1,x2,y2,col,w){ct.strokeStyle=col;ct.fillStyle=col;ct.lineWidth=w;
+    ct.beginPath();ct.moveTo(x1,y1);ct.lineTo(x2,y2);ct.stroke();
+    const a=Math.atan2(y2-y1,x2-x1);ct.beginPath();ct.moveTo(x2,y2);
+    ct.lineTo(x2-Math.cos(a-0.4)*12,y2-Math.sin(a-0.4)*12);ct.lineTo(x2-Math.cos(a+0.4)*12,y2-Math.sin(a+0.4)*12);
+    ct.closePath();ct.fill();}
+  document.getElementById('rotM').oninput=function(){m=+this.value;document.getElementById('rotMv').textContent=m;draw();};
+  document.getElementById('rotT').oninput=function(){theta=+this.value/100;document.getElementById('rotTv').textContent='θ='+theta.toFixed(2);draw();};
+  document.getElementById('rotTv').textContent='θ='+theta.toFixed(2);
+  draw();
+})();
+
+// ============ デモ2: 相対位置だけに効く ============
+(function(){
+  const cv=document.getElementById('cvRel'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:60,r:24,t:28,b:48};
+  const D=16,base=400; // ペア数 D、周波数基数
+  let m=10,q=[],th=[],gLo=0,gHi=1;
+  function rot(v,a){const c=Math.cos(a),s=Math.sin(a);return [v[0]*c-v[1]*s, v[0]*s+v[1]*c];}
+  // k = q の場合。R(mθ)q と R(nθ)q を別々に作ってから内積 → 相対位置性は「導出の帰結」として現れる
+  function score(mm,nn){let s=0;for(let i=0;i<D;i++){const a=rot(q[i],mm*th[i]),b=rot(q[i],nn*th[i]);
+    s+=a[0]*b[0]+a[1]*b[1];}return s;}
+  function seed(){q=[];th=[];for(let i=0;i<D;i++){q.push([randn(),randn()]);
+    th.push(Math.pow(base,-i/(D-1)));}
+    // y スケールは相対距離 δ の全域 [-64,64] で一度だけ固定 (m を動かしても形が変わらないように)
+    gLo=Infinity;gHi=-Infinity;for(let dd=-64;dd<=64;dd+=0.5){const v=score(0,dd);gLo=Math.min(gLo,v);gHi=Math.max(gHi,v);}
+    const p=(gHi-gLo)*0.12||1;gLo-=p;gHi+=p;}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;const N0=0,N1=64;
+    const lo=gLo,hi=gHi;const pts=[];
+    for(let n=N0;n<=N1;n+=0.5){pts.push([n,score(m,n)]);}
+    function X(n){return pad.l+(n-N0)/(N1-N0)*pw;}
+    function Y(v){return pad.t+(1-(v-lo)/(hi-lo))*ph;}
+    // 軸
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();
+    // 0 線
+    ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(pad.l,Y(0));ct.lineTo(W-pad.r,Y(0));ct.stroke();
+    // m の縦線
+    ct.strokeStyle='rgba(224,122,95,0.6)';ct.setLineDash([5,4]);ct.beginPath();ct.moveTo(X(m),pad.t);ct.lineTo(X(m),H-pad.b);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#e07a5f';ct.font='13px sans-serif';ct.textAlign='center';ct.fillText('n = m ('+m+')',X(m),pad.t+14);
+    // 曲線
+    ct.strokeStyle='#8fd6b4';ct.lineWidth=2.6;ct.beginPath();
+    pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]);i?ct.lineTo(x,y):ct.moveTo(x,y);});ct.stroke();
+    ct.fillStyle=SUBI;ct.font='14px sans-serif';ct.textAlign='center';ct.fillText('Key の位置 n',pad.l+pw/2,H-14);
+    ct.save();ct.translate(18,pad.t+ph/2);ct.rotate(-Math.PI/2);ct.fillText('Attention スコア',0,0);ct.restore();
+    document.getElementById('relOut').textContent='ピークは n = m (相対距離 0)。m を動かしても曲線は平行移動するだけで形は不変 (= 相対距離 n−m だけで決まる)';
+  }
+  document.getElementById('relM').oninput=function(){m=+this.value;document.getElementById('relMv').textContent=m;draw();};
+  document.getElementById('relSeed').onclick=function(){seed();draw();};
+  seed();m=10;draw();
+})();
+
+// ============ デモ3: 周波数ごとの圧縮率 (外挿 vs 内挿) ============
+(function(){
+  const cv=document.getElementById('cvExt'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:64,r:24,t:30,b:54};
+  const d=64,nPairs=d/2;      // ペア数 (32)
+  let mode='raw',s=4.0;
+  // θ'/θ (圧縮率) を周波数(ペア番号 i)ごとに返す。i=0 高周波 … i=nPairs-1 低周波
+  function ratio(i,mode){
+    if(mode==='pi')return 1/s;
+    if(mode==='ntk')return Math.pow(s,-2*i/(d-2));   // i=0→1, i=nPairs-1→1/s
+    if(mode==='yarn'){                               // 帯域別 (NTK-by-parts の模式): 短波長=1 / 長波長=1/s / 中間だけ補間
+      const lo=nPairs*0.28, hi=nPairs*0.72;
+      if(i<=lo)return 1; if(i>=hi)return 1/s;
+      return 1+(1/s-1)*(i-lo)/(hi-lo);
+    }
+    return 1;                                        // raw
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    function X(i){return pad.l+i/(nPairs-1)*pw;}
+    function Y(r){return pad.t+(1-r)*ph;}            // r:0..1
+    // グリッド + y 目盛り
+    ct.strokeStyle=GRID;ct.lineWidth=1;ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='right';
+    [0,0.25,0.5,0.75,1].forEach(r=>{const y=Y(r);ct.beginPath();ct.moveTo(pad.l,y);ct.lineTo(W-pad.r,y);ct.stroke();
+      ct.fillText('×'+r.toFixed(2),pad.l-8,y+4);});
+    // 1/s の底ライン
+    ct.strokeStyle='rgba(127,178,236,0.5)';ct.setLineDash([4,4]);ct.beginPath();ct.moveTo(pad.l,Y(1/s));ct.lineTo(W-pad.r,Y(1/s));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#7fb2ec';ct.textAlign='left';ct.fillText('圧縮の底 1/s = '+(1/s).toFixed(3),pad.l+8,Y(1/s)-6);
+    // 軸
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();
+    // 3 本の線 (選択中を濃く)
+    function line(mm,col){ct.strokeStyle=col;ct.lineWidth=(mm===mode)?3.2:1.6;ct.globalAlpha=(mm===mode)?1:0.4;
+      ct.beginPath();for(let i=0;i<nPairs;i++){const x=X(i),y=Y(Math.min(1,ratio(i,mm)));i?ct.lineTo(x,y):ct.moveTo(x,y);}ct.stroke();ct.globalAlpha=1;}
+    line('raw','#e07a5f');line('pi','#7fb2ec');line('ntk','#8fd6b4');line('yarn','#ffd166');
+    // 軸ラベル
+    ct.fillStyle=SUBI;ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText('高周波・秒針 (近距離担当)  ←  周波数ペア i  →  低周波・時針 (長距離担当)',pad.l+pw/2,H-14);
+    ct.save();ct.translate(18,pad.t+ph/2);ct.rotate(-Math.PI/2);ct.fillText('回転速度 θ を何倍に落とすか',0,0);ct.restore();
+    const rHi=ratio(0,mode),rLo=ratio(nPairs-1,mode);
+    const label=mode==='raw'?'生 RoPE: ':mode==='pi'?'PI: ':mode==='ntk'?'NTK-aware: ':'YaRN: ';
+    const note=mode==='raw'?' → 時針を圧縮しないので長距離で破綻':mode==='pi'?' → 全部一律。秒針まで鈍り近距離解像度が低下':
+      mode==='ntk'?' → 秒針は温存、時針だけ圧縮':' → 短波長=そのまま/長波長=1/s、中間だけ補間する帯域別';
+    document.getElementById('extOut').textContent=
+      label+'高周波(秒針) ×'+rHi.toFixed(2)+' / 低周波(時針) ×'+rLo.toFixed(2)+note;
+  }
+  function setMode(mm,btn){mode=mm;document.querySelectorAll('[data-ext]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('extRaw').onclick=function(){setMode('raw',this);};
+  document.getElementById('extPI').onclick=function(){setMode('pi',this);};
+  document.getElementById('extNTK').onclick=function(){setMode('ntk',this);};
+  document.getElementById('extYaRN').onclick=function(){setMode('yarn',this);};
+  document.getElementById('extS').oninput=function(){s=+this.value/10;document.getElementById('extSv').textContent='×'+s.toFixed(1);draw();};
+  document.getElementById('extSv').textContent='×'+s.toFixed(1);
+  draw();
+})();
+</script>
+</body>
+</html>

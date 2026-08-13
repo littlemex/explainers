@@ -24,6 +24,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 2. [FFN to MoE](./ffn-moe-explainer.html) — the FFN workhorse vs. sparsely-activated MoE, and the GEMM-inefficiency → block-sparse (MegaBlocks) story
 3. [RMSNorm](./rmsnorm-explainer.html) — why dropping the mean keeps quality while simplifying the implementation; cost and fused-kernel effects vs. LayerNorm
 4. [Flow Matching](./flow-matching-explainer.html) — watch noise flow into data, and see how averaging straight-line paths yields the correct velocity field
+5. [Positional encoding: RoPE and NoPE](./rope-explainer.html) — why attention ignores order, how RoPE rotates Q/K so the dot product depends only on relative distance, the frequency hierarchy, context extension (PI/NTK/YaRN), and the NoPE "maybe you don't need it" result
 
 ## How it works
 
