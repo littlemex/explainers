@@ -8,6 +8,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 
 | Series | Topic | Entry |
 |--------|-------|-------|
+| Paper reading | Reading one notable paper/blog post at a time — background, core equations, and conclusions in a single beginner-friendly, interactive page (first: Lilian Weng's scaling laws) | [paper-index.html](./paper-index.html) |
 | ML basics | Transformer building blocks (Attention, FFN/MoE, normalization) and Flow Matching, each explained from scratch with live animations | [ml-basics-index.html](./ml-basics-index.html) |
 | Attention lineage | MHA to GQA/MLA, sparsification (SWA/DSA), and linear/state-space models (Mamba), traced along a release-time family tree | [attention-series-index.html](./attention-series-index.html) |
 | NKI Workshop | Writing high-performance kernels on AWS Trainium — hardware hierarchy, roofline, FlashAttention, tiling, low precision, collectives | [nki-workshop-index.html](./nki-workshop-index.html) |

@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スケーリング則をていねいに読む — Kaplan と Chinchilla の間で</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --kap:#e07a5f;   /* Kaplan 系 (橙) */
+    --chi:#3d7dca;   /* Chinchilla 系 (青) */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:170px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 1 回</p>
+  <h1>スケーリング則をていねいに読む</h1>
+  <p>「モデルを大きくすると賢くなる」を、動かしながら数式まで理解する</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">元記事は Lilian Weng 氏のブログ記事「Scaling Laws, Carefully」です。スケーリング則の歴史から実務上の落とし穴までを丁寧に追った解説を、初学者向けに絵と動きで噛み砕きます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    スケーリング則 (scaling law) とは「<b>モデルを大きく・データを多く・計算を多くすれば、損失 (loss) はどれだけ下がるか</b>」を<b>べき乗則 (power law)</b> という単純な式で予言できる、という発見です。これがあると、小さな実験だけで「10 倍の計算を積んだら損失はいくつになるか」を<b>事前に見積もれる</b>ので、巨大モデルへ投資する前に設計を決められます。
+  </div>
+  <p>ただし元記事のタイトルに <b>Carefully (ていねいに)</b> と付くのが肝です。この予言は強力ですが、<b>パラメータの数え方・丸め方・当てはめる範囲</b>といった一見どうでもいい手続きの違いで、予測が大きくブレます。この記事ではその両面 ― <b>なぜ効くのか</b> と <b>どこで足をすくわれるのか</b> ― を体験します。</p>
+  <div class="toc">
+    <a href="#s1">1. 3 つの量 N・D・C と「べき乗則」</a>
+    <a href="#s2">2. 【体験】log-log で見ると直線になる</a>
+    <a href="#s3">3. なぜ計算量は C ≈ 6ND なのか</a>
+    <a href="#s4">4. Kaplan (2020) — 大きくするなら「モデル優先」</a>
+    <a href="#s5">5. Chinchilla (2022) — 「モデルとデータは等分」</a>
+    <a href="#s6">6. 【体験】IsoFLOP の谷が最適点を教える</a>
+    <a href="#s7">7. なぜ 2 つは食い違ったのか</a>
+    <a href="#s8">8. そもそも、なぜべき乗則になるのか</a>
+    <a href="#s9">9. データが足りないとき — 繰り返しの逓減</a>
+    <a href="#s10">10. 【体験】ていねいさが命 — 予測が激変する</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>3 つの量 N・D・C と「べき乗則」</h2>
+  <p class="lead">まず登場人物を揃えます。スケーリング則はたった 3 つの量と、1 つの下限で語れます。</p>
+  <table>
+    <tr><th>記号</th><th>意味</th><th>単位のイメージ</th></tr>
+    <tr><td><span class="tag">N</span></td><td>モデルの<b>パラメータ数</b> (重みの個数)</td><td>7B, 70B, 280B …</td></tr>
+    <tr><td><span class="tag">D</span></td><td>学習に使う<b>データ量</b> (トークン数)</td><td>300B, 1.4T …</td></tr>
+    <tr><td><span class="tag">C</span></td><td>学習にかける<b>計算量</b> (FLOPs)</td><td>C ≈ 6ND</td></tr>
+    <tr><td><span class="tag">E</span></td><td>どれだけ頑張っても超えられない<b>損失の下限</b> (既約誤差)</td><td>言語そのものの予測不能性など</td></tr>
+    <tr><td><span class="tag">L</span></td><td>テスト/学習の<b>損失</b> (小さいほど賢い)</td><td>予測したい対象</td></tr>
+  </table>
+  <p>これらをつなぐのが<b>べき乗則</b>です。たとえばパラメータ数 N だけを増やしたときの損失は、おおよそ次の形になります。E は「これ以上は下がらない床」です。</p>
+  <div class="mj">$$ L(N) \;\approx\; \frac{A}{N^{\alpha}} \;+\; E $$</div>
+  <p>N が大きくなると第 1 項 $A/N^{\alpha}$ がゆっくり小さくなり、損失は $E$ に近づいていきます。データ D についても、両方を同時に動かしたときも、同じ「べき乗 + 床」の形で書けることが分かっています (Rosenfeld ら 2020 が N と D を 1 つの式に統合しました)。</p>
+  <div class="mj">$$ \hat{L}(N,D) \;\approx\; \frac{A}{N^{\alpha}} \;+\; \frac{B}{D^{\beta}} \;+\; E $$</div>
+  <div class="key">
+    べき乗則の<b>べき (exponent)</b> $\alpha,\beta$ が「増やしたときの効きやすさ」を、$E$ が「到達できる限界」を決めます。スケーリング則の研究とは、要するに<b>この $A,B,\alpha,\beta,E$ を小さな実験から当てて、大きな世界を予言する</b>営みです。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】log-log で見ると直線になる</h2>
+  <p class="lead">べき乗則の「気持ち」は、軸を対数 (log) にすると一発で掴めます。曲がっていた線がまっすぐになります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvPow" width="840" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-ax="loglog" id="axLog">両対数 (log-log)</button>
+    <button class="ghost" data-ax="linear" id="axLin">ふつうの軸 (linear)</button>
+    <div class="slider">べき α <input id="powA" type="range" min="20" max="90" value="50"><span id="powAv">0.50</span></div>
+    <div class="slider">床 E <input id="powE" type="range" min="0" max="120" value="40"><span id="powEv">0.40</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>損失 L(C) = A/C<sup>α</sup> + E</span>
+    <span><span class="dot" style="background:#f0a58e"></span>床 E (これ以上下がらない)</span>
+  </div>
+  <p><b>両対数</b>にすると、床 E を無視できる領域では点がきれいな<b>直線</b>に乗ります。この直線の<b>傾きがべき α</b> です。だから研究者は測定結果を log-log 紙にプロットし、直線を引いて傾きを読むだけで「増やしたときの効き」を推定できます。</p>
+  <p>ところが<b>床 E に近づくと直線が下に曲がって寝ていきます</b>。E スライダーを上げると、早い段階で直線が崩れるのが見えるはずです。<b>この「曲がり」を見落とすと予測を外す</b> ― これが 10 章の落とし穴の伏線です。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>なぜ計算量は C ≈ 6ND なのか</h2>
+  <p class="lead">計算量 C を N と D で表せると、話が一気に見通しよくなります。この 6 という数字の出どころを押さえます。</p>
+  <p>Transformer では、1 個のパラメータは 1 トークンを処理するたびに「掛けて足す」を行います。ざっくり<b>順伝播 (forward) で 1 パラメータあたり 2 回、逆伝播 (backprop) で 4 回</b>の演算が必要で、合わせて 1 トークン 1 パラメータあたり<b>約 6 FLOPs</b> です。</p>
+  <div class="mj">$$ C \;\approx\; \underbrace{6}_{\text{fwd 2 + bwd 4}} \times \underbrace{N}_{\text{パラメータ数}} \times \underbrace{D}_{\text{トークン数}} $$</div>
+  <div class="key">
+    この式の意味は<b>「計算予算 C を決めると、N と D はトレードオフになる」</b>ということです。C を固定すると $N \times D$ が一定になり、<b>モデルを大きくすれば学習トークンは減り、逆もまた然り</b>。次章からの主役は、まさに<b>「決まった C を N と D にどう配分するか」</b>という問いです。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>Kaplan (2020) — 大きくするなら「モデル優先」</h2>
+  <p class="lead">スケーリング則を有名にしたのが OpenAI の Kaplan ら (2020) です。まず彼らの結論を押さえます。</p>
+  <p>Kaplan らは、N・D・C のいずれを増やしても損失がべき乗則で下がることを丁寧に測り、N と D を 1 つの式に結合しました。</p>
+  <div class="mj">$$ \hat{L}(N,D) \;=\; \left[\left(\frac{a}{N}\right)^{\frac{\alpha}{\beta}} + \frac{b}{D}\right]^{\beta} $$</div>
+  <p>そして「計算予算 C を最大限に活かす配分」を求めた結果、<b>モデルサイズをデータより速く伸ばすべき</b>だと結論しました。最適なモデルサイズ $N_{opt}$ は計算量 C の 0.73 乗に比例します。</p>
+  <div class="mj">$$ N_{opt} \;\propto\; C^{0.73} $$</div>
+  <div class="key">
+    <b>Kaplan の処方箋。</b>計算を 10 倍に増やせるなら、<b>モデルは約 5.5 倍</b>に大きくし、<b>学習トークンは 1.8 倍</b>だけ増やせばよい。つまり<b>「とにかく大きいモデルを、そこそこのデータで」</b>。この教えに従って、当時は巨大でデータ控えめなモデル (例: 280B パラメータの Gopher を 300B トークンで学習) が次々に作られました。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>Chinchilla (2022) — 「モデルとデータは等分」</h2>
+  <p class="lead">2 年後、DeepMind の Hoffmann ら (Chinchilla 論文) が「その配分は偏りすぎ」と異を唱えます。</p>
+  <p>彼らは 70M〜16B パラメータ、5B〜500B トークンにわたって <b>400 以上のモデル</b>を学習し、3 つの独立な方法で最適配分を求めました。結論は Kaplan と大きく違いました。</p>
+  <ol class="steps">
+    <li><b>モデルを固定してトークンを変える。</b>各サイズで学習曲線を描き、計算量ごとの最小損失を拾う。</li>
+    <li><b>IsoFLOP プロファイル。</b>計算予算 C を固定し、損失をパラメータ数 N に対してプロット。谷の底が「その予算での最適 N」(6 章で体験)。</li>
+    <li><b>式を直接当てはめる。</b>$\hat{L}=E+A/N^{\alpha}+B/D^{\beta}$ を全データに最小二乗的に当てはめる。</li>
+  </ol>
+  <p>3 手法すべてが同じ答えを出しました。<b>モデルとデータは等しい割合で伸ばすべき</b>、すなわち $N_{opt}$ は C の 0.5 乗に比例します。</p>
+  <div class="mj">$$ N_{opt} \;\propto\; C^{0.5}, \qquad N_{opt} \;=\; \left(\frac{\alpha A}{\beta B}\right)^{\frac{1}{\alpha+\beta}}\left(\frac{C}{6}\right)^{\frac{\beta}{\alpha+\beta}} $$</div>
+  <p>右の式で、当てはめた結果 $\alpha \approx \beta$ だったことがポイントです。両者がほぼ等しいと、<b>N と D を同じ速さで伸ばすのが最適</b>になります。計算を 10 倍にするなら、モデルもデータも $\sqrt{10}\approx 3.2$ 倍ずつ、というバランスです。</p>
+  <div class="key">
+    <b>決定打。</b>同じ計算予算のもとで、<b>Chinchilla (70B パラメータ・1.4T トークン)</b> は <b>Gopher (280B・300B トークン)</b> を上回りました。「大きすぎるモデルにデータが足りていなかった」わけです。以後「モデルサイズ ≒ トークン数を 20 倍程度」という Chinchilla 最適が業界の常識になりました。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】IsoFLOP の谷が最適点を教える</h2>
+  <p class="lead">Chinchilla の手法 2 を動かします。計算予算を固定して N を振ると、損失は U 字を描き、その<b>谷の底</b>が最適なモデルサイズです。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvIso" width="840" height="460"></canvas>
+  </div>
+  <div class="controls">
+    <button id="isoAdd" class="ghost">予算を 1 つ追加</button>
+    <button id="isoReset" class="ghost">リセット</button>
+    <div class="slider">計算予算 C <input id="isoC" type="range" min="0" max="100" value="20"><span id="isoCv"></span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>各予算での損失曲線 (U 字)</span>
+    <span><span class="dot" style="background:#ffd166"></span>各谷の底 = その予算の最適 N</span>
+    <span><span class="dot" style="background:#f0a58e"></span>谷を結んだ「計算最適の道」</span>
+  </div>
+  <p>スライダーで予算を変えると、谷の底 (黄色の点) が右へ移動します。<b>予算が増えるほど最適な N も大きくなる</b> ― これが $N_{opt}\propto C^{p}$ の正体です。「予算を 1 つ追加」で複数の谷を並べると、底を結んだ線 (橙) が現れます。この線の傾きが<b>べき p</b> で、Chinchilla ではおよそ 0.5 になります。</p>
+  <div class="warn">
+    <b>ここが Kaplan と Chinchilla の争点。</b>同じ U 字の谷でも、<b>底の見つけ方・当てはめ方・実験の広さ</b>が違うと、結ぶ線の傾き (p) が 0.5 にも 0.73 にもなり得ます。「谷は見えているのに結論が違う」― 次章でその理由を解きます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>なぜ 2 つは食い違ったのか</h2>
+  <p class="lead">同じ現象を測ったのに、なぜ Kaplan (0.73) と Chinchilla (0.5) は違う答えを出したのでしょう。主因は 2 つあります。</p>
+  <h3>理由 1 — 実験のスケールが違った</h3>
+  <p>Kaplan らは相対的に<b>小さいモデル</b>で当てはめ、Chinchilla は<b>約 10 倍大きい</b>スケールまで測りました。log-log の世界では、<b>小さな当てはめの誤差が、遠くへ外挿すると大きくズレます</b>。2 章で E スライダーを上げたときに直線が寝たように、小規模域だけを見た直線は大規模域を過大評価しがちです。</p>
+  <h3>理由 2 — 埋め込みパラメータの数え方</h3>
+  <p>Pearce &amp; Song (2024) が指摘したのは、<b>小さいモデルほど埋め込み (embedding) パラメータの割合が大きい</b>という単純な事実です。N に埋め込みを含めるか否かで、小規模側の点が上下にずれ、傾きが変わります。彼らは埋め込みを分けて数えると、<b>Kaplan の 0.73 が大規模側で Chinchilla の 0.5 に収束する</b>ことを示しました。</p>
+  <div class="mj">$$ N \;=\; N_{\setminus E} \;+\; \omega\, N_{\setminus E}^{1/3} $$</div>
+  <div class="key">
+    <b>和解。</b>両者は矛盾していたのではなく、<b>「何を N と数えるか」と「どのスケールで当てはめたか」の違い</b>でした。ベき乗則は<b>局所的には</b>成り立つが、<b>グローバルに 1 本の直線</b>ではない ― この認識が「ていねいに (carefully)」の核心です。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>そもそも、なぜべき乗則になるのか</h2>
+  <p class="lead">「測ったらべき乗則だった」だけでは気持ち悪いので、理由の仮説を 2 つだけ、直感で紹介します。</p>
+  <h3>仮説 A — 低次元多様体の細分割 (Sharma &amp; Kaplan 2020)</h3>
+  <p>言語データは、見かけほど高次元ではなく<b>低次元の曲面 (多様体) の上に乗っている</b>と考えます。モデルを大きくすると、この曲面を<b>より細かく区切って近似</b>できます。区切りを細かくするほど誤差が下がる速さが、ちょうど $O(N^{-1/d})$ というべき乗則になります ($d$ は多様体の実効次元)。</p>
+  <h3>仮説 B — スキルが「量子」で身につく (Michaud ら 2023)</h3>
+  <p>知識やスキルは連続にではなく<b>離散のかたまり (quanta)</b> として獲得され、それぞれの<b>出現頻度がべき乗分布</b>に従う、という見方です。頻度順にスキルを 1 つずつ習得していくと、損失の平均的な減り方がなめらかなべき乗則になります。</p>
+  <div class="key">
+    どちらも<b>「たくさんある小さな要素を、頻度順・細かさ順に取り込んでいく」</b>と自然にべき乗則が出る、という筋です。厳密な証明ではなく仮説ですが、<b>べき乗則が偶然ではなく構造から来る</b>ことの手触りが得られます。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>データが足りないとき — 繰り返しの逓減</h2>
+  <p class="lead">Chinchilla 最適は「もっとデータを」と言いますが、現実には良質なデータは有限です。同じデータを繰り返し学習するとどうなるでしょう。</p>
+  <p>Muennighoff ら (2023) は、繰り返して学習したトークンの価値が<b>指数的に減衰する</b>ことを定式化しました。ユニークなトークン数を $U_D$、繰り返し回数を $R_D$ とすると、実効的なデータ量 $D'$ は次のように頭打ちになります。</p>
+  <div class="mj">$$ D' \;=\; U_D \;+\; U_D\, r_D\left(1 - e^{-R_D/r_D}\right) $$</div>
+  <div class="canvas-wrap">
+    <canvas id="cvRep" width="840" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">繰り返しの効きめ r<sub>D</sub> <input id="repR" type="range" min="5" max="60" value="15"><span id="repRv">15</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>実効データ量 D'</span>
+    <span><span class="dot" style="background:#f0a58e"></span>「本当に新しいデータなら」の理想線</span>
+  </div>
+  <p>最初の数エポックは実効データがぐんと増えますが、繰り返すほど<b>1 周あたりの価値が減り、やがて水平に張り付きます</b>。理想線 (新しいデータを足し続けた場合) との差が、繰り返しの<b>損</b>です。Lovelace ら (2026) はさらに、過学習の罰則項を加えてこれを精緻化しました (下式)。$N/U_D$ が大きい、つまり<b>データに対してモデルが大きすぎる</b>ほど罰が重くなります。</p>
+  <div class="mj">$$ \hat{L} \;=\; E + \frac{A}{N^{\alpha}} + \frac{B}{\big(U_D(1+R_D)\big)^{\beta}} + P\cdot R_D^{\delta}\left(\frac{N}{U_D}\right)^{\kappa} $$</div>
+  <div class="key">
+    <b>教訓。</b>データが限られる領域では、Chinchilla の単純な「等分」から外れます。<b>むやみに繰り返すより、モデルを少し小さくするか、新しいデータを取りに行くほうが得</b>になることがある、と式が教えてくれます。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>【体験】ていねいさが命 — 予測が激変する</h2>
+  <p class="lead">元記事の一番の警告です。<b>当てはめる範囲やノイズのわずかな違いで、遠くへの予測が大きく変わります</b>。おもちゃで体感しましょう。</p>
+  <p>下の図は、ある「真のべき乗則 + 床」に沿って測定した点 (ノイズ入り) です。<b>小さいモデルだけで当てはめた直線 (橙)</b> と <b>全範囲で当てはめた直線 (青)</b> を、右端の巨大な計算量まで外挿します。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvSens" width="840" height="460"></canvas>
+  </div>
+  <div class="controls">
+    <button id="sensRe" class="ghost">別のノイズで引き直す</button>
+    <div class="slider">測定ノイズ <input id="sensN" type="range" min="0" max="100" value="35"><span id="sensNv"></span></div>
+    <div class="slider">小規模側の当てはめ範囲 <input id="sensK" type="range" min="20" max="70" value="40"><span id="sensKv"></span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>測定点</span>
+    <span><span class="dot" style="background:#f0a58e"></span>小規模のみ当てはめ → 外挿</span>
+    <span><span class="dot" style="background:#7fb2ec"></span>全範囲で当てはめ → 外挿</span>
+  </div>
+  <p class="rdout" id="sensOut"></p>
+  <p>2 本の外挿が、右端で大きく開くのが見えるはずです。<b>床 E の曲がりを含む全範囲を見た青</b>のほうが現実的で、<b>小規模の直線だけを信じた橙</b>は損失を過度に楽観 (または悲観) します。ノイズを上げると、同じデータでも当てはめ次第で結論がぶれます。</p>
+  <div class="warn">
+    <b>現実の落とし穴 (Besiroglu ら 2024)。</b>Chinchilla の手法 3 の再検証では、<b>Huber 損失を「合計」でなく「平均」してしまった</b>ために最適化 (L-BFGS) が早期終了し、さらに<b>べき $\alpha,\beta$ を小数 2 桁で丸めた</b>ことで推定が食い違っていた、と分かりました。<b>丸め誤差にしか見えない選択が、桁違いの予測差を生む</b> ― これがタイトルの Carefully の意味です。
+  </div>
+  <div class="key">
+    スケーリング則が成り立つ大前提は<b>「スケール以外はすべて固定」</b>です。アーキテクチャ・最適化器・学習率スケジュール・バッチ運用・データ配合・トークナイザ ― これらを途中で変えると、当てはめた式はもう当てになりません。
+  </div>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <p class="lead">この記事で通ってきた道を一枚に畳みます。</p>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>基本形</td><td>損失は $L=E+A/N^{\alpha}+B/D^{\beta}$。log-log で直線、床 E で寝る。</td></tr>
+    <tr><td>計算量</td><td>$C\approx 6ND$。予算を固定すると N と D はトレードオフ。</td></tr>
+    <tr><td>Kaplan (2020)</td><td>$N_{opt}\propto C^{0.73}$。モデル優先で大きく。</td></tr>
+    <tr><td>Chinchilla (2022)</td><td>$N_{opt}\propto C^{0.5}$。モデルとデータを等分。IsoFLOP の谷で実証。</td></tr>
+    <tr><td>和解</td><td>埋め込みの数え方 + 実験スケールの差。べき乗則は局所的な近似。</td></tr>
+    <tr><td>データ不足</td><td>繰り返しの価値は指数的に逓減。過学習罰則で精緻化。</td></tr>
+    <tr><td>Carefully</td><td>丸め・当てはめ範囲・損失の集約法で予測が激変。スケール以外は固定が前提。</td></tr>
+  </table>
+  <div class="key">
+    <b>持ち帰り。</b>スケーリング則は「小さく測って大きく予言する」魔法の道具ですが、<b>魔法が効くのは手続きがていねいなときだけ</b>です。次に誰かの「うちのモデルは C の◯乗でスケールする」を聞いたら、<b>「N の数え方は? 当てはめた範囲は? 床 E は含めた?」</b>と問い返せるようになれば、この記事は役目を果たしました。
+  </div>
+  <div class="fn">
+    元記事: Lilian Weng, "Scaling Laws, Carefully" (<a href="https://lilianweng.github.io/posts/2026-06-24-scaling-laws/" target="_blank" rel="noopener">lilianweng.github.io</a>)。<br>
+    主要参照: Kaplan et al. 2020 (<a href="https://arxiv.org/abs/2001.08361" target="_blank" rel="noopener">arXiv:2001.08361</a>) / Hoffmann et al. 2022 Chinchilla (<a href="https://arxiv.org/abs/2203.15556" target="_blank" rel="noopener">arXiv:2203.15556</a>) / Muennighoff et al. 2023 (<a href="https://arxiv.org/abs/2305.16264" target="_blank" rel="noopener">arXiv:2305.16264</a>) / Besiroglu et al. 2024 (<a href="https://arxiv.org/abs/2404.10102" target="_blank" rel="noopener">arXiv:2404.10102</a>)。<br>
+    注意: 本ページのアニメーションは直感を伝えるための<b>模式的な実装</b>であり、係数は説明用の値です。厳密な数値は各原論文を参照してください。
+  </div>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+// ============ 共通 ============
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+function axis(ct,W,H,pad){ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+  ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();}
+
+// ============ デモ1: べき乗則 log-log vs linear ============
+(function(){
+  const cv=document.getElementById('cvPow'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:70,r:30,t:30,b:56};
+  let mode='loglog',A=1.0,alpha=0.5,E=0.4;
+  const C0=1e3,C1=1e10;        // 計算量の範囲
+  function L(C){return A*Math.pow(C/C0,-alpha)+E;}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    axis(ct,W,H,pad);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    // サンプル
+    const pts=[];const NS=140;
+    for(let i=0;i<=NS;i++){const f=i/NS;const C=C0*Math.pow(C1/C0,f);pts.push([C,L(C)]);}
+    // 値域
+    let Lmax=L(C0),Lmin=E; // linear: 0..Lmax ; loglog: E床除く
+    function X(C){if(mode==='loglog'){const lx=Math.log10(C);return pad.l+(lx-Math.log10(C0))/(Math.log10(C1)-Math.log10(C0))*pw;}
+      return pad.l+(C-C0)/(C1-C0)*pw;}
+    function Y(l){if(mode==='loglog'){const yv=Math.log10(l),y0=Math.log10(Lmin*0.9),y1=Math.log10(Lmax*1.1);
+        return pad.t+(1-(yv-y0)/(y1-y0))*ph;}
+      return pad.t+(1-(l)/(Lmax*1.05))*ph;}
+    // グリッド
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=0;g<=5;g++){const yy=pad.t+ph*g/5;ct.beginPath();ct.moveTo(pad.l,yy);ct.lineTo(W-pad.r,yy);ct.stroke();}
+    // 床 E
+    ct.strokeStyle='#f0a58e';ct.setLineDash([6,5]);ct.lineWidth=1.6;
+    ct.beginPath();ct.moveTo(pad.l,Y(E));ct.lineTo(W-pad.r,Y(E));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#f0a58e';ct.font='13px sans-serif';ct.textAlign='left';ct.fillText('床 E = '+E.toFixed(2),pad.l+8,Y(E)-6);
+    // 曲線
+    ct.strokeStyle='#8fd6b4';ct.lineWidth=2.6;ct.beginPath();
+    pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]);i?ct.lineTo(x,y):ct.moveTo(x,y);});ct.stroke();
+    // 軸ラベル
+    ct.fillStyle=SUBI;ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText(mode==='loglog'?'計算量 C (対数)':'計算量 C',pad.l+pw/2,H-16);
+    ct.save();ct.translate(20,pad.t+ph/2);ct.rotate(-Math.PI/2);
+    ct.fillText(mode==='loglog'?'損失 L (対数)':'損失 L',0,0);ct.restore();
+    ct.fillStyle=INK;ct.textAlign='left';
+    ct.fillText(mode==='loglog'?'両対数: 床より上ではほぼ直線、傾き = α':'ふつうの軸: 急降下して床に張り付く曲線',pad.l+8,pad.t+18);
+  }
+  document.getElementById('axLog').onclick=function(){mode='loglog';setA(this);draw();};
+  document.getElementById('axLin').onclick=function(){mode='linear';setA(this);draw();};
+  function setA(btn){document.querySelectorAll('[data-ax]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+  document.getElementById('powA').oninput=function(){alpha=+this.value/100;document.getElementById('powAv').textContent=alpha.toFixed(2);draw();};
+  document.getElementById('powE').oninput=function(){E=+this.value/100;document.getElementById('powEv').textContent=E.toFixed(2);draw();};
+  draw();
+})();
+
+// ============ デモ2: IsoFLOP の谷 ============
+(function(){
+  const cv=document.getElementById('cvIso'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:70,r:30,t:30,b:56};
+  // Chinchilla 風パラメータ
+  const E=1.69,A=406.4,al=0.34,B=410.7,be=0.28;
+  function loss(N,D){return E+A/Math.pow(N,al)+B/Math.pow(D,be);}
+  // C を対数スケールでスライダ0..100 → 1e15..1e23
+  function Cof(v){return Math.pow(10,15+v/100*8);}
+  const Nmin=1e6,Nmax=1e12;   // N 探索範囲
+  let budgets=[];
+  function optN(C){ // 谷の底を粗く探索
+    let best=null;
+    for(let i=0;i<=200;i++){const f=i/200;const N=Nmin*Math.pow(Nmax/Nmin,f);const D=C/(6*N);
+      if(D<1e6)continue;const l=loss(N,D);if(!best||l<best.l)best={N:N,l:l,D:D};}
+    return best;
+  }
+  function curve(C){const arr=[];for(let i=0;i<=160;i++){const f=i/160;const N=Nmin*Math.pow(Nmax/Nmin,f);
+    const D=C/(6*N);if(D<1e5)continue;arr.push([N,loss(N,D)]);}return arr;}
+  function draw(){
+    ct.clearRect(0,0,W,H);axis(ct,W,H,pad);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    const all=budgets.map(C=>curve(C));
+    let lo=Infinity,hi=-Infinity;all.forEach(c=>c.forEach(p=>{lo=Math.min(lo,p[1]);hi=Math.max(hi,p[1]);}));
+    if(!isFinite(lo)){lo=2;hi=6;}hi=Math.min(hi,lo+4.5);
+    function X(N){const lx=Math.log10(N);return pad.l+(lx-6)/(12-6)*pw;}
+    function Y(l){return pad.t+(1-(l-lo)/(hi-lo))*ph;}
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=6;g<=12;g++){const xx=X(Math.pow(10,g));ct.beginPath();ct.moveTo(xx,pad.t);ct.lineTo(xx,H-pad.b);ct.stroke();
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='center';ct.fillText('10^'+g,xx,H-pad.b+18);}
+    // 各予算の曲線と底
+    const mins=[];
+    all.forEach((c,idx)=>{
+      ct.strokeStyle='rgba(143,214,180,'+(0.35+0.5*idx/Math.max(1,all.length-1))+')';ct.lineWidth=2;
+      ct.beginPath();c.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]);i?ct.lineTo(x,y):ct.moveTo(x,y);});ct.stroke();
+      const b=optN(budgets[idx]);mins.push(b);
+      ct.fillStyle='#ffd166';ct.beginPath();ct.arc(X(b.N),Y(b.l),5,0,7);ct.fill();
+    });
+    // 谷を結ぶ線
+    if(mins.length>=2){const sorted=mins.slice().sort((a,b)=>a.N-b.N);
+      ct.strokeStyle='#f0a58e';ct.lineWidth=2.4;ct.setLineDash([7,5]);ct.beginPath();
+      sorted.forEach((b,i)=>{const x=X(b.N),y=Y(b.l);i?ct.lineTo(x,y):ct.moveTo(x,y);});ct.stroke();ct.setLineDash([]);}
+    ct.fillStyle=SUBI;ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText('モデルサイズ N (対数)',pad.l+pw/2,H-2);
+    ct.save();ct.translate(20,pad.t+ph/2);ct.rotate(-Math.PI/2);ct.fillText('損失 L',0,0);ct.restore();
+    ct.fillStyle=INK;ct.textAlign='left';ct.fillText('谷の底 = その予算での最適 N。底を結ぶと「計算最適の道」',pad.l+8,pad.t+16);
+  }
+  const slC=document.getElementById('isoC'),lbl=document.getElementById('isoCv');
+  function fmtC(C){const e=Math.round(Math.log10(C));return '≈10^'+e+' FLOPs';}
+  let preview=Cof(20);
+  function refresh(){lbl.textContent=fmtC(preview);draw();}
+  slC.oninput=function(){preview=Cof(+this.value);refresh();};
+  document.getElementById('isoAdd').onclick=function(){if(budgets.length<7)budgets.push(preview);draw();};
+  document.getElementById('isoReset').onclick=function(){budgets=[Cof(10),Cof(35),Cof(60),Cof(85)];slC.value=20;preview=Cof(20);refresh();};
+  budgets=[Cof(10),Cof(35),Cof(60),Cof(85)];refresh();
+})();
+
+// ============ デモ3: 繰り返しの逓減 ============
+(function(){
+  const cv=document.getElementById('cvRep'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:70,r:30,t:30,b:56};
+  let rD=15;const U=1,Rmax=40;
+  function draw(){
+    ct.clearRect(0,0,W,H);axis(ct,W,H,pad);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    const ymax=Rmax+1; // 理想線が支配
+    function X(R){return pad.l+R/Rmax*pw;}
+    function Y(v){return pad.t+(1-v/ymax)*ph;}
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=0;g<=5;g++){const yy=pad.t+ph*g/5;ct.beginPath();ct.moveTo(pad.l,yy);ct.lineTo(W-pad.r,yy);ct.stroke();}
+    // 理想線 D=U*(1+R)
+    ct.strokeStyle='#f0a58e';ct.setLineDash([6,5]);ct.lineWidth=2;ct.beginPath();
+    for(let i=0;i<=Rmax;i++){const v=U*(1+i);const x=X(i),y=Y(v);i?ct.lineTo(x,y):ct.moveTo(x,y);}ct.stroke();ct.setLineDash([]);
+    // 実効 D'
+    ct.strokeStyle='#8fd6b4';ct.lineWidth=2.8;ct.beginPath();
+    for(let i=0;i<=Rmax;i++){const v=U+U*rD*(1-Math.exp(-i/rD));const x=X(i),y=Y(v);i?ct.lineTo(x,y):ct.moveTo(x,y);}ct.stroke();
+    // 飽和線
+    const sat=U+U*rD;ct.strokeStyle='rgba(143,214,180,0.4)';ct.setLineDash([3,4]);ct.beginPath();
+    ct.moveTo(pad.l,Y(sat));ct.lineTo(W-pad.r,Y(sat));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=SUBI;ct.font='13px sans-serif';ct.textAlign='left';ct.fillText('飽和 ≈ U(1+r_D)',pad.l+8,Y(sat)-6);
+    ct.fillStyle=SUBI;ct.font='14px sans-serif';ct.textAlign='center';
+    ct.fillText('繰り返し回数 R_D (エポック)',pad.l+pw/2,H-16);
+    ct.save();ct.translate(20,pad.t+ph/2);ct.rotate(-Math.PI/2);ct.fillText('実効データ量 D\'',0,0);ct.restore();
+  }
+  document.getElementById('repR').oninput=function(){rD=+this.value;document.getElementById('repRv').textContent=rD;draw();};
+  draw();
+})();
+
+// ============ デモ4: 当てはめ感度 ============
+(function(){
+  const cv=document.getElementById('cvSens'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:70,r:30,t:30,b:56};
+  const trueA=1.0,trueAl=0.42,trueE=0.35,C0=1e3;
+  const Cx0=1e3,Cx1=1e11,fitLo=1e3;
+  let noise=0.35,kFrac=0.4,pts=[];
+  function gen(){pts=[];const NS=26;
+    for(let i=0;i<NS;i++){const f=i/(NS-1);const C=Cx0*Math.pow(1e7/Cx0,f); // 測定は小〜中規模のみ
+      const l=trueA*Math.pow(C/C0,-trueAl)+trueE;const obs=l*(1+noise*0.15*randn());pts.push([C,Math.max(obs,trueE*0.6)]);}}
+  function fit(sel){ // log-log 直線最小二乗 y=m x+b
+    let sx=0,sy=0,sxx=0,sxy=0,n=0;
+    sel.forEach(p=>{const x=Math.log10(p[0]),y=Math.log10(p[1]);sx+=x;sy+=y;sxx+=x*x;sxy+=x*y;n++;});
+    const m=(n*sxy-sx*sy)/(n*sxx-sx*sx),b=(sy-m*sx)/n;return {m:m,b:b};}
+  function draw(){
+    ct.clearRect(0,0,W,H);axis(ct,W,H,pad);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    const lx0=Math.log10(Cx0),lx1=Math.log10(Cx1);
+    let ly0=Math.log10(trueE*0.7),ly1=Math.log10(trueA*1.3+trueE);
+    function X(C){return pad.l+(Math.log10(C)-lx0)/(lx1-lx0)*pw;}
+    function Y(l){return pad.t+(1-(Math.log10(l)-ly0)/(ly1-ly0))*ph;}
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=3;g<=11;g++){const xx=X(Math.pow(10,g));ct.beginPath();ct.moveTo(xx,pad.t);ct.lineTo(xx,H-pad.b);ct.stroke();
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='center';ct.fillText('10^'+g,xx,H-pad.b+18);}
+    // 当てはめ範囲の境界
+    const kC=Cx0*Math.pow(1e7/Cx0,kFrac);
+    ct.fillStyle='rgba(240,165,142,0.08)';ct.fillRect(pad.l,pad.t,X(kC)-pad.l,ph);
+    ct.strokeStyle='rgba(240,165,142,0.5)';ct.setLineDash([4,4]);ct.beginPath();ct.moveTo(X(kC),pad.t);ct.lineTo(X(kC),H-pad.b);ct.stroke();ct.setLineDash([]);
+    // 点
+    ct.fillStyle='#8fd6b4';pts.forEach(p=>{ct.beginPath();ct.arc(X(p[0]),Y(p[1]),3.4,0,7);ct.fill();});
+    // 当てはめ
+    const small=pts.filter(p=>p[0]<=kC);
+    const fS=fit(small.length>=2?small:pts),fA=fit(pts);
+    function drawFit(f,col){ct.strokeStyle=col;ct.lineWidth=2.4;ct.beginPath();
+      for(let i=0;i<=100;i++){const lx=lx0+(lx1-lx0)*i/100;const ly=f.m*lx+f.b;const x=pad.l+(lx-lx0)/(lx1-lx0)*pw;const y=Y(Math.pow(10,ly));i?ct.lineTo(x,y):ct.moveTo(x,y);}ct.stroke();}
+    drawFit(fS,'#f0a58e');drawFit(fA,'#7fb2ec');
+    // 右端予測
+    const pS=Math.pow(10,fS.m*lx1+fS.b),pA=Math.pow(10,fA.m*lx1+fA.b);
+    ct.fillStyle='#f0a58e';ct.beginPath();ct.arc(X(Cx1),Y(pS),5,0,7);ct.fill();
+    ct.fillStyle='#7fb2ec';ct.beginPath();ct.arc(X(Cx1),Y(pA),5,0,7);ct.fill();
+    ct.fillStyle=SUBI;ct.font='14px sans-serif';ct.textAlign='center';ct.fillText('計算量 C (対数)',pad.l+pw/2,H-2);
+    ct.save();ct.translate(20,pad.t+ph/2);ct.rotate(-Math.PI/2);ct.fillText('損失 L (対数)',0,0);ct.restore();
+    const gap=Math.abs(pS-pA)/Math.min(pS,pA)*100;
+    document.getElementById('sensOut').textContent=
+      '右端 (10^11 FLOPs) の予測 — 小規模のみ: L≈'+pS.toFixed(3)+' / 全範囲: L≈'+pA.toFixed(3)+' → 差 '+gap.toFixed(0)+'%';
+  }
+  const slN=document.getElementById('sensN'),slK=document.getElementById('sensK');
+  slN.oninput=function(){noise=+this.value/100;document.getElementById('sensNv').textContent=(noise).toFixed(2);gen();draw();};
+  slK.oninput=function(){kFrac=+this.value/100;document.getElementById('sensKv').textContent=Math.round(kFrac*100)+'%';draw();};
+  document.getElementById('sensRe').onclick=function(){gen();draw();};
+  document.getElementById('sensNv').textContent=noise.toFixed(2);
+  document.getElementById('sensKv').textContent=Math.round(kFrac*100)+'%';
+  gen();draw();
+})();
+</script>
+</body>
+</html>
