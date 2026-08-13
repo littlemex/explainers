@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kimi K3 は何が珍しいのか — 2.8T MoE の設計を読む</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --kda:#e07a5f;   /* KDA (橙) */
+    --mla:#3d7dca;   /* Gated MLA (青) */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:15px;overflow-x:auto;line-height:1.7}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:170px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 2 回</p>
+  <h1>Kimi K3 は何が珍しいのか</h1>
+  <p>2.8T パラメータ MoE が積んだ、KDA だけではない設計の数々を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">Kimi K3 (Moonshot AI, 2026-07) は「オープンウェイトで最大級」なだけでなく、注意機構・MoE・層の繋ぎ方・学習基盤のあちこちで独自の工夫を積んでいるモデルです。この記事はその工夫を、初学者でも辿れるように整理します。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    Kimi K3 は<b>総パラメータ 2.8 兆・有効活性化 1040 億</b>の MoE モデルで、<b>1M トークンのネイティブ文脈長</b>とネイティブなマルチモーダル (画像・動画) 対応を持ちます。系列方向には<b>線形 Attention (KDA) を 3、通常の Attention (Gated MLA) を 1 の比率で混ぜる</b>ハイブリッド構成を採り、<b>深さ方向にも Attention 型の選択的参照を重ねる (Attention Residuals)</b> という、珍しい二段構えの設計です。これらのアーキテクチャ改良にデータ・学習レシピの改善を合わせて、前世代の Kimi K2 比で<b>スケーリング効率が約 2.5 倍</b>になったと報告されています。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>総パラメータ / 活性化パラメータ</td><td>2.8T / 104B</td></tr>
+    <tr><td>MoE (Stable LatentMoE)</td><td>896 ルーテッドエキスパートから 16 個を選択</td></tr>
+    <tr><td>Attention</td><td>KDA (線形) 3 層 + Gated MLA (通常) 1 層、を各ブロックで繰り返し</td></tr>
+    <tr><td>位置符号化</td><td>全 MLA 層で NoPE (RoPE を使わない)</td></tr>
+    <tr><td>文脈長</td><td>1,000,000 トークン</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. なぜハイブリッドか — KDA 3 : Gated MLA 1</a>
+    <a href="#s2">2. 【体験】局所反復 vs 大域アクセス</a>
+    <a href="#s3">3. RoPE を完全に捨てる — NoPE-MLA</a>
+    <a href="#s4">4. Stable LatentMoE — 896 分の 16 を安定に選ぶ</a>
+    <a href="#s5">5. 【体験】ロードバランスが崩れると何が起きるか</a>
+    <a href="#s6">6. Attention Residuals — 深さ方向にも Attention</a>
+    <a href="#s7">7. 【体験】層をまたいで「見に行く」重み</a>
+    <a href="#s8">8. 学習基盤の珍しい工夫 — CPU DRAM・一時停止できる砂場</a>
+    <a href="#s9">9. 精度戦略 — FP8 で貯め、MXFP4 で配る</a>
+    <a href="#s10">10. 都市伝説チェック — Graviton は本当に使っているのか</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜハイブリッドか — KDA 3 : Gated MLA 1</h2>
+  <p class="lead">まず一番目立つ設計判断から見ます。K3 は全層を線形 Attention (KDA) にはしません。</p>
+  <p><b>KDA (Kimi Delta Attention)</b> は、状態を固定サイズに保ちながら系列を処理する線形 Attention の一種で、Gated DeltaNet の忘却ゲートをチャネルごとに細粒度化した手法です (仕組みの詳細は Attention 系列の <a href="./attn-kda.html">KDA — Kimi Delta Attention</a> を参照してください)。計算量が系列長に比例する ($O(N)$) ので長文脈に強い一方、<b>状態が固定サイズなので、大昔の情報を薄めずに正確に引き出す</b>のは通常の Attention (KV を全部保持する $O(N^2)$ 系) が得意です。</p>
+  <p>K3 はこのトレードオフを<b>両方使う</b>ことで解決します。論文いわく、<b>各ブロックは KDA を 3 層、続けて Gated MLA (通常の Attention の効率化版) を 1 層</b>という構成で、これをモデル全体で繰り返します。さらに<b>バックボーンの最後にもう 1 層 Gated MLA を追加</b>し、必ず「最終層は大域 Attention」で終わるようにしています。</p>
+  <div class="key">
+    <b>比喩。</b>KDA 3 層は「直近の会議メモを要約しながら持ち歩く秘書」、Gated MLA 1 層は「必要なときに議事録の原本を丸ごと読み返す係」です。ほとんどの処理は要約 (KDA) で速く済ませ、ときどき原本 (Gated MLA) を引いて精度を取り戻す ― これが 3:1 の比率の狙いです。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】局所反復 vs 大域アクセス</h2>
+  <p class="lead">KDA と Gated MLA で、情報の流れ方がどう違うかを見ます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvHyb" width="840" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-h="kda" id="hKDA">KDA (線形・局所反復)</button>
+    <button class="ghost" data-h="mla" id="hMLA">Gated MLA (通常・大域)</button>
+    <div class="slider">注目するトークン <input id="hPos" type="range" min="1" max="17" value="12"><span id="hPosv">12</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--kda)"></span>KDA: 固定状態を毎ステップ更新して引き渡す</span>
+    <span><span class="dot" style="background:var(--mla)"></span>Gated MLA: 過去すべてに直接アクセス</span>
+  </div>
+  <p class="rdout" id="hOut"></p>
+  <p><b>KDA</b> モードでは、注目トークンは<b>直前の状態 1 つだけ</b>を受け取ります。過去の情報はすべてそこに圧縮されており、更新のたびに (チャネルごとの速さで) 少しずつ薄れます。<b>Gated MLA</b> モードでは、注目トークンから<b>過去のすべてのトークンへ直接線が引かれます</b>― トークンごとのエントリを<b>系列長方向には圧縮せず</b>保持したまま、欲しい記憶を直接取りに行けます (MLA は 1 トークンあたりの KV を潜在ベクトルに圧縮しますが、それは<b>次元方向</b>の圧縮で、系列に沿った圧縮ではありません)。K3 は 3 層薄めたら 1 層で読み直す、を繰り返すことで、速さと正確さの両方を狙っています。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>RoPE を完全に捨てる — NoPE-MLA</h2>
+  <p class="lead">もう 1 つの珍しい判断が、位置符号化の扱いです。</p>
+  <p>MLA (Multi-head Latent Attention) 自体は Kimi K2 / K2.5 でも使われていましたが、K2 では RoPE (回転位置符号化) を組み合わせていました。K3 は MLA に<b>入力依存・チャネルごとの出力ゲート</b>を追加して「Gated MLA」にする一方、<b>そのすべての MLA 層から RoPE を完全に外し、NoPE (位置符号化なし) に切り替えました</b>。ML 基礎シリーズの <a href="./rope-explainer.html">位置をどう教えるか — RoPE と NoPE をゼロから</a> で見た「明示的な位置符号化がなくても位置情報は他の経路から漏れる」という考え方の、frontier 級モデルでの実践例です (ただし K3 の場合、位置を運ぶのは因果マスクではなく次段落の KDA の仕組みです)。</p>
+  <div class="key">
+    <b>なぜ K3 で成立するのか。</b>K3 では位置の情報を<b>KDA の再帰的なゲーティングと減衰の仕組み</b>がすでに運んでいます (「何ステップ前の情報か」に応じて減衰するので、暗黙に順序を符号化している)。だから MLA 側は<b>RoPE で位置を教え直す必要がない</b>、というのが論文の説明です。副産物として、<b>1M トークンまで RoPE の周波数調整や YaRN のような再チューニングが一切不要</b>になりました (これは ML 基礎シリーズの RoPE 解説で見た PI/NTK/YaRN の悩みそのものを、そもそも発生させない選択です)。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>Stable LatentMoE — 896 分の 16 を安定に選ぶ</h2>
+  <p class="lead">MoE 側の工夫です。K3 は 896 個という非常に細かく分割されたエキスパートから、トークンごとに 16 個だけを使います (疎度は 896/16 = <b>56</b>)。</p>
+  <p>LatentMoE は、選ばれたエキスパートに送る表現をモデル全体の幅 $d$ のままにせず、<b>幅 $\ell$ の小さな潜在空間に圧縮してから</b>送ります (共有エキスパートだけは全幅のまま処理)。これにより、896 個という多さでも通信・計算コストが現実的に収まります ― <b>「Latent」の名の由来はここ</b>です。</p>
+  <p>ただしこの極端な疎さは 2 つの副作用を生みます。<b>(1)</b> 縮小 → エキスパート内部のゲート付き FFN → 展開、というほぼ<b>4 回連続の行列積</b>になるため活性化が暴走しやすい (activation explosion)。<b>(2)</b> 約 900 個のエキスパートの負荷を均すのが、既存の負荷分散手法の想定を超えて難しい。K3 はこれに<b>3 つの工夫</b>で対処しています。</p>
+  <ul>
+    <li><b>展開前の RMSNorm</b>: 潜在空間から元の幅へ戻す直前に正規化を挟み、暴走の芽を摘む。</li>
+    <li><b>SiTU-GLU</b>: 活性化関数の出力を tanh でなめらかに頭打ちさせ、特定チャンネルの値が暴走するのを抑える。</li>
+    <li><b>Quantile Balancing (QB)</b>: 各エキスパートのスコアに足すバイアスを、そのエキスパートが「目標負荷に到達するために必要な採用ライン (分位点)」から直接求め、動的に調整する負荷分散則。</li>
+  </ul>
+  <div class="key">
+    <b>要するに。</b>「896 個から 16 個を選ぶ」という<b>極端な疎さ</b>を安定に回すための下支えが、展開前 RMSNorm・SiTU-GLU・Quantile Balancing の 3 点です。次の体験ではこの中の負荷分散 (QB) の効果を単純化して体感します。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】ロードバランスが崩れると何が起きるか</h2>
+  <p class="lead">エキスパートへのルーティングを繰り返し、Quantile Balancing の強さを変えると負荷の偏りがどう変わるかを見ます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvMoe" width="840" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button id="moeStep" class="ghost">トークンを 200 個ルーティング</button>
+    <button id="moeReset" class="ghost">リセット</button>
+    <div class="slider">Quantile Balancing の強さ <input id="moeQB" type="range" min="0" max="100" value="60"><span id="moeQBv">60%</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>各エキスパートが受け取った負荷 (64 グループに縮約表示)</span>
+    <span><span class="dot" style="background:#f0a58e"></span>目標負荷 (均等な場合)</span>
+  </div>
+  <p class="rdout" id="moeOut"></p>
+  <p>Quantile Balancing の強さを 0 にしてトークンを流すと、人気の高いエキスパート (グラフの一部の棒) にどんどん負荷が積み重なり、<b>ごく一部の棒だけが伸びて残りはほぼ空</b>になります。強さを上げるほど、人気エキスパートのバイアスが下がって選ばれにくくなり、<b>負荷を受け取るグループの数が増え、棒の高さが目標負荷 (橙線) に揃っていく</b>のが見えます。「896 分の 16」という極端な疎さで学習が崩れないのは、この負荷分散を含む§4 の 3 つの工夫が合わさっているためで、このデモはその一因を単純化して再現したものです。</p>
+  <div class="warn">
+    <b>デモの注意。</b>ここでの更新則 (人気度スコアからバイアスを引く) は<b>負荷分散の一般的な考え方を模式化したもの</b>で、論文の Quantile Balancing (Top-(k+1) 選択から採用ラインを直接求める手続き) そのものではありません。スライダーの「強さ」も論文のパラメータではなく、本デモ独自の単純化です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>Attention Residuals — 深さ方向にも Attention</h2>
+  <p class="lead">K3 で最もユニークな設計がこれです。普通のモデルは層の出力をただ足し算 (残差接続) しますが、K3 は<b>その均等な足し算を、Attention による選択的な参照に置き換えます</b>。</p>
+  <p>ふつうの残差接続は、後続の層の入力に「それまでの層の出力をすべて (重み 1 で) 蓄積したもの」を渡します。<b>Attention Residuals (AttnRes)</b> は、参照する側ごとに<b>学習可能な「疑似 Query」</b> $w$ を持たせ、それより前の出力 (＝疑似 Key/Value) に対して<b>Attention と同じ仕組みで重み付き平均</b>を取ります。トークン埋め込みそのものも、$i=0$ 番目の参照先として key/value 集合に含まれます。</p>
+  <div class="mj">$$ \alpha_{i\to l} = \frac{\exp\big(w_l^\top \mathrm{RMSNorm}(f_i(h_i))\big)}{\sum_{j&lt;l}\exp\big(w_l^\top \mathrm{RMSNorm}(f_j(h_j))\big)} $$</div>
+  <p style="font-size:14px;color:var(--sub)">($i=0$ のときは $f_i(h_i)$ をトークン埋め込みそのものと読み替えます。)</p>
+  <div class="warn">
+    <b>粒度の注意。</b>ここで示した式は「層」単位の一般形 (Full AttnRes) です。<b>K3 の実装 (Block AttnRes) では、この $l,i$ が個々の層ではなく「12 層ずつまとめたブロック」番号に置き換わります</b> (12 層区切りで 8 ブロック、末尾は端数、埋め込み層を 1 ブロックとして数えると全体で 9 ブロック)。以降の説明とデモは直感のために<b>「層」を「ブロック」の代わりの模式的な単位</b>として使っています。
+  </div>
+  <div class="key">
+    <b>比喩。</b>「深さ方向の Attention」というアイデアそのものは新しくありませんが (層・ブロック方向の重み付き結合は複数の先行研究で試みられています)、K3 は<b>2.8T 規模の frontier モデルにこれを実装した</b>点が実務上の見どころです。系列方向の Attention (KDA/MLA) が「どのトークンを見るか」を学ぶのと対に、深さ方向の Attention Residuals は<b>「どのブロックの出力を見るか」を参照する側ごとに学ぶ</b>仕組みです。RMSNorm は、出力の大きいブロックが重みを独占しないようにする安全弁です。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】層をまたいで「見に行く」重み</h2>
+  <p class="lead">ある層が、それより前のどの層をどれだけ重視するかを、標準の残差接続と比べます (前節の注意の通り、実際は「層」ではなく「ブロック」単位です)。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRes" width="840" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-r="std" id="rStd">標準の残差接続</button>
+    <button class="ghost" data-r="attn" id="rAttn">Attention Residuals</button>
+    <div class="slider">注目する層 l <input id="resL" type="range" min="3" max="16" value="12"><span id="resLv">12</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>層 i → 層 l への重み</span>
+  </div>
+  <p class="rdout" id="resOut"></p>
+  <p><b>標準の残差接続</b>では、すべての先行層の出力が<b>重み 1 でそのまま蓄積</b>されます (棒は「均等な重み」の模式表示で、実際は平均ではなく足し算です)。<b>Attention Residuals</b> では、参照する側ごと・入力ごとに重みが変わり、<b>ある層は数層前を強く参照し、別の層は入力に近い浅い層を強く参照する</b>、といった選択的な参照が可能になります。棒の高さが不揃いになるほど「選んで見ている」ことを表します (デモの Key ベクトルは固定した乱数で、実際の入力依存の隠れ状態ではありません)。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>学習基盤の珍しい工夫 — CPU DRAM・一時停止できる砂場</h2>
+  <p class="lead">アーキテクチャだけでなく、2.8T パラメータを実際に学習・運用するための基盤にも珍しい工夫があります。</p>
+  <table>
+    <tr><th>工夫</th><th>やること</th><th>狙い</th></tr>
+    <tr><td>MoonEP</td><td>エキスパート並列の実行を「静的な計算形状・ゼロコピー通信」で均一化</td><td>896 エキスパートの実行を GPU 間で偏りなく揃える</td></tr>
+    <tr><td>Pipeline ZeRO-2 + CPU オフロード</td><td>勾配を DP ランク間でシャーディングし、<b>シャード済みの勾配を CPU 側に保持</b></td><td>GPU メモリを圧迫せず 2.8T パラメータの勾配を扱う</td></tr>
+    <tr><td>KV キャッシュの CPU DRAM プール</td><td>GPU から退避された再利用可能なプレフィックスだけを<b>CPU DRAM の外部プール</b>に書き出す</td><td>GPU 上にまだ生きているブロックの冗長なコピーを避けつつ長文脈のキャッシュを延命</td></tr>
+    <tr><td>一時停止できる砂場 (resumable microVM sandbox)</td><td>エージェント型 RL のロールアウト中、<b>一時停止したサンドボックスはメモリも CPU も消費しない</b></td><td>百万トークン規模の長時間エージェント軌跡を、大量に並行して保持</td></tr>
+    <tr><td>KDA Context Parallelism / state-aware prefix caching</td><td>KDA の固定状態を単位として、デバイス間分割とプレフィックス再利用を専用設計</td><td>線形 Attention ならではのキャッシュ構造をハードウェアに合わせて最適化</td></tr>
+  </table>
+  <p style="font-size:14px;color:var(--sub)">(用語) <b>DP ランク</b>=データ並列の分担単位。<b>ZeRO-2</b>=勾配やオプティマイザ状態を DP ランク間で分割して重複を減らす手法。<b>microVM</b>=1 台の物理機に多数の隔離環境を軽量に載せる仮想化方式 (K3 では Firecracker を採用)。</p>
+  <div class="key">
+    <b>共通する発想。</b>2.8T パラメータ・1M トークン・百万トークン規模のエージェント軌跡という 3 つの「大きさ」をすべて GPU メモリだけで抱えるのは無理があります。一時停止したサンドボックスがメモリも CPU も消費しないという設計は、論文によれば<b>エージェントがモデルの推論結果を待っている時間がサンドボックス生存期間の最大 98% を占める</b>という観察に基づいています ― 待ち時間の大半を「何も食わない」状態にできれば、並行して保持できるエージェント数が跳ね上がります。K3 は<b>「今すぐ計算に使わないものは CPU 側 (DRAM) に退避し、必要になったら戻す」</b>という判断をあちこちに仕込むことで、GPU をボトルネックにしない基盤を作っています。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>精度戦略 — FP8 で貯め、MXFP4 で配る</h2>
+  <p class="lead">数値精度の使い分けも徹底しています。</p>
+  <ul>
+    <li><b>事前学習</b>: backward のために保存しておく活性化の多くを<b>ブロック単位の FP8 量子化 (＋オフロード)</b> でメモリ節約 (これは活性化の<b>記憶</b>を軽くする策で、学習の演算そのものを FP8 で行っているかは今回参照した範囲では確認できていません)。</li>
+    <li><b>事後学習</b>: SFT 以降で<b>量子化を意識した学習 (QAT: Quantization-Aware Training。量子化後の精度低下を見越して、学習中からその劣化ごと最適化する手法)</b> を行い、パラメータ記憶の大半を占める<b>MoE エキスパートの重みを MXFP4</b>、その<b>入力活性化を MXFP8</b> に量子化。Attention の射影や LatentMoE の射影・共有エキスパートなど、それ以外の成分は量子化の対象から外している。</li>
+  </ul>
+  <div class="key">
+    <b>ねらい。</b>896 個もあるエキスパートの重みはメモリの大半を占めるので、<b>そこだけ 4 ビットまで削って配布・推論コストを下げる</b>一方、量子化の影響を受けやすい非エキスパート部分は高い精度を保つ、という選択的な量子化です。学習時から量子化を見据えて訓練 (QAT) しておくことで、配布時の劣化を抑えています。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>都市伝説チェック — Graviton は本当に使っているのか</h2>
+  <p class="lead">「K3 は AWS Graviton (ARM CPU) を使っている」という話をよく見かけるので、ここで正直に検証します。</p>
+  <div class="warn">
+    <b>結論: 一次資料 (Kimi K3 技術レポート, arXiv:2607.24653) 本文に "Graviton" ないし "ARM" への言及は見つかりませんでした。</b>Sebastian Raschka のアーキテクチャ解説や日本語コミュニティ記事にも、Graviton/ARM の記載は確認できていません。<b>技術レポートが明示的に述べている「珍しい CPU の使い方」は次の通りです</b> (§8 参照): (1) 勾配シャードを CPU DRAM に保持する Pipeline ZeRO-2、(2) 退避した KV キャッシュ・プレフィックスを CPU DRAM の外部プールに置く仕組み、(3) 一時停止中はメモリも CPU も消費しない resumable microVM サンドボックス。いずれも「<b>CPU (の主に DRAM 容量) を GPU の避難先として使う</b>」という設計で、<b>CPU の種類 (Graviton/ARM か x86 か) は論文中で特定されていません</b>。
+  </div>
+  <p>もし Graviton 採用について具体的な出典 (ブログのどの節、どのスライドか) があれば、それは技術レポート本体ではなく、Moonshot AI や AWS 側の別の発表・インフラ紹介の可能性があります。本記事では<b>裏付けが取れなかった主張を断定で書かない</b>という方針上、ここでは「未確認」として明記します。なお本記事の検証は技術レポートの本文テキストを機械的に抜き出して検索したものであり、図・表・脚注や OCR で読み取れなかった箇所は取りこぼしている可能性があります。「本文に見当たらない」は「存在しないことの証明」ではなく、<b>現時点で確認できていない、という限定付きの結論</b>です。</p>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <p class="lead">K3 の珍しさを一枚に畳みます。</p>
+  <table>
+    <tr><th>層</th><th>珍しい点</th><th>狙い</th></tr>
+    <tr><td>系列方向の Attention</td><td>KDA 3 : Gated MLA 1 のハイブリッド、かつ全 MLA 層を NoPE 化</td><td>線形の速さと通常 Attention の正確さを両取り。RoPE 再調整の悩みをそもそも消す</td></tr>
+    <tr><td>MoE</td><td>896 分の 16 (疎度 56) という極端な疎さを、展開前 RMSNorm・SiTU-GLU・Quantile Balancing の 3 点で安定化</td><td>幅 $\ell$ の潜在空間で専門性を上げつつルーティング崩壊を防ぐ</td></tr>
+    <tr><td>深さ方向</td><td>ブロック間の残差接続を Attention 型の選択的参照に置き換える (Block AttnRes)</td><td>「どのブロックを見るか」を参照する側ごとに学習可能にする</td></tr>
+    <tr><td>学習・推論基盤</td><td>MoonEP、勾配/KV キャッシュの CPU DRAM 退避、一時停止可能なエージェント砂場</td><td>2.8T パラメータ・1M 文脈・百万トークン級エージェント軌跡を GPU メモリの外へ逃がす</td></tr>
+    <tr><td>数値精度</td><td>事前学習は保存用活性化をブロック単位 FP8 で圧縮、配布はエキスパート重み MXFP4 + 活性化 MXFP8</td><td>メモリを食う箇所だけ選択的に軽量化</td></tr>
+  </table>
+  <div class="key">
+    <b>持ち帰り。</b>Kimi K3 の「珍しさ」は KDA という 1 つの部品ではなく、<b>系列方向 (KDA/MLA 比率と NoPE)・深さ方向 (Attention Residuals)・MoE 内部 (Quantile Balancing)・基盤 (CPU への退避)・数値精度 (選択的量子化)</b> という<b>5 つの軸すべてで「均等・固定・全部同じ」をやめて、必要な場所だけに計算資源を選択的に割り振る</b>という一貫した設計思想として読むと筋が通ります。
+  </div>
+  <div class="fn">
+    主要参照: Kimi Team, "Kimi K3: Open Frontier Intelligence" (<a href="https://arxiv.org/abs/2607.24653" target="_blank" rel="noopener">arXiv:2607.24653</a>)。KDA の原典は Kimi Linear (<a href="https://arxiv.org/abs/2510.26692" target="_blank" rel="noopener">arXiv:2510.26692</a>、詳細は本サイトの <a href="./attn-kda.html">KDA 解説</a>)。アーキテクチャ解説: Sebastian Raschka, "Kimi K3 Architecture Notes" (<a href="https://sebastianraschka.com/blog/2026/kimi-k3-architecture-notes.html" target="_blank" rel="noopener">sebastianraschka.com</a>)。システム/推論スタック: SemiAnalysis, "Kimi K3: The Manos, The Mythos..." (<a href="https://newsletter.semianalysis.com/p/kimi-k3-the-manos-the-mythos-the" target="_blank" rel="noopener">newsletter.semianalysis.com</a>、一部有料部分は未確認)。日本語解説: 松岡氏 Qiita「Attention Residuals」(<a href="https://qiita.com/kenmatsu4/items/68af97c53db6232108cd" target="_blank" rel="noopener">qiita.com</a>)。<br>
+    注意: 本ページのアニメーションは直感を伝えるための<b>模式的な実装</b>です。MoE ロードバランスのデモは負荷分散の考え方を単純化して再現したもので Quantile Balancing の手続きそのものではなく、Attention Residuals のデモ・説明は実際のブロック粒度を「層」に単純化しています。厳密な定義・数値は原論文を参照してください。
+  </div>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const KDA='#e07a5f', MLA='#3d7dca';
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+// ============ デモ1: 局所反復 (KDA) vs 大域アクセス (Gated MLA) ============
+(function(){
+  const cv=document.getElementById('cvHyb'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const N=17,pad=50,gap=(W-2*pad)/(N-1),ty=H*0.42,r=9;
+  let mode='kda',pos=12;
+  function tx(i){return pad+i*gap;}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    // ブロック帯 (深さ方向のパターン。系列軸とは別次元だが参考として上部に表示)
+    ct.fillStyle=SUBI;ct.font='13px sans-serif';ct.textAlign='center';
+    ct.fillText('この 1 層 (KDA または Gated MLA) の中で、系列方向の情報がどう伝わるか',W/2,26);
+    // トークン列
+    for(let i=0;i<N;i++){
+      const x=tx(i),sel=(i===pos-1);
+      let col;
+      if(mode==='kda'){ // 位置が新しいほど記憶が濃い(色を濃く)
+        const age=(pos-1-i)/(N-1); col=`rgba(224,122,95,${Math.max(0.25,1-age*0.9)})`;
+      } else { col= i<pos ? 'rgba(61,125,202,0.85)' : 'rgba(143,214,180,0.35)'; }
+      if(i>=pos)col= i===pos-1?col:'rgba(143,214,180,0.35)';
+      ct.beginPath();ct.arc(x,ty,sel?r+3:r,0,7);
+      ct.fillStyle= sel? '#ffd166' : col;
+      ct.fill();
+      if(sel){ct.strokeStyle='#fff';ct.lineWidth=2;ct.stroke();}
+    }
+    if(mode==='kda'){
+      // 直前の状態から1本だけ矢印
+      if(pos>=2){arrow(tx(pos-2),ty,tx(pos-1)-r-4,ty,'#e07a5f',2.6);}
+      ct.fillStyle='#e07a5f';ct.font='13px sans-serif';ct.textAlign='center';
+      ct.fillText('直前の状態 1 つだけを受け取る (過去はすでに圧縮済み)',W/2,ty+50);
+    }else{
+      for(let i=0;i<pos-1;i++){
+        const x1=tx(i),x2=tx(pos-1);
+        ct.strokeStyle='rgba(61,125,202,0.45)';ct.lineWidth=1.6;
+        ct.beginPath();ct.moveTo(x1,ty+r);ct.quadraticCurveTo((x1+x2)/2,ty+70+ (pos-1-i)*2,x2,ty+r);ct.stroke();
+      }
+      ct.fillStyle='#3d7dca';ct.font='13px sans-serif';ct.textAlign='center';
+      ct.fillText('過去のトークンすべてに直接アクセスできる (系列方向は圧縮なし)',W/2,ty+120);
+    }
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='center';
+    ct.fillText('系列上の位置 →',W/2,H-14);
+    document.getElementById('hOut').textContent = mode==='kda'
+      ? '注目トークンが見えるのは「1 つの固定サイズ状態」のみ (計算量 O(N))'
+      : '注目トークンは過去 '+(pos-1)+' 個すべてに個別にアクセス (計算量 O(N²))';
+  }
+  function arrow(x1,y1,x2,y2,col,w){ct.strokeStyle=col;ct.fillStyle=col;ct.lineWidth=w;
+    ct.beginPath();ct.moveTo(x1,y1);ct.lineTo(x2,y2);ct.stroke();
+    const a=Math.atan2(y2-y1,x2-x1);ct.beginPath();ct.moveTo(x2,y2);
+    ct.lineTo(x2-Math.cos(a-0.4)*9,y2-Math.sin(a-0.4)*9);ct.lineTo(x2-Math.cos(a+0.4)*9,y2-Math.sin(a+0.4)*9);
+    ct.closePath();ct.fill();}
+  function setMode(mm,btn){mode=mm;document.querySelectorAll('[data-h]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('hKDA').onclick=function(){setMode('kda',this);};
+  document.getElementById('hMLA').onclick=function(){setMode('mla',this);};
+  document.getElementById('hPos').oninput=function(){pos=+this.value;document.getElementById('hPosv').textContent=pos;draw();};
+  draw();
+})();
+
+// ============ デモ2: MoE ロードバランス (Quantile Balancing 模式) ============
+(function(){
+  const cv=document.getElementById('cvMoe'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:56,r:20,t:24,b:44};
+  const NB=64; // 896 エキスパートを 64 グループに縮約して表示
+  let pop=[],bias=[],load=[],total=0,qb=0.6;
+  function seed(){pop=[];bias=[];load=[];total=0;
+    for(let b=0;b<NB;b++){pop.push(1+3*Math.pow(Math.random(),3));bias.push(0);load.push(0);}}
+  function routeOne(){
+    let best=-1,bestScore=-Infinity;
+    for(let b=0;b<NB;b++){
+      const score=pop[b]+randn()*0.3-qb*bias[b];
+      if(score>bestScore){bestScore=score;best=b;}
+    }
+    load[best]+=1;total+=1;
+    if(total>0){const target=1/NB;
+      for(let b=0;b<NB;b++){const dev=(load[b]/total)-target;bias[b]+=dev*0.15;}}
+  }
+  function stats(){const target=total>0?1/NB:0;let mean=0;for(let b=0;b<NB;b++)mean+=load[b];mean/=NB;
+    let varr=0;for(let b=0;b<NB;b++)varr+=(load[b]-mean)*(load[b]-mean);varr/=NB;
+    return {std:Math.sqrt(varr),max:Math.max(...load)};}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    const maxLoad=Math.max(1,...load,total/NB*1.6);
+    function X(b){return pad.l+b/(NB-1)*pw;}
+    function Y(v){return pad.t+(1-v/maxLoad)*ph;}
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=0;g<=4;g++){const yy=pad.t+ph*g/4;ct.beginPath();ct.moveTo(pad.l,yy);ct.lineTo(W-pad.r,yy);ct.stroke();}
+    // 目標負荷線
+    const target=total>0?total/NB:0;
+    ct.strokeStyle='#f0a58e';ct.setLineDash([5,4]);ct.lineWidth=1.8;
+    ct.beginPath();ct.moveTo(pad.l,Y(target));ct.lineTo(W-pad.r,Y(target));ct.stroke();ct.setLineDash([]);
+    // 軸
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();
+    // 棒
+    const bw=pw/NB*0.72;
+    for(let b=0;b<NB;b++){const x=X(b)-bw/2,y=Y(load[b]);
+      ct.fillStyle='rgba(143,214,180,0.85)';ct.fillRect(x,y,bw,(H-pad.b)-y);}
+    ct.fillStyle=SUBI;ct.font='13px sans-serif';ct.textAlign='center';
+    ct.fillText('エキスパートグループ (896 個を 64 グループに縮約)',pad.l+pw/2,H-10);
+    const st=stats();
+    document.getElementById('moeOut').textContent=
+      'ルーティング済みトークン数: '+total+' / 負荷の標準偏差: '+st.std.toFixed(2)+' (0 に近いほど均等) / 最大負荷: '+st.max;
+  }
+  document.getElementById('moeStep').onclick=function(){for(let k=0;k<200;k++)routeOne();draw();};
+  document.getElementById('moeReset').onclick=function(){seed();draw();};
+  document.getElementById('moeQB').oninput=function(){qb=+this.value/100;document.getElementById('moeQBv').textContent=this.value+'%';draw();};
+  seed();draw();
+})();
+
+// ============ デモ3: Attention Residuals vs 標準の残差接続 ============
+(function(){
+  const cv=document.getElementById('cvRes'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,pad={l:56,r:20,t:24,b:44};
+  const D=8,MAXL=16;
+  const Kv=[],Wv=[];
+  for(let i=0;i<MAXL;i++){const k=[],w=[];for(let d=0;d<D;d++){k.push(randn());w.push(randn());}Kv.push(k);Wv.push(w);}
+  function rmsnorm(v){let s=0;for(const x of v)s+=x*x;const r=Math.sqrt(s/v.length)+1e-6;return v.map(x=>x/r);}
+  function dot(a,b){let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s;}
+  let mode='std',l=12;
+  function weights(){
+    const n=l-1;if(n<=0)return[];
+    if(mode==='std')return Array.from({length:n},()=>1/n);
+    const w=Wv[l-1];const scores=[];for(let i=0;i<n;i++)scores.push(dot(w,rmsnorm(Kv[i])));
+    const m=Math.max(...scores);const ex=scores.map(s=>Math.exp(s-m));const sum=ex.reduce((a,b)=>a+b,0);
+    return ex.map(e=>e/sum);
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    const ws=weights();const n=ws.length;
+    const barMax=Math.max(...ws,1/Math.max(1,n))*1.2;
+    function X(i){return pad.l+ (n<=1?0.5:i/(n-1)) *pw;}
+    function barW(){return Math.min(46,pw/Math.max(1,n)*0.7);}
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=0;g<=4;g++){const yy=pad.t+ph*g/4;ct.beginPath();ct.moveTo(pad.l,yy);ct.lineTo(W-pad.r,yy);ct.stroke();}
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();
+    const bw=barW();
+    for(let i=0;i<n;i++){const x=X(i)-bw/2,y=pad.t+(1-ws[i]/barMax)*ph;
+      ct.fillStyle= mode==='std' ? 'rgba(143,214,180,0.7)' : 'rgba(255,209,102,0.9)';
+      ct.fillRect(x,y,bw,(H-pad.b)-y);
+      ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';ct.fillText('層'+(i+1),X(i),H-pad.b+16);
+    }
+    ct.fillStyle=SUBI;ct.font='13px sans-serif';ct.textAlign='center';
+    ct.fillText('層 '+l+' が、それより前のどの層をどれだけ見るか',pad.l+pw/2,H-6);
+    const mx=Math.max(...ws),mi=ws.indexOf(mx);
+    document.getElementById('resOut').textContent = mode==='std'
+      ? '標準の残差接続: 全 '+n+' 層が均等 (各 '+(100/n).toFixed(1)+'%)'
+      : 'Attention Residuals: 最大の重みは層 '+(mi+1)+' で '+(mx*100).toFixed(1)+'% (均等なら '+(100/n).toFixed(1)+'%)';
+  }
+  function setMode(mm,btn){mode=mm;document.querySelectorAll('[data-r]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');draw();}
+  document.getElementById('rStd').onclick=function(){setMode('std',this);};
+  document.getElementById('rAttn').onclick=function(){setMode('attn',this);};
+  document.getElementById('resL').oninput=function(){l=+this.value;document.getElementById('resLv').textContent=l;draw();};
+  draw();
+})();
+</script>
