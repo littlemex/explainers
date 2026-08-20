@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>コンパイラとハードウェアの対話 — シリーズ</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:64px 24px 52px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:36px;letter-spacing:.04em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:960px;margin:0 auto;padding:36px 20px 80px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 20px;text-align:center}
+  .thread{background:#eaf5ef;border:1px solid var(--g4);border-radius:14px;padding:18px 22px;margin:0 0 30px;color:var(--ink);font-size:15.5px}
+  .thread b{color:var(--g1)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 24px 20px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;
+    box-shadow:0 2px 14px rgba(15,81,50,.05);transition:.18s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 26px rgba(15,81,50,.14);border-color:var(--g3)}
+  .card .cat{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;
+    padding:2px 10px;font-size:12.5px;font-weight:700;align-self:flex-start;margin-bottom:12px}
+  .card h2{margin:0 0 8px;font-size:20px;color:var(--g1);line-height:1.4}
+  .card p{margin:0 0 16px;font-size:14.5px;color:var(--sub);flex:1}
+  .card .meta{font-size:12.5px;color:#9aa;display:flex;justify-content:space-between;align-items:center}
+  .card .go{color:var(--g2);font-weight:700}
+  .card.soon{opacity:.62;pointer-events:none}
+  .card.soon .go{color:#9aa}
+  .card.soon .cat{background:#e4e9e6;color:#7a8a82}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 22px;color:var(--g2);text-decoration:none;font-size:14px}
+  .axis{display:flex;align-items:center;justify-content:center;gap:0;margin:6px 0 30px;font-size:14px;flex-wrap:wrap}
+  .axis .pole{background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 18px;font-weight:700}
+  .axis .pole.hw{color:#b5401f;border-color:#f0b6a3}
+  .axis .pole.sw{color:var(--g1);border-color:var(--g4)}
+  .axis .arrow{color:var(--sub);padding:0 14px;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">COMPILER &#8646; HARDWARE</p>
+  <h1>コンパイラとハードウェアの対話</h1>
+  <p>並列性・局所性・効率を「実行時のハード」と「コンパイル時のコンパイラ」のどちらが決めるのか</p>
+</header>
+<main>
+  <a class="back" href="./index.html">&larr; explainers トップへ戻る</a>
+  <p class="intro">プロセッサの性能は、突き詰めると「やるべき仕事を、いつ・どこで・どの順で実行するかを誰が決めるか」で決まります。この判断を実行時のハードウェアに委ねる方向と、コンパイル時のコンパイラに委ねる方向 ── その綱引きを背骨に、命令レベル並列性から VLIW、データ並列、メモリ階層、ドメイン特化アクセラレータ、深層学習コンパイラ、そして 3D 積層と材料までを一気通貫でたどります。</p>
+
+  <div class="axis">
+    <span class="pole hw">動的 ・ ハードウェアが決める</span>
+    <span class="arrow">&#8646;</span>
+    <span class="pole sw">静的 ・ コンパイラが決める</span>
+  </div>
+
+  <div class="thread">
+    <b>一本の問い。</b> スーパースカラ CPU は「賢いハードウェア＋素朴な命令列」、VLIW は「素朴なハードウェア＋賢いコンパイラが作り込んだ命令列」。両極のどこに座るかで、電力効率・予測可能性・汎用性のトレードオフが決まります。一部の深層学習アクセラレータ（TPU、そして国産の <b>MN-Core</b>）は、この軸を「コンパイラに全振り」する方向へ大きく押し進めた設計です。シリーズの後半では、その思想が <b>3D 積層</b>という物理実装、さらには積層を支える<b>材料探索（Matlantis）</b>へと繋がりうる様子を、事実と推測を分けながら見ていきます。
+  </div>
+
+  <div class="grid">
+
+    <a class="card" href="./chw-01-responsibility.html">
+      <span class="cat">01 ・ 総論</span>
+      <h2>責務分担の地図 ── 静的 vs 動的</h2>
+      <p>同じプログラムでも、依存解決・順序決定・並列化を「実行時のハード」がやるか「コンパイル時のコンパイラ」がやるかで、必要な回路も電力も予測可能性も変わる。シリーズ全体の座標軸を、動く比較デモで掴む。</p>
+      <div class="meta"><span>総論</span><span class="go">開く &rarr;</span></div>
+    </a>
+
+    <span class="card soon">
+      <span class="cat">02 ・ ハード主導</span>
+      <h2>命令レベル並列性（ILP）</h2>
+      <p>パイプライン、スーパースカラ、アウトオブオーダー実行。ハザードとフォワーディング、Tomasulo 方式。ハードウェアが実行時に並列性を掘り出す仕組みと、その回路コストを動くガントチャートで理解する。</p>
+      <div class="meta"><span>近日</span><span class="go">準備中</span></div>
+    </span>
+
+    <a class="card" href="./chw-03-vliw.html">
+      <span class="cat">03 ・ コンパイラ主導</span>
+      <h2>VLIW ── 静的スケジューリング</h2>
+      <p>1 つの長い命令に複数演算を詰め、並列化の判断をハードからコンパイラへ移す。バンドル、NOP、レイテンシ隠蔽。スカラと VLIW の比較スケジューラを 1 サイクルずつ動かし、コンパイラが演算をどう詰めるかを体験する。</p>
+      <div class="meta"><span>デモあり</span><span class="go">開く &rarr;</span></div>
+    </a>
+
+    <span class="card soon">
+      <span class="cat">04 ・ 技法</span>
+      <h2>命令スケジューリングの技法</h2>
+      <p>リストスケジューリング、ソフトウェアパイプライニング（モジュロスケジューリング）、トレーススケジューリング、プレディケーション、ループアンローリング。コンパイラが並列性を引き出す道具箱を、ループのガント可視化で理解する。</p>
+      <div class="meta"><span>近日</span><span class="go">準備中</span></div>
+    </span>
+
+    <span class="card soon">
+      <span class="cat">05 ・ データ並列</span>
+      <h2>SIMD・ベクトル・GPU（SIMT）</h2>
+      <p>1 命令で多数のデータを処理するデータ並列。ベクトルレジスタ、warp と mask、メモリコアレッシング。ハードは大量のレーンを用意し、コンパイラとプログラマが並列性を「露出」させる分担を動くアニメで理解する。</p>
+      <div class="meta"><span>近日</span><span class="go">準備中</span></div>
+    </span>
+
+    <span class="card soon">
+      <span class="cat">06 ・ 局所性</span>
+      <h2>メモリ階層とコンパイラ</h2>
+      <p>ハードが自動で管理するキャッシュ vs コンパイラが明示的に管理するスクラッチパッド。タイリング／ブロッキング、データレイアウト。局所性を「誰が作るか」という責務分担の視点でメモリウォールに挑む。</p>
+      <div class="meta"><span>近日</span><span class="go">準備中</span></div>
+    </span>
+
+    <a class="card" href="./chw-07-domain-specific.html">
+      <span class="cat">07 ・ 特化</span>
+      <h2>ドメイン特化アクセラレータ</h2>
+      <p>汎用性を捨てて演算効率に全振りする空間アーキテクチャ。シストリックアレイ（TPU）とデータフロー、そしてキャッシュも分岐予測も持たず全サイクルをコンパイラが決める国産 MN-Core の階層構造。VLIW 思想の極致を動くアニメで理解する。</p>
+      <div class="meta"><span>デモあり</span><span class="go">開く &rarr;</span></div>
+    </a>
+
+    <span class="card soon">
+      <span class="cat">08 ・ コンパイラ</span>
+      <h2>深層学習コンパイラスタック</h2>
+      <p>グラフ IR から LLVM/MLIR、XLA・TVM。演算融合と自動スケジューリング、polyhedral 最適化。MN-Core の L3IR/L2IR/L1IR 多段 lowering も題材に、フレームワークからチップ命令までの旅を追う。</p>
+      <div class="meta"><span>近日</span><span class="go">準備中</span></div>
+    </span>
+
+    <span class="card soon">
+      <span class="cat">09 ・ 物理層</span>
+      <h2>実装の物理 ── 3D 積層</h2>
+      <p>ムーアの法則の減速で、性能の主役は「縦に積む」へ。TSV、ハイブリッドボンディング、HBM、チップレット、2.5D インターポーザ。なぜ広帯域になるのか、そして最大の壁である熱を、動く模式図で理解する。</p>
+      <div class="meta"><span>近日</span><span class="go">準備中</span></div>
+    </span>
+
+    <a class="card" href="./chw-10-mn-core.html">
+      <span class="cat">10 ・ ケーススタディ</span>
+      <h2>MN-Core と垂直統合</h2>
+      <p>コンパイラに全振りしたハードは電力効率が高く発熱を抑えられ、演算器の真上にメモリを積みやすい。MN-Core から次世代 L1000 の 3D 積層 DRAM、そして積層を支える材料を AI で探す Matlantis まで。一本の思想がハード・コンパイラ・物理・材料をどう繋ぐかを描いて締めくくる。</p>
+      <div class="meta"><span>シリーズの締め</span><span class="go">開く &rarr;</span></div>
+    </a>
+
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

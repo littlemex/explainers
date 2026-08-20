@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLIW — 静的スケジューリング</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --amber:#c98a1a; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  /* scheduler grid */
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 auto}
+  .toggle button{background:#fff;color:var(--sub);border:0;border-radius:0;padding:9px 16px;font-weight:600}
+  .toggle button.active{background:var(--g1);color:#fff}
+  .sched{display:grid;gap:6px;margin:16px 0;font-family:"SF Mono",Menlo,Consolas,monospace}
+  .schedrow{display:grid;grid-template-columns:56px repeat(4,1fr);gap:6px}
+  .cell{background:#f3f9f6;border:1px solid var(--line);border-radius:8px;padding:8px 4px;text-align:center;
+    font-size:12.5px;min-height:40px;display:flex;align-items:center;justify-content:center;transition:.2s}
+  .cell.head{background:transparent;border:0;color:var(--g1);font-weight:700;font-family:sans-serif}
+  .cell.cyc{background:transparent;border:0;color:var(--sub);font-weight:700}
+  .cell.op{background:#d8f0e2;border-color:var(--g3);color:var(--g1);font-weight:700}
+  .cell.nop{color:#b3c4bb}
+  .cell.stall{background:#fbf0dc;border-color:#e6cf8a;color:var(--amber)}
+  .cell.fresh{box-shadow:0 0 0 3px var(--g3)}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:12px 0}
+  .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;text-align:center}
+  .box .big{font-size:24px;font-weight:800;color:var(--g1);display:block}
+  .box .lbl{font-size:12.5px;color:var(--sub)}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:13.5px;color:var(--sub);margin-top:6px}
+  .sw{display:inline-block;width:14px;height:14px;border-radius:4px;margin-right:6px;vertical-align:middle;border:1px solid var(--line)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}.cell{font-size:10px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 03</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>VLIW ── 静的スケジューリング</h1>
+  <p>1 つの長い命令に複数演算を詰め、並列化の判断をハードからコンパイラへ移す</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">01 章で描いた「静的 &#8646; 動的」の軸。この章は、静的側の代表格 VLIW を、コンパイラが実際に演算を詰める様子を動かしながら理解します。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>VLIW（Very Long Instruction Word、超長命令語）</b>は、1 個のとても長い命令の中に、複数の演算ユニットへの操作をまとめて詰め込むアーキテクチャです。「どの演算をどのサイクルにどのユニットで実行するか」を、実行時のハードではなく<b>コンパイル時にコンパイラが決め切り</b>、それをそのまま命令（バンドル）にエンコードします。ハードは依存チェックも順序入れ替えもしないと割り切れるので単純・低電力。代償は、性能がコンパイラの巧拙に直結し、埋められないスロットが <b>NOP</b> になってコードが膨らむこと。この割り切りが見事に当たる領域が深層学習で、その先に MN-Core があります（07 章）。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. バンドル ── 命令の中の並列</a>
+    <a href="#s2">2. 【体験】コンパイラはこう詰める</a>
+    <a href="#s3">3. レイテンシ隠蔽という仕事</a>
+    <a href="#s4">4. 代表例と長所・短所</a>
+    <a href="#s5">5. なぜ深層学習と相性が良いか</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>バンドル ── 命令の中の並列</h2>
+  <p class="lead">VLIW 命令は、各機能ユニットに対応する固定の「スロット」に分かれています。</p>
+  <p>1 つの VLIW 命令（バンドル）は、たとえば「ALU で加算、別の ALU で減算、乗算器で積、ロードユニットでメモリ読み出し」を<b>同時に</b>指示する、複数スロットの塊です。コンパイラが並列に実行できる独立な演算を見つけられなければ、そのスロットには <b>NOP（何もしない）</b>が入ります。</p>
+  <div class="math">
+    ┌─── 1 つの VLIW 命令（バンドル）= 1 サイクルで同時実行 ───┐<br>
+    │  ALU0        │  ALU1        │  MUL         │  MEM         │  BR   │<br>
+    ├──────────────┼──────────────┼──────────────┼──────────────┼───────┤<br>
+    │ add r3,r1,r2 │ sub r6,r4,r5 │ mul r9,r7,r8 │ ld r10,[r11] │  NOP  │<br>
+    └──────────────┴──────────────┴──────────────┴──────────────┴───────┘
+  </div>
+  <p>スーパースカラ CPU も 1 サイクルに複数命令を発行しますが、その割り当てを<b>実行時にハードが動的に</b>決めます。VLIW は<b>同じ割り当てをコンパイル時に確定</b>させ、命令に焼き込む。「賢いハード＋素朴な命令列」か、「素朴なハード＋賢いコンパイラが作り込んだ命令列」か、の違いです（01 章）。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】コンパイラはこう詰める</h2>
+  <p class="lead"><b>ハードウェアは両方とも同じ</b>（乗算器 ×2、メモリ ×2 の 4 スロット、命令はプログラム順に発行するインオーダー機）です。違うのは<b>命令の順序だけ</b>。一方は素朴な順序（積の直後にその書き出しを置いたソースそのまま）、もう一方はコンパイラが並べ替えた後。差はすべて<b>コンパイラの並べ替え</b>によるもので、ハードの幅の違いではありません。積のレイテンシは 3。<b>実行</b>を押すと 1 サイクルずつ進みます。素朴な順序では、各書き出しが直前の積の完成（積を発行した 3 サイクル後）まで発行できず空転する点に注目してください。</p>
+  <div class="math">
+    <span class="c"># ハード共通: MUL×2, MEM(load/store)×2 の 4 スロット・インオーダー発行</span><br>
+    <span class="c"># 素朴な順序: 積のすぐ後に書き出しを置いている</span><br>
+    o0 = v0 * w0 <span class="c">[MUL,3]</span>;&nbsp; store o0 <span class="c">[MEM,1]</span>&nbsp; <span class="c"># store は o0 の完成(発行の3サイクル後)まで待つ</span><br>
+    o1 = v1 * w1 <span class="c">[MUL,3]</span>;&nbsp; store o1 <span class="c">[MEM,1]</span>&nbsp; … o5 まで<br>
+    <span class="c"># コンパイラの並べ替え後: 積 o0..o5 を先に、その後 store o0..o5</span>
+  </div>
+  <div class="controls">
+    <div class="toggle" id="modeToggle">
+      <button data-mode="scalar">並べ替えなし（素朴な順序）</button>
+      <button data-mode="vliw" class="active">並べ替えあり（スケジューリング後）</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="runBtn">実行（1 サイクルずつ）</button>
+    <button id="instantBtn" class="ghost">一気に表示</button>
+    <button id="resetBtn" class="ghost">リセット</button>
+  </div>
+  <div class="sched" id="sched"></div>
+  <div class="legend">
+    <span><i class="sw" style="background:#d8f0e2;border-color:var(--g3)"></i>演算を発行</span>
+    <span><i class="sw" style="background:#fbf0dc;border-color:#e6cf8a"></i>ストール（次の演算のレイテンシ待ちで進めない）</span>
+    <span><i class="sw" style="background:#f3f9f6"></i>NOP（空きスロット）</span>
+  </div>
+  <div class="stats" id="stats"></div>
+  <p id="explain" class="lead" style="padding-left:0"></p>
+  <div class="key">
+    示しているのは、<b>同じプログラムでも、コンパイラが依存とレイテンシを読んで独立演算を並べ直すだけで必要サイクル数が縮む</b>という事実です。VLIW ハードはこの詰めた命令列を流すだけで並列性を得ます。逆に、コンパイラが下手に詰めれば NOP だらけになり、ハードの並列度は活きません ── だから VLIW は<b>コンパイラが主役</b>なのです。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>レイテンシ隠蔽という仕事</h2>
+  <p class="lead">ロードや乗算は、結果が出るまで数サイクルかかります。その待ち時間をどう埋めるかがコンパイラの腕です。</p>
+  <p>上のデモで「コンパイラなし（素朴な順序）」を実行すると、各書き出しが直前の積の完成（レイテンシ 3）を待って <b>stall</b>（空転）していたはずです。インオーダー発行のハードは、後ろにある独立な積を勝手に前へ持ってこられないため、待つしかありません。コンパイラが<b>積をすべて先に、書き出しを後に</b>並べ替えておけば、積のレイテンシの裏で次々と別の積を発行でき、空転が消えます。ある演算の結果待ちの時間に依存の無い別の演算を差し込む ── これが<b>レイテンシ隠蔽</b>で、静的スケジューリングの中核の仕事です。デモの 2 つは<b>全く同じハードウェア</b>で、違いは命令の順序だけ。速さの差はコンパイラが生んでいます。</p>
+  <div class="warn">
+    <b>コンパイラの重責。</b> インターロック（ハードによる依存待ち）を持たない露出パイプライン型の設計では、コンパイラが固定レイテンシを 1 サイクルでも読み違えると、まだ出ていない結果を使って計算が壊れます。一方、キャッシュミスのように<b>実行時にしか分からない可変レイテンシ</b>は静的に読めないため、実機の多くはメモリ待ちを検出して全体をストールさせるインターロックを持ちます（Itanium 等はロードにインターロックを備え、この場合は正しさは保たれ性能だけが落ちます）。いずれにせよ VLIW コンパイラは<b>ハードの動作モデルを正確に持ち、サイクル単位で命令を並べる</b>必要があり、この難しさが開発コストの高さの正体です。
+  </div>
+  <p>より高度な技法 ── ループ反復をまたいで並列化する<b>ソフトウェアパイプライニング</b>、分岐を消す<b>プレディケーション</b>、実行されやすい経路を直線化する<b>トレーススケジューリング</b>など ── は、次章 04 で扱います。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>代表例と長所・短所</h2>
+  <table>
+    <tr><th>製品 / 系統</th><th>用途</th><th>備考</th></tr>
+    <tr><td>Intel Itanium（IA-64 / EPIC）</td><td>サーバ CPU</td><td>VLIW の思想を汎用 CPU に持ち込んだ野心作。厳密には古典 VLIW と異なり、ストップビットによる並列指定やインターロックを持つ EPIC 方式。バイナリ互換とコンパイラ依存の難しさで商業的には苦戦</td></tr>
+    <tr><td>TI C6000 系 DSP</td><td>信号処理</td><td>VLIW が最も成功した領域。規則的なループが多い DSP と好相性</td></tr>
+    <tr><td>Qualcomm Hexagon DSP</td><td>モバイル SoC</td><td>スマホの信号処理・AI 前処理で広く使われる VLIW DSP</td></tr>
+    <tr><td>Transmeta Crusoe / Efficeon</td><td>低電力 CPU</td><td>内部は VLIW、x86 を実行時にプロファイルしながら動的翻訳する（動的翻訳＋静的発行のハイブリッド）</td></tr>
+    <tr><td>一部の AI アクセラレータ</td><td>深層学習</td><td>規則的な行列演算に静的スケジューリングで電力効率を追求（Hexagon NPU 系、<b>MN-Core</b> など。なお TPU はシストリック＋別方式、GPU は SIMT で VLIW ではない）</td></tr>
+  </table>
+  <table>
+    <tr><th class="tag">長所</th><th class="tag">短所</th></tr>
+    <tr>
+      <td>ハードが単純で電力効率が高い（掘る回路が要らない）／性能が予測可能／コンパイラは全体を見渡して大域最適化できる</td>
+      <td>NOP でコードが肥大／ユニット数やレイテンシが変わると再コンパイルが要り互換性が弱い／キャッシュミス等の動的遅延を静的に隠せない／コンパイラが極めて難しい</td>
+    </tr>
+  </table>
+  <div class="key">
+    <b>なぜ汎用 CPU では主流にならなかったのか。</b> 分岐が多く、メモリアクセスが不規則で、既存バイナリ互換が必須な汎用ワークロードでは、上記の短所が致命的でした（Itanium の苦戦が象徴）。一方、<b>DSP や一部の深層学習アクセラレータ</b>のように計算パターンが規則的・分岐が少なく・専用コンパイラと一体で提供できる領域では、VLIW 的な静的スケジューリングが電力効率で大きく優位に立ちます。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>なぜ深層学習と相性が良いか</h2>
+  <p class="lead">VLIW の弱点（分岐・不規則アクセス・互換性）が、密な行列積が支配的な範囲では問題になりにくいからです。</p>
+  <p>この「なぜ深層学習が静的側に寄れるのか」という議論は <a href="./chw-01-responsibility.html#s5">01 章 §5</a> で詳しく扱いました（行列積主体で分岐が少なく、形が既知でアクセスが見通せ、毎回コンパイルが前提。ただし GPU が主流な理由や MoE 等の動的性という留保も 01 章に記載）。ここでは VLIW 固有の含意を 1 つだけ加えます。<b>VLIW の「命令に並列と順序を焼き込む」形式は、この規則的なワークロードと特に相性が良い</b>という点です。</p>
+  <div class="key">
+    だからこそ、MN-Core は VLIW 命令フォーマットを採用し、命令ワードで演算を明示的にスケジュールする設計を選びました。キャッシュも分岐予測も持たず、全サイクルをコンパイラが決める ── VLIW 思想を極限まで押し進めた姿と、その公式の説明は、次の 07 章で詳しく見ます。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>やること</td><td>複数演算を 1 つの長い命令（バンドル）に詰め、割り当てをコンパイル時に確定</td></tr>
+    <tr><td>ハードの割り切り</td><td>依存チェック・順序入れ替えをしない → 単純・低電力</td></tr>
+    <tr><td>コンパイラの責務</td><td>依存解析・スケジュール・レイテンシ隠蔽・レジスタ割り当て</td></tr>
+    <tr><td>弱点</td><td>NOP による肥大・互換性・動的遅延・コンパイラ難度</td></tr>
+    <tr><td>効く領域</td><td>DSP と深層学習（規則的・分岐少・専用コンパイラ前提）</td></tr>
+  </table>
+  <div class="seriesnav">
+    次に読む → <a href="./chw-07-domain-specific.html">07. ドメイン特化アクセラレータ（MN-Core）</a>（04 スケジューリング技法は準備中）
+  </div>
+  <div class="fn">
+    参考: J. A. Fisher, "Very Long Instruction Word architectures and the ELI-512," ISCA 1983。Intel IA-64 / EPIC。<a href="https://dev.mn-core.com/architecture/" target="_blank" rel="noopener">MN-Core SDK Hub アーキテクチャ</a>。<br>
+    注意: 本ページのスケジューラは、依存とレイテンシの扱いを直感的に伝えるための<b>模式的な可視化</b>です。実機のバンドル構成・レイテンシ・サイクル数は実装に依存し、ここでの概算とは一致しません。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= VLIW スケジューラ デモ =================
+(function(){
+  const IDX=[0,1,2,3,4,5];
+  const mkMul=i=>({res:"o"+i, unit:"MUL", lat:3, deps:[], disp:"o"+i});
+  const mkSt =i=>({res:"_"+i, unit:"MEM", lat:1, deps:["o"+i], disp:"st o"+i});
+  // 素朴な順序: 積の直後に書き出し。コンパイラ並べ替え後: 積を全部先に、その後書き出し。
+  const NAIVE=[]; IDX.forEach(i=>{ NAIVE.push(mkMul(i)); NAIVE.push(mkSt(i)); });
+  const SCHED=[...IDX.map(mkMul), ...IDX.map(mkSt)];
+  const NUM_OPS=NAIVE.length;
+  const UNITS=[{id:"MUL0",t:"MUL"},{id:"MUL1",t:"MUL"},{id:"MEM0",t:"MEM"},{id:"MEM1",t:"MEM"}];
+
+  // 共通ハード: インオーダー・スーパースカラ発行(プログラム順に、空きユニットが尽きるか次が未準備なら打ち切り)
+  function runInOrder(order){
+    const ready={}, rows=[]; let idx=0, cyc=1, g=0;
+    while(idx<order.length && g++<300){
+      const used={}; const cells=UNITS.map(u=>({unit:u.id,type:u.t,op:null}));
+      let progressed=false;
+      while(idx<order.length){
+        const o=order[idx];
+        const depOk=o.deps.every(d=>ready[d]!==undefined && ready[d]<=cyc);
+        if(!depOk) break;                 // インオーダー: 未準備の演算を飛ばせない
+        const s=UNITS.findIndex((u,ui)=>u.t===o.unit && !used[ui]);
+        if(s<0) break;                    // その種類のユニットが空いていない
+        used[s]=true; cells[s].op=o; ready[o.res]=cyc+o.lat; idx++; progressed=true;
+      }
+      rows.push({cyc,cells,stall:!progressed}); cyc++;
+    }
+    return {rows, cycles:rows.length};
+  }
+  const R={vliw:runInOrder(SCHED), scalar:runInOrder(NAIVE)};
+  let curMode="vliw", curSched=null, anim=null;
+  const $=id=>document.getElementById(id);
+  function build(){ curSched = R[curMode]; }
+  function render(upto){
+    const el=$("sched"); el.innerHTML="";
+    const head=document.createElement("div"); head.className="schedrow";
+    head.innerHTML=`<div class="cell head">cycle</div>`+UNITS.map(u=>`<div class="cell head">${u.id}</div>`).join("");
+    el.appendChild(head);
+    curSched.rows.forEach((row,ri)=>{
+      const vis = upto===undefined || ri<upto;
+      const div=document.createElement("div"); div.className="schedrow";
+      let html=`<div class="cell cyc">${row.cyc}</div>`;
+      row.cells.forEach(c=>{
+        if(!vis){ html+=`<div class="cell nop">·</div>`; return; }
+        if(c.op){ const fresh=(upto!==undefined&&ri===upto-1)?" fresh":"";
+          html+=`<div class="cell op${fresh}">${c.op.disp}<span style="opacity:.55"> ·${c.type}</span></div>`; }
+        else if(row.stall){ html+=`<div class="cell stall">stall</div>`; }
+        else { html+=`<div class="cell nop">NOP</div>`; }
+      });
+      div.innerHTML=html; el.appendChild(div);
+    });
+    if(upto===undefined || upto>=curSched.rows.length) stats();
+  }
+  function stats(){
+    const s=curSched;
+    const nop = s.rows.reduce((a,r)=>a+r.cells.filter(c=>!c.op).length,0);
+    const total = s.rows.length*UNITS.length;
+    const util = ((total-nop)/total*100);
+    const vc=R.vliw.cycles, sc=R.scalar.cycles;
+    $("stats").innerHTML=`
+      <div class="box"><span class="big">${s.cycles}</span><span class="lbl">総サイクル数</span></div>
+      <div class="box"><span class="big">${NUM_OPS}</span><span class="lbl">演算数</span></div>
+      <div class="box"><span class="big">${util.toFixed(0)}%</span><span class="lbl">スロット稼働率</span></div>
+      <div class="box"><span class="big">${(sc/vc).toFixed(2)}×</span><span class="lbl">並べ替えの効果</span></div>`;
+    $("explain").innerHTML = curMode==="vliw"
+      ? `並べ替え後は、積 6 個を 2 つの乗算器に詰め(1 サイクル 2 積)、その後 6 個の書き出しを 2 つの MEM スロットに詰めます。同じハードで <b>${vc} サイクル</b>。逐次の素朴な順序（${sc} サイクル）に対し ${(sc/vc).toFixed(2)} 倍、これはすべて並べ替えの効果です。`
+      : `素朴な順序では、各 store がその直前の積の完成(レイテンシ 3)を待って <span style="color:var(--amber)">stall</span> します。しかもインオーダー発行なので、後ろの独立な積を前に持ってこられません。<b>${sc} サイクル</b>。全く同じハードなのに、差の ${sc-vc} サイクルは純粋にコンパイラの並べ替えの有無から生まれています。`;
+  }
+  function play(){ build(); if(anim)clearInterval(anim); let step=0; render(step); $("runBtn").disabled=true;
+    anim=setInterval(()=>{ step++; render(step); if(step>=curSched.rows.length){clearInterval(anim);anim=null;$("runBtn").disabled=false;} },650); }
+  function instant(){ if(anim){clearInterval(anim);anim=null;} build(); render(); $("runBtn").disabled=false; }
+  function reset(){ if(anim){clearInterval(anim);anim=null;} build(); render(0); $("stats").innerHTML=""; $("explain").innerHTML=""; $("runBtn").disabled=false; }
+  document.querySelectorAll("#modeToggle button").forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll("#modeToggle button").forEach(x=>x.classList.remove("active")); b.classList.add("active"); curMode=b.dataset.mode; reset(); };
+  });
+  $("runBtn").onclick=play; $("instantBtn").onclick=instant; $("resetBtn").onclick=reset;
+  reset();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

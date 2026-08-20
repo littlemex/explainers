@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ドメイン特化アクセラレータ — 空間アーキと MN-Core</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  .status{text-align:center;font-size:14px;color:var(--sub);margin:6px 0}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 07</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>ドメイン特化アクセラレータ</h1>
+  <p>汎用性を捨てて演算効率に全振りする ── シストリックアレイと、静的制御を徹底した MN-Core</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">01 章の「静的 &#8646; 動的」の軸を思い出してください。この章は、その軸の<b>右端（静的の極）</b>に立つプロセッサたちの話です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    汎用 CPU は「あらゆるプログラムをそこそこ速く」動かすため、並列性を掘る回路や分岐予測をハードに積みます。対して<b>ドメイン特化アクセラレータ</b>は、行列積のような<b>特定の規則的な計算だけ</b>を高効率に回すと割り切り、制御回路を削って演算器を敷き詰めます。その典型が<b>シストリックアレイ</b>（TPU）と<b>データフロー / 空間アーキテクチャ</b>。そして国産の <b>MN-Core</b> は、キャッシュも分岐予測もアウトオブオーダーも一切持たず、<b>全サイクルをコンパイラが決める</b>ことで、電力効率ランキング Green500 で 2020〜21 年に複数回世界 1 位を獲得しました。この「静的制御を徹底する」思想を最も突き詰めた設計の一つです（同様の思想の決定論的アーキテクチャに Groq TSP などもあります）。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. なぜ特化が効くのか</a>
+    <a href="#s2">2. 【体験】シストリックアレイ</a>
+    <a href="#s3">3. MN-Core ── 制御をすべて捨てる</a>
+    <a href="#s4">4. 【体験】階層と放送・縮約</a>
+    <a href="#s5">5. ハードとコンパイラの責務</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ特化が効くのか</h2>
+  <p class="lead">汎用 CPU の電力の多くは、演算そのものではなく「演算をお膳立てする作業」に消えています。</p>
+  <p>1 個の加算を実行するために、汎用プロセッサは命令をフェッチし、デコードし、依存を調べ、レジスタを読み、結果を書き戻します。これらのオーバーヘッドは、演算 1 回あたりで見ると演算本体より大きいことすらあります。深層学習のように<b>同じ形の演算を莫大な回数繰り返す</b>ワークロードでは、このお膳立てを削れれば効率が跳ね上がります。</p>
+  <h3>特化の 3 つの武器</h3>
+  <table>
+    <tr><th>武器</th><th>内容</th><th>効く理由</th></tr>
+    <tr><td>命令オーバーヘッド削減</td><td>演算ごとに命令を出さず、配線で演算器を繋ぐ</td><td>フェッチ・デコード・依存チェックの電力が消える</td></tr>
+    <tr><td>データ再利用</td><td>読み込んだ値を隣の演算器へ直接渡す</td><td>メモリへの往復（最も高価な操作）を減らせる</td></tr>
+    <tr><td>制御の除去</td><td>分岐予測・投機・キャッシュを持たない</td><td>その面積と電力を演算器に回せる</td></tr>
+  </table>
+  <p>ただしこれらは<b>「計算パターンが規則的で、コンパイル時に見通せる」</b>という前提の上でしか成り立ちません。汎用計算では成立しませんが、行列積・畳み込みが主体の深層学習では見事に成立します（01 章 §5）。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】シストリックアレイ</h2>
+  <p class="lead">Google の TPU で有名になった方式です。演算器（PE）を格子状に並べ、行列 A を左から、行列 B を上から流し込むと、各 PE が積を足し込みながら結果 C を作ります。心臓の鼓動（systole）のように、データが 1 拍ごとに隣へ進むのでこの名があります。なお、ここで示すのは各 PE に累算和を留める <b>output-stationary</b> 型で、TPU v1 は重みを PE に事前ロードする <b>weight-stationary</b> 型という別変種です（データの流し方が違うだけで、命令なしにデータを流して積和する発想は共通）。</p>
+  <p>ここでは $2\times2$ の行列積 $C = A \times B$ を計算します。各 PE は「上から来た値」と「左から来た値」を掛けて自分の和に足し、それぞれを下と右へそのまま送ります。<b>一度読んだデータが格子内を歩き回って何度も使われる</b>のがポイントです。</p>
+  <div class="math">
+    A = [[1, 2],[3, 4]]&nbsp;&nbsp; B = [[5, 6],[7, 8]]&nbsp;&nbsp; <span class="c">→ C = [[19, 22],[43, 50]]</span>
+  </div>
+  <div class="controls">
+    <button id="syStep">1 拍すすめる</button>
+    <button id="syPlay" class="ghost">自動再生</button>
+    <button id="syReset" class="ghost">リセット</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvSys" width="760" height="360"></canvas></div>
+  <div class="status" id="syStatus"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3d7dca"></span>A の要素（左から流入）</span>
+    <span><span class="dot" style="background:#e0a94a"></span>B の要素（上から流入）</span>
+    <span><span class="dot" style="background:#43b581"></span>PE の累算和</span>
+  </div>
+  <div class="key">
+    注目してほしいのは、<b>各 PE には「命令」が来ていない</b>ことです。全 PE は「来た 2 つを掛けて足し、隣へ送る」という<b>同じ動作を毎拍くり返すだけ</b>。何を計算するかは、いつどのデータを流し込むかという<b>スケジュール（=外側の制御）だけで決まります</b>。命令フェッチもデコードも要らないので、莫大な数の PE を低電力で動かせる ── これが空間アーキテクチャの正体です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>MN-Core ── 制御をすべて捨てる</h2>
+  <p class="lead">MN-Core は、Preferred Networks（PFN）が神戸大学の牧野淳一郎氏らと共同開発した国産の深層学習アクセラレータです。「制御をハードから剥がす」という思想を、シストリックアレイよりさらに徹底しています。</p>
+  <p>牧野氏は重力多体問題専用計算機 <b>GRAPE</b> を 30 年にわたり開発してきた研究者で、「汎用性を捨てて特定計算の効率を極限まで高める」専用計算機の系譜がその背景にあります。「ハードの制御回路を削り、最適化の責務をソフトに移す」という路線のもと、第 1 世代 MN-Core は 2018 年に試作が公開され、2020 年に MN-3 として稼働しました。この MN-3 は、電力効率ランキング <b>Green500 で 2020 年 6 月・2021 年 6 月・2021 年 11 月に世界 1 位</b>を獲得しています（2020 年 11 月は 2 位で、連続首位ではありません）。なお Green500 の指標は HPL（倍精度の密行列計算）という<b>規則的なワークロード</b>での効率であり、これ自体が「規則的計算では静的設計が効く」ことの好例になっています。</p>
+  <div class="key">
+    公式ドキュメントは明快です ──「MN-Core にはハードウェアキャッシュが無く、キャッシュコヒーレンスも投機実行も無いため、実行は完全に決定論的である。キャッシュコントローラ・分岐予測器・投機実行は排除された。<b>シミュレーションで測った性能が、実機で得られる性能と一致する</b>」（この決定論はチップ内の実行についての話で、ホスト転送や DRAM リフレッシュを含むシステム全体が完全に決定論的という意味ではありません）。これは 01 章で見た「静的方式は性能が予測可能」という長所を強く体現しています。各 PE はプログラムカウンタも命令デコーダも持たず、全 PE がホストの命令列で<b>完全同期</b>する巨大な SIMD（1 つの命令で多数のデータを同時に処理する方式）として動きます。
+  </div>
+  <p>そして MN-Core は <b>VLIW 命令フォーマット</b>を採用します（03 章）。公式の言葉で「各命令ワードで演算が明示的にスケジュールされ、プログラマとコンパイラがハードウェア資源を細粒度で制御する」。汎用プロセッサがハードとして持つネットワーク制御・キャッシュ制御・命令スケジューラを、MN-Core は<b>持たず、その機能をすべてコンパイラへ移して</b>います。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】階層と放送・縮約</h2>
+  <p class="lead">MN-Core はプロセッシングエレメント（PE）を何段にも束ねた入れ子構造で、各段に「放送（broadcast）」と「縮約（reduction）」のネットワークを持ちます。行列積で必要な「同じ重みを多数の PE に配る」「部分和を集める」を、キャッシュ階層なしで高効率にこなす仕組みです。</p>
+  <p>階層は下から <b>PE</b>（最小単位。ALU・ローカルメモリ・レジスタを持つ）→ <b>MAB</b>（PE 4 個＋行列演算器 MAU 1 個）→ <b>L1B</b>（MAB 16 個）→ <b>L2B</b>（L1B 8 個）→ <b>Group</b>（L2B 2 個）→ チップ（Group 4 個）、と積み上がります（数値は第 2 世代 MN-Core 2）。掛け合わせると PE 総数は 4×16×8×2×4 = 4096、DRAM は 16 GiB。各段のメモリ（L2B の L2BM、L1B の L1BM のように、その段に付く放送用メモリ）にどのデータを置き、いつ放送・縮約するかは、<b>すべてコンパイラが静的に決めます</b>。以上を踏まえて、再生ボタンでデータが上位から末端へ配られ（放送）、結果が末端から集約される（縮約）様子を見てください（下図は段数を簡略化しています）。</p>
+  <div class="controls">
+    <button id="hiPlay">放送 → 縮約を再生</button>
+    <button id="hiReset" class="ghost">リセット</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvHier" width="820" height="380"></canvas></div>
+  <div class="status" id="hiStatus"></div>
+  <div class="warn">
+    <b>ここがシストリックアレイとの違い。</b> シストリックアレイは 2 次元格子への「流し込みスケジュール」だけを外から与えました。MN-Core はさらに<b>階層メモリの配置と多段の放送・縮約まで</b>コンパイラの管理下に置きます。制御をハードから剥がした分、コンパイラの責務（08 章）は極大になりますが、その代わりハードは単純になり、<b>演算あたりの電力（電力効率）が高く</b>なります ── この高い電力効率が、10 章で見る 3D 積層メモリを載せられるかどうかの鍵になります。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>ハードとコンパイラの責務</h2>
+  <table>
+    <tr><th>役割</th><th>担当</th><th>内容</th></tr>
+    <tr><td>演算</td><td>ハード</td><td>MAU / ALU、階層メモリ、放送・縮約ネットワークを提供する「だけ」</td></tr>
+    <tr><td>命令パッキング</td><td class="tag">コンパイラ</td><td>全機能ユニットへの演算割り当て（VLIW バンドル生成）</td></tr>
+    <tr><td>スケジューリング</td><td class="tag">コンパイラ</td><td>全サイクルの実行順序を静的に確定</td></tr>
+    <tr><td>データ配置</td><td class="tag">コンパイラ</td><td>L2BM → L1BM → MAB → レジスタのどこに何を置くか</td></tr>
+    <tr><td>ネットワーク制御</td><td class="tag">コンパイラ</td><td>いつ放送・縮約・分配するかを命令として明示</td></tr>
+  </table>
+  <h3>世代ごとの主要スペック</h3>
+  <table>
+    <tr><th>項目</th><th>MN-Core（第 1 世代）</th><th>MN-Core 2（第 2 世代）</th></tr>
+    <tr><td>公開</td><td>2018 年（SEMICON Japan で展示）</td><td>2022 年 12 月発表 / Hot Chips 2024</td></tr>
+    <tr><td>プロセス</td><td>TSMC 12nm</td><td>TSMC N7（7nm）</td></tr>
+    <tr><td>構成</td><td>4 ダイ 1 パッケージ / MAB 2048</td><td>単一ダイ / PE 4096 / 550 mm² / 220 億 Tr</td></tr>
+    <tr><td>クロック</td><td>500 MHz</td><td>750 MHz</td></tr>
+    <tr><td>半精度級ピーク</td><td>524 TFLOPS（FP16、4 ダイ合計）</td><td>393 TFLOPS（TF16、単一ダイ）</td></tr>
+    <tr><td>消費電力</td><td>500 W（予測値）</td><td>330 W（設計値）</td></tr>
+  </table>
+  <p class="lead" style="padding-left:0">数値は PFN 公式ページおよび MN-Core 2 ホワイトペーパーの公表値です。第 1 世代の半精度値は FP16・4 ダイ合計、第 2 世代は TF16（PFN の低精度テンソル形式で FP16 とは別物）・単一ダイの値であり、<b>形式も集計単位も異なるため世代間の数字を直接比較することはできません</b>（第 1 世代の単精度 131 TFLOPS に対し第 2 世代は TF32 で 98 TFLOPS、FP32 で 49 TFLOPS など、指標ごとに位置づけが変わります）。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>特化が効く理由</td><td>命令オーバーヘッド削減・データ再利用・制御の除去。ただし規則的計算が前提</td></tr>
+    <tr><td>シストリックアレイ</td><td>格子に PE を敷き、データを流す。命令フェッチ不要でデータが何度も再利用される（TPU）</td></tr>
+    <tr><td>MN-Core</td><td>キャッシュ・分岐予測・OoO を全排除した決定論的アーキ。VLIW でコンパイラが全制御</td></tr>
+    <tr><td>階層</td><td>PE → MAB → L1B → L2B。放送・縮約ネットワークをコンパイラが操る</td></tr>
+    <tr><td>代償と果実</td><td>コンパイラの責務は極大（08 章）。代わりにハードは単純で高電力効率 → 3D 積層へ（10 章）</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>ドメイン特化とは「静的 &#8646; 動的」の軸を右端まで振り切ること。制御をハードから剥がし、コンパイラに全部渡す。MN-Core はこの思想を最も徹底した設計の一つで、<b>2020〜21 年に Green500 で複数回世界 1 位</b>という電力効率を実証しました。次はこの高電力効率のハードが、演算器の真上にメモリを積む <b>3D 積層</b>、さらに積層を支える<b>材料探索</b>へと繋がりうる、垂直統合の物語です。
+  </div>
+  <div class="seriesnav">
+    次の章 → <a href="./chw-10-mn-core.html">10. MN-Core と垂直統合 ── L1000・3D 積層・Matlantis</a>（08 深層学習コンパイラ / 09 3D 積層の物理 は準備中）
+  </div>
+  <div class="fn">
+    出典: <a href="https://projects.preferred.jp/mn-core/" target="_blank" rel="noopener">PFN MN-Core プロジェクト</a>、<a href="https://projects.preferred.jp/mn-core/assets/MN-Core_2_whitepaper_ja.pdf" target="_blank" rel="noopener">MN-Core 2 ホワイトペーパー</a>、<a href="https://dev.mn-core.com/architecture/" target="_blank" rel="noopener">MN-Core SDK Hub アーキテクチャ</a>、<a href="https://www.top500.org/lists/green500/" target="_blank" rel="noopener">Green500</a>。シストリックアレイ: H. T. Kung &amp; C. Leiserson (1978)、Google TPU (Jouppi et al., ISCA 2017)。<br>
+    注意: 本ページのアニメーションは仕組みを直感的に伝えるための<b>模式的な可視化</b>です。実際の PE 数・タイミング・データ経路はここでの簡略図とは異なります。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= シストリックアレイ 2x2 matmul =================
+(function(){
+  const cv=document.getElementById('cvSys'), ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const A=[[1,2],[3,4]], B=[[5,6],[7,8]]; // C=[[19,22],[43,50]]
+  // PE grid 2x2. A rows enter from left (staggered), B cols from top (staggered).
+  // schedule: at tick t, A[i] element A[i][k] arrives to PE(i,0) when ... standard weight-not-stationary streaming.
+  // We simulate the classic output-stationary systolic: PE(i,j) accumulates sum_k A[i][k]*B[k][j].
+  // Feed: left input to row i at tick: A[i][k] enters at t = k + i (skew). top input to col j: B[k][j] at t = k + j.
+  // PE(i,j) at tick t receives left value that has traveled j steps and top value traveled i steps.
+  // Simplify: compute per-tick what each PE multiplies. PE(i,j) does mult of A[i][k],B[k][j] at tick t=k+i+j.
+  let tick=0; const maxTick=5; let timer=null;
+  const gx=300, gy=120, cell=110; // grid origin
+  function peSum(i,j,upto){ // accumulated sum after processing ticks <= upto
+    let s=0; for(let k=0;k<2;k++){ if(k+i+j<=upto) s+=A[i][k]*B[k][j]; } return s;
+  }
+  function activeMul(i,j,t){ for(let k=0;k<2;k++){ if(k+i+j===t) return [A[i][k],B[k][j],k]; } return null; }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    ct.fillText('拍 t = '+tick+'  ／  各 PE は A×B を掛けて累算し、A を右へ・B を下へ送る',20,26);
+    // draw A feeders (left)
+    ct.font='13px monospace';
+    for(let i=0;i<2;i++){
+      const py=gy+i*cell+cell/2;
+      for(let k=0;k<2;k++){
+        const t0=k+i; // enters row i at tick t0 into col0; travels right
+        // position along row: has moved (tick - t0) cells right
+        const prog=tick-t0;
+        if(prog<0||prog>2) continue;
+        const x=gx-70+prog*cell;
+        drawChip(x,py,A[i][k],'#3d7dca','A'+i+k);
+      }
+    }
+    // draw B feeders (top)
+    for(let j=0;j<2;j++){
+      const px=gx+j*cell+cell/2;
+      for(let k=0;k<2;k++){
+        const t0=k+j; const prog=tick-t0;
+        if(prog<0||prog>2) continue;
+        const y=gy-70+prog*cell;
+        drawChip(px,y,B[k][j],'#e0a94a','B'+k+j);
+      }
+    }
+    // draw PEs
+    for(let i=0;i<2;i++)for(let j=0;j<2;j++){
+      const x=gx+j*cell, y=gy+i*cell;
+      const done=(1+i+j)<=tick; // both k processed
+      ct.fillStyle= done?'#1c5c3f':'#173a2c';
+      ct.strokeStyle='#43b581'; ct.lineWidth=2;
+      roundRect(ct,x+8,y+8,cell-16,cell-16,12); ct.fill(); ct.stroke();
+      const am=activeMul(i,j,tick);
+      if(am){ ct.strokeStyle='#ffd98f'; ct.lineWidth=3; roundRect(ct,x+8,y+8,cell-16,cell-16,12); ct.stroke(); }
+      ct.fillStyle='#9fc4ac'; ct.font='11px sans-serif'; ct.textAlign='center';
+      ct.fillText('PE('+i+','+j+')', x+cell/2, y+30);
+      ct.fillStyle='#8fe3ad'; ct.font='bold 26px sans-serif';
+      ct.fillText(peSum(i,j,tick), x+cell/2, y+cell/2+18);
+      if(am){ ct.fillStyle='#ffd98f'; ct.font='12px monospace';
+        ct.fillText('+ '+am[0]+'×'+am[1], x+cell/2, y+cell-18); }
+      ct.fillStyle= done?'#8fd6b4':'#5c7d6c'; ct.font='11px sans-serif';
+      if(done) ct.fillText('= C'+i+j+' 確定', x+cell/2, y+cell-4);
+    }
+  }
+  function drawChip(x,y,v,col,lbl){
+    ct.fillStyle=col; ct.globalAlpha=.9; roundRect(ct,x-20,y-16,40,32,7); ct.fill(); ct.globalAlpha=1;
+    ct.fillStyle='#0d2b20'; ct.font='bold 15px sans-serif'; ct.textAlign='center'; ct.fillText(v,x,y+5);
+  }
+  function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function status(){
+    const el=document.getElementById('syStatus');
+    if(tick>=3) el.innerHTML='全 PE 確定 → C = [[19, 22],[43, 50]]。一度流し込んだ A・B が格子内を歩いて再利用されたことに注目。';
+    else el.innerHTML='データが 1 拍ごとに右・下へ進み、対角線状に演算が波及していきます。';
+  }
+  function upd(){draw();status();}
+  document.getElementById('syStep').onclick=()=>{ if(tick<maxTick){tick++;upd();} };
+  document.getElementById('syReset').onclick=()=>{ if(timer){clearInterval(timer);timer=null;document.getElementById('syPlay').classList.remove('active');} tick=0;upd(); };
+  document.getElementById('syPlay').onclick=function(){
+    if(timer){clearInterval(timer);timer=null;this.classList.remove('active');return;}
+    this.classList.add('active');
+    timer=setInterval(()=>{ if(tick<3){tick++;upd();} else {clearInterval(timer);timer=null;document.getElementById('syPlay').classList.remove('active');} },800);
+  };
+  upd();
+})();
+
+// ================= MN-Core 階層: 放送 → 縮約 =================
+(function(){
+  const cv=document.getElementById('cvHier'), ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  // 4 levels: L2B(1) -> L1B(2) -> MAB(4) -> PE(8)  (簡略。実際はもっと多い)
+  const levels=[
+    {n:1, y:50,  lbl:'L2B', c:'#e0a94a'},
+    {n:2, y:140, lbl:'L1B', c:'#c98bd6'},
+    {n:4, y:230, lbl:'MAB', c:'#3d7dca'},
+    {n:8, y:320, lbl:'PE',  c:'#43b581'},
+  ];
+  function nodeX(li,idx){ const n=levels[li].n; const span=W-120; return 60+span*(idx+0.5)/n; }
+  // phase: 0..3 broadcast down (level lit), 4..7 reduction up
+  let phase=0; const maxPhase=8; let timer=null;
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    const isB=phase<4;
+    ct.fillText((isB?'放送 (broadcast): 上位 → 末端へデータを配る':'縮約 (reduction): 末端 → 上位へ部分和を集める')+'   [段階 '+((phase%4)+1)+'/4]',20,26);
+    // edges: broadcast lights the edge INTO level `phase` (top-down); reduction lights bottom-up
+    const reachedUp = phase-4; // 0..3 during reduction
+    for(let li=0; li<levels.length-1; li++){
+      const a=levels[li], b=levels[li+1];
+      for(let bi=0; bi<b.n; bi++){
+        const ai=Math.floor(bi/(b.n/a.n));
+        const x1=nodeX(li,ai), y1=a.y+18, x2=nodeX(li+1,bi), y2=b.y-18;
+        const active = isB ? ((li+1)===phase)             // phase 1..3
+                           : (reachedUp>=1 && li===(3-reachedUp)); // phase 5..7
+        ct.strokeStyle= active? (isB?'#ffd98f':'#8fe3ad') : 'rgba(215,245,230,0.18)';
+        ct.lineWidth= active?3:1;
+        ct.beginPath(); ct.moveTo(x1,y1); ct.lineTo(x2,y2); ct.stroke();
+      }
+    }
+    // nodes
+    levels.forEach((L,li)=>{
+      ct.fillStyle='#9fc4ac'; ct.font='12px sans-serif'; ct.textAlign='right';
+      ct.fillText(L.lbl+' ×'+L.n, 52, L.y+4);
+      for(let i=0;i<L.n;i++){
+        const x=nodeX(li,i);
+        // lit condition
+        let lit=false;
+        if(isB){ lit = li<=phase; }        // broadcast fills top-down
+        else { const reachedUp = phase-4;  // 0..3
+               lit = li >= (3-reachedUp); }// reduction fills bottom-up
+        ct.fillStyle= lit? L.c : '#173a2c';
+        ct.strokeStyle=L.c; ct.lineWidth=2; ct.globalAlpha= lit?1:0.5;
+        const r=li===3?11:15;
+        ct.beginPath(); ct.arc(x,L.y,r,0,7); ct.fill(); ct.stroke(); ct.globalAlpha=1;
+      }
+    });
+    ct.fillStyle='#6fae90'; ct.font='12px sans-serif'; ct.textAlign='center';
+    ct.fillText('※ 実際は L2B×2→L1B×8→MAB×16→PE×4 の入れ子で PE 総数 4096。ここでは簡略化。', W/2, H-10);
+  }
+  function status(){
+    const el=document.getElementById('hiStatus');
+    if(phase<4) el.innerHTML='同じ重みデータを上位メモリから末端 PE へ一斉配布。キャッシュを介さず、放送ネットワークが直接配ります。';
+    else if(phase<maxPhase) el.innerHTML='各 PE の部分和を、縮約ネットワークが上位へ集約しながら足し上げます。';
+    else el.innerHTML='放送 → 演算 → 縮約が 1 サイクルの無駄もなく完結。この配置と転送のタイミングを、すべてコンパイラが事前に決めています。';
+  }
+  function upd(){draw();status();}
+  document.getElementById('hiReset').onclick=()=>{ if(timer){clearInterval(timer);timer=null;} phase=0;upd(); };
+  document.getElementById('hiPlay').onclick=function(){
+    if(timer){clearInterval(timer);timer=null;}
+    phase=0; upd();
+    timer=setInterval(()=>{ if(phase<maxPhase){phase++;upd();} else {clearInterval(timer);timer=null;} },700);
+  };
+  upd();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

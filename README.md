@@ -12,6 +12,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 | ML basics | Transformer building blocks (Attention, FFN/MoE, normalization) and Flow Matching, each explained from scratch with live animations | [ml-basics-index.html](./ml-basics-index.html) |
 | Attention lineage | MHA to GQA/MLA, sparsification (SWA/DSA), and linear/state-space models (Mamba), traced along a release-time family tree | [attention-series-index.html](./attention-series-index.html) |
 | NKI Workshop | Writing high-performance kernels on AWS Trainium — hardware hierarchy, roofline, FlashAttention, tiling, low precision, collectives | [nki-workshop-index.html](./nki-workshop-index.html) |
+| Compiler ⇄ Hardware | Who decides parallelism/locality/efficiency — runtime hardware vs compile-time compiler. From ILP and VLIW to domain-specific accelerators (MN-Core), 3D stacking, and materials discovery (Matlantis) | [chw-index.html](./chw-index.html) |
 | Coding | Algorithms and coding fundamentals — binary search, complexity, DP, graph search — explained then quizzed | [coding-index.html](./coding-index.html) |
 | Distributed systems | CAP, consistency models, consensus (Raft/Paxos), replication — explained then quizzed | [distsys-index.html](./distsys-index.html) |
 | MLIR | Dialects, progressive lowering, SSA, pattern rewriting — explained then quizzed | [mlir-index.html](./mlir-index.html) |
