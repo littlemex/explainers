@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>メモリ階層とコンパイラ — キャッシュか、スクラッチパッドか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  .status{text-align:center;font-size:14px;color:var(--sub);margin:6px 0}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:12px 0}
+  .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;text-align:center}
+  .box .big{font-size:24px;font-weight:800;color:var(--g1);display:block}
+  .box .lbl{font-size:12.5px;color:var(--sub)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 06</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>メモリ階層とコンパイラ ── キャッシュか、スクラッチパッドか</h1>
+  <p>局所性という仕事を、ハードが自動でやるか、コンパイラが明示的に作り込むか</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">01 章で見た 3 つの判断（命令の並べ方・並列実行のさせ方・データ移動）のうち、まだ扱っていなかった<b>データ移動</b>を掘り下げます。演算器を並べても、データが届かなければ動けません。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    演算はどんどん速くなる一方で、DRAM（メインメモリ）からデータを取ってくる速さはそこまで伸びていません。この差（メモリウォール）を埋める鍵が<b>局所性</b>（最近使ったデータや近くのデータを再利用すること）です。局所性を作る責務を<b class="who-hw" style="color:var(--hw);font-weight:700">ハードウェアが実行時に自動で</b>担うのが<b>キャッシュ</b>、<b class="who-sw" style="color:var(--g1);font-weight:700">コンパイラ（やプログラマ）が事前に明示して</b>担うのが<b>スクラッチパッドメモリ</b>です。どちらも「速いオンチップメモリにデータを置く」という同じ目的を持ちますが、<b>誰がいつ何を置くかを決めるか</b>がまったく違います。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. メモリウォールと局所性</a>
+    <a href="#s2">2. キャッシュ ── ハードが自動で管理する</a>
+    <a href="#s3">3. スクラッチパッド ── ソフトが明示的に管理する</a>
+    <a href="#s4">4. タイリングとデータレイアウト</a>
+    <a href="#s5">5. 【体験】タイリング前後のヒット率</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>メモリウォールと局所性</h2>
+  <p class="lead">演算器の速度とメインメモリの速度の差は、年々広がってきました。</p>
+  <p>CPU や GPU の演算性能はトランジスタ数の増加とアーキテクチャの進歩により伸びてきましたが、DRAM のレイテンシ（データが届くまでの時間）はほぼ改善せず、帯域（単位時間あたりに運べる量）は伸びてはいるものの演算性能の伸びには遠く及びません。この差は<b>メモリウォール</b>と呼ばれ、演算器を待たせないためには「同じデータを何度も遠くの DRAM まで取りに行かない」工夫が欠かせません。</p>
+  <p>その工夫の土台になるのが<b>局所性</b>です。<b>時間的局所性</b>（さっき使ったデータをもう一度使う可能性が高い）と<b>空間的局所性</b>（あるアドレスを使ったら、その近くのアドレスも使う可能性が高い）の 2 種類があり、これを利用してデータを演算器の近くの小さく速いメモリに置いておくのが、階層化されたメモリ（L1/L2/L3 キャッシュ、あるいはスクラッチパッド）の基本思想です。キャッシュは通常、データを<b>キャッシュライン</b>（典型的には 64 バイト程度の固定サイズの塊）単位で読み書きし、目的のデータがそこにあれば<b>ヒット</b>、無ければ<b>ミス</b>（さらに下位の階層まで取りに行く必要がある状態）と呼びます。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>キャッシュ ── ハードが自動で管理する</h2>
+  <p class="lead">キャッシュは、プログラマから見れば「透過的」です。存在を意識しなくても、ハードが最近使ったデータを勝手に保持してくれます。</p>
+  <p>キャッシュは、アクセスされたアドレスをハードが実行時に観測し、<b>置換ポリシー</b>（どのデータを追い出すかの規則。LRU＝最近最も使われていないものを追い出す、が代表的）にもとづいて自動的にデータを入れ替えます。プログラマや実行ファイルは、キャッシュの容量やラインサイズを直接指定する必要がありません。同じバイナリを、キャッシュが大きい次世代の CPU に載せ替えるだけで速くなることもあります。</p>
+  <div class="key">
+    これは 01 章で見た<b>動的方式</b>そのものです。「データをいつどこに置くか」という判断を、コンパイル時ではなく<b>実行時にハードが決める</b>。汎用性と互換性は高い一方、<b>いつ何がキャッシュに載っているかはプログラムの見た目からは読みにくく</b>、性能が実行時のアクセスパターンに揺らぎます。さらに、ヒット判定・置換ロジック・（マルチコアなら）キャッシュコヒーレンス（複数コアのキャッシュ間でデータの一致を保つ仕組み）の回路自体が、面積と電力を食います。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>スクラッチパッド ── ソフトが明示的に管理する</h2>
+  <p class="lead">キャッシュと対照的に、スクラッチパッドメモリは「何をいつ置くか」をコンパイラ（またはプログラマ）がプログラムの中で明示します。</p>
+  <p><b>スクラッチパッドメモリ</b>（SPM）は、キャッシュと同じくオンチップの高速メモリですが、ハードによる自動キャッシングを行いません。ロード命令ではなく、明示的な「このアドレスへコピーせよ」という転送命令でデータを出し入れします。ヒット/ミス判定や置換ロジック、コヒーレンス回路が不要なため、同じ面積・電力であればより多くのメモリ容量や演算器に回せます。GPU の shared memory（スレッドブロック内で共有する高速メモリ）、多くの DSP のローカルメモリ、そして 07 章で見る <b>MN-Core の階層メモリ（L2BM/L1BM と呼ぶオンチップメモリ）や PE のローカルメモリ</b>もこの系譜です。</p>
+  <div class="warn">
+    <b>代償は「見えない安全網が無い」ことです。</b> キャッシュは、コンパイラがデータ配置を誤ってもヒット率が下がるだけで正しさは保たれます。スクラッチパッドでは、必要なデータを転送し終える前に演算を始めてしまえば結果が壊れます。ハードが守ってくれない分、<b>データがいつどこにあるかをコンパイラが完全に把握し、転送と演算のタイミングを正しく組む責任</b>を負います。この構図は、03 章で見た VLIW の「コンパイラの重責」と同じ形です。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>タイリングとデータレイアウト</h2>
+  <p class="lead">局所性は放っておいて生まれるものではなく、多くの場合「作る」ものです。その代表的な技法がタイリングです。</p>
+  <p>行列積のように同じデータを何度も読み返す計算では、素朴にループを回すと、キャッシュ（またはスクラッチパッド）に載らない大きな行列全体を何度も読み直してしまい、局所性が失われます。<b>タイリング（ブロッキング）</b>は、計算をキャッシュ容量に収まる小さなブロック（タイル。必ずしも正方形とは限りません）に分割し、1 つのタイルを最後まで使い切ってから次のタイルへ進むことで、同じデータを繰り返し使う間だけ高速メモリに留める技法です。コンパイラが自動でループをタイル状に変換する手法（ループ変換、より一般的な枠組みは 08 章で扱う polyhedral 最適化）もありますが、依存関係を壊さずに正しく変換するのは簡単ではありません。</p>
+  <p>もう 1 つの重要な要素が<b>データレイアウト</b>です。同じ論理的な行列でも、行方向に連続して並べる<b>row-major</b>と列方向に並べる<b>column-major</b>、構造体の配列である <b>AoS（Array of Structures）</b>と配列の構造体である <b>SoA（Structure of Arrays）</b>では、アクセスパターンによって空間的局所性が大きく変わります。レイアウトの選択もコンパイラや開発者が事前に決める「静的」な判断です。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】タイリング前後のヒット率</h2>
+  <p class="lead">同じ 8&times;8 の行列走査を、素朴な走査とタイル(ブロック)走査で比べます。キャッシュは「直近アクセスした数本のラインだけを保持する」模式的なモデルです（実機の連想度・置換方式・ライン幅とは異なります）。</p>
+  <div class="controls">
+    <div class="toggle" id="memToggle" style="display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden">
+      <button data-mode="naive" class="ghost active" style="border-radius:0">素朴な走査（行だけ／列だけ）</button>
+      <button data-mode="tiled" class="ghost" style="border-radius:0">タイル走査（4&times;4 ブロック）</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="memStep">1 ステップ進める</button>
+    <button id="memPlay" class="ghost">自動再生</button>
+    <button id="memReset" class="ghost">リセット</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvMem" width="640" height="420"></canvas></div>
+  <div class="status" id="memStatus"></div>
+  <div class="stats" id="memStats"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>ヒット（キャッシュに残っていた）</span>
+    <span><span class="dot" style="background:#e07a5f"></span>ミス（DRAM まで取りに行く）</span>
+    <span><span class="dot" style="background:#3d7dca"></span>現在アクセス中</span>
+  </div>
+  <div class="key">
+    <b>素朴な走査</b>は列方向にジャンプするたびに新しいキャッシュラインへ触れ、模式モデルの小さな容量ではすぐ前のデータを追い出してしまい<b>ミスが増えます</b>。<b>タイル走査</b>は 4&times;4 の小ブロックの中を歩き回ってから次のブロックへ進むため、<b>同じ行・同じラインへのアクセスが近くに集まり、ヒット率が上がります</b>。データそのものも計算そのものも変わっていません ── <b>アクセスする順序だけをコンパイラ（またはプログラマ）が変えた</b>結果です。これはキャッシュでもスクラッチパッドでも共通して効く考え方で、後者ではこの順序と配置をコンパイラが命令として明示します。なお、このデモは走査順が空間的局所性を変える最小例です。4 節で挙げた行列積のタイリングが狙う「同じデータを何度も読み返す再利用のブロック化」は、同じ原理をより強力に適用したものだと考えてください。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>問題</td><td>メモリウォール。演算は速いが DRAM は遅い。局所性で埋める</td></tr>
+    <tr><td>キャッシュ（動的）</td><td>ハードが実行時に自動保持・置換。透過的だが性能が読みにくい</td></tr>
+    <tr><td>スクラッチパッド（静的）</td><td>コンパイラが明示的に転送・配置。単純・高効率だが安全網が無い</td></tr>
+    <tr><td>局所性を作る技法</td><td>タイリング／ブロッキングとデータレイアウト</td></tr>
+    <tr><td>この先</td><td>MN-Core の階層メモリ（07 章）はスクラッチパッド系の極限。自動タイリングは 08 章のコンパイラスタックへ</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>「データ移動を誰が決めるか」もまた、01 章で見た軸の一部です。キャッシュはハードに委ね汎用性を取り、スクラッチパッドはコンパイラに委ね効率と予測可能性を取る。キャッシュは 02 章の OoO と、スクラッチパッドは 03 章の VLIW と同じ側に立ちます。規則的な計算ほど後者が効くという構図は、これまでの章と同じです。次章では、このスクラッチパッド路線を極限まで進めた MN-Core のハードウェアを見ます。
+  </div>
+  <div class="seriesnav">
+    次に読む → <a href="./chw-07-domain-specific.html">07. ドメイン特化アクセラレータ</a>
+  </div>
+  <div class="fn">
+    参考: J. L. Hennessy &amp; D. A. Patterson, <i>Computer Architecture: A Quantitative Approach</i>（メモリ階層・局所性の原理）。M. D. Lam, E. E. Rothberg, M. E. Wolf, "The Cache Performance and Optimizations of Blocked Algorithms," ASPLOS 1991（ブロッキング／タイリング）。R. Banakar et al., "Scratchpad Memory: A Design Alternative for Cache Onchip Memory in Embedded Systems," CODES 2002（スクラッチパッドメモリ）。<br>
+    注意: 本ページのキャッシュモデル・ヒット率・ステップ数は、局所性の考え方を直感的に伝えるための<b>模式的な可視化</b>です。実機の連想度・置換方式・ライン幅・実際のヒット率とは一致しません。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= タイリング前後のキャッシュヒット/ミス =================
+(function(){
+  const cv=document.getElementById('cvMem'), ct=cv.getContext('2d');
+  const N=8, CAP=4; // 8x8 行列、模式キャッシュは「直近 4 本のライン」を保持(1 行=1 ライン とみなす簡略モデル)
+  const cell=cv.width/N;
+
+  // アクセス順の生成
+  function naiveOrder(){
+    // 素朴な走査: 列方向優先(i を固定して j を回すのではなく、列 j を固定して i を回す=悪いレイアウト想定)
+    const seq=[];
+    for(let j=0;j<N;j++) for(let i=0;i<N;i++) seq.push([i,j]);
+    return seq;
+  }
+  function tiledOrder(){
+    const seq=[]; const T=4;
+    for(let bi=0;bi<N;bi+=T) for(let bj=0;bj<N;bj+=T)
+      for(let i=bi;i<bi+T;i++) for(let j=bj;j<bj+T;j++) seq.push([i,j]);
+    return seq;
+  }
+  const ORDERS={naive:naiveOrder(), tiled:tiledOrder()};
+
+  // 模式キャッシュ: 「行番号(=ライン)」を直近 CAP 本だけ保持する LRU
+  function simulate(order){
+    let lines=[]; // 直近使った行番号(先頭が最新)
+    const results=[];
+    order.forEach(([i,j])=>{
+      const hit = lines.includes(i);
+      lines = [i, ...lines.filter(x=>x!==i)].slice(0,CAP);
+      results.push({i,j,hit});
+    });
+    return results;
+  }
+  const SIM={naive:simulate(ORDERS.naive), tiled:simulate(ORDERS.tiled)};
+
+  let curMode='naive', step=0, timer=null;
+  const $=id=>document.getElementById(id);
+
+  function draw(){
+    ct.clearRect(0,0,cv.width,cv.height);
+    const seq=SIM[curMode];
+    // grid
+    for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+      ct.strokeStyle='rgba(215,245,230,0.18)'; ct.lineWidth=1;
+      ct.strokeRect(j*cell,i*cell,cell,cell);
+    }
+    for(let k=0;k<step;k++){
+      const {i,j,hit}=seq[k];
+      const isCur = k===step-1;
+      ct.fillStyle = isCur? '#3d7dca' : (hit? '#43b581':'#e07a5f');
+      ct.globalAlpha = isCur? 1 : 0.85;
+      ct.fillRect(j*cell+2,i*cell+2,cell-4,cell-4);
+      ct.globalAlpha=1;
+    }
+    ct.fillStyle='#d7f5e6'; ct.font='13px sans-serif'; ct.textAlign='left';
+    ct.fillText((curMode==='naive'?'素朴な走査':'タイル走査(4×4)')+'  '+step+' / '+seq.length, 8, 16);
+  }
+  function stats(){
+    const seq=SIM[curMode];
+    const upto=seq.slice(0,step);
+    const hits=upto.filter(x=>x.hit).length;
+    const misses=upto.length-hits;
+    const rate= upto.length? (hits/upto.length*100).toFixed(0):'0';
+    $('memStats').innerHTML=`
+      <div class="box"><span class="big">${hits}</span><span class="lbl">ヒット</span></div>
+      <div class="box"><span class="big">${misses}</span><span class="lbl">ミス</span></div>
+      <div class="box"><span class="big">${rate}%</span><span class="lbl">ヒット率</span></div>`;
+  }
+  function status(){
+    const seq=SIM[curMode];
+    const el=$('memStatus');
+    if(step===0){ el.innerHTML='再生またはステップで走査を開始します。'; return; }
+    if(step>=seq.length){
+      el.innerHTML = curMode==='tiled'
+        ? '完了。4×4 のブロック内を歩く間は同じ行への再アクセスが密になり、ヒット率が高く保たれます。'
+        : '完了。列方向に飛ぶたびに新しい行に触れ、模式キャッシュの容量(4 本)をすぐに使い切ってミスが増えます。';
+      return;
+    }
+    const cur=seq[step-1];
+    el.innerHTML = `(${cur.i}, ${cur.j}) へアクセス — ` + (cur.hit? '<b style="color:var(--g1)">ヒット</b>':'<b style="color:#b5401f">ミス</b>（DRAM から取得しキャッシュへ）');
+  }
+  function upd(){ draw(); stats(); status(); }
+  function reset(){ if(timer){clearInterval(timer);timer=null;} step=0; upd(); $('memPlay').classList.remove('active'); }
+  document.querySelectorAll('#memToggle button').forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll('#memToggle button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curMode=b.dataset.mode; reset(); };
+  });
+  $('memStep').onclick=()=>{ const seq=SIM[curMode]; if(step<seq.length){ step++; upd(); } };
+  $('memReset').onclick=reset;
+  $('memPlay').onclick=function(){
+    const seq=SIM[curMode];
+    if(timer){ clearInterval(timer); timer=null; this.classList.remove('active'); return; }
+    this.classList.add('active');
+    timer=setInterval(()=>{
+      if(step<seq.length){ step++; upd(); } else { clearInterval(timer); timer=null; this.classList.remove('active'); }
+    },160);
+  };
+  reset();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

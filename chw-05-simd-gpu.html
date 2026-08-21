@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIMD・ベクトル・GPU (SIMT) — データ並列</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  .status{text-align:center;font-size:14px;color:var(--sub);margin:6px 0}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 auto}
+  .toggle button{background:#fff;color:var(--sub);border:0;border-radius:0;padding:9px 16px;font-weight:600}
+  .toggle button.active{background:var(--g1);color:#fff}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:12px 0}
+  .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;text-align:center}
+  .box .big{font-size:24px;font-weight:800;color:var(--g1);display:block}
+  .box .lbl{font-size:12.5px;color:var(--sub)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 05</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>SIMD・ベクトル・GPU (SIMT) ── データ並列</h1>
+  <p>1 個の命令で多数のデータを同時に処理する ── 並列性を「露出」させる責務は誰が担うのか</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">これまでの章(02〜04)は、1 本の命令列の中に埋もれた独立な命令を、誰がどう並べて同時に実行するかでした。この章は視点を変えて、<b>同じ 1 個の演算を、大量のデータに対して同時に適用する</b>という別種の並列性を扱います。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>SIMD(Single Instruction, Multiple Data)</b>は、1 個の命令で複数のデータを同時に処理する方式です。ベクトル命令(CPU の AVX 等)は、この並列性を<b>コンパイラかプログラマが明示的に「露出」させ</b>、固定幅のベクトルレジスタに詰め込みます。GPU の <b>SIMT(Single Instruction, Multiple Threads)</b>は、見た目はスカラなコードを大量のスレッドとして書かせ、<b>ハードが連続スレッドを固定規則で束ねて</b> SIMD 的に実行する方式です。前者は「並列性の露出」がソフト側、後者は幅への詰め込みこそハードが担うものの、並列性の露出自体はスレッドとして明示的に書きます（データ配置の責務も残ります。5 節）── そして GPU はその代償として<b>ワープスケジューラという実行時の仕組み</b>を抱えます。命令レベルの並べ替えはむしろ静的（インオーダー発行）で、動的なのはスレッドレベルの warp 切り替え、というのが 01 章で触れた GPU の位置づけの実体です。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. データ並列とは ── Flynn の分類</a>
+    <a href="#s2">2. SIMD・ベクトル ── 露出はソフトの責務</a>
+    <a href="#s3">3. GPU の SIMT ── warp とスケジューラ</a>
+    <a href="#s4">4. 【体験】分岐発散と実行マスク</a>
+    <a href="#s5">5. 【体験】メモリコアレッシング</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>データ並列とは ── Flynn の分類</h2>
+  <p class="lead">計算機の並列性は、古典的に「命令の流れ」と「データの流れ」がそれぞれ 1 本か複数本かで分類されます(Flynn, 1966)。</p>
+  <table>
+    <tr><th>分類</th><th>内容</th><th>例</th></tr>
+    <tr><td>SISD</td><td>1 命令が 1 データを処理</td><td>素朴なスカラプロセッサ</td></tr>
+    <tr><td>SIMD</td><td>1 命令が複数データを同時に処理</td><td>CPU のベクトル命令(AVX 等)</td></tr>
+    <tr><td>MISD</td><td>複数命令が 1 データを処理(実用例はほぼない)</td><td>(冗長化のパイプライン等、限定的)</td></tr>
+    <tr><td>MIMD</td><td>複数の命令が複数のデータを独立に処理</td><td>マルチコア CPU、複数プロセスの並列実行</td></tr>
+  </table>
+  <p>深層学習の主役である行列積や畳み込みは、<b>同じ演算(積和)を莫大な回数繰り返す</b>という点で SIMD 的な並列性の宝庫です。この章では、この「1 命令・多データ」をハードとソフトがどう分担して実現するかを見ます。GPU の SIMT は Flynn の 4 分類には厳密には収まらない実装上の呼び名で、実質的には SIMD の一種として位置づけられます(詳細は 3 節)。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>SIMD・ベクトル ── 露出はソフトの責務</h2>
+  <p class="lead">CPU のベクトル命令は、固定幅のベクトルレジスタに複数の値を詰め、1 命令でまとめて演算します。</p>
+  <p>Intel の SSE(128 bit)・AVX(256 bit)・AVX-512(512 bit)は、たとえば単精度浮動小数なら 4・8・16 個の値を 1 本のレジスタに詰めて同時に加算・乗算します。幅は世代ごとに固定で、コード側は使うベクトル幅を意識して書く(またはコンパイラに書かせる)必要があります。ARM の SVE(Scalable Vector Extension)はこの幅をハードごとに可変にし、同じバイナリが異なる実装幅で動く点が特徴です。</p>
+  <div class="key">
+    ここでの<b>並列性の「露出」</b>とは、独立に処理できるデータの集まりをコンパイラ(またはプログラマ)がベクトル命令として明示することです。コンパイラの<b>自動ベクトル化</b>はループを解析してこれを試みますが、ループ内にデータ依存(前の反復の結果を使う)があったり、メモリアラインメント（データの先頭アドレスがベクトルレジスタの境界に揃っていること）が不揃いだったり、ループ内に分岐が混じったりすると、ベクトル化を諦めてスカラのまま実行することがあります。VLIW(03 章)がコンパイラに命令のスケジュールを丸ごと委ねたのと同じ精神で、SIMD もコンパイラに「どのデータが本当に独立か」を見抜く責務を負わせています。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>GPU の SIMT ── warp とスケジューラ</h2>
+  <p class="lead">GPU は「ベクトル幅を意識してコードを書く」手間を減らすため、見た目はスカラなコードを大量のスレッドとして走らせ、ハードが束ねます。</p>
+  <p>NVIDIA の GPU では、隣接する 32 スレッドが <b>warp</b>(ワープ)という単位にまとめられます(AMD では 32 または 64 スレッドの <b>wavefront</b>)。プログラマは 1 スレッド分のスカラなコード(カーネル)だけを書きますが、実行時にはハードが warp 単位で同じ命令を全スレッドへ同時に発行します。これが SIMT ── SIMD と同じ「1 命令・多データ」を、明示的なベクトル幅ではなく<b>スレッド束という形</b>で実現する方式です。</p>
+  <div class="warn">
+    <b>SIMD と SIMT の違い。</b> SIMD はコンパイラが「このデータはベクトルレジスタに詰められる」と静的に確定させます。SIMT はプログラマがスカラ視点でコードを書きます。warp の束ね方は連続する 32 スレッドという固定規則で決まり、<b>ハードのワープスケジューラが実行時に決めるのは「どの warp をいつ走らせるか」の切り替えだけ</b>です。GPU は 1 つの実行ユニット群に対して多数の warp を同時に抱え、あるメモリアクセスで止まった warp があれば、待たずに<b>別の準備済み warp へ実行時に切り替えて</b>遅延を隠します。これは 01 章で触れた「GPU はかなり動的な設計」の実体で、ワープスケジューラ自体が「並列性を掘る回路」の一種と言えます。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】分岐発散と実行マスク</h2>
+  <p class="lead">同じ warp 内のスレッドが if 文で別々の経路に分かれると、SIMT の効率は大きく落ちます。これを<b>分岐発散(divergence)</b>と呼びます。以下のデモでは、warp 内の各スレッドに対応する演算の通り道を<b>レーン</b>と呼び、幅 8 に縮めた模型で示します。</p>
+  <p>ハードは 1 度に 1 つの命令列しか発行できないため、warp 内のスレッドが then 側と else 側に分かれると、<b>両方の経路を逐次的に実行</b>し、各パスでは「その経路を通るスレッドだけ」を実行マスクで有効にします。結果として、全スレッドが同じ経路を通る場合の 2 倍近い時間がかかることがあります。下のデモで、8 レーンが同じ分岐を通る場合と、条件によって半分ずつ分かれる場合を比べてください。</p>
+  <div class="controls">
+    <div class="toggle" id="divToggle">
+      <button data-mode="uniform" class="active">全レーン同じ経路</button>
+      <button data-mode="diverge">レーンが分岐で分裂</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="divPlay">再生</button>
+    <button id="divReset" class="ghost">リセット</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvDiv" width="760" height="260"></canvas></div>
+  <div class="stats" id="divStats"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>then 側を実行(有効レーン)</span>
+    <span><span class="dot" style="background:#e0a94a"></span>else 側を実行(有効レーン)</span>
+    <span><span class="dot" style="background:#2a3d33"></span>マスクで無効化(そのパスでは何もしない)</span>
+  </div>
+  <div class="key">
+    全レーンが同じ経路を通れば 1 パスで済み、有効レーン率は 100% です。分裂した場合は 2 パスかかり、各パスの有効レーン率は 50% に落ちます ── <b>演算器の半分が「無効化」というだけで遊ぶ</b>のが分岐発散のコストです。行列積や畳み込みのように<b>スレッド間で同じ条件分岐しか出てこない</b>規則的な計算では、この問題は起きにくく、GPU の SIMT が高い効率を発揮できます。逆に、データ依存の分岐が多い不規則な処理では、この発散コストが GPU の弱点として表面化します。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】メモリコアレッシング</h2>
+  <p class="lead">warp 内の各スレッドが読み書きするアドレスの並び方によって、実際に発行されるメモリトランザクション数は大きく変わります。</p>
+  <p>warp 内の 32 スレッドが<b>連続したアドレス</b>にアクセスする場合、ハードはこれを 1 回(または少数回)のメモリへのまとまった転送（トランザクション）に<b>合体(coalesce)</b>できます。逆に、各スレッドが飛び飛びの(ストライドのある、あるいは散在した)アドレスにアクセスすると、合体できず<b>スレッドごとに近いトランザクション</b>が発行され、実効帯域が大きく落ちます。データレイアウトを SoA(Structure of Arrays、同じ属性を連続配置)にするか AoS(Array of Structures、レコード単位で並べる)にするかという<b>ソフト側の選択</b>が、このコアレッシングの効きやすさを左右します(この続きは 06 章のメモリ階層で扱います)。</p>
+  <div class="controls">
+    <div class="toggle" id="memToggle">
+      <button data-mode="contig" class="active">連続アクセス(コアレッス可)</button>
+      <button data-mode="stride">ストライドアクセス</button>
+    </div>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvMem" width="760" height="230"></canvas></div>
+  <div class="stats" id="memStats"></div>
+  <div class="warn">
+    <b>誰の責務か。</b> ハードは、おおむね同じ範囲（セグメント）に収まっていれば合体できる、という程度の単純な規則で動きます。「同じ範囲に収まるようにデータを並べる」のは、コンパイラの自動ベクトル化(2 節)と同じ意味で<b>ソフト側の責務</b>です。この点で SIMT も、実行の束ね方はハードが決める一方、<b>データの並べ方という上流の判断はソフトに残っている</b>ことがわかります。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>SIMD</td><td>固定幅ベクトルレジスタ。並列性の露出はコンパイラ/プログラマの責務</td></tr>
+    <tr><td>SIMT</td><td>スカラ風コードを warp(32 スレッド等)として束ね、ハードが実行時にスケジュール</td></tr>
+    <tr><td>GPU が動的な理由</td><td>ワープスケジューラが実行時に warp を切り替えて遅延を隠す(01 章の留保と整合)</td></tr>
+    <tr><td>分岐発散</td><td>warp 内の経路分裂は逐次 2 パス化し有効レーン率を落とす</td></tr>
+    <tr><td>コアレッシング</td><td>連続アクセスは合体、ストライドは非効率。データレイアウトはソフト側の責務</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b> SIMD も SIMT も「1 命令・多データ」という同じ目的を追いますが、<b>並列性をどこで確定させるか</b>が違います。SIMD はコンパイル時にベクトル幅へ確定させ、SIMT は束ね方こそ固定規則ですが、どの warp をいつ走らせるかの切り替えを実行時に担います。だからこそ GPU は、規則的な深層学習ワークロードの主役でありながら、命令レベルの並べ替えはむしろ静的（インオーダー発行）で、動的なのはスレッドレベルの warp 切り替えに限られる ── 軸のどちらの極でもない中間的な設計なのです（01 章の位置づけと整合）。次章では、この並列レーンにデータをどう届けるかという<b>メモリ階層の責務分担</b>を見ていきます。
+  </div>
+  <div class="seriesnav">
+    次に読む → <a href="./chw-06-memory.html">06. メモリ階層とコンパイラ</a>
+  </div>
+  <div class="fn">
+    参考: M. J. Flynn, "Some Computer Organizations and Their Effectiveness," IEEE Trans. Computers, 1972（分類の初出は 1966 年の "Very High-Speed Computing Systems"、1972 年論文で精緻化）。J. L. Hennessy &amp; D. A. Patterson, <i>Computer Architecture: A Quantitative Approach</i>。NVIDIA, <i>CUDA C++ Programming Guide</i>(SIMT・warp・メモリコアレッシングの節)。Intel, <i>Intel 64 and IA-32 Architectures Software Developer's Manual</i>(AVX)。<br>
+    注意: 本ページのデモは分岐発散とコアレッシングの考え方を直感的に伝えるための<b>模式的な可視化</b>です。実機の warp 幅・トランザクション粒度・スケジューリング方式は世代・ベンダーによって異なり、ここでの簡略図とは一致しません。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= 分岐発散デモ =================
+(function(){
+  const cv=document.getElementById('cvDiv'), ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const N=8; // レーン数
+  let mode='uniform', phase=0, timer=null; // phase: 0=待機 1=thenパス 2=elseパス(発散時のみ) 3=完了
+  // uniform: 全レーン then のみ。diverge: 前半then/後半else
+  function laneGoesThen(i){ return mode==='uniform' ? true : i<N/2; }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    const title = mode==='uniform' ? '全レーンが同じ経路 → 1 パスで完了' : 'レーンが分岐で分裂 → then/else を 2 パスで逐次実行';
+    ct.fillText(title, 20, 26);
+    const laneW=(W-80)/N, y0=60, h=140;
+    for(let i=0;i<N;i++){
+      const x=40+i*laneW;
+      const goesThen=laneGoesThen(i);
+      let active=false, col='#2a3d33', lbl='';
+      if(phase===1){ active=goesThen; col=active?'#43b581':'#2a3d33'; lbl=active?'then':'mask'; }
+      else if(phase===2){ active=!goesThen; col=active?'#e0a94a':'#2a3d33'; lbl=active?'else':'mask'; }
+      else if(phase>=3){ col = goesThen?'#43b581':'#e0a94a'; lbl=goesThen?'then 済':'else 済'; }
+      else { col='#173a2c'; lbl='待機'; }
+      ct.fillStyle=col; ct.globalAlpha= (phase===0)?0.6:1;
+      roundRect(ct,x+4,y0,laneW-8,h,8); ct.fill(); ct.globalAlpha=1;
+      ct.strokeStyle='#43b581'; ct.lineWidth=1.5; roundRect(ct,x+4,y0,laneW-8,h,8); ct.stroke();
+      ct.fillStyle='#0d2b20'; ct.font='bold 11px sans-serif'; ct.textAlign='center';
+      ct.fillText('L'+i, x+laneW/2, y0+h/2-6);
+      ct.fillText(lbl, x+laneW/2, y0+h/2+12);
+    }
+    ct.fillStyle='#6fae90'; ct.font='12px sans-serif'; ct.textAlign='left';
+    let stepLbl='待機中';
+    if(phase===1) stepLbl='パス 1/1 (または 1/2): then 側を実行';
+    else if(phase===2) stepLbl='パス 2/2: else 側を実行';
+    else if(phase>=3) stepLbl='完了';
+    ct.fillText(stepLbl, 20, H-16);
+  }
+  function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function stats(){
+    const passes = (mode==='uniform') ? 1 : 2;
+    const activeLanes = (mode==='uniform') ? N : N/2;
+    const util = (activeLanes/N*100).toFixed(0);
+    document.getElementById('divStats').innerHTML =
+      `<div class="box"><span class="big">${passes}</span><span class="lbl">実行パス数</span></div>`+
+      `<div class="box"><span class="big">${util}%</span><span class="lbl">パスあたり有効レーン率</span></div>`+
+      `<div class="box"><span class="big">${passes===1?'発散なし':'発散あり'}</span><span class="lbl">状態</span></div>`;
+  }
+  function play(){
+    if(timer){clearInterval(timer);timer=null;}
+    phase=0; draw();
+    const seq = mode==='uniform' ? [1,3] : [1,2,3];
+    let k=0;
+    timer=setInterval(()=>{
+      phase=seq[k]; draw();
+      if(phase>=3){ clearInterval(timer); timer=null; stats(); }
+      k++;
+    },700);
+  }
+  function reset(){ if(timer){clearInterval(timer);timer=null;} phase=0; draw(); document.getElementById('divStats').innerHTML=''; }
+  document.querySelectorAll('#divToggle button').forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll('#divToggle button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); mode=b.dataset.mode; reset(); };
+  });
+  document.getElementById('divPlay').onclick=play;
+  document.getElementById('divReset').onclick=reset;
+  reset();
+})();
+
+// ================= メモリコアレッシング デモ =================
+(function(){
+  const cv=document.getElementById('cvMem'), ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const N=8; // レーン数
+  let mode='contig';
+  function addr(i){ return mode==='contig' ? i : (i*7)%32; } // ストライド風に飛び散らす
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    ct.fillText(mode==='contig' ? '連続アクセス: 全レーンが隣接アドレス → 1 トランザクションに合体' : 'ストライドアクセス: アドレスが飛び散る → 複数トランザクションが必要',20,24);
+    const memY=70, memH=40, cellW=(W-80)/32;
+    // メモリ行(32 番地)
+    for(let a=0;a<32;a++){
+      const x=40+a*cellW;
+      ct.fillStyle='#173a2c'; ct.strokeStyle='#2a4d3c'; ct.lineWidth=1;
+      ct.fillRect(x,memY,cellW-1,memH); ct.strokeRect(x,memY,cellW-1,memH);
+    }
+    // 各レーンがどの番地を指しているか
+    const laneY=150, laneH=60, laneW=(W-80)/N;
+    // トランザクション判定: 連続なら1グループ、ストライドなら各アドレスが遠いので個別トランザクションとみなす(簡略化: ユニークな32/コアレッシング幅8ごとのグループ数)
+    const addrs=[]; for(let i=0;i<N;i++) addrs.push(addr(i));
+    let txCount;
+    if(mode==='contig'){ txCount=1; }
+    else {
+      // グループ幅8(擬似セクタ)でユニークなセクタ数を数える
+      const sectors=new Set(addrs.map(a=>Math.floor(a/8)));
+      txCount=sectors.size;
+    }
+    for(let i=0;i<N;i++){
+      const x=40+i*laneW;
+      const a=addrs[i];
+      ct.fillStyle='#43b581'; ct.globalAlpha=.85;
+      roundRect(ct,x+4,laneY,laneW-8,laneH,8); ct.fill(); ct.globalAlpha=1;
+      ct.strokeStyle='#43b581'; ct.lineWidth=1.5; roundRect(ct,x+4,laneY,laneW-8,laneH,8); ct.stroke();
+      ct.fillStyle='#0d2b20'; ct.font='bold 11px sans-serif'; ct.textAlign='center';
+      ct.fillText('L'+i, x+laneW/2, laneY+laneH/2-8);
+      ct.fillText('addr '+a, x+laneW/2, laneY+laneH/2+10);
+      // 線でメモリ番地へ接続
+      const mx=40+a*cellW+cellW/2;
+      ct.strokeStyle= mode==='contig' ? 'rgba(255,217,143,0.55)' : 'rgba(224,169,74,0.55)';
+      ct.lineWidth=1.2;
+      ct.beginPath(); ct.moveTo(x+laneW/2,laneY); ct.lineTo(mx,memY+memH); ct.stroke();
+    }
+    ct.fillStyle='#ffd98f'; ct.font='bold 13px sans-serif'; ct.textAlign='left';
+    ct.fillText('必要なメモリトランザクション数: '+txCount, 20, H-14);
+  }
+  function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function stats(){
+    const addrs=[]; for(let i=0;i<N;i++) addrs.push(addr(i));
+    const txCount = mode==='contig' ? 1 : new Set(addrs.map(a=>Math.floor(a/8))).size;
+    document.getElementById('memStats').innerHTML =
+      `<div class="box"><span class="big">${txCount}</span><span class="lbl">トランザクション数</span></div>`+
+      `<div class="box"><span class="big">${N}</span><span class="lbl">アクセス要求元レーン数</span></div>`+
+      `<div class="box"><span class="big">${mode==='contig'?'高':'低'}</span><span class="lbl">帯域効率</span></div>`;
+  }
+  document.querySelectorAll('#memToggle button').forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll('#memToggle button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); mode=b.dataset.mode; draw(); stats(); };
+  });
+  draw(); stats();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

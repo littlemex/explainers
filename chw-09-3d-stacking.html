@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>実装の物理 — 3D 積層</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .infer{background:#fff8e8;border:1px solid #e6cf8a;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .infer b{color:#9a7a1a}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:220px}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  .status{text-align:center;font-size:14px;color:var(--sub);margin:6px 0}
+  .cost{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:14px 0}
+  .cost .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:140px;text-align:center}
+  .cost .box .big{font-size:24px;font-weight:800;color:var(--g1);display:block;line-height:1.2}
+  .cost .box .lbl{font-size:13px;color:var(--sub)}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 auto}
+  .toggle button{background:#fff;color:var(--sub);border:0;border-radius:0;padding:9px 16px;font-weight:600}
+  .toggle button.active{background:var(--g1);color:#fff}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 09</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>実装の物理 ── 3D 積層</h1>
+  <p>ムーアの法則の減速で、性能の主役が「縦に積む」へ移った</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">これまでの章は、ハードとコンパイラの<b>責務分担</b>という論理の話でした。この章は少し足元へ降りて、その論理を成立させる<b>物理実装</b>を見ます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    トランジスタを平面に敷き詰める微細化（ムーアの法則）が鈍化する中、性能を伸ばすもう一つの道が<b>チップを縦に積む「3D 積層」</b>です。シリコンを貫く縦配線 <b>TSV</b>（Through-Silicon Via）や、はんだを使わず銅を直接接合する<b>ハイブリッドボンディング</b>によって、ダイ同士を短い距離・大量の配線で結べます。これは広帯域・低レイテンシ・低電力を同時にもたらしますが、代償として<b>熱がこもりやすくなる</b>という大きな壁があります。この物理の土台の上に、10 章で見る MN-Core L1000 の 3D 積層 DRAM が乗っています。なお、01 章の「静的 &#8646; 動的」の軸とも無縁ではありません ── 静的な設計がもたらす電力効率の高さが、この熱の壁を和らげ 3D 積層という物理の選択を後押しする、という関係をこの章の最後で回収します。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. なぜ縦に積むのか</a>
+    <a href="#s2">2. 積層の技術 ── TSV・ボンディング・チップレット</a>
+    <a href="#s3">3. 【体験】平面 vs 2.5D vs 3D の配線</a>
+    <a href="#s4">4. 最大の壁「熱」と他の課題</a>
+    <a href="#s5">5. 【体験】積むほど内部は熱くなる</a>
+    <a href="#s6">6. 具体例と MN-Core への接続</a>
+    <a href="#s7">7. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ縦に積むのか</h2>
+  <p class="lead">「もっと小さく」で速くしてきた時代が終わりに近づいています。</p>
+  <p>長らく半導体の性能向上は、トランジスタを微細化して同じ面積にもっと詰め込む（ムーアの法則）ことで進んできました。しかし微細化 1 世代の進歩は年々小さくなり、コストは跳ね上がっています。加えて、チップが大きく複雑になるほど、遠く離れた回路同士を結ぶ配線そのものが遅延と電力の支配的な要因になります（配線遅延の壁）。平面（2D）にどれだけ広げても、この壁は解決しません。</p>
+  <div class="key">
+    そこで、平面では使っていなかった<b>3 つ目の次元 ── 高さ（縦）方向</b>を使います。複数のダイ（半導体の小片）を<b>縦に積む</b>ことで、平面上では遠かった回路同士を、垂直方向の短い距離で結べます。これが 3D 集積（3D integrated circuit、3D IC）の基本発想です。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>積層の技術 ── TSV・ボンディング・チップレット</h2>
+  <p class="lead">「縦に積む」を実現する要素技術は、大きく分けて配線・接合・分割の 3 つです。</p>
+  <table>
+    <tr><th>技術</th><th>内容</th></tr>
+    <tr><td>TSV（Through-Silicon Via）</td><td>シリコンダイを垂直に貫通させて開けた穴に導体を充填した縦配線。積んだダイ間を最短距離・大量本数で結ぶ</td></tr>
+    <tr><td>マイクロバンプ</td><td>ダイとダイの間に置く微小なはんだ等の突起で電気的に接続する古典的な方式。接続ピッチ（間隔）に限界がある</td></tr>
+    <tr><td>ハイブリッドボンディング</td><td>はんだのバンプを使わず、絶縁膜（誘電体）同士の接合と銅（Cu）同士の直接接合を同時に行う方式。バンプが無い分、接続ピッチを大幅に狭められ、単位面積あたりの接続数（＝帯域の密度）を大きく上げられる</td></tr>
+    <tr><td>チップレット</td><td>1 つの大きなチップを機能ブロック単位の小さなダイに分割し、ダイ間配線（インターポーザやブリッジ等の高密度配線）で結んで 1 パッケージにまとめる方式。小さいダイほど不良の当たる確率が下がり歩留まり（製造したチップのうち良品がとれる割合）が上がる</td></tr>
+  </table>
+  <p>ここで「2.5D」と「3D」は区別しておく価値があります。<b>2.5D</b>は、シリコンインターポーザ（配線層を持つ土台のシリコン板）の上に複数のダイを<b>横並び</b>に置き、インターポーザ内の配線と TSV で結ぶ方式です。<b>HBM</b>（後述）は、TSV で 3D 積層した DRAM スタックを 2.5D インターポーザで演算ダイと統合する複合的な代表例です。これに対して<b>真の 3D</b>は、ダイそのものを<b>縦に積み重ね</b>、ダイを貫通する TSV やハイブリッドボンディングで直結します。同じ「積層」という言葉でも、何を縦に積んでいるかが違う点に注意してください。</p>
+  <div class="warn">
+    <b>用語の重なりに注意。</b> ハイブリッドボンディングは 2.5D・3D どちらの文脈でも使われ得る接合技術であり、「2.5D か 3D か」という積み方の分類とは別の軸です。両者を混同しないようにしてください。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【体験】平面 vs 2.5D vs 3D の配線</h2>
+  <p class="lead">同じ「2 つの機能ブロックを結ぶ」という仕事を、平面配線・2.5D インターポーザ・3D 縦積みの 3 方式で比べます。配線の本数（＝帯域の目安）と配線の長さ（＝遅延・電力の目安）がどう変わるかに注目してください。</p>
+  <div class="controls">
+    <div class="toggle" id="wireToggle">
+      <button data-w="planar" class="active">平面（2D）</button>
+      <button data-w="25d">2.5D（インターポーザ）</button>
+      <button data-w="3d">3D（TSV 縦積み）</button>
+    </div>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvWire" width="820" height="300"></canvas></div>
+  <div class="cost" id="wireStats"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3d7dca"></span>ダイ A</span>
+    <span><span class="dot" style="background:#e0a94a"></span>ダイ B</span>
+    <span><span class="dot" style="background:#8fe3ad"></span>接続配線</span>
+  </div>
+  <div class="key">
+    <b>平面</b>では、A と B を結ぶ配線は基板の外周に限られた少数の I/O（入出力ピン）を長く迂回させる必要があります。<b>2.5D</b>では、インターポーザという中間の土台に両ダイを近接配置し、その配線層で多数の短い接続を作れます。<b>3D</b>では、A の真下に B を積み、ダイを貫通する TSV でほぼ最短距離・最大本数の接続を実現します。この図はあくまで<b>相対的な模式図</b>で、実際の配線本数・長さは製品ごとに大きく異なります。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>最大の壁「熱」と他の課題</h2>
+  <p class="lead">積層は帯域・遅延・電力の面で利点がありますが、その代償として複数の困難が同時に増えます。</p>
+  <p>まず利点をまとめます。TSV による層間の大量の縦配線は、メモリウォール（06 章）対策として広い内部バスを作れます（<b>帯域</b>）。垂直方向の配線は水平に長く引き回す配線より伝搬距離が短く、遅延を減らせます（<b>レイテンシ</b>）。信号をパッケージ内・チップ内に留めることで配線の寄生容量（配線が持つ余分な電気容量で、これを充放電する分だけ電力を消費する）が減り、消費電力を大きく削減できるとされます（<b>電力</b>）。同じ機能をより小さい実装面積に収められる点も利点です。</p>
+  <div class="warn">
+    <b>最大の壁は熱です。</b> ダイを積み重ねるほど発熱源同士が電気的にも熱的にも近接し、スタック内部に熱がこもりやすくなります。放熱は多くの場合スタックの片面（ヒートシンクを付けた面）から抜けるため、<b>その放熱面から遠い層ほど熱が抜けにくく高温になりがち</b>です。どちらの面が放熱面かはパッケージ構造しだいで、演算ダイの上にメモリを積む構成では下側の演算ダイが苦しくなることも多く、いずれにせよ平面のチップより冷やしにくいのが難点です。加えて次のような課題も増えます。
+  </div>
+  <table>
+    <tr><th>課題</th><th>内容</th></tr>
+    <tr><td>歩留まり</td><td>工程が増えるほど不良リスクが増える。特にウェハ対ウェハ（wafer-to-wafer）接合では、積層内のどれか 1 つのダイが不良だと積層全体が不良になりやすい。ダイ対ダイ（die-to-die）接合は、個々のダイを接合前にテストして良品だけを使えるため歩留まりで有利とされる</td></tr>
+    <tr><td>コスト</td><td>工程数の増加、専用の接合・検査装置、TSV 加工などにより製造コストが増える</td></tr>
+    <tr><td>設計複雑性</td><td>3D 積層を活かすには高度な設計手法と新しい CAD ツールが必要。現状ではゲート単位の 3D 分割よりブロック単位（チップレット単位）での統合が現実的とされる</td></tr>
+    <tr><td>テスト容易性</td><td>異なるダイに分割された同一回路モジュール間の配線が積層内部に多数存在するため、故障箇所の特定が難しく、テスト容易性が下がる</td></tr>
+    <tr><td>標準化</td><td>via-first / via-middle / via-last など複数の TSV 実装方式（製造工程のどの段階で TSV を形成するかの違い）が競合し、TSV ベースの 3D IC の設計・製造・パッケージングに関する標準がまだ少ない</td></tr>
+  </table>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】積むほど内部は熱くなる</h2>
+  <p class="lead">積層段数を増やすと、内部の層（特に放熱経路から遠い層）にどれだけ熱がこもりやすくなるかを、模式的なヒートマップで見ます。</p>
+  <div class="controls">
+    <div class="slider">
+      <span>積層段数</span>
+      <input type="range" id="stackSlider" min="1" max="6" step="1" value="4">
+      <span id="stackVal">4</span>
+    </div>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvHeat" width="500" height="380"></canvas></div>
+  <div class="status" id="heatStatus"></div>
+  <div class="key">
+    段数を増やすほど、<b>放熱面から遠い層ほど熱が抜けにくく高温になりやすい</b>様子が模式的に見えます（このデモは放熱面がスタックの片側にあると仮定しています。どちらの面が放熱面になるかはパッケージ構造で変わります）。これは各層が均等に発熱する仮定の単純化されたモデルであり、実際の温度分布は発熱源の配置・冷却方式（水冷やベイパーチャンバーなど）・パッケージ設計に大きく依存します。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>具体例と MN-Core への接続</h2>
+  <p class="lead">3D 積層はすでに製品として存在し、それぞれ異なる課題への向き合い方を示しています。</p>
+  <table>
+    <tr><th>製品 / 技術</th><th>積み方</th><th>備考</th></tr>
+    <tr><td>HBM（High Bandwidth Memory）</td><td>DRAM ダイを TSV で縦積みし、それを 2.5D インターポーザで演算ダイの隣に置く</td><td>GPU の広帯域メモリの定番。「速い信号を少数のピンで」ではなく「そこそこの速度の信号を超多数のピンで並列に」流すことで帯域を稼ぐ</td></tr>
+    <tr><td>AMD 3D V-Cache</td><td>高性能 x86 コアのダイ（CCD）上、主に <b>L3 キャッシュ領域の直上</b>に SRAM ダイをハイブリッドボンディングで積む（発熱の大きいコアの真上には放熱用の構造シリコンを置く）</td><td>静的で低発熱な設計でなくても 3D 積層は製品化されている実例。ただし高発熱コアと同一スタックになるため、動作電圧・周波数に制約を課して熱の代償を払っている</td></tr>
+    <tr><td>TSMC SoIC、Intel Foveros</td><td>ロジックダイ同士 / ロジックとメモリを高密度に 3D 接続するパッケージング技術</td><td>業界で広く報じられている一般知識に基づく記述であり、今回は公式サイトへの一次情報での確認はできていません（確度: 一般知識）</td></tr>
+  </table>
+  <p>AMD 3D V-Cache の例からも分かる通り、<b>低発熱は 3D 積層の必要条件ではありません</b>。発熱の大きい高性能コアと同一のスタックにも SRAM は積まれています（その代わり動作電圧・周波数に制約を課しています）。ただし、演算器側の電力密度を抑えられれば、その分だけ積層メモリの熱的な余裕が生まれ、積層を選びやすくなる ── という関係は成り立ちます。つまり<b>電力効率の高さは、3D 積層を後押しする要因の一つ</b>であって、必須条件ではないというのが誠実な言い方です。</p>
+  <div class="key">
+    07 章で見た MN-Core は、コンパイラに制御を全部渡すことで<b>演算器あたりの電力効率</b>を高めた設計でした。この章で見た物理の土台（TSV・ハイブリッドボンディング・熱の制約）の上に、PFN の第 3 世代 <b>MN-Core L1000</b> は<b>独自の 3D 積層 DRAM</b>を演算器の真上に載せる構想を掲げています。その詳細（性能目標・電力効率との関係・材料探索 Matlantis との繋がり）は、次の 10 章で扱います。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>背景</td><td>微細化の鈍化と配線遅延の壁 → 「縦に積む」という第 3 の次元へ</td></tr>
+    <tr><td>要素技術</td><td>TSV、マイクロバンプ、ハイブリッドボンディング、チップレット。2.5D（横並び＋インターポーザ）と真の 3D（縦積み）は別概念</td></tr>
+    <tr><td>利点</td><td>帯域（多数の縦配線）・レイテンシ（短い伝搬距離）・電力（寄生容量の削減）・実装面積</td></tr>
+    <tr><td>最大の壁</td><td>熱がこもりやすい。加えて歩留まり・コスト・設計複雑性・テスト容易性・標準化の課題</td></tr>
+    <tr><td>この先</td><td>電力効率の高い設計は積層を後押しする一因（必須条件ではない）。10 章で MN-Core L1000 の 3D 積層 DRAM へ</td></tr>
+  </table>
+  <div class="seriesnav">
+    次に読む → <a href="./chw-10-mn-core.html">10. MN-Core と垂直統合 ── L1000・3D 積層・Matlantis</a>
+  </div>
+  <div class="fn">
+    出典: <a href="https://en.wikipedia.org/wiki/Through-silicon_via" target="_blank" rel="noopener">Wikipedia: Through-silicon via</a>、<a href="https://en.wikipedia.org/wiki/3D_integrated_circuit" target="_blank" rel="noopener">Wikipedia: 3D integrated circuit</a>、<a href="https://en.wikipedia.org/wiki/2.5D_integrated_circuit" target="_blank" rel="noopener">Wikipedia: 2.5D integrated circuit</a>、<a href="https://en.wikipedia.org/wiki/Chiplet" target="_blank" rel="noopener">Wikipedia: Chiplet</a>、<a href="https://en.wikipedia.org/wiki/High_Bandwidth_Memory" target="_blank" rel="noopener">Wikipedia: High Bandwidth Memory</a>、<a href="https://en.wikipedia.org/wiki/3D_V-Cache" target="_blank" rel="noopener">Wikipedia: 3D V-Cache</a>。TSMC SoIC・Intel Foveros は業界で広く報じられている一般知識に基づく記述で、今回は公式一次情報への直接到達はできていません。<br>
+    注意: 本ページの配線比較図・ヒートマップは仕組みを直感的に伝えるための<b>模式的な可視化</b>であり、実際の配線本数・温度分布とは一致しません。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= 平面 / 2.5D / 3D 配線比較 =================
+(function(){
+  const cv=document.getElementById('cvWire'), ct=cv.getContext('2d');
+  const W=cv.width, H=cv.height;
+  const MODES={
+    planar:{n:4, len:1.0, lbl:'平面（2D）', note:'A と B は基板外周の少数の I/O を経由し、長い配線で結ばれます。配線本数が少なく、距離も長いため、帯域は低く遅延・電力は大きくなりがちです。'},
+    '25d':{n:10, len:0.45, lbl:'2.5D（インターポーザ）', note:'インターポーザ上で A と B を近接配置し、その配線層と TSV で多数の短い接続を作れます。配線本数が増え、距離も短縮されます。'},
+    '3d':{n:18, len:0.15, lbl:'3D（TSV 縦積み）', note:'B を A の真下に積み、ダイを貫通する TSV でほぼ最短距離・最大本数の接続を実現します。配線本数・距離の両方で最も有利です。'},
+  };
+  let cur='planar';
+  function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const m=MODES[cur];
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    ct.fillText(m.lbl, 20, 26);
+    if(cur==='planar'){
+      const ay=100, by=100, aw=260, bh=90;
+      ct.fillStyle='#3d7dca'; roundRect(ct,60,ay,220,bh,10); ct.fill();
+      ct.fillStyle='#e0a94a'; roundRect(ct,W-280,ay,220,bh,10); ct.fill();
+      ct.fillStyle='#0d2b20'; ct.font='bold 14px sans-serif'; ct.textAlign='center';
+      ct.fillText('ダイ A', 170, ay+bh/2+5); ct.fillText('ダイ B', W-170, ay+bh/2+5);
+      // long routed wires around
+      ct.strokeStyle='#8fe3ad'; ct.lineWidth=2;
+      for(let i=0;i<m.n;i++){
+        const y0=ay+15+i*((bh-30)/(m.n-1));
+        ct.beginPath();
+        ct.moveTo(280, y0);
+        ct.lineTo(280, ay+bh+40+i*6);
+        ct.lineTo(W-280, ay+bh+40+i*6);
+        ct.lineTo(W-280, y0);
+        ct.stroke();
+      }
+    } else if(cur==='25d'){
+      const ipY=230, ipH=30;
+      ct.fillStyle='#173a2c'; roundRect(ct,50,ipY,W-100,ipH,8); ct.fill();
+      ct.strokeStyle='#43b581'; ct.lineWidth=1.5; roundRect(ct,50,ipY,W-100,ipH,8); ct.stroke();
+      ct.fillStyle='#6fae90'; ct.font='11px sans-serif'; ct.textAlign='center';
+      ct.fillText('シリコンインターポーザ', W/2, ipY+ipH+16);
+      const ay=150, bh=70;
+      ct.fillStyle='#3d7dca'; roundRect(ct,150,ay,200,bh,10); ct.fill();
+      ct.fillStyle='#e0a94a'; roundRect(ct,W-350,ay,200,bh,10); ct.fill();
+      ct.fillStyle='#0d2b20'; ct.font='bold 14px sans-serif'; ct.textAlign='center';
+      ct.fillText('ダイ A', 250, ay+bh/2+5); ct.fillText('ダイ B', W-250, ay+bh/2+5);
+      ct.strokeStyle='#8fe3ad'; ct.lineWidth=2;
+      for(let i=0;i<m.n;i++){
+        const x1=350-(i%5)*8, x2=W-350+(i%5)*8;
+        ct.beginPath(); ct.moveTo(x1, ay+bh); ct.lineTo(x1, ipY); ct.stroke();
+        ct.beginPath(); ct.moveTo(x2, ay+bh); ct.lineTo(x2, ipY); ct.stroke();
+      }
+      ct.beginPath(); ct.moveTo(80, ipY+ipH/2); ct.lineTo(W-80, ipY+ipH/2); ct.strokeStyle='rgba(143,227,173,0.5)'; ct.stroke();
+    } else {
+      const cx=W/2, topY=90, dieH=70, gap=10;
+      ct.fillStyle='#3d7dca'; roundRect(ct,cx-140,topY,280,dieH,10); ct.fill();
+      ct.fillStyle='#0d2b20'; ct.font='bold 14px sans-serif'; ct.textAlign='center';
+      ct.fillText('ダイ A', cx, topY+dieH/2+5);
+      const by=topY+dieH+gap;
+      ct.fillStyle='#e0a94a'; roundRect(ct,cx-140,by,280,dieH,10); ct.fill();
+      ct.fillText('ダイ B', cx, by+dieH/2+5);
+      ct.strokeStyle='#8fe3ad'; ct.lineWidth=3;
+      const n=m.n;
+      for(let i=0;i<n;i++){
+        const x=cx-120+ (i*(240/(n-1)));
+        ct.beginPath(); ct.moveTo(x, topY+dieH-4); ct.lineTo(x, by+4); ct.stroke();
+      }
+      ct.fillStyle='#6fae90'; ct.font='11px sans-serif'; ct.textAlign='center';
+      ct.fillText('TSV ×'+n+'（ダイを貫通する縦配線）', cx, by+dieH+22);
+    }
+  }
+  function stats(){
+    const m=MODES[cur];
+    const relBw=(m.n/MODES.planar.n).toFixed(1);
+    const relLen=(m.len*100).toFixed(0);
+    document.getElementById('wireStats').innerHTML=
+      '<div class="box"><span class="big">'+m.n+'</span><span class="lbl">配線本数(相対)</span></div>'+
+      '<div class="box"><span class="big">×'+relBw+'</span><span class="lbl">帯域の目安(平面比)</span></div>'+
+      '<div class="box"><span class="big">'+relLen+'%</span><span class="lbl">配線長の目安(平面比)</span></div>';
+  }
+  function upd(){draw();stats();}
+  document.querySelectorAll('#wireToggle button').forEach(b=>{
+    b.onclick=()=>{document.querySelectorAll('#wireToggle button').forEach(x=>x.classList.remove('active'));b.classList.add('active');cur=b.dataset.w;upd();};
+  });
+  upd();
+})();
+
+// ================= 積層段数と熱のヒートマップ =================
+(function(){
+  const cv=document.getElementById('cvHeat'), ct=cv.getContext('2d');
+  const W=cv.width, H=cv.height;
+  const padT=40, padB=40, padX=90;
+  function heatColor(t){
+    // t in [0,1] -> cool green to hot amber/red
+    const stops=[[0x0d,0x2b,0x20],[0x43,0xb5,0x81],[0xe0,0xa9,0x4a],[0xe0,0x7a,0x5f]];
+    const seg=Math.min(2, Math.floor(t*3));
+    const localT=(t*3)-seg;
+    const a=stops[seg], b=stops[seg+1];
+    const r=Math.round(a[0]+(b[0]-a[0])*localT);
+    const g=Math.round(a[1]+(b[1]-a[1])*localT);
+    const bl=Math.round(a[2]+(b[2]-a[2])*localT);
+    return 'rgb('+r+','+g+','+bl+')';
+  }
+  function temps(n){
+    // 模式モデル: 各層が均等に発熱、放熱はスタックの片面(放熱面)からのみ抜けると仮定。
+    // 層 i (0=放熱面に最も近い層) の温度は、放熱面から遠いほど上昇。
+    const arr=[];
+    for(let i=0;i<n;i++){
+      const layersAbove=(n-1-i);
+      const t=Math.min(1, (layersAbove+1)/n * (0.35+0.65*(n/6)));
+      arr.push(t);
+    }
+    return arr;
+  }
+  function draw(n){
+    ct.clearRect(0,0,W,H);
+    const t=temps(n);
+    const rowH=(H-padT-padB)/n;
+    ct.fillStyle='#d7f5e6'; ct.font='13px sans-serif'; ct.textAlign='center';
+    ct.fillText('積層段数 '+n+' ・ 放熱面から遠い層ほど高温(模式)', W/2, 22);
+    for(let i=0;i<n;i++){
+      const rowIdx=n-1-i; // draw top layer (i=n-1) at top of canvas
+      const y=padT+i*rowH;
+      ct.fillStyle=heatColor(t[rowIdx]);
+      ct.fillRect(padX, y+2, W-padX*2, rowH-4);
+      ct.strokeStyle='#0d2b20'; ct.lineWidth=1; ct.strokeRect(padX, y+2, W-padX*2, rowH-4);
+      ct.fillStyle='#0d2b20'; ct.font='bold 12px sans-serif'; ct.textAlign='right';
+      const lbl = rowIdx===0 ? '放熱面側(層1)' : (rowIdx===n-1 ? '最遠層(層'+n+')' : '層'+(rowIdx+1));
+      ct.fillStyle='#0d2b20'; ct.textAlign='center';
+      ct.fillText(lbl+'  '+Math.round(t[rowIdx]*100)+'%', W/2, y+rowH/2+4);
+    }
+    ct.fillStyle='#6fae90'; ct.font='11px sans-serif'; ct.textAlign='center';
+    ct.fillText('放熱面（ヒートシンク）', W/2, padT+n*rowH+18);
+  }
+  function status(n){
+    const t=temps(n);
+    const top=Math.round(t[n-1]*100);
+    const el=document.getElementById('heatStatus');
+    if(n===1) el.innerHTML='1 層だけなら放熱経路は単純で、熱はこもりにくい状態です。';
+    else el.innerHTML='段数 '+n+' では、最も放熱面から遠い層の相対温度指標が約 '+top+'% まで上昇。放熱面からの経路が長くなるほど、その層は冷えにくくなります(あくまで相対的な模式値)。';
+  }
+  const slider=document.getElementById('stackSlider');
+  function upd(){ const n=+slider.value; document.getElementById('stackVal').textContent=n; draw(n); status(n); }
+  slider.oninput=upd;
+  upd();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

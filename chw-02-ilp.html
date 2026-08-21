@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>命令レベル並列性 (ILP) — ハードが実行時に掘る</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  .status{text-align:center;font-size:14px;color:var(--sub);margin:6px 0}
+  .meters{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;margin:16px 0}
+  .meter{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:190px;flex:1}
+  .meter .lbl{font-size:13.5px;color:var(--sub);margin-bottom:8px}
+  .bar{height:12px;border-radius:6px;background:#e4e9e6;overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:6px;transition:width .35s}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:12px 0}
+  .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;text-align:center}
+  .box .big{font-size:24px;font-weight:800;color:var(--g1);display:block}
+  .box .lbl{font-size:12.5px;color:var(--sub)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 02</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>命令レベル並列性 (ILP) ── ハードが実行時に掘る</h1>
+  <p>素朴な命令列に埋もれた並列性を、実行時のハードウェアが自力で発掘する仕組み</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">01 章で描いた「静的 &#8646; 動的」の軸。この章は、動的側の代表格である現代の高性能 CPU が、並列性をどう掘り出しているのかを見ていきます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>命令レベル並列性 (ILP、Instruction-Level Parallelism)</b> とは、隣り合う命令どうしの間にある「同時に実行してよい」余地のことです。現代の高性能 CPU は、コンパイラが渡してきた命令列を受け取り、その並列性を<b>実行時に自力で発掘</b>します。パイプライン化、スーパースカラ発行、そしてアウトオブオーダー (OoO、out-of-order) 実行を支える制御機構（ハザード検出・発行制御・レジスタリネーミングなど）は、演算そのものを 1 つも行いません ── すべて「並列性を掘るための回路」です。命令の並べ方をコンパイラに委ねる VLIW という方式（03 章で詳述）がある一方、ここではハードウェアがその判断の大部分を引き受けます（OoO 向けでもコンパイラの静的スケジューリングは併用されます）。その代償が、回路の複雑さと電力です。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. パイプラインとハザード</a>
+    <a href="#s2">2. スーパースカラ ── 1 サイクル複数命令</a>
+    <a href="#s3">3. アウトオブオーダー実行と Tomasulo 方式</a>
+    <a href="#s4">4. 分岐予測と投機実行</a>
+    <a href="#s5">5. 【体験】同じプログラムを 3 つの発行方式で</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>パイプラインとハザード</h2>
+  <p class="lead">1 つの命令の処理を複数の段に分割し、段ごとに別の命令を同時に流すのがパイプライン化です。</p>
+  <p>典型例として、命令を「フェッチ (IF) → デコード (ID) → 実行 (EX) → メモリアクセス (MEM) → 結果の書き戻し (WB)」の 5 段に分ける、模式的なパイプラインを考えます (実機の段数や分割は設計ごとに大きく異なります)。各段は毎サイクル 1 つの命令を処理できるので、段が空くたびに次の命令を流し込めば、理想的には 1 サイクルに 1 命令が完了するようになります。</p>
+  <div class="math">
+    <span class="c"># 5 段パイプライン、命令が 1 サイクルずつ段を進む(模式)</span><br>
+    命令1: IF&nbsp; ID&nbsp; EX&nbsp; MEM&nbsp; WB<br>
+    命令2:&nbsp;&nbsp;&nbsp;&nbsp;IF&nbsp; ID&nbsp; EX&nbsp;&nbsp; MEM&nbsp; WB<br>
+    命令3:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;IF&nbsp; ID&nbsp;&nbsp; EX&nbsp;&nbsp; MEM&nbsp; WB
+  </div>
+  <p>この理想を崩すのが<b>ハザード</b>です。同じ回路(演算器やメモリポート)を複数の命令が同時に欲しがる<b>構造ハザード</b>、後続の命令が前の命令の結果をまだ受け取れない<b>データハザード</b>、分岐先が確定するまで次の命令を決められない<b>制御ハザード</b>の 3 種があります。</p>
+  <p>データハザードの多くは<b>フォワーディング (forwarding、バイパスとも)</b> ── EX 段で計算した結果を WB を待たずに次の命令の EX 段へ直接渡す配線 ── で解決できます。ただし<b>ロード命令の結果を直後の命令がすぐ使う (ロード-ユース)</b> 場合は、メモリから値が返ってくるタイミングがフォワーディングの配線だけでは間に合わないことが多く、模式的には 1 サイクルの<b>ストール(空転)</b>が入ります。</p>
+  <div class="warn">
+    <b>ここは概念図です。</b> 実機のパイプライン段数、フォワーディングパスの有無、ロード-ユースの遅延サイクル数はマイクロアーキテクチャごとに異なります。ここでは「ハザードがあるとストールが生まれ、フォワーディングでそれを減らせる」という骨格だけを押さえてください。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>スーパースカラ ── 1 サイクル複数命令</h2>
+  <p class="lead">パイプラインの各段の幅を広げ、1 サイクルに複数の命令を同時に流すのがスーパースカラです。</p>
+  <p>単純にフェッチ・デコード・実行の各段を並列に複数用意すれば、1 サイクルに 2 命令、3 命令を処理できます。ここで注意したいのは、<b>スーパースカラであることと、順序を入れ替えて実行することは別の概念</b>だという点です(01 章)。命令をプログラム順のまま複数発行（issue、命令を実行ユニットへ送り出すこと）する<b>インオーダー・スーパースカラ</b>も存在し、これは「幅は広いが、依存待ちが起きたら後ろの命令も一緒に止まる」という性質を持ちます。順序入れ替えまで踏み込むアウトオブオーダー実行は、次節で扱う別の仕組みです。</p>
+  <div class="key">
+    インオーダー・スーパースカラは、独立な命令が<b>隣り合っている</b>場合には効果を発揮しますが、依存関係のある命令が並んでいると、幅を広げても発行できる命令が見つからず幅を活かせません。「幅を広げる」ことと「並べ替えて活かす」ことは別の仕事であり、後者を担うのが OoO です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>アウトオブオーダー実行と Tomasulo 方式</h2>
+  <p class="lead">プログラム順の後方にある独立な命令を、実行時に前へ繰り上げて実行するのが OoO です。その古典的な実現法が Tomasulo 方式です。</p>
+  <p>現代のアウトオブオーダー実行は、Tomasulo 方式 (R. M. Tomasulo が IBM System/360 Model 91 のために考案) に ROB を加えた構成が一般的です。現代の OoO として、次の要素をまとめて見ます。</p>
+  <table>
+    <tr><th>要素</th><th>役割</th></tr>
+    <tr><td>予約ステーション (reservation station)</td><td>まだ実行できない命令を、必要なオペランドが揃うまで保持しておく待合室。オペランドが揃った命令から実行に回せる</td></tr>
+    <tr><td>レジスタリネーミング</td><td>同じレジスタ名を使うだけの命令どうしを、実体としては別のレジスタに割り当て直し、本当は依存していない偽の依存 (WAR・WAW、後述) を消す</td></tr>
+    <tr><td>CDB (共通データバス、common data bus)</td><td>演算器が出した結果を、それを待つすべての予約ステーションへ同時に配る配線</td></tr>
+    <tr><td>ROB (リオーダバッファ、reorder buffer)</td><td>命令を実行順は入れ替えても、結果を確定 (リタイア) する順番はプログラム順に戻すための緩衝装置。※オリジナルの Tomasulo にはなく、精密例外を実現するため後年 (Smith &amp; Pleszkun 系) に追加された拡張</td></tr>
+  </table>
+  <p>命令には本来の依存(結果を使う、真の依存)のほかに、<b>WAR (Write After Read、先に読んでから後で書く順を守る必要がある偽の依存)</b> と <b>WAW (Write After Write、書く順序だけを守る必要がある偽の依存)</b> という、レジスタ名の再利用だけが原因の偽の依存があります。レジスタリネーミングはこの偽の依存を取り除き、本当は独立な命令を並べ替えて実行できるようにします。ROB は、こうして順序が乱れた実行結果を、外部(レジスタファイルやメモリ)から見えるタイミングだけは<b>プログラム順に戻す</b>役割を持ち、これによって例外処理や分岐ミス時の巻き戻しが正しく行えます。</p>
+  <div class="warn">
+    <b>これは並列性を掘る回路であり、演算そのものではありません。</b> 予約ステーション・リネーミング用のレジスタファイル・CDB・ROB は、いずれも「どの命令をいつ流すか」を実行時に決めるためだけの回路です(01 章)。演算器そのものの面積・電力は変わらないのに、これらの制御回路がチップの相当な部分を占め、消費電力の相当な割合を持っていく、という点が OoO の代償です(具体的な割合は世代・実装により大きく異なるため数値は割愛します)。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>分岐予測と投機実行</h2>
+  <p class="lead">分岐先が確定するまで待っていては、パイプラインもスーパースカラも空転してしまいます。そこで「たぶんこっちだろう」と<b>予測</b>して先に進みます。</p>
+  <p>分岐予測器は、過去の分岐の傾向(実行履歴)からその先の分岐がどちらへ飛ぶかを推測し、CPU はその予測に基づいて<b>投機的に</b>命令を実行し始めます。予測が当たれば、分岐先が確定するのを待つ時間を丸ごと節約できます。予測が外れた場合は、投機的に実行してしまった命令の結果を捨てて、正しい分岐先からやり直す<b>巻き戻し (フラッシュ)</b> が発生します。予測ミスのペナルティは、パイプラインが深く投機の範囲が広いほど大きくなります。</p>
+  <div class="key">
+    分岐予測器も投機実行のための巻き戻し機構も、<b>並列性を掘るための回路</b>という点で予約ステーションや ROB と同じ仲間です。分岐先は実行時にしか分からない ── この静的方式の弱点を、予測が当たっている限りハードが埋めてくれます。しかし予測が外れれば、投機した分の電力と時間を丸ごと捨てることになります。この「賭けに勝てば速い、外れれば無駄になる」という性質そのものが、動的方式の予測不能性の源泉です(01 章)。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】同じプログラムを 3 つの発行方式で</h2>
+  <p class="lead">6 個の命令(依存関係あり、レイテンシ＝結果が出るまでのサイクル数もさまざま)を、発行の仕方が違う 3 つのモデルで流します。ハードウェアの回路自体は増えていく一方(概念的なメーターで示す)、その分だけサイクル数がどう縮むかに注目してください。</p>
+  <div class="math">
+    <span class="c"># 対象プログラム(各命令のレイテンシと依存)</span><br>
+    i1: a = ld X&nbsp;&nbsp;&nbsp; <span class="c">[MEM, lat 2]</span><br>
+    i2: b = a + 1&nbsp; <span class="c">[ALU, lat 1, needs a]</span><br>
+    i3: c = ld Y&nbsp;&nbsp;&nbsp; <span class="c">[MEM, lat 2]</span><br>
+    i4: d = c * 2&nbsp; <span class="c">[MUL, lat 3, needs c]</span><br>
+    i5: e = 5 + 6&nbsp; <span class="c">[ALU, lat 1]&nbsp;&nbsp; # どの命令にも依存しない独立命令</span><br>
+    i6: f = d + e&nbsp; <span class="c">[ALU, lat 1, needs d,e]</span>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-m="inorder">インオーダー(1 発行)</button>
+    <button class="ghost" data-m="inss">インオーダー・スーパースカラ(2 発行)</button>
+    <button class="ghost" data-m="ooo">アウトオブオーダー(2 発行)</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvIlp" width="860" height="290"></canvas></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3d7dca"></span>MEM(load)</span>
+    <span><span class="dot" style="background:#e0a94a"></span>MUL</span>
+    <span><span class="dot" style="background:#43b581"></span>ALU</span>
+  </div>
+  <div class="stats" id="ilpStats"></div>
+  <div class="meters">
+    <div class="meter"><div class="lbl">並列性を掘る回路の複雑さ(概念値)</div><div class="bar"><i id="mHw" style="background:var(--hw)"></i></div></div>
+  </div>
+  <p id="ilpNote" class="lead" style="padding-left:0"></p>
+  <div class="key">
+    注目してほしいのは i5 です。他のどの命令にも依存しない完全に独立な命令なのに、<b>インオーダーではプログラム順で 5 番目の自分の順番が来るまで実行されません</b>。プログラム順を守るインオーダー発行では、前にある i4（オペランド c の到着を待つ乗算）が発行できるようになるまでの待ちに巻き込まれ、後ろの i5 まで足止めされてしまうからです。<b>アウトオブオーダーは i5 を早い段階で前に繰り上げ</b>、i4 のレイテンシ待ちの裏で処理を進めます。同じプログラム・同じ演算器数でも、発行方式だけで完了サイクルが変わる ── これが「ハードが並列性を掘る」ことの具体例です。ちょうど VLIW が<b>同じ並べ替えをコンパイル時に</b>済ませてしまうのと対比してください(<a href="./chw-03-vliw.html#s2">03 章のデモ</a>)。
+  </div>
+  <p class="lead" style="padding-left:0">前提: MEM・MUL・ALU はそれぞれ 1 ユニットのみと仮定した模式的なモデルです。インオーダー系は「その回のプログラム順の先頭から、依存が満たされている命令だけを、幅の上限まで発行し、未準備の命令が来たら止まる」という単純な規則で発行順を決めています。OoO は幅の上限まで、依存が満たされた命令から優先的に(プログラム順に関わらず)発行します。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <table>
+    <tr><th>論点</th><th>要点</th></tr>
+    <tr><td>ILP とは</td><td>命令列に埋もれた「同時に実行してよい」余地</td></tr>
+    <tr><td>パイプライン</td><td>処理を段に分けて重ねる。ハザードがストールを生み、フォワーディングが多くを解決する</td></tr>
+    <tr><td>スーパースカラ</td><td>1 サイクルに複数命令を発行。順序を守るインオーダーと、入れ替える OoO は別概念</td></tr>
+    <tr><td>OoO(Tomasulo)</td><td>予約ステーション・リネーミング・CDB・ROB で、偽の依存を消し順序を入れ替え、リタイアだけプログラム順に戻す</td></tr>
+    <tr><td>分岐予測・投機</td><td>実行時にしか分からない分岐先を予測して先取り。外れれば巻き戻しコストを払う</td></tr>
+    <tr><td>代償</td><td>これらすべてが「並列性を掘るための回路」であり、演算そのものではない電力・面積を食う</td></tr>
+  </table>
+  <div class="key">
+    <b>静的側との対比。</b> ここで見た予約ステーション・リネーミング・分岐予測は、すべて<b>実行時にハードウェアが</b>担う判断です。次の 03 章の VLIW は、この<b>同じ並べ替えの判断をコンパイルの時点で確定させ、そのまま命令に焼き込む</b>ことで、これらの回路そのものを丸ごと持たずに済ませます。同じ目的地(独立な命令を並べて速く実行する)へ、正反対の経路で辿り着く 2 つの方式として読み比べてみてください。
+  </div>
+  <div class="seriesnav">
+    次に読む → <a href="./chw-03-vliw.html">03. VLIW ── 静的スケジューリング</a>
+  </div>
+  <div class="fn">
+    参考: J. L. Hennessy &amp; D. A. Patterson, <i>Computer Architecture: A Quantitative Approach</i>。R. M. Tomasulo, "An Efficient Algorithm for Exploiting Multiple Arithmetic Units," <i>IBM Journal of R&amp;D</i>, 1967。J. E. Smith &amp; G. S. Sohi, "The Microarchitecture of Superscalar Processors," <i>Proceedings of the IEEE</i>, 1995。<br>
+    注意: 本ページのパイプライン段数・ハザードの扱い・スケジューラは、仕組みを直感的に伝えるための<b>模式的な可視化</b>です。実機の段数・レイテンシ・発行幅・分岐予測ペナルティは実装ごとに大きく異なり、ここでの概算とは一致しません。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= ILP デモ: 3 発行方式のガント =================
+(function(){
+  const cv=document.getElementById('cvIlp'), ct=cv.getContext('2d');
+  const W=cv.width, H=cv.height;
+  const COL={MEM:'#3d7dca', MUL:'#e0a94a', ALU:'#43b581'};
+  const OPS=[
+    {n:'i1: a=ld X', r:'a', u:'MEM', lat:2, d:[]},
+    {n:'i2: b=a+1',  r:'b', u:'ALU', lat:1, d:['a']},
+    {n:'i3: c=ld Y', r:'c', u:'MEM', lat:2, d:[]},
+    {n:'i4: d=c*2',  r:'d', u:'MUL', lat:3, d:['c']},
+    {n:'i5: e=5+6',  r:'e', u:'ALU', lat:1, d:[]},
+    {n:'i6: f=d+e',  r:'f', u:'ALU', lat:1, d:['d','e']},
+  ];
+  // インオーダー系: 先頭から依存が満たされた命令だけを幅の上限まで発行、未準備が来たら止まる(その回はそこで打ち切り)
+  function schedInorder(width){
+    const ready={}, iss={}; let idx=0, cyc=1, guard=0;
+    while(idx<OPS.length && guard++<50){
+      let issuedThisCycle=0;
+      while(idx<OPS.length && issuedThisCycle<width){
+        const o=OPS[idx];
+        const depOk=o.d.every(x=>ready[x]!==undefined && ready[x]<=cyc);
+        if(!depOk) break; // インオーダー: 未準備の命令を飛ばせない
+        iss[o.n]=cyc; ready[o.r]=cyc+o.lat; idx++; issuedThisCycle++;
+      }
+      cyc++;
+    }
+    return iss;
+  }
+  // OoO: 幅の上限まで、依存が満たされた命令から優先的に発行(プログラム順を無視してよい)
+  function schedOoo(width){
+    const ready={}, iss={}, done=new Set(); let cyc=1, guard=0;
+    while(done.size<OPS.length && guard++<50){
+      const cand=OPS.filter(o=>!done.has(o.n) && o.d.every(x=>ready[x]!==undefined && ready[x]<=cyc));
+      let k=0;
+      for(const o of cand){ if(k<width){ k++; iss[o.n]=cyc; ready[o.r]=cyc+o.lat; done.add(o.n);} }
+      cyc++;
+    }
+    return iss;
+  }
+  const MODELS={
+    inorder:{iss:schedInorder(1), hw:0.15,
+      note:'幅 1。プログラム順を厳守するため、i4(乗算,レイテンシ 3)の完了待ちで i5・i6 も足止めされる。独立な i5 の位置は活かせない。'},
+    inss:{iss:schedInorder(2), hw:0.35,
+      note:'幅 2 のスーパースカラだが、順序はプログラム順のまま。幅が広がった分だけ多少縮むが、i4 待ちで i5 が足止めされる点は変わらない。'},
+    ooo:{iss:schedOoo(2), hw:0.95,
+      note:'幅 2 で、依存が満たされた命令から優先発行。独立な i5 は i4 の完了を待たずに早い段階へ繰り上がり、i4 のレイテンシの裏で処理が進む。'},
+  };
+  let cur='inorder';
+  function draw(m){
+    ct.clearRect(0,0,W,H);
+    const iss=m.iss;
+    const maxC=Math.max(...OPS.map(o=>iss[o.n]+o.lat));
+    const padL=112, padT=40, rowH=34, gap=6;
+    const usableW=W-padL-30;
+    const cw=usableW/maxC;
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    ct.fillText('横軸: サイクル(バー幅 = レイテンシ)', padL, 22);
+    ct.strokeStyle='rgba(215,245,230,0.13)'; ct.lineWidth=1; ct.font='11px sans-serif'; ct.textAlign='center';
+    for(let c=0;c<=maxC;c++){
+      const x=padL+c*cw;
+      ct.beginPath(); ct.moveTo(x,padT-6); ct.lineTo(x,padT+OPS.length*(rowH+gap)); ct.stroke();
+      if(c<maxC){ct.fillStyle='#6fae90'; ct.fillText(c+1, x+cw/2, padT-10);}
+    }
+    OPS.forEach((o,i)=>{
+      const y=padT+i*(rowH+gap);
+      ct.fillStyle='#9fc4ac'; ct.font='12px monospace'; ct.textAlign='right';
+      ct.fillText(o.n, padL-10, y+rowH/2+4);
+      const x=padL+(iss[o.n]-1)*cw;
+      const w=Math.max(cw*o.lat-4, 10);
+      ct.fillStyle=COL[o.u]; ct.globalAlpha=0.92;
+      roundRect(ct,x+2,y+2,w,rowH-4,7); ct.fill(); ct.globalAlpha=1;
+      ct.fillStyle='#0d2b20'; ct.font='bold 12px sans-serif'; ct.textAlign='center';
+      ct.fillText(o.u, x+2+w/2, y+rowH/2+4);
+    });
+    const fx=padL+maxC*cw;
+    ct.strokeStyle='#ffd98f'; ct.setLineDash([5,4]); ct.lineWidth=2;
+    ct.beginPath(); ct.moveTo(fx,padT-6); ct.lineTo(fx,padT+OPS.length*(rowH+gap)); ct.stroke(); ct.setLineDash([]);
+    ct.fillStyle='#ffd98f'; ct.font='bold 14px sans-serif'; ct.textAlign='right';
+    ct.fillText('完了 '+maxC+' サイクル', fx-8, padT+OPS.length*(rowH+gap)+18);
+  }
+  function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function stats(){
+    const m=MODELS[cur];
+    const maxC=Math.max(...OPS.map(o=>m.iss[o.n]+o.lat));
+    document.getElementById('ilpStats').innerHTML=
+      `<div class="box"><span class="big">${maxC}</span><span class="lbl">完了サイクル数</span></div>
+       <div class="box"><span class="big">${OPS.length}</span><span class="lbl">命令数</span></div>`;
+  }
+  function upd(){
+    const m=MODELS[cur];
+    draw(m);
+    document.getElementById('mHw').style.width=(m.hw*100)+'%';
+    document.getElementById('ilpNote').innerHTML=m.note;
+    stats();
+  }
+  document.querySelectorAll('[data-m]').forEach(b=>{
+    b.onclick=()=>{document.querySelectorAll('[data-m]').forEach(x=>x.classList.remove('active'));b.classList.add('active');cur=b.dataset.m;upd();};
+  });
+  upd();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

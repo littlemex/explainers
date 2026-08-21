@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>命令スケジューリングの技法 — コンパイラの道具箱</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --hw:#e07a5f; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.6}
+  .math .c{color:#8fd6b4}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:15px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .legend{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  input[type=range]{width:220px;accent-color:var(--g2)}
+  .rangelbl{font-size:14px;color:var(--sub)}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 6px;color:#fff;text-decoration:none;font-size:14px;opacity:.9}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .seriesnav{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:12px 18px;margin:16px 0;font-size:15px}
+  .seriesnav a{font-weight:700}
+  .status{text-align:center;font-size:14px;color:var(--sub);margin:6px 0}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 auto}
+  .toggle button{background:#fff;color:var(--sub);border:0;border-radius:0;padding:9px 16px;font-weight:600}
+  .toggle button.active{background:var(--g1);color:#fff}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:12px 0}
+  .box{background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;text-align:center}
+  .box .big{font-size:24px;font-weight:800;color:var(--g1);display:block}
+  .box .lbl{font-size:12.5px;color:var(--sub)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:24px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">コンパイラとハードウェアの対話 ・ 04</p>
+  <a class="back" href="./chw-index.html">&larr; シリーズ目次へ戻る</a>
+  <h1>命令スケジューリングの技法 ── コンパイラの道具箱</h1>
+  <p>並列性をハードに掘らせないなら、コンパイルの時点で自力で掘る ── そのための道具箱</p>
+</header>
+<main>
+
+<section>
+  <h2><span class="num">0</span>この章の狙い</h2>
+  <p class="lead">02 章では、スーパースカラやアウトオブオーダー実行という<b>ハードウェアが実行時に並列性を掘り出す</b>仕組みを見ました。03 章の VLIW は、その責務をコンパイラに丸ごと預けました。ではコンパイラは、どうやって並列性を掘り出すのか。この章はその<b>アルゴリズムの道具箱</b>を扱います。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    静的スケジューリングとは、命令を<b>いつ・どの演算器で実行するかをコンパイル時に確定させる</b>ことです。素朴に並べただけでは、依存関係の待ち時間で演算器が遊び、VLIW なら空きスロットが NOP（何もしない命令）で埋まります。コンパイラはこれを避けるために、基本ブロック内では<b>リストスケジューリング</b>、ループには<b>ループアンローリング</b>と<b>ソフトウェアパイプライニング(モジュロスケジューリング)</b>、分岐を跨ぐには<b>トレーススケジューリング</b>と<b>プレディケーション</b>という技法を使います。いずれも「独立に動かせる命令を、待ち時間の裏側に詰め込む」という一点を目的にしています。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. なぜ「技法」が要るのか ── 依存グラフ</a>
+    <a href="#s2">2. リストスケジューリング ── ブロック内</a>
+    <a href="#s3">3. ループを跨ぐ ── アンローリングとソフトウェアパイプライニング</a>
+    <a href="#s4">4. 分岐を跨ぐ ── トレーススケジューリングとプレディケーション</a>
+    <a href="#s5">5. 【体験】ソフトウェアパイプライニング</a>
+    <a href="#s6">6. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ「技法」が要るのか ── 依存グラフ</h2>
+  <p class="lead">命令を並べ替えてよいかどうかは、命令どうしの<b>依存関係</b>で決まります。まずこの依存を整理します。</p>
+  <p>2 つの命令の間には 3 種類の依存があります。<b>真の依存(RAW, Read After Write)</b>は、前の命令が書いた値を後の命令が読むもので、順序を崩せません。<b>逆依存(WAR, Write After Read)</b>と<b>出力依存(WAW, Write After Write)</b>は、同じレジスタを使い回すことで生じる見かけ上の依存（02 章で「偽の依存」と呼んだものと同じ）で、別のレジスタを割り当てれば解消できます(これを名前替え、レジスタリネーミングと呼びます)。02 章で見た Tomasulo 方式は、この名前替えを<b>ハードが実行時に</b>行いました。コンパイラは同じことを<b>コンパイル時に</b>行います。</p>
+  <p>真の依存だけを残して命令をノード、依存を辺とした有向グラフが<b>データ依存グラフ(DDG)</b>です。演算にはレイテンシ(結果が出るまでのサイクル数)があるので、辺には重みが付きます。スケジューリングとは、このグラフの依存と資源の制約のもとで<b>全体のサイクル数(makespan)を最小化する</b>ように、各命令を実行サイクルと演算器へ割り当てる問題です（各命令をできるだけ早いサイクルに置く貪欲な規則は、その一手法にすぎません）。</p>
+  <div class="key">
+    グラフ上で入口から出口までの<b>最長経路(クリティカルパス)</b>の長さが、そのブロックを実行するのに最低限かかるサイクル数の下限を与えます。スケジューリングの技法は、この下限に実行時間を近づけるために、クリティカルパス上でない命令を<b>待ち時間の隙間に詰め込む</b>ことを狙います。なお、演算器の数などの資源制約まで含めた最適スケジューリングは一般に NP 困難であり、実際のコンパイラは以下のような<b>ヒューリスティック</b>で近似します。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>リストスケジューリング ── ブロック内</h2>
+  <p class="lead">分岐を含まない一続きの命令列(基本ブロック)の中で最も広く使われる貪欲法が、リストスケジューリングです。</p>
+  <p>手順は単純です。(1) DDG を作る。(2) 依存元がすべて完了済みで<b>いま実行可能な命令</b>を「レディリスト」に入れる。(3) レディリストの中から<b>優先度</b>の高い命令を選び、空いている演算器に割り当てる。(4) サイクルを 1 つ進め、新たに実行可能になった命令をレディリストに追加する ── これを全命令が片付くまで繰り返します。</p>
+  <p>優先度の付け方が質を左右します。よく使われるのは<b>そのノードから出口までのクリティカルパス長</b>(残り経路が長い命令を優先し、後で詰まらせない)や、<b>実行時期の自由度(モビリティ)が小さい命令を優先</b>する、といった指標です。VLIW(03 章)では、同じサイクルに複数の演算器へ命令を割り当てた結果が、そのまま 1 本の長い命令語(バンドル)になります。</p>
+  <div class="warn">
+    <b>ブロック内で閉じることの限界。</b> リストスケジューリングは 1 つの基本ブロックの中でしか命令を動かせません。ところが 1 ブロックは短いことが多く、その中だけでは並列に動かせる独立命令が足りず、演算器が埋まりきりません。並列性をもっと引き出すには、<b>ループの反復をまたいで</b>、あるいは<b>分岐をまたいで</b>命令を動かす必要があります ── それが次の 2 節・3 節の技法です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>ループを跨ぐ ── アンローリングとソフトウェアパイプライニング</h2>
+  <p class="lead">数値計算やメディア処理などでは、プログラムの実行時間の大半をループが占めることが多くあります。だからループの反復をまたいで並列性を掘る技法が、静的スケジューリングの主役になります。</p>
+  <h3>ループアンローリング</h3>
+  <p>ループ本体を数回ぶんコピーして 1 つの大きなブロックにまとめる技法です。ブロックが大きくなるぶん、リストスケジューリングで詰め込める独立命令が増え、ループの制御(カウンタ更新や分岐)の相対的なコストも下がります。代償として<b>コードサイズが増え</b>、同時に生きる値が増えて<b>レジスタ不足(レジスタプレッシャ)</b>を招きやすくなります。</p>
+  <h3>ソフトウェアパイプライニング(モジュロスケジューリング)</h3>
+  <p>より強力なのが、ループの<b>異なる反復を重ね合わせて</b>実行する技法です。ある反復のロードを走らせている裏で、1 つ前の反復の乗算と、2 つ前の反復のストアを同時に走らせる ── こうして定常状態では<b>一定間隔ごとに新しい反復を投入</b>できます。この間隔を<b>開始間隔(II, Initiation Interval)</b>と呼びます。</p>
+  <div class="math">
+II の下限 = max(<span class="c">ResMII</span>, <span class="c">RecMII</span>)
+  <span class="c">ResMII</span> = 必要な演算数 ÷ 演算器の数     (資源による下限)
+  <span class="c">RecMII</span> = max( 循環ごとの ⌈総遅延 ÷ 反復距離⌉ )  (依存による下限)
+  </div>
+  <p>RecMII は、反復をまたいで結果を受け渡す<b>ループ運搬依存</b>（例: <span class="c">s = s + a[i]</span> の <span class="c">s</span> のように、前の反復の結果を次の反復が使う関係）があるときの下限です。その循環一巡にかかる総遅延を、循環が何反復ぶんにまたがるか（反復距離）で割った値の最大が効きます。モジュロスケジューリングは、この II を小さく保ったまま各命令を配置する代表的なアルゴリズムです。ループの立ち上げ部分(プロローグ)と締めくくり(エピローグ)には重なりが不十分な区間が残りますが、反復回数が多ければ定常状態が支配的になり、<b>実効スループットは 1 反復あたり II サイクル</b>に漸近します。次節のデモで、この重ね合わせがどれだけ効くかを体験します。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>分岐を跨ぐ ── トレーススケジューリングとプレディケーション</h2>
+  <p class="lead">基本ブロックが短くなる大きな理由は、分岐でこま切れになるからです。分岐の壁を越えて命令を動かす技法が 2 つあります。</p>
+  <h3>トレーススケジューリング</h3>
+  <p>実行される可能性が高い経路(トレース)を 1 本選び、途中の分岐をいったん無視して<b>1 つの大きなブロックとしてスケジュール</b>する技法です(Fisher, 1981)。予想が外れて別の分岐へ抜けた場合に備えて、外れた経路には<b>補償コード</b>を挿入して正しさを保ちます。よく通る道を高速化する代わりに、稀な道は少し遅くなってもよい、という賭けです。頻繁に実行される（ホットな）経路の入口を 1 箇所に限り、途中から飛び込まれたときの補償を単純にした<b>スーパーブロック</b>はこの変種です。</p>
+  <h3>プレディケーション(if 変換)</h3>
+  <p>分岐そのものをなくしてしまう技法です。<code>if (c) a; else b;</code> を、条件 <code>c</code> を<b>プレディケート(述語)レジスタ</b>に入れ、<code>a</code> は <code>c</code> が真のとき、<code>b</code> は偽のときだけ結果を書き込む、という形に変換します。分岐が消えるので命令列が一直線になり、スケジューラが自由に詰め込めるようになります。予測の外れやすい分岐を消せるのが利点で、VLIW 系の Itanium(IA-64)はプレディケーションを全面的に採用しました。</p>
+  <div class="warn">
+    <b>代償は「両方を実行する」こと。</b> プレディケーションは then 側と else 側の両方の命令を発行し、要らない方を書き込み抑止でつぶします。これは 05 章で扱う GPU の<b>実行マスクと発想が同じ</b>で、分岐発散のときに両経路を逐次実行するのと相似です。つまり分岐が消えて詰め込みやすくなる代わりに、無駄な演算が増える。どちらが得かは分岐の偏り方しだいで、コンパイラ(あるいはプログラマ)が見極める責務を負います。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】ソフトウェアパイプライニング</h2>
+  <p class="lead">同じループを「反復ごとに順番に流す」場合と「反復を重ね合わせる」場合で、完了までのサイクル数を比べます。1 反復は ロード(2)→乗算(2)→ストア(1) の依存鎖です。</p>
+  <p>下のガントチャートは、横軸がサイクル、各行が 1 つの反復です。逐次実行（比較用に、反復を一切重ねない最も素朴な実行を置いています）では、ある反復が終わるまで次の反復のロードを始めません。ソフトウェアパイプライン化すると、ロード・乗算・ストアが別々の演算器で動くことを使って、開始間隔 II = 2 サイクルごとに次の反復を投入します（この模式では説明のため II = 2 を固定値として与えています。実際の II は資源と依存の下限式から決まります）。反復回数を増やすと、立ち上げ(プロローグ)のコストが薄まり、スループットが 1 反復あたり II へ近づく様子が見えます。</p>
+  <div class="controls">
+    <div class="toggle" id="schToggle">
+      <button data-mode="seq" class="active">逐次実行</button>
+      <button data-mode="pipe">ソフトウェアパイプライン</button>
+    </div>
+  </div>
+  <div class="controls">
+    <span class="rangelbl">反復回数: <b id="iterVal">4</b></span>
+    <input type="range" id="iterRange" min="3" max="8" value="4" step="1">
+  </div>
+  <div class="controls">
+    <button id="schPlay">再生</button>
+    <button id="schReset" class="ghost">リセット</button>
+  </div>
+  <div class="canvas-wrap"><canvas id="cvSch" width="760" height="330"></canvas></div>
+  <div class="stats" id="schStats"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>ロード(レイテンシ 2)</span>
+    <span><span class="dot" style="background:#5aa9e6"></span>乗算(レイテンシ 2)</span>
+    <span><span class="dot" style="background:#e0a94a"></span>ストア(レイテンシ 1)</span>
+  </div>
+  <div class="key">
+    逐次実行は 1 反復あたり 5 サイクルかかり、N 反復で 5N サイクルです。ソフトウェアパイプラインは定常状態で II = 2 サイクルごとに反復を投入するので、N 反復で およそ 2(N&minus;1)+5 サイクル。反復が増えるほど加速率は 5/2 = 2.5 倍へ漸近します（この 2.5 倍という数字は、反復を一切重ねない素朴なベースラインと、II = 2 という仮定に依存した値です）。<b>ハードは 1 個も足していません</b> ── 同じ演算器を、コンパイラが命令を並べ替えて隙間なく使い切っただけです。これが「並列性をコンパイル時に掘る」ことの正体です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>まとめ</h2>
+  <table>
+    <tr><th>技法</th><th>効く範囲</th><th>要点と代償</th></tr>
+    <tr><td>リストスケジューリング</td><td>基本ブロック内</td><td>レディリストから優先度で貪欲に選ぶ。ブロックが短いと並列性が足りない</td></tr>
+    <tr><td>ループアンローリング</td><td>ループ</td><td>本体を複製して独立命令を増やす。コードサイズ増・レジスタ不足</td></tr>
+    <tr><td>ソフトウェアパイプライニング</td><td>ループ</td><td>反復を重ね II ごとに投入。スループットは 1 反復/II へ漸近</td></tr>
+    <tr><td>トレーススケジューリング</td><td>分岐またぎ</td><td>よく通る経路を 1 ブロック化。外れ経路に補償コードが要る</td></tr>
+    <tr><td>プレディケーション</td><td>分岐またぎ</td><td>分岐を述語で消す。両経路を実行する無駄が生じる</td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b> これらはすべて「独立に動かせる命令を、待ち時間の裏に詰め込む」という一点に収束します。02 章のアウトオブオーダー実行が<b>実行時にハードで</b>やっていたことを、静的スケジューリングは<b>コンパイル時にソフトで</b>やり切ろうとします。ハードから制御回路を剥がすほど、その掘り出しの責務はまるごとコンパイラに乗ってきます。次章では、視点を変えて「1 つの演算を大量のデータに同時適用する」データ並列 ── SIMD と GPU を見ていきます。
+  </div>
+  <div class="seriesnav">
+    次に読む → <a href="./chw-05-simd-gpu.html">05. SIMD・ベクトル・GPU (SIMT)</a>
+  </div>
+  <div class="fn">
+    参考: J. A. Fisher, "Trace Scheduling: A Technique for Global Microcode Compaction," IEEE Trans. Computers, 1981。M. Lam, "Software Pipelining: An Effective Scheduling Technique for VLIW Machines," PLDI 1988。B. R. Rau, "Iterative Modulo Scheduling," 1994(MICRO-27 / HP Labs テクニカルレポート)。J. R. Allen ほか, "Conversion of Control Dependence to Data Dependence"(if 変換), POPL 1983。J. L. Hennessy &amp; D. A. Patterson, <i>Computer Architecture: A Quantitative Approach</i>(スケジューリングとプレディケーションの章)。Itanium(IA-64)のプレディケーションは Intel の IA-64 アーキテクチャ資料による。<br>
+    注意: 本ページのデモは開始間隔とスループットの関係を直感的に伝えるための<b>模式的な可視化</b>です。実機ではレイテンシ・演算器数・依存の循環・レジスタ数によって II の下限が変わり、ここでの固定値(レイテンシ 2/2/1、II = 2)とは一致しません。
+  </div>
+</section>
+
+</main>
+<script>
+// ================= ソフトウェアパイプライニング ガント =================
+(function(){
+  const cv=document.getElementById('cvSch'), ct=cv.getContext('2d');
+  const W=cv.width;
+  let mode='seq', iters=4, cursor=null, timer=null;
+  // 1 反復 = L(len2) -> M(len2) -> S(len1)。演算器は L/M/S で別。
+  const OPS=[
+    {k:'L', len:2, off:0, col:'#43b581', lbl:'Ld'},
+    {k:'M', len:2, off:2, col:'#5aa9e6', lbl:'Mul'},
+    {k:'S', len:1, off:4, col:'#e0a94a', lbl:'St'}
+  ];
+  const ITER_LEN=5; // 1 反復の依存鎖長
+  function startOf(iter){ return mode==='seq' ? ITER_LEN*iter : 2*iter; } // pipe: II=2
+  function totalCycles(){
+    return mode==='seq' ? ITER_LEN*iters : 2*(iters-1)+ITER_LEN;
+  }
+  function layout(){
+    const top=54, rowH=Math.min(30, (cv.height-top-30)/iters);
+    const left=44, right=16;
+    const maxC = ITER_LEN*iters; // 逐次基準で軸を固定し両モードを同尺で比較
+    const cw=(W-left-right)/maxC;
+    return {top,rowH,left,right,cw,maxC};
+  }
+  function draw(){
+    // 高さを反復数に合わせて調整
+    cv.height = 54 + iters*Math.min(30,26) + 46;
+    const {top,rowH,left,cw,maxC}=layout();
+    ct.clearRect(0,0,W,cv.height);
+    ct.fillStyle='#d7f5e6'; ct.font='14px sans-serif'; ct.textAlign='left';
+    ct.fillText(mode==='seq' ? '逐次実行: 反復が終わるまで次の反復を始めない' : 'ソフトウェアパイプライン: II=2 ごとに次の反復を投入', 20, 24);
+    // サイクル目盛り
+    ct.strokeStyle='#1e4535'; ct.lineWidth=1; ct.font='10px sans-serif'; ct.fillStyle='#6fae90'; ct.textAlign='center';
+    for(let c=0;c<=maxC;c++){
+      const x=left+c*cw;
+      ct.beginPath(); ct.moveTo(x,top-4); ct.lineTo(x, top+iters*rowH); ct.stroke();
+      if(c%2===0 || cw>20){ ct.fillText(c, x, top-8); }
+    }
+    // 実行カーソル
+    if(cursor!==null){
+      const x=left+cursor*cw;
+      ct.strokeStyle='#ffd98f'; ct.lineWidth=2;
+      ct.beginPath(); ct.moveTo(x,top-4); ct.lineTo(x, top+iters*rowH); ct.stroke();
+    }
+    // 各反復の行と演算ブロック
+    for(let it=0;it<iters;it++){
+      const y=top+it*rowH;
+      ct.fillStyle='#6fae90'; ct.font='11px sans-serif'; ct.textAlign='right';
+      ct.fillText('反復'+(it+1), left-6, y+rowH/2+4);
+      const s=startOf(it);
+      for(const op of OPS){
+        const bx=left+(s+op.off)*cw, bw=op.len*cw;
+        const endC=s+op.off+op.len;
+        const done = cursor===null ? true : cursor>=endC;
+        const running = cursor!==null && cursor>=(s+op.off) && cursor<endC;
+        ct.globalAlpha = (cursor!==null && !done && !running) ? 0.28 : 1;
+        ct.fillStyle=op.col;
+        roundRect(ct,bx+1,y+3,Math.max(2,bw-2),rowH-6,5); ct.fill();
+        if(running){ ct.strokeStyle='#fff'; ct.lineWidth=2; roundRect(ct,bx+1,y+3,Math.max(2,bw-2),rowH-6,5); ct.stroke(); }
+        ct.globalAlpha=1;
+        if(bw>22){ ct.fillStyle='#0d2b20'; ct.font='bold 10px sans-serif'; ct.textAlign='center'; ct.fillText(op.lbl, bx+bw/2, y+rowH/2+3); }
+      }
+    }
+    ct.fillStyle='#ffd98f'; ct.font='bold 12px sans-serif'; ct.textAlign='left';
+    ct.fillText('総サイクル数: '+totalCycles(), 20, cv.height-14);
+  }
+  function roundRect(c,x,y,w,h,r){r=Math.min(r,h/2,w/2);c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function stats(){
+    const seqT=ITER_LEN*iters, pipeT=2*(iters-1)+ITER_LEN;
+    const cur=totalCycles();
+    const sp=(seqT/pipeT);
+    const thr=(iters/cur);
+    document.getElementById('schStats').innerHTML=
+      `<div class="box"><span class="big">${cur}</span><span class="lbl">総サイクル数(このモード)</span></div>`+
+      `<div class="box"><span class="big">${thr.toFixed(2)}</span><span class="lbl">反復/サイクル</span></div>`+
+      `<div class="box"><span class="big">${sp.toFixed(2)}&times;</span><span class="lbl">パイプライン化の加速率</span></div>`;
+  }
+  function play(){
+    if(timer){clearInterval(timer);timer=null;}
+    cursor=0; draw();
+    const end=totalCycles();
+    timer=setInterval(()=>{
+      cursor++; draw();
+      if(cursor>=end){ clearInterval(timer); timer=null; cursor=null; draw(); stats(); }
+    },260);
+  }
+  function reset(){ if(timer){clearInterval(timer);timer=null;} cursor=null; draw(); stats(); }
+  document.querySelectorAll('#schToggle button').forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll('#schToggle button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); mode=b.dataset.mode; reset(); };
+  });
+  document.getElementById('iterRange').oninput=(e)=>{ iters=parseInt(e.target.value,10); document.getElementById('iterVal').textContent=iters; reset(); };
+  document.getElementById('schPlay').onclick=play;
+  document.getElementById('schReset').onclick=reset;
+  reset();
+})();
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$'],['\\[','\\]']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
