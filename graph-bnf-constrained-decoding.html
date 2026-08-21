@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BNF とグラフで生成を縛る — 構造制約は安全、事実制約は危険</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --amber:#b8860b; --red:#c0392b; --track:#e6efe9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  .topbar{max-width:900px;margin:0 auto;padding:14px 22px;font-size:14px}
+  .topbar a{color:var(--g2);text-decoration:none;font-weight:600}
+  .topbar a:hover{text-decoration:underline}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:52px 24px 42px;text-align:center}
+  header h1{margin:0 0 10px;font-size:30px;line-height:1.35;letter-spacing:.02em}
+  header p{margin:0 auto;opacity:.94;font-size:16px;max-width:660px}
+  main{max-width:900px;margin:0 auto;padding:30px 22px 80px}
+  h2{font-size:23px;margin:1.8em 0 .5em;color:var(--g1);border-left:6px solid var(--g2);padding-left:14px}
+  h3{font-size:19px;margin:1.2em 0 .3em;color:var(--g1)}
+  p{margin:.6em 0}
+  code{background:#eef4f0;color:#0f5132;padding:2px 7px;border-radius:6px;font-size:14px;
+    font-family:"SF Mono",Menlo,monospace}
+  .lead{color:var(--sub)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0;
+    box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  .pipe{display:flex;flex-direction:column;gap:7px;align-items:center;margin:14px 0}
+  .step{background:#f0f7f3;border:1px solid var(--line);border-radius:10px;padding:9px 16px;font-size:15px;min-width:260px;text-align:center}
+  .step.hot{border-color:var(--g2);color:var(--g1);font-weight:700;background:#e3f2ea}
+  .arrow{color:var(--g3);font-size:19px;line-height:1}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.two{grid-template-columns:1fr}}
+  .tag{display:inline-block;font-size:13px;padding:2px 10px;border-radius:20px;background:#eef4f0;border:1px solid var(--line);color:var(--sub);margin:2px 6px 2px 0}
+  .kg{background:#f0f7f3;border:1px solid var(--line);border-radius:12px;padding:16px}
+  .edge{display:flex;align-items:center;gap:10px;font-size:15px;padding:5px 0}
+  .node{background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px 12px;font-weight:600}
+  .node.subj{border-color:var(--g2);color:var(--g1)}
+  .rel{color:var(--amber);font-family:"SF Mono",monospace;font-size:13px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+  button.mode{background:#fff;border:1px solid var(--line);color:var(--ink);padding:9px 15px;border-radius:9px;font-size:15px;cursor:pointer;transition:.15s}
+  button.mode.on{background:var(--g2);color:#fff;border-color:var(--g2);font-weight:700}
+  button.mode:hover{border-color:var(--g2)}
+  .toggle{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:14px;color:var(--sub)}
+  .switch{position:relative;width:52px;height:28px;background:#dfe9e3;border:1px solid var(--line);border-radius:20px;cursor:pointer;flex:none}
+  .switch .dot{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#9db3a6;transition:.18s}
+  .switch.on{background:var(--g3);border-color:var(--g2)}
+  .switch.on .dot{left:27px;background:#fff}
+  .sent{font-size:19px;background:#fff;border:1px dashed var(--g3);border-radius:10px;padding:14px 16px;margin:12px 0;font-family:"SF Mono",monospace}
+  .sent .cursor{color:var(--g2);font-weight:700}
+  .cands{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+  .cand{display:grid;grid-template-columns:150px 1fr 58px;align-items:center;gap:10px;font-size:14px}
+  .cname{font-family:"SF Mono",monospace}
+  .bar{height:22px;border-radius:6px;background:var(--g2);transition:width .3s,background .3s,opacity .3s}
+  .cand .track{background:var(--track);border-radius:6px}
+  .cand.masked .bar{background:#e0b4b0;opacity:.6}
+  .cand.masked .cname{color:var(--red);text-decoration:line-through}
+  .cand.chosen .cname{color:var(--g1);font-weight:700}
+  .pct{text-align:right;color:var(--sub);font-family:"SF Mono",monospace;font-size:13px}
+  .verdict{margin-top:14px;padding:12px 16px;border-radius:10px;font-size:15px;border:1px solid}
+  .v-ok{background:#e8f6ee;border-color:var(--g3);color:#0f5132}
+  .v-bad{background:#fbeceb;border-color:#e0a49f;color:#8f2c22}
+  .v-warn{background:#fbf5e6;border-color:#e6d29a;color:#7a5a12}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px;background:#fff}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left}
+  th{background:#e3f2ea;color:var(--g1)}
+  .g{color:var(--g2);font-weight:700}.b{color:var(--red);font-weight:700}.y{color:var(--amber);font-weight:700}
+  ul{margin:.5em 0}
+  footer{text-align:center;color:var(--sub);font-size:13px;padding:24px;border-top:1px solid var(--line);margin-top:40px}
+  footer a{color:var(--g2)}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./index.html">← アーカイブ一覧</a></div>
+<header>
+  <h1>BNF とグラフで生成を縛る</h1>
+  <p>constrained decoding の考え方を、グラフによる意味・関係の制約へ広げられるか。触って確かめると「構造で縛るのは有意義、事実で縛るのは危険」という境界が見えてくる。</p>
+</header>
+<main>
+
+  <div class="card lead">
+    <p>普通の constrained decoding は、文法パーサが「今この続きとして許されないトークン」の確率をゼロにするだけの仕組み。これをグラフに置き換えると何ができて、どこで危うくなるのか。まず全体像、次に触れるデモ、最後に「グラフが BNF を超える点」を整理する。</p>
+  </div>
+
+  <h2>1. BNF は「構文」を止める</h2>
+  <div class="pipe">
+    <div class="step">LLM logits</div><div class="arrow">↓</div>
+    <div class="step hot">BNF parser: 許されないトークン → −∞</div><div class="arrow">↓</div>
+    <div class="step">softmax → 生成</div>
+  </div>
+  <p>これが成り立つ理由は 3 つ。<span class="tag">1 prefix 単調に検証できる</span><span class="tag">2 語彙のズレを吸収できる</span><span class="tag">3 設計上「行き止まり」が無い</span></p>
+
+  <h2>2. グラフに置き換えると「意味・関係」を止めたくなる</h2>
+  <div class="pipe">
+    <div class="step">LLM が <code>Company A acquired ...</code> まで生成</div><div class="arrow">↓</div>
+    <div class="step hot">グラフ: A の出辺 {acquired→B, owns→C, employs→D} で候補を限定</div><div class="arrow">↓</div>
+    <div class="step">constraint mask → logits → 生成</div>
+  </div>
+  <p>アナロジーは美しい。だが意味制約は上の 3 条件を欠く。それをデモで確かめる。</p>
+
+  <h2>3. デモ: グラフ制約デコードを動かす</h2>
+  <div class="card">
+    <p class="lead">LLM が次の一語を選ぶ。グラフには A の関係だけが載っている。モードと「正解の世界」を切り替えて挙動を見る。</p>
+    <div class="two">
+      <div class="kg">
+        <div style="color:var(--sub);font-size:13px;margin-bottom:8px">Knowledge Graph（閉じた世界）</div>
+        <div class="edge"><span class="node subj">Company A</span></div>
+        <div class="edge"><span class="rel">acquired →</span><span class="node">Company B</span></div>
+        <div class="edge"><span class="rel">owns&nbsp;&nbsp;&nbsp;→</span><span class="node">Company C</span></div>
+        <div class="edge"><span class="rel">employs →</span><span class="node">Person D</span></div>
+      </div>
+      <div class="kg">
+        <div style="color:var(--sub);font-size:13px;margin-bottom:8px">生成中の文</div>
+        <div class="sent">Company A acquired <span class="cursor" id="blank">___</span></div>
+        <div class="toggle">
+          <div class="switch" id="truthSw" onclick="toggleTruth()"><div class="dot"></div></div>
+          <span>正解は <b id="truthLbl">Company B（グラフ内）</b></span>
+        </div>
+        <div style="font-size:12px;color:#8aa">スイッチを入れると「正解が Company E（グラフに無いが真実）」の世界へ</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="mode on" id="m-none" onclick="setMode('none')">制約なし</button>
+      <button class="mode" id="m-hard" onclick="setMode('hard')">Hard mask（BNF 的）</button>
+      <button class="mode" id="m-soft" onclick="setMode('soft')">Soft bias（latent guidance）</button>
+    </div>
+    <div class="cands" id="cands"></div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+
+  <h3>デモから読み取れること</h3>
+  <ul>
+    <li><b>制約なし</b>: モデルの素の確率。グラフ外の <code>Company E</code> も選べる。</li>
+    <li><b>Hard mask</b>: グラフに無いものを −∞。正解がグラフ内なら綺麗に効く。<span class="b">だが正解がグラフ外（E）だと、確信たっぷりに <code>Company B</code> へ流し込まれる</span> — 幻覚の抑制ではなく別の幻覚の製造。</li>
+    <li><b>Soft bias</b>: <code>logit' = logit + λ·compat(token, G)</code>。0 にはせず持ち上げるだけ。ただし compat を測るには hidden state とグラフを同じ空間に載せる学習（重い GNN）が要る。</li>
+  </ul>
+
+  <h2>4. なぜ意味の hard mask は危ういのか</h2>
+  <div class="two">
+    <div class="card"><h3>構文マスク（無害寄り）</h3><p>valid なトークンへ再正規化しても、構文的に正しければ大きな害はない。行き止まりも設計で防げる。</p></div>
+    <div class="card"><h3 style="color:var(--red)">意味マスク（有害）</h3><p>閉世界仮説「グラフに無い＝偽」を強制。グラフは常に不完全なので、真を殺し、言いたくなかったことを言わせる。<code>did not acquire</code> のような意味反転も判定できない。</p></div>
+  </div>
+  <p class="lead">補足: 厳密には構文マスクも無害とは限らない。mask と再正規化はモデル分布を歪めることが知られ（Grammar-Aligned Decoding）、制約が強すぎると構文は完璧でも意味を壊す失敗も報告される。正しくは「構造制約は構文妥当性を保証するが分布忠実性は保証しない。事実制約はそこに閉世界誤差を上乗せする」という多層の問題。</p>
+
+  <h2>5. では BNF とグラフの違いは何か</h2>
+  <p>構造制約として使う限り、両者は別の軸の力を持つ。BNF は<b>入れ子・再帰</b>（スタック）、グラフは<b>参照・束縛・到達可能性</b>（関係の記憶）。</p>
+  <table>
+    <tr><th></th><th>BNF / CFG</th><th>グラフ（構造制約として）</th></tr>
+    <tr><td>得意</td><td>再帰・入れ子（括弧の対応、式のネスト）</td><td>参照整合・変数束縛・到達可能性</td></tr>
+    <tr><td>状態</td><td>スタック（ネスト深さ）</td><td>現在ノード + 束縛の集合（既出エンティティ）</td></tr>
+    <tr><td>アルファベット</td><td>作成時に静的固定</td><td>データ由来で動的・既出値に依存できる</td></tr>
+    <tr><td>検査範囲</td><td>局所的にインクリメンタル</td><td>大域的（全体が valid な部分グラフを成すか）</td></tr>
+  </table>
+  <p>「宣言した id と使う id が一致せよ」は CFG では書けない（agreement/reference は文脈自由の外）。実際 CFG ベースの制約デコードは「変数の使用前定義」を扱えないと報告されている。グラフの到達可能性なら「直前に束縛したノードから届く要素だけ許す」が書ける。だから一番強いのは<b>合わせ技</b> —— 構文の骨格は BNF、参照の穴埋めはグラフ。text-to-SQL がまさにこれ（SQL 文法 + スキーマ束縛）。</p>
+
+  <h2>6. まとめ</h2>
+  <div class="card">
+    <p>グラフを<b>型システム / 状態機械</b>（構造）として使う限り、BNF と同じ意義がある。<b>事実データベース</b>として mask に使うと、閉世界仮説で真を殺し確信ありげな誤りを製造する。境界は「型で絞る（安全）」対「事実で絞る（危険）」。そして学習ゼロで出力層に刺す hard 構造制約は validity を保証するが、valid 候補の中の正しさ（correctness）は上げない —— それは検証器 reward の学習が担う層。</p>
+  </div>
+
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+const DATA = {
+  false: [
+    {name:'Company B', logit:2.4, inG:true},
+    {name:'Company C', logit:1.1, inG:true},
+    {name:'Company E', logit:0.6, inG:false},
+    {name:'the firm',  logit:0.2, inG:false},
+    {name:'Person D',  logit:-0.3, inG:true},
+  ],
+  true: [
+    {name:'Company E', logit:2.5, inG:false},
+    {name:'Company B', logit:1.0, inG:true},
+    {name:'the firm',  logit:0.4, inG:false},
+    {name:'Company C', logit:0.1, inG:true},
+    {name:'Person D',  logit:-0.4, inG:true},
+  ]
+};
+let mode='none', truthE=false;
+const LAMBDA=1.6;
+function softmax(xs){const m=Math.max(...xs.filter(x=>isFinite(x)));const e=xs.map(x=>isFinite(x)?Math.exp(x-m):0);const s=e.reduce((a,b)=>a+b,0);return e.map(v=>v/s);}
+function compute(){
+  const base = DATA[truthE?'true':'false'].map(d=>({...d}));
+  let logits = base.map(d=>{
+    if(mode==='none') return d.logit;
+    if(mode==='hard') return d.inG ? d.logit : -Infinity;
+    if(mode==='soft') return d.logit + (d.inG ? LAMBDA : 0);
+  });
+  const probs = softmax(logits);
+  base.forEach((d,i)=>{d.p=probs[i]; d.masked=(mode==='hard'&&!d.inG);});
+  let bi=0; base.forEach((d,i)=>{if(d.p>base[bi].p)bi=i;});
+  base[bi].chosen=true;
+  return {base, chosen:base[bi]};
+}
+function render(){
+  const {base, chosen}=compute();
+  const el=document.getElementById('cands'); el.innerHTML='';
+  base.forEach(d=>{
+    const w=Math.round(d.p*100);
+    const row=document.createElement('div');
+    row.className='cand'+(d.masked?' masked':'')+(d.chosen?' chosen':'');
+    row.innerHTML=`<div class="cname">${d.name}${d.inG?'':' <span style="color:#8aa;font-size:12px">(KG外)</span>'}</div>
+      <div class="track"><div class="bar" style="width:${Math.max(w,2)}%"></div></div>
+      <div class="pct">${w}%</div>`;
+    el.appendChild(row);
+  });
+  document.getElementById('blank').textContent = chosen.name;
+  const v=document.getElementById('verdict');
+  const truthName = truthE?'Company E':'Company B';
+  const correct = chosen.name===truthName;
+  if(mode==='none'){
+    v.className='verdict v-warn';
+    v.innerHTML=`<b>制約なし</b>: モデルは <b>${chosen.name}</b> を選択。${correct?'たまたま正解と一致。':'誤り。素のモデルは間違え得る。'}グラフの知識は使っていない。`;
+  }else if(mode==='hard'){
+    if(!truthE){ v.className='verdict v-ok';
+      v.innerHTML=`<b>Hard mask</b>: KG外候補を全て −∞。<b>${chosen.name}</b> を選択 = 正解。正解がグラフ内にあるうちは綺麗に効く。`;
+    }else{ v.className='verdict v-bad';
+      v.innerHTML=`<b>Hard mask で流し込み発生</b>: 真実は <b>Company E</b> だが KG に無いので −∞。モデルは仕方なく <b>Company B</b> を確信たっぷりに出力 = 確信ありげな別の幻覚を製造。これが意味マスクの危うさ。`;
+    }
+  }else{ v.className='verdict v-warn';
+    v.innerHTML=`<b>Soft bias</b>: KG内候補を λ=${LAMBDA} 持ち上げ <b>${chosen.name}</b> を選択。0 にしないので流し込みは緩和されるが、この compat を測るには hidden state とグラフを同じ空間に載せる学習（重い GNN）が要り、"軽く足すだけ" とは矛盾する。`;
+  }
+}
+function setMode(m){mode=m;['none','hard','soft'].forEach(x=>document.getElementById('m-'+x).classList.toggle('on',x===m));render();}
+function toggleTruth(){truthE=!truthE;document.getElementById('truthSw').classList.toggle('on',truthE);
+  document.getElementById('truthLbl').textContent = truthE?'Company E（グラフに無い＝真実）':'Company B（グラフ内）';render();}
+render();
+</script>
+</body>
+</html>

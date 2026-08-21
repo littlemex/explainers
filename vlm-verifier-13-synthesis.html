@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>検証器で VLM の精度を上げる — 形式制約 (BNF / グラフ) の視点で再整理</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --amber:#b8860b; --red:#c0392b; --track:#e6efe9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.9;font-size:17px}
+  .topbar{max-width:900px;margin:0 auto;padding:14px 22px;font-size:14px}
+  .topbar a{color:var(--g2);text-decoration:none;font-weight:600}
+  .topbar a:hover{text-decoration:underline}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:52px 24px 42px;text-align:center}
+  header h1{margin:0 0 12px;font-size:29px;line-height:1.4;letter-spacing:.02em}
+  header p{margin:0 auto;opacity:.94;font-size:16px;max-width:680px}
+  main{max-width:900px;margin:0 auto;padding:30px 22px 60px}
+  h2{font-size:22px;margin:1.9em 0 .5em;color:var(--g1);border-left:6px solid var(--g2);padding-left:14px}
+  h3{font-size:18px;margin:1.3em 0 .3em;color:var(--g1)}
+  p{margin:.6em 0}
+  code{background:#eef4f0;color:#0f5132;padding:2px 7px;border-radius:6px;font-size:14px;font-family:"SF Mono",Menlo,monospace}
+  a.cite{color:var(--g2);text-decoration:none;border-bottom:1px dotted var(--g3);font-size:.92em}
+  a.cite:hover{background:#eef4f0}
+  .lead{color:var(--sub)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin:16px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  .tldr{background:#e3f2ea;border:1px solid var(--g3)}
+  ul,ol{margin:.5em 0;padding-left:1.3em} li{margin:.35em 0}
+  .findings li{margin:.5em 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px;background:#fff}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:#e3f2ea;color:var(--g1)}
+  .g{color:var(--g2);font-weight:700}.b{color:var(--red);font-weight:700}.y{color:var(--amber);font-weight:700}
+  /* two-axis figure */
+  .axis{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+  @media(max-width:680px){.axis{grid-template-columns:1fr}}
+  .axbox{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fff}
+  .axbox h4{margin:0 0 6px;font-size:15px}
+  .safe{border-color:var(--g3);background:#f0f9f4}
+  .danger{border-color:#e0a49f;background:#fdf1f0}
+  /* interactive layer stack */
+  .stack{display:flex;flex-direction:column;gap:8px;margin:14px 0}
+  .layer{border:1px solid var(--line);border-radius:10px;padding:12px 16px;background:#fff;cursor:pointer;transition:.15s;display:flex;align-items:baseline;gap:12px}
+  .layer:hover{border-color:var(--g2);box-shadow:0 4px 14px rgba(15,81,50,.1)}
+  .layer.on{background:#e3f2ea;border-color:var(--g2)}
+  .layer .n{flex:none;width:26px;height:26px;border-radius:50%;background:var(--g2);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .layer .t{font-weight:700;color:var(--g1)}
+  .layer .cost{margin-left:auto;font-size:12px;color:var(--sub);white-space:nowrap}
+  .layer .d{display:none;font-size:14px;color:var(--sub);width:100%;margin-top:8px;line-height:1.7}
+  .layer.on .d{display:block}
+  .toggle{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:14px;color:var(--sub)}
+  .btn{background:#fff;border:1px solid var(--line);color:var(--ink);padding:8px 14px;border-radius:9px;font-size:14px;cursor:pointer}
+  .btn.on{background:var(--g2);color:#fff;border-color:var(--g2);font-weight:700}
+  .demoOut{margin-top:10px;padding:11px 14px;border-radius:10px;font-size:14.5px;border:1px solid}
+  .o-accept{background:#fdf1f0;border-color:#e0a49f;color:#8f2c22}
+  .o-reject{background:#fdf1f0;border-color:#e0a49f;color:#8f2c22}
+  .note{font-size:13.5px;color:var(--sub)}
+  /* invoice extraction demo */
+  .doc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-family:"SF Mono",Menlo,monospace;font-size:14px;margin:10px 0}
+  .doc .row{display:flex;justify-content:space-between;max-width:280px;padding:2px 0}
+  .doc .hl{color:var(--red);font-weight:700}
+  .conds{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+  .conds .btn{font-size:13.5px}
+  .exout{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fbfefc}
+  .exjson{font-family:"SF Mono",Menlo,monospace;font-size:14px;background:#0f2419;color:#a9e8c2;border-radius:8px;padding:10px 14px;margin:4px 0 12px;white-space:pre-wrap}
+  .check{display:grid;grid-template-columns:1fr;gap:6px;margin:8px 0}
+  .ck{display:flex;align-items:center;gap:10px;font-size:14.5px}
+  .ck .mk{flex:none;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff}
+  .ck.yes .mk{background:var(--g2)} .ck.no .mk{background:var(--red)} .ck.na .mk{background:#9db3a6}
+  .exwhy{margin-top:10px;font-size:14px;color:var(--sub);line-height:1.75}
+  footer{text-align:center;color:var(--sub);font-size:13px;padding:24px;border-top:1px solid var(--line);margin-top:36px}
+  footer a{color:var(--g2)}
+  .refs{font-size:13px;color:var(--sub);line-height:1.8}
+  .refs a{color:var(--g2);text-decoration:none} .refs a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./vlm-verifier-index.html">← 検証器の研究シリーズ 目次</a></div>
+<header>
+  <h1>検証器で VLM の精度を上げる<br>― 形式制約 (BNF / グラフ) の視点で再整理</h1>
+  <p>これまでの調査を、今回検討した「BNF 制約付き生成のグラフ拡張」と「検証の出力層への前倒し」という視点で 1 枚に畳み直す。実証済みと設計仮説を分けて記す。</p>
+</header>
+<main>
+
+  <div class="card tldr">
+    <p style="margin:.2em 0"><b>持ち帰る一文</b>: 生成時は構造（構文・スキーマ・参照束縛）だけで縛って validity を確保し、事実の正しさは生成後の field-keyed 検証と検証器ランキングに委ねる。事実で生成を縛れば真の候補を殺して誤答へ確率質量を流し込み、構造で縛りすぎても意味を壊す。だから境界の両側の副作用を測りながら多層で分業する。</p>
+  </div>
+
+  <p class="lead">VLM（画像を読む AI）の出力を信じず、検証器で整合性を機械判定して精度を上げる調査を全 12 回続けてきた。今回、別の入口 ― BNF constrained decoding をグラフによる意味・関係制約へ拡張できるか、検証器を生成後でなく出力層に前倒しできるか ― を検討した。このグラフ拡張と検証の前倒しは同じ骨格を共有し、調査が経験的に引いた境界線と、形式手法・文書 AI の先行研究が引く境界線は概ね重なる。ただし単純な「安全 / 危険」の二分ではなく、境界の両側にそれぞれ副作用がある。数値は原則として小規模（n が一桁〜二十）の探索的計測で、傾向の提示であり統計的検定ではない。</p>
+
+  <h2>1. これまでの調査の到達点</h2>
+  <ul class="findings">
+    <li><b>中心思想</b>: VLM を仮説生成器とみなし、決定論的検証器で整合性を機械判定する。「verifier で候補をランクする」設計は Cobbe 2021 <a class="cite" href="https://arxiv.org/abs/2110.14168" target="_blank" rel="noopener">arXiv:2110.14168</a> が起点。</li>
+    <li><b>最大の敵</b>: 整合的誤読（coherent misreading）。壊れた出力でなく、流暢で辻褄の合った誤り。</li>
+    <li><b>ハードゲート vs ソフトレビューの相補性（第 4 回）</b>: 決定論ゲート = 正しいルール上で誤拒否 0 / 検出 4/6（規則の範囲外の誤り 2 件は素通し）、AI レビュー = 全検出だが誤拒否 2/5。得意が正反対なので二段で使う。</li>
+    <li><b>presence から field-keyed へ（第 6・11 回）</b>: 「値が紙のどこかに在るか（presence）」では整合的誤読を素通しする。「その欄の証拠に束縛されているか（field-keyed）」に変えると流用型の誤りを理想条件での上限値として 100% 捕捉・誤拒否 0。証拠が汚れると分離は崩れる（第 12 回）。</li>
+    <li><b>検証器自体の検証（第 3・7 回）</b>: AI に検証ルールを書かせると欠陥ルールが黙って通る（自由記述 7/20）。登録時に決まった形で審査すると 0。</li>
+  </ul>
+
+  <h2>2. BNF から グラフ、そして constrained decoding へ</h2>
+  <p>BNF constrained decoding は文法パーサが「今この続きとして許されないトークン」の logit を <code>−∞</code> にする構文制約。xgrammar <a class="cite" href="https://arxiv.org/abs/2411.15100" target="_blank" rel="noopener">2411.15100</a>・outlines <a class="cite" href="https://arxiv.org/abs/2307.09702" target="_blank" rel="noopener">2307.09702</a>・llguidance が実装し、静的な文法・スキーマに対しては対応する部分集合の範囲で構造妥当性をほぼオーバーヘッドなく保証する。</p>
+  <p>グラフに置き換えると、状態が「パーサのスタック」から「グラフ上の現在ノード + 束縛済みの集合」になる。ただし現在ノードと直前の関係だけを状態にする素朴な版は有限状態機械に留まり、スタックを持つ CFG より弱く任意深さの入れ子を表現できない。参照束縛の力は束縛済みの集合を状態に持つ側から来る。<b>だからグラフは BNF の上位互換ではなく直交する</b> ― 入れ子・再帰はスタック（BNF）の領分、参照整合・変数束縛はグラフの領分。</p>
+  <p>グラフが CFG を超える力の核は参照束縛。CFG は有界な一致なら書けるが、非有界の複写・交差依存は文脈自由でない。実装面でも SynCode <a class="cite" href="https://arxiv.org/abs/2403.01632" target="_blank" rel="noopener">2403.01632</a> が「変数の使用前定義のような semantic constraint は CFG ベース制約付き復号では扱えない」と明記する。離れたセクション間の ID 相互参照が連鎖すると到達可能性（推移閉包）まで要る（言語理論の帰属は末尾）。</p>
+  <p>なお請求書ドメインで最強の検証器「合計が合うか」は、BNF でもグラフ到達可能性でもない第三のクラス、<b>算術・集約制約</b>である。これを decode 時に強制すると、合計欄は独立に読まれた値でなく検算結果のコピーになり、「独立に読んだ二系統の一致」という検証シグナルそのものが消える（明細の誤読を検出できなくなる）。だから生成では縛らず、検証と生成を独立に保ったまま後述の第 2・第 3 層に置く。</p>
+
+  <h2>3. 境界線はどこか ― 両側に副作用がある</h2>
+  <p>軸は 2 つ。第一に<b>何で縛るか</b>（構造か事実か）、第二に<b>構造で縛る側にも副作用がある</b>こと。今回の線引きは調査が実データで見つけた境界と重なるが、線は二分でなく多層になる。</p>
+
+  <h3>第一の軸 ― 構造 vs 事実</h3>
+  <div class="axis">
+    <div class="axbox safe">
+      <h4 class="g">field-keyed = 構造・参照束縛（安全側）</h4>
+      <p style="font-size:14.5px">「その欄の証拠（bbox）に束縛されているか」。値が正しいフィールドから届くかを問う参照制約で、グラフが CFG を超える束縛の力に対応する。LMDX <a class="cite" href="https://arxiv.org/abs/2309.10952" target="_blank" rel="noopener">2309.10952</a> が「localize 機構の欠如」を既存 LLM 抽出の根本欠陥と明示、DocILE <a class="cite" href="https://arxiv.org/abs/2302.05658" target="_blank" rel="noopener">2302.05658</a> が「正しいアイテムへの割当」を独立タスク化。</p>
+    </div>
+    <div class="axbox danger">
+      <h4 class="b">presence = 事実照合（危険側）</h4>
+      <p style="font-size:14.5px">presence と事実 hard mask はどちらも同じ閉じた資源（文書 / KG）を参照するが、病理の向きが逆。<b>presence は十分条件</b>として使う（在れば受理 → 偶然一致で整合的誤読を過剰受理）。<b>事実 hard mask は必要条件</b>として使う（無ければ棄却 → 真の候補を殺し誤答へ確率質量を流し込む）。「存在 ≠ 支持」は領域を跨いで確認される（ALCE <a class="cite" href="https://arxiv.org/abs/2305.14627" target="_blank" rel="noopener">2305.14627</a>、ELI5 で最良でも 50% で完全支持が欠落）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="toggle"><span>デモ ― 同じ閉じた資源を</span>
+      <button class="btn on" id="b-suf" onclick="setUse('suf')">十分条件に使う（presence）</button>
+      <button class="btn" id="b-nec" onclick="setUse('nec')">必要条件に使う（事実 mask）</button>
+    </div>
+    <div id="demoOut" class="demoOut o-accept"></div>
+    <p class="note">同じ資源でも、使い方の向きで正反対の系統誤差が出る。どちらも「事実照合を検証原理に据えると系統誤差が入る」という同じ教訓の両端。</p>
+  </div>
+
+  <h3>第二の軸 ― 構造で縛る側も無害ではない</h3>
+  <ul>
+    <li><b>分布忠実性は保証しない</b>: Grammar-Aligned Decoding <a class="cite" href="https://arxiv.org/abs/2405.21047" target="_blank" rel="noopener">2405.21047</a> は mask &amp; renormalize がモデル分布を体系的に歪めることを示す（ASAp で補正可）。素朴な hard mask は「文法的だが不自然」を作る。</li>
+    <li><b>強すぎると意味を壊す</b>: Structure Snowballing <a class="cite" href="https://arxiv.org/abs/2604.06066" target="_blank" rel="noopener">2604.06066</a> は、Outlines ベースの構造制約で自己修正を強制しても改善せず「構文はほぼ完璧だが深層の意味誤りを検出できない」失敗（formatting trap / alignment tax）が生じると報告。ただし制約がモデルの意味的容量を超えたときの条件付き現象。</li>
+  </ul>
+  <p>実務がこの多層性を裏づける。KG grounding の主要研究は事実の生成時 hard mask を避け、retrieve 段の集約（GraphRAG <a class="cite" href="https://arxiv.org/abs/2404.16130" target="_blank" rel="noopener">2404.16130</a>、HippoRAG <a class="cite" href="https://arxiv.org/abs/2405.14831" target="_blank" rel="noopener">2405.14831</a> は "without any extra training" の PageRank）、事後検証（KGR <a class="cite" href="https://arxiv.org/abs/2311.13314" target="_blank" rel="noopener">2311.13314</a>）へ向かっている。</p>
+  <p class="note">補足: field-keyed とグラフ / Synchromesh <a class="cite" href="https://arxiv.org/abs/2201.11227" target="_blank" rel="noopener">2201.11227</a> の束縛は「同型」ではなく類比 + 重要な相違。Synchromesh の symbol table/scope は生成 prefix から決定論的に構築でき構成上外部誤差源を持たないが、field-keyed の bbox 束縛は誤りを含む外部 OCR に依存し、制約自体が汚れうる。これが第 12 回（証拠を汚すと分離が +1.00 → −0.15 へ符号反転）の弱点そのもの。</p>
+
+  <h2>4. 新しい問い ― 検証を「出力層アタッチ」へ動かせるか</h2>
+  <p>これまでの検証器はすべて事後だった。問いは、検証器を VLM の出力層に前倒しし生成時に精度を上げられるか、RL をせずに。前提として constrained decoding は自己回帰テキストデコーダにのみ作用し視覚エンコーダには何も要求しないので、VLM にそのまま適用できる。ただし制約の根拠（OCR / bbox）が視覚側から来る点で純テキストと質的に異なる。</p>
+  <ul>
+    <li><b>学習ゼロで validity は取れる</b>: 抽出出力を文書スキーマに constrained decoding で強制すれば、対応スキーマの範囲で schema-valid が保証され壊れた抽出が減る。logit processor を各ステップに挟むだけで再学習不要。スキーマを文法規則に動的注入する GCD <a class="cite" href="https://arxiv.org/abs/2305.13971" target="_blank" rel="noopener">2305.13971</a> が既存実装。許容値集合を trie で縛る構想の最も直接的な先行実装は GENRE <a class="cite" href="https://arxiv.org/abs/2010.00904" target="_blank" rel="noopener">2010.00904</a>。</li>
+    <li><b>手に入るのは validity であって correctness ではない</b>: mask は invalid を消すだけで valid 候補の順位はベース VLM のまま。正しい型を誤った欄に束ねる整合的誤読は構造 mask では直らない。correctness への影響は評価方法論に交絡し一般には決まらない（フォーマット制約が推論を下げるとする Tam 2024 <a class="cite" href="https://arxiv.org/abs/2408.02442" target="_blank" rel="noopener">2408.02442</a> に対し、開発元 dottxt が非査読ブログでその評価方法の欠陥を指摘し逆の結果 ― 決着なし）。</li>
+    <li><b>事実で mask してはいけない</b>（§3 の必要条件としての事実 mask による過剰拒否・流し込み）。</li>
+  </ul>
+  <h3>VLM 固有の 5 つの壁</h3>
+  <ol>
+    <li><b>トークンアラインメント</b>: OCR 証拠文字列と VLM トークナイザ境界は一致せず、値を許すには全トークン化パスの trie が要る（DOMINO <a class="cite" href="https://arxiv.org/abs/2403.06988" target="_blank" rel="noopener">2403.06988</a> が関連）。フィールド・文書ごとの動的 trie 構築で、静的文法の "near-zero overhead" は成り立たない。</li>
+    <li><b>値の正規化</b>: 「¥12,300」「12,300円」「12300」は同値。正規化バリアントを trie 側に入れるか事後で吸収するかが設計に直結。</li>
+    <li><b>OCR 誤りの伝播と逆転</b>: OCR が誤れば真値が許容集合から漏れ制約が正解を殺す。さらに VLM は OCR-free に画素から読めるため、VLM が正しく OCR が誤るケースでは、OCR 束縛は強いモデルを弱い証拠に隷属させる。</li>
+    <li><b>スキーマ順序</b>: 生成順を固定し文書の自然な読み取り順と衝突しうる（キー順が精度に影響することは経験的に報告）。</li>
+    <li><b>escape のトレードオフ</b>: 流し込み回避に「該当なし / 不確か」の escape を入れるべきだが、不確実時にそこへ逃げ abstention 過多で recall が落ちる。</li>
+  </ol>
+
+  <h2>5. 分業の階層（介入コストの安い順）</h2>
+  <p class="lead">同じ決定論検証器（field-keyed 束縛・算術検算）を、第 2 層ではランカー、第 3 層ではゲートという二役で使う。各層をクリックすると詳細。</p>
+  <div class="stack" id="stack">
+    <div class="layer on" onclick="tog(this)"><span class="n">1</span><span class="t">構造制約 ― constrained decoding</span><span class="cost">学習ゼロ・今日できる</span>
+      <div class="d">出力を文書スキーマ / 型 / 状態機械に束ねて壊れた出力を減らす。validity 保証。ただし分布歪み（GAD）と容量超過時の意味破壊（structure snowballing）に注意。事実値そのものは縛らない。</div></div>
+    <div class="layer" onclick="tog(this)"><span class="n">2</span><span class="t">検証器ランクの best-of-n</span><span class="cost">学習ゼロ・RL の前に</span>
+      <div class="d">検証器を k サンプルのランカーに使い、valid だが誤りの残差を選別で削る。Cobbe 2021 の verifier ランクを生成時に効かせる最も安いレバー。field-keyed は pass/fail の二値なので、ランキングには段階スコア（例: 通過フィールド数）への変換が要る。</div></div>
+    <div class="layer" onclick="tog(this)"><span class="n">3</span><span class="t">参照束縛の検証 ― field-keyed（事後）</span><span class="cost">実証済み（上限値）</span>
+      <div class="d">第 2 層と同じ検証器を最終出力のゲートに使い、値が正しい欄の証拠に束縛されているかを機械判定。整合的誤読の主戦場。理想条件での上限値は実証済み、実環境での実力値はこれから。</div></div>
+    <div class="layer" onclick="tog(this)"><span class="n">4</span><span class="t">順位学習 ― RL</span><span class="cost">重い・要 go/no-go</span>
+      <div class="d">best-of-n でも残る誤りに、検証器 reward で順位を学習する（process reward が outcome を上回る: Lightman 2023 / 人手ラベル不要化: Math-Shepherd）。ただし過剰最適化で真性能が劣化する reward hacking（Gao 2022）と、最終正誤は outcome だけでも同等で差は推論過程に出る（Uesato 2022）という留保。</div></div>
+  </div>
+
+  <h2>6. 最小構成と計測計画</h2>
+  <p><b>最小構成</b>: VLM 抽出を JSON スキーマ文法で constrained decoding し（壊れた出力を削減）、フィールドごとに field-keyed 証拠束縛を事後ゲートで判定。事実値そのものは mask しない。必ず escape を文法に含める。</p>
+  <p><b>計測</b>: 合成請求書 testbed で、hallucinated field rate・整合的誤読の捕捉率・誤拒否率を、<span class="y">(a) 制約なし / (b) 事後ゲートのみ / (c) constrained decoding + 事後ゲート / (d) (c) + 検証器 best-of-n</span> の 4 条件で比較。validity と correctness を分けて測る（JSONSchemaBench <a class="cite" href="https://arxiv.org/abs/2501.10868" target="_blank" rel="noopener">2501.10868</a> が先行）。escape は abstention 単体でなく risk-coverage 曲線で評価。加えて「trie が真値を含んでいた率（真値カバレッジ）」を単独指標として測る ― 壁 1〜3 が合流する故障「真値が許容集合から漏れる」を直接測る安価な診断で、「decode 時制約は事後検証より正解を殺しやすい」という仮説の本丸。</p>
+
+  <div class="card">
+    <p class="lead" style="margin-top:0"><b>デモ ― 4 条件で同じ請求書を抽出する</b>。VLM はしばしば「合計」欄に、紙の上に実在する別の値（小計 ¥12,300）を入れてしまう（整合的誤読）。条件を切り替えて、構造妥当性・整合的誤読の捕捉・正しい値の選択がどう変わるか見る。</p>
+    <div class="doc">
+      <div class="row"><span>小計</span><span>¥12,300</span></div>
+      <div class="row"><span>消費税</span><span>¥1,230</span></div>
+      <div class="row"><span>合計</span><span class="hl">¥13,530</span> <span style="color:#9db3a6">← 正しい合計</span></div>
+    </div>
+    <div class="conds">
+      <button class="btn on" id="c-a" onclick="setCond('a')">(a) 制約なし</button>
+      <button class="btn" id="c-b" onclick="setCond('b')">(b) 事後ゲートのみ</button>
+      <button class="btn" id="c-c" onclick="setCond('c')">(c) 制約 + ゲート</button>
+      <button class="btn" id="c-d" onclick="setCond('d')">(d) + best-of-n</button>
+    </div>
+    <div class="exout" id="exout"></div>
+    <p class="note">要点: 構造制約（c）は「壊れた出力」を消すが、整合的誤読は消せない ― 捕捉はゲートの仕事。正しい値を積極的に選ぶには best-of-n（d）が要る。validity と correctness は別物。</p>
+  </div>
+  <p><b>決定変数</b>: constrained decoding と best-of-n で「valid だが誤り」がどれだけ残るか。その残差が RL に投資する価値の有無を決める。学習ゼロの層はそれ自体が有用な成果であり、かつ RL 投資の go/no-go を測る計測器を兼ねる。</p>
+
+  <h2>7. 誠実な限界（実証済み vs 設計仮説）</h2>
+  <div class="card">
+    <ul>
+      <li>実証済みは事後検証側（第 4 / 6 / 11 / 12 回、いずれも小規模）。生成時アタッチ側の「constrained decoding + 束縛検証 + best-of-n」の統合は設計仮説で、比較の実データはこれから。</li>
+      <li>constrained decoding が保証するのは対応スキーマ範囲の構造妥当性だけ（どのエンジンも JSON Schema 仕様を完全カバーしないことは JSONSchemaBench 自身が示す）。整合的誤読は構造 mask では減らず、強すぎる制約はむしろ意味を壊しうる。</li>
+      <li>ハード検証の保証は非対称かつ規則依存。捕捉対象の誤りについての誤受理ゼロであって、範囲外は素通しし（第 4 回の 4/6）、正しいものも拒否しうる。形式検証の Clover <a class="cite" href="https://arxiv.org/abs/2310.17807" target="_blank" rel="noopener">2310.17807</a> は自ベンチマーク上で誤受理 0・正解の 13% 棄却。「通したものは正しい」に寄せるほど「正しいものを落とす」。</li>
+      <li>field-keyed の 100% 捕捉は理想条件での上限値。実環境では証拠品質の変動が生成の自由度を壊すため、上限値を実力値と誤読してはいけない。</li>
+      <li>グラフを latent（hidden state）に埋め込んで logit を連続調整する soft guidance は、結局 GNN / Graph Transformer の joint 学習を要する重い設計（GreaseLM <a class="cite" href="https://arxiv.org/abs/2201.08860" target="_blank" rel="noopener">2201.08860</a> / QA-GNN <a class="cite" href="https://arxiv.org/abs/2104.06378" target="_blank" rel="noopener">2104.06378</a>）。本稿の対象外。</li>
+    </ul>
+  </div>
+
+  <p class="refs" style="margin-top:26px">脚注（言語理論と帰属）: 非有界の複写が文脈自由でないことは pumping lemma（Bar-Hillel, Perles, Shamir 1961）、自然言語の交差依存の非文脈自由性は Shieber 1985（スイスドイツ語）が標準の帰属。有界な agreement は非終端の展開で CFG でも表現できる。一階述語論理だけでは到達可能性（推移閉包）を表現できないことは記述的複雑性 / 局所性の結果による。</p>
+
+  <p class="note" style="margin-top:20px">関連: constrained decoding の一般的な直感は <a href="./graph-bnf-constrained-decoding.html">「BNF とグラフで生成を縛る」</a>（触れるデモつき）で扱う。本ページはそれを VLM 検証の文脈に接続した統合回。</p>
+
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+let use='suf';
+function renderDemo(){
+  const el=document.getElementById('demoOut');
+  if(use==='suf'){
+    el.className='demoOut o-accept';
+    el.innerHTML='<b>十分条件（presence）</b>: 「小計 ¥12,300」が文書のどこかに在れば「合計」欄として受理 → だが ¥12,300 は小計であって合計ではない。別欄の値との偶然一致を<b>過剰受理</b>し、整合的誤読が素通しする。';
+  }else{
+    el.className='demoOut o-reject';
+    el.innerHTML='<b>必要条件（事実 mask）</b>: 「KG / 既知の値集合に無い金額は生成禁止」。だが正しい合計 ¥13,530 が KG 未登録なら −∞ にされ、モデルは既知の ¥12,300 へ<b>流し込まれる</b> → 真を殺し、確信ありげな別の誤りを製造（過剰拒否）。';
+  }
+}
+function setUse(u){use=u;document.getElementById('b-suf').classList.toggle('on',u==='suf');document.getElementById('b-nec').classList.toggle('on',u==='nec');renderDemo();}
+function tog(el){el.classList.toggle('on');}
+renderDemo();
+
+// --- 4-condition invoice extraction demo ---
+const COND = {
+  a: { json:'{ "合計": "一万二千三百円" }  // ← 自由文で型崩れの回もある\n{ "合計": "¥12,300" }        // ← 小計の値を合計に(整合的誤読)',
+       valid:false, caught:false, correct:false,
+       why:'素の VLM。JSON が壊れる回もあれば、紙に実在する小計 ¥12,300 を合計欄に入れる整合的誤読も素通しする。構造も正しさも何も保証されない。' },
+  b: { json:'{ "合計": "¥12,300" }  // 小計値(誤り)。ただし事後ゲートが弾く',
+       valid:false, caught:true, correct:false,
+       why:'field-keyed 束縛ゲートが「合計欄の値が合計欄の証拠 bbox から来ているか」を照合し、小計由来の ¥12,300 を棄却する。誤読は捕捉できるが、生成は無制約なので出力が壊れる回は残り、正しい値は出てこない(棄却止まり)。' },
+  c: { json:'{ "合計": "¥12,300" }  // 構造は妥当。値は依然として誤読',
+       valid:true, caught:true, correct:false,
+       why:'constrained decoding でスキーマ・型が保証され「壊れた出力」は消える。だが構造 mask は整合的誤読(小計→合計)を直さない ― 値の誤りはゲートが捕捉して棄却するだけ。validity は取れても correctness は別物、が目で見える。' },
+  d: { json:'{ "合計": "¥13,530" }  // 束縛整合な候補を検証器が選択',
+       valid:true, caught:true, correct:true,
+       why:'k サンプルを検証器(束縛 + 合計 = 小計 + 税 の算術検算)でランクし、合計欄が正しい証拠に束縛された候補 ¥13,530 を選ぶ。構造制約とゲートだけでは「棄却」止まりだった残差を、best-of-n が「正しい値の選択」まで押し上げる。' },
+};
+let cond='a';
+function ckRow(cls, label){
+  const mk = cls==='yes'?'○':(cls==='no'?'×':'—');
+  return `<div class="ck ${cls}"><span class="mk">${mk}</span><span>${label}</span></div>`;
+}
+function renderCond(){
+  const c=COND[cond];
+  const catchCls = (cond==='a')?'no':(cond==='d'?'na':'yes');
+  const catchLabel = (cond==='d')?'整合的誤読の捕捉（この回は誤読自体が起きず該当なし）':'整合的誤読を捕捉';
+  document.getElementById('exout').innerHTML =
+    `<div style="font-size:13px;color:#6f957f;margin-bottom:4px">VLM の出力</div>`+
+    `<div class="exjson">${c.json}</div>`+
+    `<div class="check">`+
+      ckRow(c.valid?'yes':'no','構造妥当（スキーマ・型が保証）')+
+      ckRow(catchCls, catchLabel)+
+      ckRow(c.correct?'yes':'no','正しい値を選べた（correctness）')+
+    `</div>`+
+    `<div class="exwhy">${c.why}</div>`;
+}
+function setCond(x){cond=x;['a','b','c','d'].forEach(k=>document.getElementById('c-'+k).classList.toggle('on',k===x));renderCond();}
+renderCond();
+</script>
+</body>
+</html>
