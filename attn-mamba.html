@@ -124,7 +124,7 @@
   $$ h_t = A_t h_{t-1} + B_t x_t, \qquad y_t = C_t h_t $$
   <p>$\Delta_t$ は連続時間の SSM を離散化する際のステップ幅で、$\Delta_t$ を通して $A_t$ も実質的に入力依存になります (離散化の詳細な式は本稿では扱いません)。この選択性により、Mamba はトークンごとに「この入力を強く状態に書き込むか、素通りさせるか」「過去をどれだけ保持するか」を切り替えられます。線形 Attention の特徴写像 $\phi$ や DeltaNet の書き込み強度 $\beta_t$ が担っていた役割を、SSM の言葉で $B_t, C_t, \Delta_t$ が担う、という対応関係で理解すると位置づけがはっきりします。</p>
   <div class="key">
-    ポイントは <b>$A, B, C$ を固定にするか入力依存にするか</b>という一点です。固定なら従来の (選択的でない) SSM、入力依存なら Mamba の選択的 SSM です。状態 $h_t$ 自体は依然として固定サイズで、これは前章までの $S_t$ (線形 Attention・DeltaNet の状態) と同じ役割を果たします。
+    ポイントは <b>$B, C, \Delta$ を入力依存にするか</b>という一点です ($A$ は学習される固定パラメータのままですが、$\Delta_t$ を介して実効的な $A_t$ は入力依存になります)。固定なら従来の (選択的でない) SSM、入力依存なら Mamba の選択的 SSM です。状態 $h_t$ 自体は依然として固定サイズで、これは前章までの $S_t$ (線形 Attention・DeltaNet の状態) と同じ役割を果たします。
   </div>
 </section>
 
@@ -132,9 +132,9 @@
   <h2><span class="num">3</span>計算量</h2>
   <p class="lead">選択的 SSM も線形 Attention・DeltaNet と同じ骨格を持つので、計算量の性質も同じ系統に属します。</p>
   <h3>時間計算量 (学習 / Prefill)</h3>
-  <p>状態更新が各時刻 $O(1)$ の固定サイズ演算なので、系列長 $N$ に対して <b>$O(N)$</b> です。ただし単純な逐次再帰は GPU の並列性を活かせないため、Mamba はハードウェア対応のスキャン (parallel scan) アルゴリズムで並列化します。Mamba2 はさらに、この選択的 SSM の計算が線形 Attention の chunk 単位の行列演算と等価であることを示す <b>Structured State Space Duality (SSD)</b> という理論を導入し、行列乗算に還元することで学習を大幅に高速化しました。</p>
+  <p>状態更新が各時刻 $O(1)$ の固定サイズ演算なので、系列長 $N$ に対して <b>$O(N)$</b> です。ただし単純な逐次再帰は GPU の並列性を活かせないため、Mamba はハードウェア対応のスキャン (parallel scan) アルゴリズムで並列化します。Mamba2 はさらに、状態遷移行列 $A_t$ を単純化した形について、この選択的 SSM の計算が線形 Attention の chunk 単位の行列演算と等価であることを示す <b>Structured State Space Duality (SSD)</b> という理論を導入し (詳細は §6)、行列乗算に還元することで学習を大幅に高速化しました。</p>
   <h3>Decode 時のボトルネック</h3>
-  <p>1 トークン生成ごとに読み直すのは固定サイズの状態 $h_t$ だけで、KV-Cache のように過去 $N$ トークン分の Key・Value を読み直す必要がありません。KV-Cache が実質的に不要に近い構成になるため、線形 Attention・DeltaNet と同様に decode の memory-bound な重さから離脱できます。</p>
+  <p>1 トークン生成ごとに読み直すのは固定サイズの状態 $h_t$ だけで、KV-Cache のように過去 $N$ トークン分の Key・Value を読み直す必要がありません。純粋な Mamba 層では KV-Cache は不要 (ハイブリッド構成では Attention 層の分のみ必要) になるため、線形 Attention・DeltaNet と同様に KV-Cache 読み出しに起因する $N$ 依存の memory-bound 負荷から離脱できます。</p>
   <h3>KV / 状態メモリの $N$ 依存</h3>
   <p>状態 $h_t$ は固定サイズで系列長 $N$ に依存しません。前章までで見た「固定状態は有限容量の連想記憶であり、厳密な長距離参照は原理的に犠牲になる」という制約は、選択的 SSM にも同様に当てはまります。</p>
   <div class="cost">
@@ -178,22 +178,22 @@
     <div class="box"><span class="big" id="exp_mha">—</span><span class="lbl">MHA の KV (相対値)</span></div>
     <div class="box"><span class="big" id="exp_mamba">一定</span><span class="lbl">Mamba の状態 (相対値)</span></div>
   </div>
-  <p>スライダで $N$ を伸ばすと、MHA 側の棒はどんどん高くなりますが、Mamba 側の棒は常に同じ高さのままです。これが「固定サイズ状態」の意味するところで、長い文脈でもメモリ使用量が頭打ちになる一方、前章までで触れた通り厳密な長距離参照は犠牲になります。</p>
+  <p>スライダで $N$ を伸ばすと、MHA 側の棒はどんどん高くなりますが、Mamba 側の棒は常に同じ高さのままです。これが「固定サイズ状態」の意味するところで、長い文脈でもメモリ使用量が頭打ちになる一方、前章までで触れた通り厳密な長距離参照は犠牲になります。なお系列長が十分短い間は MHA の KV の方が固定状態より小さいこともあり、固定状態が効いてくるのはむしろ長い文脈で KV が伸び続けたときです。</p>
 </section>
 
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
   <p class="lead">Mamba は線形 Attention と同じ「固定状態の再帰」骨格を、SSM という別の理論的入口から実現した手法です。</p>
   <p>Mamba は Gu と Dao による "Mamba: Linear-Time Sequence Modeling with Selective State Spaces" (arXiv:2312.00752, 2023-12) で提案されました。状態更新の行列を入力依存にする選択性と、ハードウェア対応のスキャンアルゴリズムにより、SSM を実用的な系列モデリング手法として確立しました。代表的な適用例に Mamba 3B や、Attention 層と Mamba 層を混在させた Jamba があります。</p>
-  <p>Mamba2 は同じ著者らによる "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality" (arXiv:2405.21060, 2024-05) で、選択的 SSM の計算と線形 Attention の chunk 並列計算が数学的に等価であることを SSD 理論で示し、行列乗算ベースのアルゴリズムで学習を高速化しました。Nemotron 3 は Mamba2 を主体に一部の層だけ GQA (全結合系) を挟むハイブリッド構成を採用していると報告されています。</p>
+  <p>Mamba2 は同じ著者らによる "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality" (arXiv:2405.21060, 2024-05) で、状態遷移行列 $A_t$ をスカラー×単位行列に制限した形に単純化することで、選択的 SSM の計算と線形 Attention の chunk 並列計算が数学的に等価であることを SSD 理論で示し、行列乗算ベースのアルゴリズムで学習を高速化しました。Mamba2 系の代表的な実運用モデルには Codestral Mamba (Mistral AI) があり、また NVIDIA の Nemotron-H は Mamba2 を主体に一部の層だけ GQA (全結合系) を挟むハイブリッド構成を採用していると報告されています。</p>
   <div class="warn">
-    <b>ヘッジ (重要)。</b>「Mamba3」と呼ばれる手法について、本稿執筆時点で正式な論文を特定できていません。系統図には将来ノードとして薄く載せますが、本章では数式・数値を一切示しません。
+    <b>ヘッジ (重要)。</b>「Mamba3」と呼ばれる手法について、本稿執筆時点で正式な論文を特定できていません。シリーズ目次の系統図には将来ノードとして薄く載せますが、本章では数式・数値を一切示しません。
   </div>
   <table>
     <tr><th>系統上の位置</th><th>差分</th></tr>
     <tr><td>関連: 線形 Attention / DeltaNet</td><td>softmax のカーネル近似・delta 則から固定状態の再帰に到達</td></tr>
     <tr><td>本章: Mamba / Mamba2</td><td>制御理論の SSM から到達。状態更新行列を入力依存にする「選択」が肝。Mamba2 は SSD で線形 Attention 側と理論統合</td></tr>
-    <tr><td>実運用: Nemotron 3 など</td><td>Mamba2 を主体に一部層で GQA を挟むハイブリッド (報告)</td></tr>
+    <tr><td>実運用: Nemotron-H など</td><td>Mamba2 を主体に一部層で GQA を挟むハイブリッド (報告)</td></tr>
   </table>
   <p>線形 Attention・DeltaNet・SSM は、出発点 (softmax のカーネル近似か、delta 則か、制御理論の SSM か) こそ異なりますが、いずれも「固定サイズの状態を再帰で更新する」という同じ骨格の変奏です。次章 <b>KDA</b> は DeltaNet 系の忘却ゲートをさらに細粒度化する方向に進みます。</p>
 </section>
@@ -203,10 +203,10 @@
   <table>
     <tr><th>論点</th><th>要点</th></tr>
     <tr><td>やること</td><td>SSM の状態更新 $h_t=Ah_{t-1}+Bx_t,\ y_t=Ch_t$ を、$B,C,\Delta$ を入力依存にして「選択的」にする</td></tr>
-    <tr><td>数式</td><td>$h_t=A_t h_{t-1}+B_t x_t,\ y_t=C_t h_t$ ($A_t,B_t,C_t$ は $x_t$ の関数)</td></tr>
+    <tr><td>数式</td><td>$h_t=A_t h_{t-1}+B_t x_t,\ y_t=C_t h_t$ ($B_t,C_t$ は $x_t$ の関数。$A_t$ は $\Delta_t$ を介して入力依存)</td></tr>
     <tr><td>時間計算量</td><td>$O(N)$。並列スキャン (Mamba) / SSD による行列乗算 (Mamba2)</td></tr>
-    <tr><td>状態 / メモリ</td><td>固定サイズ ($N$ 非依存)。KV-Cache が実質不要に近い</td></tr>
-    <tr><td>代表モデル</td><td>Mamba 3B、Jamba、Mamba2、Nemotron 3 (Mamba2+GQAハイブリッド、報告)</td></tr>
+    <tr><td>状態 / メモリ</td><td>固定サイズ ($N$ 非依存)。純粋な Mamba 層では KV-Cache は不要 (ハイブリッドでは Attention 層分のみ必要)</td></tr>
+    <tr><td>代表モデル</td><td>Mamba 3B、Jamba、Codestral Mamba、Nemotron-H (Mamba2+GQAハイブリッド、報告)</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>Mamba は、線形 Attention や DeltaNet と同じ「固定サイズ状態の再帰更新」という骨格を、制御理論の状態空間モデルという別の系譜から導きました。状態更新の行列を入力に応じて選ぶ「選択性」が Mamba の肝で、Mamba2 はこの選択的 SSM を SSD 理論により線形 Attention 側の計算と結び付け、学習効率を高めました。次章はふたたび DeltaNet 系に戻り、忘却ゲートを細粒度化する <b>KDA</b> へ進みます。
@@ -218,7 +218,7 @@
   <div class="fn">
     参考: Albert Gu, Tri Dao. "Mamba: Linear-Time Sequence Modeling with Selective State Spaces." arXiv:2312.00752, 2023 (<a href="https://arxiv.org/abs/2312.00752" target="_blank" rel="noopener">arXiv:2312.00752</a>)。<br>
     参考: Tri Dao, Albert Gu. "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality." arXiv:2405.21060, 2024 (<a href="https://arxiv.org/abs/2405.21060" target="_blank" rel="noopener">arXiv:2405.21060</a>)。<br>
-    注意: 「Mamba3」は本稿執筆時点で正式な論文を特定できておらず、本章では扱いません。Nemotron 3 の Mamba2+GQA ハイブリッド構成は報告に基づく記述です。本ページのアニメーションは、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
+    注意: 「Mamba3」は本稿執筆時点で正式な論文を特定できておらず、本章では扱いません。Nemotron-H の Mamba2+GQA ハイブリッド構成は報告に基づく記述です。本稿の式は $y_t=Ch_t$ とし、原論文にあるスキップ項 $D x_t$ は教育的簡略化のため省略しています。本ページのアニメーションは、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>
 
@@ -282,7 +282,7 @@
     ct.fillText('出力 (h から都度読み出す)',x0,yy-8);
 
     ct.fillStyle='#ffd98f';ct.font='13px sans-serif';ct.textAlign='center';
-    ct.fillText('A_t, B_t, C_t は入力 x_t に応じて変化 (選択的)。MHA と違い KV の列は増えない',W/2,H-14);
+    ct.fillText('Δ_t, B_t, C_t は入力 x_t の関数 (A_t は Δ_t 経由で実効的に変化)。MHA と違い KV の列は増えない',W/2,H-14);
   }
   const s=document.getElementById('archT');
   s.oninput=()=>draw(+s.value);

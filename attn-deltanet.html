@@ -84,7 +84,7 @@
   <p class="lead">この記事は Attention の基礎、そして前章 <a href="./attn-linear.html">Linear Attention</a> の固定状態 $S_t$ による再帰更新を前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-linear.html">前章: Linear Attention — softmax を外して O(N) に</a> を読んでください。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    前章の Linear Attention は、状態 $S_t$ に $\phi(k_t)v_t^\top$ を<b>無条件に足し込む</b>だけでした。似たキーが繰り返し来ると値が上書きされ続け、状態が飽和して古い連想が壊れます。<b>DeltaNet</b> は、この加算を「予測してから、誤差の分だけ直す」delta 則 (Widrow–Hoff の最小二乗則) に置き換えます。さらに <b>Gated DeltaNet</b> は、状態を毎ステップ一律に減衰させる忘却ゲート $g_t$ (Mamba-2 由来) を加え、delta 則と選択的忘却を統合します。固定状態という土台は変えず、<b>「何を・どれだけ書き込むか」を精緻化する</b>のがこの章です。
+    前章の Linear Attention は、状態 $S_t$ に $\phi(k_t)v_t^\top$ を<b>無条件に足し込む</b>だけでした。似たキーが繰り返し来ると値が上書きされ続け、状態が飽和して古い連想が壊れます。<b>DeltaNet</b> は、この加算を「予測してから、誤差の分だけ直す」delta 則 (Widrow–Hoff の最小二乗則) に置き換えます。さらに <b>Gated DeltaNet</b> は、トークンごとに入力から決まる (時間方向に選択的な) 忘却ゲート $g_t$ (Mamba-2 由来) を状態の全チャネルに一律に掛けて減衰させ、delta 則と組み合わせます。固定状態という土台は変えず、<b>「何を・どれだけ書き込むか」を精緻化する</b>のがこの章です。
   </div>
   <div class="toc">
     <a href="#s1">1. 何を解決する手法か</a>
@@ -113,6 +113,7 @@
   <p class="lead">状態 $S_{t-1}$ からの予測値と実際の値 $v_t$ の差 (delta) だけを書き込みます。記号は本シリーズ共通のものを使います。</p>
   <p>状態 $S_{t-1}$ を線形連想記憶とみなすと、キー $k_t$ に対する現在の予測値はこう読み出せます。</p>
   $$ \hat v_t = S_{t-1}^\top k_t $$
+  <p>なお、前章の Linear Attention はキーにカーネル特徴写像 $\phi(k_t)$ を適用していましたが、現代の DeltaNet (Yang et al. 2024, arXiv:2406.06484) では $\phi$ を使わず、キー $k_t$ を L2 正規化 ($\lVert k_t\rVert=1$) してそのまま使います。$\beta_t\in(0,1)$ のとき $(I-\beta_t k_t k_t^\top)$ の固有値は $(0,1]$ に収まり、状態のノルムが発散しません。</p>
   <p>新しい値 $v_t$ との予測誤差 $v_t - \hat v_t$ を、書き込み強度 $\beta_t$ でキー方向に足し込むのが DeltaNet の状態更新です。</p>
   $$ S_t = S_{t-1} + \beta_t\, k_t\,(v_t - \hat v_t)^\top = \big(I - \beta_t\, k_t k_t^\top\big)\,S_{t-1} + \beta_t\, k_t v_t^\top $$
   <div class="math">
@@ -122,11 +123,13 @@
     S_t = S_{t-1} + beta_t * k_t * (v_t - v_hat_t)^T
   </div>
   <p>この更新は、二乗誤差 $\mathcal{L}_t = \frac{1}{2}\lVert S^\top k_t - v_t \rVert^2$ を状態について 1 ステップ勾配降下したもの ($S_t = S_{t-1} - \beta_t \nabla_S \mathcal{L}_t$) にちょうど一致します。$\beta_t$ は入力からトークンごとに学習される学習率で、実装では sigmoid を通して $(0,1)$ に収めることが多く、大きく取れば $k_t$ 方向の既存成分を強く消してから上書きし、小さく取れば緩やかに混ぜます。</p>
-  <p>Gated DeltaNet は、この更新に状態全体を一律に減衰させる忘却ゲート $g_t \in (0,1)$ (Mamba-2 由来の選択的忘却) を掛けます。</p>
+  <p>Gated DeltaNet は、この更新にトークンごとに入力から決まる忘却ゲート $g_t \in (0,1)$ (Mamba-2 由来) を掛けます。$g_t$ は時間方向には選択的 (トークンごとに値が変わる) ですが、チャネル方向には一律 (スカラーとして状態の全チャネルに同じ値を掛ける) です。</p>
   $$ S_t = g_t\big(I - \beta_t\, k_t k_t^\top\big)\,S_{t-1} + \beta_t\, k_t v_t^\top $$
   <div class="key">
-    $\beta_t$ は「<b>この差分をどれだけ強く書き込むか</b>」、$g_t$ は「<b>今までの状態全体をどれだけ残すか</b>」という別の役割です。$g_t=1$ とすれば DeltaNet に一致するので、Gated DeltaNet は DeltaNet を包含する拡張になっています。次章 KDA では、この $g_t$ をさらにチャネルごとの対角ゲートへ細粒度化します。
+    $\beta_t$ は「<b>この差分をどれだけ強く書き込むか</b>」、$g_t$ は「<b>今までの状態全体をどれだけ残すか</b>」という別の役割です。$g_t=1$ とすれば DeltaNet に一致するので、Gated DeltaNet は DeltaNet を包含する拡張になっています。後の章で扱う KDA では、この $g_t$ をさらにチャネルごとの対角ゲートへ細粒度化します。
   </div>
+  <p>状態からの出力 (読み出し) は、前章までと同じくクエリ $q_t$ で行います。</p>
+  $$ o_t = S_t^\top q_t $$
 </section>
 
 <section id="s3">
@@ -135,7 +138,7 @@
   <h3>時間計算量 (prefill / 学習時)</h3>
   <p>delta 則の更新は各ステップで $(I-\beta_t k_t k_t^\top)$ が左から挟まるため、単純な累積和には畳めず素朴には系列方向に逐次的です。arXiv:2406.06484 の chunk 化アルゴリズムは、これを chunk 単位の行列演算に展開して GPU 上で並列に処理し、系列長 $N$ に対して<b>$O(N)$</b> の chunk 並列で計算できるようにしました。$N^2$ のスコア行列は作りません。</p>
   <h3>Decode 時のボトルネック</h3>
-  <p>前章と同じく、1 トークンを生成するのに必要なのは<b>直前の状態 $S_{t-1}$ だけ</b>です。予測 $\hat v_t = S_{t-1}^\top k_t$ を計算し、誤差の分だけ状態を更新すれば完結するため、KV-Cache のように過去 $N$ 件を読み直す必要はありません。</p>
+  <p>前章と同じく、1 トークンを生成するのに必要なのは<b>直前の状態 $S_{t-1}$ だけ</b>です。予測 $\hat v_t = S_{t-1}^\top k_t$ を計算し、誤差の分だけ状態を更新してから $o_t = S_t^\top q_t$ で読み出せば完結するため、KV-Cache のように過去 $N$ 件を読み直す必要はありません。</p>
   <h3>KV / 状態メモリの $N$ 依存</h3>
   <p>状態 $S_t$ は前章と同じ<b>固定サイズ</b>で、系列長 $N$ には依存しません。delta 則と忘却ゲートは「固定容量をどう使うか」を精緻化するものであり、状態のサイズそのものを変える仕組みではありません。</p>
   <div class="cost">
@@ -158,7 +161,7 @@
   <div class="legend">
     <span><span class="dot" style="background:var(--k)"></span>キー $k_t$</span>
     <span><span class="dot" style="background:var(--v)"></span>値 $v_t$ / 状態 $S$</span>
-    <span><span class="dot" style="background:var(--q)"></span>予測誤差</span>
+    <span><span class="dot" style="background:var(--q)"></span>予測誤差 (delta) / 飽和する列 (加法)</span>
   </div>
   <p><b>加法更新</b>に切り替えると、似たキーが来るたびに状態のマス目が無条件に濃く塗り重ねられ、やがて飽和 (衝突) することが分かります。<b>delta 更新</b>に切り替えると、まず現在の状態から予測値を読み出し、実際の値との誤差だけを計算し、<b>その差分だけ</b>を状態に書き込む 3 ステップが流れます。同じキーが繰り返し来ても、すでに予測できている分は書き直さないため、状態が無駄に飽和しません。</p>
 </section>
@@ -184,10 +187,11 @@
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
   <p class="lead">DeltaNet は Linear Attention の子で、Gated DeltaNet はその直接の拡張です。</p>
   <p>DeltaNet の理論的な骨格は Schlag et al. "Linear Transformers Are Secretly Fast Weight Programmers" (arXiv:2102.11174, 2021-02) が示しました。線形 Attention の fast weight 更新に Widrow–Hoff の delta 則を持ち込み、状態を連想記憶としてオンライン学習する更新に置き換えたものです。この更新を系列方向に並列化し、実モデルのスケールに乗せたのが Yang et al. "Parallelizing Linear Transformers with the Delta Rule over Sequence Length" (arXiv:2406.06484, 2024-06) で、論文では 1.3B パラメータ規模のモデルで検証されています。</p>
-  <p>Gated DeltaNet は Yang et al. "Gated Delta Networks: Improving Mamba2 with Delta Rule" (arXiv:2412.06464, 2024-12) で提案され、Mamba-2 由来の選択的忘却ゲート $g_t$ を delta 則に統合しました。実運用の例としては、Qwen3.5 が Gated DeltaNet (線形) と GQA (全結合系) と MoE を組み合わせるハイブリッド構成を採っていると報告されています ([報告])。</p>
+  <p>Gated DeltaNet は Yang et al. "Gated Delta Networks: Improving Mamba2 with Delta Rule" (arXiv:2412.06464, 2024-12) で提案され、Mamba-2 由来の忘却ゲート $g_t$ を delta 則に統合しました。実運用の例としては、Qwen3-Next が Gated DeltaNet 層と Gated Attention 層を 3:1 で交互配置し、さらに MoE を組み合わせるハイブリッド構成を採用しています。</p>
   <div class="key">
-    <b>系統上の位置。</b> 親は前章の <b>Linear Attention</b> です。加法更新を delta 則に置き換えるという最小限の変更で、固定状態という土台はそのまま引き継ぎます。系譜としては RWKV・RetNet・GLA を経て精緻化された流れの先に DeltaNet が位置し、そこから Gated DeltaNet、さらに次々章の <b>KDA</b> (忘却ゲートをチャネルごとの対角ゲートへ細粒度化) へと続きます。次章では系統をもう一本、Linear Attention と同じ「固定状態の再帰」という骨格を別の理論 (選択的状態空間モデル) から導いた <b>Mamba / Mamba2</b> を見ます。
+    <b>系統上の位置。</b> 親は前章の <b>Linear Attention</b> です。加法更新を delta 則に置き換えるという最小限の変更で、固定状態という土台はそのまま引き継ぎます。delta 則の着想自体は 2021 年に遡りますが、RetNet・GLA などが確立した chunk 並列のハードウェア効率化技術の上で、2024 年に実用化されました。そこから Gated DeltaNet、さらに後の章で扱う <b>KDA</b> (忘却ゲートをチャネルごとの対角ゲートへ細粒度化) へと続きます。次章では系統をもう一本、Linear Attention と同じ「固定状態の再帰」という骨格を別の理論 (選択的状態空間モデル) から導いた <b>Mamba / Mamba2</b> を見ます。
   </div>
+  <p>delta 則自体にも派生が続いています。Grazzi et al. (arXiv:2411.12537) は $\beta_t$ の値域を $(0,2)$ まで広げ、$(I-\beta_t k_t k_t^\top)$ の固有値を負の領域まで許すことで、偶奇判定 (parity) や置換の合成のような状態追跡タスクを解く能力を高めています。RWKV-7 も同様に一般化した delta 則を採用しており、さらに複数ステップの Householder 積へ拡張する DeltaProduct (Siems et al., 2025) といった発展も続いています。</p>
 </section>
 
 <section id="s7">
@@ -195,10 +199,10 @@
   <table>
     <tr><th>論点</th><th>要点</th></tr>
     <tr><td>やること</td><td>状態からの予測値 $\hat v_t=S_{t-1}^\top k_t$ と実際の値の誤差だけを、書き込み強度 $\beta_t$ で書き込む (delta 則)</td></tr>
-    <tr><td>数式</td><td>$S_t=(I-\beta_t k_t k_t^\top)S_{t-1}+\beta_t k_t v_t^\top$。Gated 版は忘却ゲート $g_t$ を左から掛ける</td></tr>
+    <tr><td>数式</td><td>$S_t=(I-\beta_t k_t k_t^\top)S_{t-1}+\beta_t k_t v_t^\top$。Gated 版は忘却ゲート $g_t$ を状態全体に掛ける。読み出しは $o_t=S_t^\top q_t$</td></tr>
     <tr><td>時間計算量</td><td>$O(N)$。chunk 化アルゴリズムで GPU 上を並列に処理</td></tr>
     <tr><td>状態 / メモリ</td><td>前章と同じ固定サイズ。$N$ に依存しない</td></tr>
-    <tr><td>代表モデル</td><td>DeltaNet (理論・並列化の論文モデル)、Gated DeltaNet (論文)。実運用例: Qwen3.5 のハイブリッド構成</td></tr>
+    <tr><td>代表モデル</td><td>DeltaNet (理論・並列化の論文モデル)、Gated DeltaNet (論文)。実運用例: Qwen3-Next のハイブリッド構成</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>DeltaNet は、固定状態への書き込みを「無条件の加算」から「予測誤差だけを直す delta 則」に置き換え、有限容量の状態をより効率よく使えるようにしました。Gated DeltaNet はさらに、Mamba-2 由来の忘却ゲートで状態全体を選択的に減衰させ、delta 則と忘却を統合します。固定状態という Linear Attention からの土台は変えず、<b>「何を書き込み、何を残すか」を精緻化する</b>のがこの章の一手でした。次章は同じ「固定状態の再帰」という骨格を、選択的状態空間モデルという別の理論から導いた <b>Mamba / Mamba2</b> へ進みます。
@@ -211,6 +215,8 @@
     参考: Imanol Schlag et al. "Linear Transformers Are Secretly Fast Weight Programmers." arXiv:<a href="https://arxiv.org/abs/2102.11174" target="_blank" rel="noopener">2102.11174</a>, 2021。<br>
     参考: Songlin Yang et al. "Parallelizing Linear Transformers with the Delta Rule over Sequence Length." arXiv:<a href="https://arxiv.org/abs/2406.06484" target="_blank" rel="noopener">2406.06484</a>, 2024。<br>
     参考: Songlin Yang et al. "Gated Delta Networks: Improving Mamba2 with Delta Rule." arXiv:<a href="https://arxiv.org/abs/2412.06464" target="_blank" rel="noopener">2412.06464</a>, 2024。<br>
+    参考: Tri Dao, Albert Gu. "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality." arXiv:<a href="https://arxiv.org/abs/2405.21060" target="_blank" rel="noopener">2405.21060</a>, 2024。<br>
+    参考: Riccardo Grazzi et al. "Unlocking State-Tracking in Linear RNNs Through Negative Eigenvalues." arXiv:<a href="https://arxiv.org/abs/2411.12537" target="_blank" rel="noopener">2411.12537</a>, 2024。<br>
     注意: 本ページのアニメーションと数値例は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>
@@ -227,7 +233,7 @@
   function drawAdd(){
     ct.clearRect(0,0,W,H);
     ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
-    ct.fillText('加法更新: S_t = S_{t-1} + k_t v_t^T — 似たキーが来るたび無条件に足し込む',20,28);
+    ct.fillText('加法更新: S_t = S_{t-1} + phi(k_t) v_t^T — 似たキーが来るたび無条件に足し込む',20,28);
     const rows=4, cols=8, cellW=(W-120)/cols, cellH=48, x0=60, y0=60;
     // 同じキー方向(列2)に繰り返し書き込みが起きて飽和する様子
     const hitCol=2;
@@ -242,7 +248,7 @@
       }
     }
     ct.fillStyle='#d7f5e6';ct.font='12px sans-serif';ct.textAlign='center';
-    ct.fillText('状態 S の各マス (列=キー方向, 行=書き込み時刻)',W/2,y0-14);
+    ct.fillText('状態 S のマス (列=キー方向)。行は同じ固定サイズの状態の、書き込み時刻ごとのスナップショット',W/2,y0-14);
     ct.fillStyle=Q;ct.font='bold 13px sans-serif';
     ct.fillText('同じキー方向 (橙の列) に繰り返し無条件加算 → 濃く塗り重なり飽和',W/2,y0+rows*cellH+26);
     ct.fillStyle='#ffd98f';ct.font='13px sans-serif';

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gated Attention — softmax にゲートを足す</title>
+<title>Gated Attention — Attention 出力にゲートを掛ける</title>
 <style>
   :root{
     --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
@@ -74,7 +74,7 @@
 <header>
   <p class="kicker">ATTENTION の系統と進化 ・ 10</p>
   <a class="back" href="./attention-series-index.html">← シリーズ目次へ戻る</a>
-  <h1>Gated Attention — softmax にゲートを足す</h1>
+  <h1>Gated Attention — Attention 出力にゲートを掛ける</h1>
   <p>KV を削るのではなく、出力にゲートを掛けて「無理な注意」を抑える、最終章</p>
 </header>
 <main>
@@ -101,9 +101,9 @@
   <h2><span class="num">1</span>何を解決する手法か</h2>
   <p class="lead">softmax は「何も見たくない」ときでも、必ずどこかに注意を割り当ててしまう。</p>
   <p>素の Attention の出力は $\mathrm{softmax}(QK^\top/\sqrt d)V$ です。ここで softmax の性質を思い出してください ― <b>出力される重み $a_i$ は必ず合計 1 になります</b>。これは、そのクエリにとって参照すべき情報が本当にどこかに存在する場合には自然な仕組みです。しかし、<b>参照すべき情報が実質どこにもない</b>クエリであっても、softmax は合計 1 になるようにどこかのトークンへ重みを配らなければなりません。</p>
-  <p>この「行き場のない注意」は、多くの場合、系列の先頭付近など特定のトークンに集中して溜まっていく傾向が観測されています。これが <b>attention sink</b> です。系列が長くなるほど、この意味のない重みの集中は無視できない存在になり、長文脈での外挿性能を損なう一因になると報告されています。</p>
+  <p>この「行き場のない注意」は、多くの場合、系列の先頭付近など特定のトークンに集中して溜まっていく傾向が観測されています。これが <b>attention sink</b> です (StreamingLLM, Xiao et al., arXiv:2309.17453, 2023 が初出として報告)。系列が長くなるほど、この意味のない重みの集中は無視できない存在になり、長文脈での外挿性能を損なう一因になると報告されています。</p>
   <div class="key">
-    ここまでの MQA・GQA・MLA・SWA・DSA は、すべて「<b>KV をどう減らすか</b>」で戦ってきました。Gated Attention の着想はまったく別の場所にあります ― <b>KV は素の Attention のまま一切変えず、その代わり Attention の出力そのものにゲートを掛けて、どれだけ通すかを制御する</b>。ゲートが小さければ「この注意はほぼ捨てる」、大きければ「そのまま通す」という弁を、ヘッドごとに入力から学習させます。attention sink 的な無理な注意の割り当てが起きても、その出力への影響をゲートで絞り込めるという発想です。
+    ここまでの MQA・GQA・MLA・SWA・DSA は、すべて「<b>KV をどう減らすか</b>」で戦ってきました。Gated Attention の着想はまったく別の場所にあります ― <b>KV は素の Attention のまま一切変えず、その代わり Attention の出力そのものにゲートを掛けて、どれだけ通すかを制御する</b>。ゲートが小さければ「この注意はほぼ捨てる」、大きければ「そのまま通す」という弁を、ヘッドごとに入力から学習させます。効果は推論時に事後的にマスクするだけではありません ― <b>学習時にこのゲートが存在すること自体が、モデルが先頭トークンに注意を「逃がす」必要性を薄れさせ、sink の形成そのものを抑える</b>と報告されています。原論文の副題 *Attention-Sink-Free* はこの学習時効果を指しています。
   </div>
 </section>
 
@@ -116,12 +116,12 @@
     head_i = softmax(Q_i K_i^T / sqrt(d)) V_i&nbsp;&nbsp;<span class="c">∈ R^(N×d)</span>
   </div>
   <p>ここに、入力 $X$ から作るヘッド専用の sigmoid ゲート $g_i$ を要素ごとに掛けます。</p>
-  $$ g_i = \sigma\!\left(X W_i^{G}\right) \in \mathbb{R}^{N\times d}, \qquad W_i^{G}\in\mathbb{R}^{d_{\text{model}}\times d} $$
-  $$ \mathrm{head}_i^{\text{gated}} = g_i \odot \mathrm{head}_i $$
+  <p>$$ g_i = \sigma\!\left(X W_i^{G}\right) \in \mathbb{R}^{N\times d}, \qquad W_i^{G}\in\mathbb{R}^{d_{\text{model}}\times d} $$</p>
+  <p>$$ \mathrm{head}_i^{\text{gated}} = g_i \odot \mathrm{head}_i $$</p>
   <p>全ヘッドを結合して出力射影を掛ける最後の一歩は MHA と変わりません。</p>
-  $$ \mathrm{GatedAttn}(X) = \mathrm{Concat}\!\left(\mathrm{head}_1^{\text{gated}},\dots,\mathrm{head}_h^{\text{gated}}\right) W^O $$
+  <p>$$ \mathrm{GatedAttn}(X) = \mathrm{Concat}\!\left(\mathrm{head}_1^{\text{gated}},\dots,\mathrm{head}_h^{\text{gated}}\right) W^O $$</p>
   <div class="key">
-    <b>素の MHA との差分はこれだけです。</b>$g_i=\mathbf{1}$ (ゲート常時全開) にすれば第 1 章の MHA にそのまま戻ります。追加されたパラメータもヘッド数分の $W_i^{G}$ だけで、$Q,K,V$ の計算・KV-Cache には何も触れません。$\odot$ (要素積) による非線形なスケーリングが、素の Attention には無かった「出力を選んで絞る」自由度を与えます。
+    <b>素の MHA との差分はこれだけです。</b>$g_i\approx\mathbf{1}$ (sigmoid の出力なので厳密に 1 にはなりませんが、ゲートが十分開いた極限) にすれば第 1 章の MHA にそのまま戻ります。追加されたパラメータは $W_i^{G}\in\mathbb{R}^{d_{\text{model}}\times d}$ を $h$ 個、つまり合計 $d_{\text{model}}^2$ ― <b>$W^O$ 1 個分に相当する規模</b>で、「ごく小さい」とは言えません。ただし $Q,K,V$ の計算・KV-Cache には何も触れません。非線形性の主な源は sigmoid $\sigma$ です ($\odot$ (要素積) 自体は各引数について線形な演算です)。この入力依存の非線形ゲートが、素の Attention には無かった「出力を選んで絞る」自由度を与えます。
   </div>
 </section>
 
@@ -129,15 +129,15 @@
   <h2><span class="num">3</span>計算量</h2>
   <p class="lead">計算量の骨格は素の Attention と同じです。変わるのは KV ではなく出力側だけ。</p>
   <h3>時間計算量 (prefill / 学習時)</h3>
-  <p>スコア行列 $QK^\top$ の計算は変わらず<b>$O(N^2 d_{\text{model}})$</b> です。ゲート $g_i=\sigma(XW_i^G)$ の計算とヘッド出力への要素積は $O(N d_{\text{model}})$ で、$N^2$ の項に比べて無視できるほど軽い追加コストです。</p>
+  <p>スコア行列 $QK^\top$ の計算は変わらず<b>$O(N^2 d_{\text{model}})$</b> です。ゲート射影 $g_i=\sigma(XW_i^G)$ 自体はヘッドあたり $O(N\,d_{\text{model}}\,d)$、全ヘッド合計で $O(N\,d_{\text{model}}^2)$ ― $Q,K,V$ の射影と同じオーダーの線形コストです (要素積 $g_i\odot\mathrm{head}_i$ の部分だけが $O(N d_{\text{model}})$)。系列長 $N$ が大きい長文脈では $N^2$ の項に対して漸近的に無視できますが、短い系列では Attention 層全体の射影 FLOPs を素の MHA の 4 個 ($Q,K,V,O$) から 5 個へ、約 25% 増やす無視できないコストになります。</p>
   <h3>Decode 時のボトルネック</h3>
   <p>1 トークン生成ごとに読む KV の量は、<b>素の Attention (MHA・GQA など、ベースにした構造)とまったく同じ</b>です。ゲートは Attention の出力を絞るだけで、どの KV を読むか・どれだけ読むかには一切関与しません。</p>
   <h3>KV メモリの $N$ 依存</h3>
-  <p>KV-Cache は<b>ベースの Attention 構造 (MHA なら $2Nhd\,b_{\text{KV}}L$) のまま不変</b>です。Gated Attention が追加するのは、ヘッド数 $h$ に比例するごく小さな射影行列 $W_i^G$ のパラメータだけで、系列長 $N$ には依存しません。</p>
+  <p>KV-Cache は<b>ベースの Attention 構造 (MHA なら $2Nhd\,b_{\text{KV}}L$) のまま不変</b>です。Gated Attention が追加するのは、層あたり $h$ 個の射影行列 $W_i^G$ ($h\times d_{\text{model}}\times d = d_{\text{model}}^2$、$W^O$ 1 個分の規模) のパラメータで、系列長 $N$ には依存しません (モデル全体では層数 $L$ 倍の $L\,d_{\text{model}}^2$)。</p>
   <div class="cost">
-    <div class="box"><span class="big">O(N&sup2;d)</span><span class="lbl">時間計算量 (不変)</span></div>
+    <div class="box"><span class="big">O(N&sup2;d<sub>model</sub>)</span><span class="lbl">時間計算量 (不変)</span></div>
     <div class="box"><span class="big">KV 不変</span><span class="lbl">ベース構造のまま</span></div>
-    <div class="box"><span class="big">+h 個</span><span class="lbl">追加パラメータ (ゲート射影)</span></div>
+    <div class="box"><span class="big">+d<sub>model</sub>&sup2;</span><span class="lbl">追加パラメータ/層 (ゲート射影)</span></div>
   </div>
   <p>この章で得られる利得は、計算量やメモリの削減ではなく<b>品質側</b>です。ゲートが sink 的な無駄な注意を出力レベルで抑えることで、長文脈での外挿性能が改善すると報告されています。</p>
 </section>
@@ -172,15 +172,15 @@
     <div class="box"><span class="big" id="g_sink">—</span><span class="lbl">出力に残る sink 成分</span></div>
     <div class="box"><span class="big" id="g_signal">—</span><span class="lbl">出力に残る有用成分</span></div>
   </div>
-  <p>左の帯は、あるクエリの素の Attention 重み (模式値) で、先頭トークンに大きな重みが集中しています ― これが attention sink です。この重みで作られた出力を、右のゲート $g$ で減衰させます。$g$ を下げるほど、<b>sink 成分も有用成分も一緒に絞られます</b>が、そもそもこのヘッドの出力の大部分が sink に食われている場合、ゲートを絞ることで「この出力はほとんど信用しない」という判断を下せます。他のヘッドが $g\approx 1$ で開いていれば、有用な情報の流れはそちらから維持されます。<b>数値と重み分布は仕組みを直感的に伝えるための模式的な可視化であり、実測値ではありません。</b></p>
+  <p>左の帯は、あるクエリの素の Attention 重み (模式値) で、先頭トークンに大きな重みが集中しています ― これが attention sink です。この重みで作られた出力を、右のゲート $g$ で減衰させます。$g$ を下げるほど、<b>sink 成分も有用成分も一緒に絞られます</b>が、そもそもこのヘッドの出力の大部分が sink に食われている場合、ゲートを絞ることで「この出力はほとんど信用しない」という判断を下せます。他のヘッドが $g\approx 1$ で開いていれば、有用な情報の流れはそちらから維持されます。有用成分まで一緒に減衰させてなお性能が上がる理由は主に 2 つです ― (i) 参照すべき情報が実質ないクエリでは出力全体がノイズなので丸ごと閉じてよい、(ii) 実際の $g_i$ はここで示すヘッド単位のスカラーではなく <b>トークンごと・チャネルごとに値が変わる $N\times d$ の要素毎ゲート</b>なので、有用な次元だけを選択的に残せます。<b>数値と重み分布、そしてスカラー近似は仕組みを直感的に伝えるための模式的な可視化であり、実測値ではありません。</b></p>
 </section>
 
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
   <p class="lead">Gated Attention は MHA (および GQA 等の派生) の出力側に足す、独立した一手です。</p>
-  <p>Gated Attention は Qiu et al. "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free" (arXiv:2505.06708, 2025-05) で提案されました。論文では、Scaled Dot-Product Attention の出力にヘッド専用の sigmoid ゲートを掛けるという単純な変更が、3.5兆トークンで学習した <b>15B MoE モデルおよび 1.7B dense モデルの 30 種類以上のバリアント</b>にわたって一貫して性能を改善したと報告されています。この疎なゲート機構が attention sink を軽減し、長文脈での外挿性能を高めることも確認されたとされています。</p>
+  <p>Gated Attention は Qiu et al. "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free" (arXiv:2505.06708, 2025-05) で提案されました。論文では、Scaled Dot-Product Attention の出力にヘッド専用の sigmoid ゲートを掛けるという単純な変更が、3.5兆トークンで学習した <b>15B MoE モデルおよび 1.7B dense モデルの 30 種類以上のバリアント</b>にわたって一貫して性能を改善したと報告されています。この機構が attention sink を軽減し、長文脈での外挿性能を高めることも確認されたとされています。タイトルの 3 要素のうち、<b>Non-linearity</b> は前節で触れた sigmoid の非線形性、<b>Attention-Sink-Free</b> は上記の学習時効果です。残る <b>Sparsity</b> は、学習後のゲート値が疎に分布する (多くの次元でほぼ 0 かほぼ 1 に近づく) という観察を指し、加えて massive activations の抑制や学習安定性の向上にも寄与すると報告されています。</p>
   <div class="warn">
-    <b>ヘッジ (重要)。</b>本論文の著者には Qwen チームに所属するメンバーが含まれていますが、これは<b>公開されている Qwen 系モデル (例: Qwen3 など) がこの Gated Attention をそのまま採用しているという確認ではありません</b>。本稿執筆時点で、特定の公開モデルのアーキテクチャがこの論文の手法を実装していると一次資料で確認できたわけではないため、<b>対応関係は断定せず「著者の一部が Qwen チームに所属」という事実のみ</b>を述べます。
+    <b>ヘッジ (重要)。</b>本論文の著者には Qwen チームに所属するメンバーが含まれていますが、これは<b>公開されている Qwen 系モデル (例: Qwen3 など) がこの Gated Attention をそのまま採用しているという確認ではありません</b>。本稿執筆時点 (2026-08) で、特定の公開モデルのアーキテクチャがこの論文の手法を実装していると一次資料で確認できたわけではないため、<b>対応関係は断定せず「著者の一部が Qwen チームに所属」という事実のみ</b>を述べます。この時点以降に公開モデルの技術資料が更新されている可能性があるため、最新情報は一次資料で再確認してください。
   </div>
   <p>系統上、Gated Attention は<b>MHA (第 1 章) の直接の子</b>ですが、これまでの章とは軸が異なります。MQA・GQA・MLA・SWA・DSA は KV バイト式 $2Nn_{kv}d\,b_{\text{KV}}L$ のどこかの因子を削る「KV 削減系」でした。Linear・DeltaNet・Mamba 系は softmax を外して固定状態にする「$N$ 依存を消す系」でした。Gated Attention は<b>KV にも $N$ 依存にも触れず、出力の非線形なスケーリングで品質を上げる</b>、いわば横軸の一手です。実装上は GQA や MLA の上にも同じゲートを重ねられる、独立した拡張だと理解してください。</p>
 </section>
@@ -191,7 +191,7 @@
     <tr><th>論点</th><th>要点</th></tr>
     <tr><td>やること</td><td>MHA の各ヘッド出力 $\mathrm{head}_i$ に、ヘッド専用の sigmoid ゲート $g_i=\sigma(XW_i^G)$ を要素積で掛ける</td></tr>
     <tr><td>数式</td><td>$\mathrm{head}_i^{\text{gated}}=g_i\odot\mathrm{head}_i$、結合して $W^O$ (ゲート全開なら素の MHA に一致)</td></tr>
-    <tr><td>時間計算量</td><td>$O(N^2 d_{\text{model}})$。素の Attention と同じ (ゲート計算は無視できるほど軽い)</td></tr>
+    <tr><td>時間計算量</td><td>$O(N^2 d_{\text{model}})$。素の Attention と同じ (ゲート射影自体は $Q,K,V$ と同オーダーの線形コストだが、$N$ が大きい長文脈では $N^2$ 項に対して漸近的に無視できる)</td></tr>
     <tr><td>KV</td><td>不変。削減系ではなく、出力側の品質改善策</td></tr>
     <tr><td>効果</td><td>attention sink の軽減、長文脈外挿性能の向上 (報告値)</td></tr>
     <tr><td>代表モデル</td><td>15B MoE / 1.7B dense 検証 (Qiu et al. 2025)。公開モデルでの採用対応は未確認</td></tr>
@@ -212,8 +212,9 @@
     シリーズ目次へ → <a href="./attention-series-index.html">Attention の系統と進化 ― 全 10 章</a>
   </div>
   <div class="fn">
-    参考: Qiu et al. "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free." arXiv:2505.06708, 2025 (<a href="https://arxiv.org/abs/2505.06708" target="_blank" rel="noopener">arXiv:2505.06708</a>)。<br>
+    参考: Qiu et al. "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free." (<a href="https://arxiv.org/abs/2505.06708" target="_blank" rel="noopener">arXiv:2505.06708</a>, 2025)。<br>
     参考: Vaswani et al. "Attention Is All You Need." NeurIPS 2017 (<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">arXiv:1706.03762</a>)。<br>
+    参考: Xiao et al. "Efficient Streaming Language Models with Attention Sinks." (<a href="https://arxiv.org/abs/2309.17453" target="_blank" rel="noopener">arXiv:2309.17453</a>, 2023)。<br>
     注意: 本ページのアニメーションと数値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>

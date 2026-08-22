@@ -102,9 +102,9 @@
   <p class="lead">MHA が重いのは「表現力のために分けたヘッド」と「KV-Cache として保存するヘッド」が同じ本数に縛られていたからです。</p>
   <p>前章で見たとおり、MHA は $h$ 本の Q ヘッドそれぞれに自前の Key・Value を持たせていました。これは表現力の観点では自然な設計ですが、推論時にキャッシュする量の観点では過剰です。Decode では毎トークン、過去 $N$ 件分の Key・Value を HBM から読み直しますが、<b>読み直す量は KV ヘッドの本数に比例して増える</b>のに対し、Query は 1 トークン分しか使いません。つまり Q ヘッドを $h$ 本のまま保っても、<b>各 Q ヘッドが厳密に別々の KV を持つ必要はない</b>のではないか、というのが着想の出発点です。</p>
   <p>MQA (Shazeer, 2019) はこの発想を極端まで押し進め、<b>全ての Q ヘッドで Key・Value を 1 組だけ共有</b>します。KV ヘッド数は $n_{kv}=1$ まで落ち、KV-Cache は Q ヘッド数 $h$ に関係なく一定になります。ただし全ヘッドが同じ「見方」の KV しか参照できなくなるため、MHA が持っていた「ヘッドごとに違う観点」という表現力の一部を犠牲にします。</p>
-  <p>GQA (Ainslie et al., 2023) はこのトレードオフを緩めます。Q ヘッドを $g$ 個のグループに分け、<b>同じグループ内の Q ヘッドだけが KV を共有</b>する設計です。$g=1$ なら MQA に一致し、$g=h$ なら MHA に一致します。つまり GQA は MHA と MQA を両端に持つ連続的な設計空間で、$g$ を調整することで品質と KV の重さを天秤にかけられます。</p>
+  <p>GQA (Ainslie et al., 2023) はこのトレードオフを緩めます。Q ヘッドを $g$ 個のグループに分け、<b>同じグループ内の Q ヘッドだけが KV を共有</b>する設計です。$g=1$ なら MQA に一致し、$g=h$ なら MHA に一致します。つまり GQA は MHA と MQA を両端に持つ、ひと続きの設計空間で、$g$ を調整することで品質と KV の重さを天秤にかけられます。</p>
   <div class="key">
-    ポイントは、<b>KV ヘッドを減らしても Q ヘッド数 $h$ は変えない</b>ことです。Attention の「観点の多さ」は Q 側の射影で保ちつつ、キャッシュする KV だけを間引く。これが MQA / GQA が計算量をほぼ変えずに KV-Cache だけを削れる理由です。
+    ポイントは、<b>KV ヘッドを減らしても Q ヘッド数 $h$ は変えない</b>ことです。Attention の「観点の多さ」は Q 側の射影で保ちつつ、キャッシュする KV だけを間引く。これが MQA / GQA が支配項の演算量を保ったまま KV-Cache だけを削れる理由です。
   </div>
 </section>
 
@@ -116,21 +116,21 @@
   <p>Q ヘッドごとに射影行列 $W_i^Q$ は個別に持ちますが、Key・Value の射影行列 $W^K, W^V$ は<b>全ヘッド共通の 1 組だけ</b>です。</p>
   <div class="math">
     <span class="c"># Q はヘッドごと、K・V は共通の1組</span><br>
-    Q_i = X W_i^Q&nbsp;&nbsp; (i=1,\dots,h),&nbsp;&nbsp; K = X W^K,&nbsp;&nbsp; V = X W^V
+    Q_i = X W_i^Q&nbsp;&nbsp; (i = 1, …, h),&nbsp;&nbsp; K = X W^K,&nbsp;&nbsp; V = X W^V
   </div>
   $$ \mathrm{head}_i^{\text{MQA}} = \mathrm{softmax}\!\left(\frac{Q_i K^{\top}}{\sqrt{d}}\right) V \in \mathbb{R}^{N\times d} $$
   <p>すべてのヘッド $i$ が同じ $K,V$ を参照します。キャッシュするのは $K,V$ 1 組分だけなので $n_{kv}=1$ です。</p>
   <h3>GQA ($n_{kv}=g$)</h3>
-  <p>Q ヘッドを $g$ 個のグループに分け ($h/g$ 本ずつ)、グループ $j$ ($j=1,\dots,g$) が自前の $K_j, V_j$ を持ちます。ヘッド $i$ が属するグループを $j(i)$ と書くと、</p>
+  <p>Q ヘッドを $g$ 個のグループに分け (通常は $h$ を割り切る $g$ を選び、$h/g$ 本ずつ)、グループ $j$ ($j=1,\dots,g$) が自前の $K_j, V_j$ を持ちます。ヘッド $i$ が属するグループを $j(i)$ と書くと、</p>
   <div class="math">
     <span class="c"># グループ j ごとに K,V を1組。同グループ内の Q ヘッドが共有</span><br>
-    K_j = X W_j^K,&nbsp;&nbsp; V_j = X W_j^V&nbsp;&nbsp; (j=1,\dots,g)
+    K_j = X W_j^K,&nbsp;&nbsp; V_j = X W_j^V&nbsp;&nbsp; (j = 1, …, g)
   </div>
   $$ \mathrm{head}_i^{\text{GQA}} = \mathrm{softmax}\!\left(\frac{Q_i K_{j(i)}^{\top}}{\sqrt{d}}\right) V_{j(i)} \in \mathbb{R}^{N\times d} $$
   <p>いずれも最後は前章と同じく結合して出力射影をかけます。</p>
   $$ \mathrm{Attn}(X) = \mathrm{Concat}(\mathrm{head}_1,\dots,\mathrm{head}_h)\, W^O $$
   <div class="key">
-    3 つの手法は<b>同じ式の $n_{kv}$ が違うだけ</b>です。$n_{kv}=h$ で MHA (各ヘッドが専用 KV)、$n_{kv}=g$ で GQA (グループ共有)、$n_{kv}=1$ で MQA (全ヘッド共有)。$g$ を $1$ から $h$ まで動かすと、MQA から GQA、そして MHA まで連続的につながります。
+    3 つの手法は<b>同じ式の $n_{kv}$ が違うだけ</b>です。$n_{kv}=h$ で MHA (各ヘッドが専用 KV)、$n_{kv}=g$ で GQA (グループ共有)、$n_{kv}=1$ で MQA (全ヘッド共有)。$g$ を $1$ から $h$ まで動かすと、MQA から GQA、そして MHA まで段階的につながります。
   </div>
 </section>
 
@@ -138,21 +138,21 @@
   <h2><span class="num">3</span>計算量とメモリ帯域</h2>
   <p class="lead">時間計算量は MHA と変わりません。MQA / GQA が効くのは「メモリ帯域」であって「演算量」ではない、というのが本章最大のポイントです。</p>
   <h3>時間計算量 (学習 / Prefill)</h3>
-  <p>スコア行列 $Q_i K_{j(i)}^\top$ の計算は各ヘッドで依然 $N\times N$ です。$K,V$ を共有していても、Q ヘッドの本数 $h$ 本分のスコア計算・softmax・重み付き和はそのまま必要なので、総計算量は MHA と同じ<b>$O(N^2 d_{\text{model}})$</b> です。KV ヘッドを減らしても演算量は 1 バイトも減りません。</p>
+  <p>スコア行列 $Q_i K_{j(i)}^\top$ の計算は各ヘッドで依然 $N\times N$ です。$K,V$ を共有していても、Q ヘッドの本数 $h$ 本分のスコア計算・softmax・重み付き和はそのまま必要なので、総計算量は MHA と同じ<b>$O(N^2 d_{\text{model}})$</b> です。Attention 層内の K/V 射影 ($W^K, W^V$) のパラメータと演算は KV ヘッド数の比 $n_{kv}/h$ に応じて実際に減りますが、モデル全体・長文脈で支配的なのはスコア計算・softmax・重み付き和の $O(N^2 d_{\text{model}})$ 項なので、この減少はボトルネックには影響しません。</p>
   <h3>Decode 時のボトルネック</h3>
-  <p>MHA の decode がキツかったのは、1 トークン生成ごとに<b>$h$ 本分の Key・Value を HBM から読む</b>ことでした。MQA / GQA では読むべき KV ヘッドが $n_{kv}$ 本 ($1$ または $g$) に減るので、<b>同じ演算量に対して読み出すメモリ量が $h/n_{kv}$ 倍軽く</b>なります。Decode は依然 memory-bound ですが、その帯域負荷そのものを削れるのが MQA / GQA の効能です。</p>
+  <p>MHA の decode がキツかったのは、1 トークン生成ごとに<b>$h$ 本分の Key・Value を HBM から読む</b>ことでした。MQA / GQA では読むべき KV ヘッドが $n_{kv}$ 本 ($1$ または $g$) に減るので、同じトークン生成であっても<b>KV の読み出し量が $n_{kv}/h$ に縮み</b>ます (重み行列の読み出し量はここでは変わりません)。Decode は依然 memory-bound ですが、その帯域負荷そのものを削れるのが MQA / GQA の効能です。</p>
   <h3>KV メモリの大きさ</h3>
   <p>KV バイト式は前章と同じですが、$n_{kv}$ が変わります。</p>
   $$ \text{KV bytes} \approx 2 \cdot N \cdot n_{kv} \cdot d \cdot b_{\text{KV}} \cdot L $$
   <p>MHA では $n_{kv}=h$ でしたが、GQA では $n_{kv}=g\;(1<g<h)$、MQA では $n_{kv}=1$ です。$h=32,\,g=8$ なら KV は $1/4$ に、MQA ($n_{kv}=1$) なら $1/32$ まで縮みます。$N$・$L$ への依存はそのまま線形ですが、<b>係数となる $n_{kv}$ を叩く</b>のがこの章の一手です。</p>
   <div class="key">
-    覚えておく基準: MQA / GQA は<b>「計算量は不変、メモリ帯域と KV 容量だけを削る」</b>手法です。演算 (GEMM) 側は変わらないので TTFT への効きは薄く、KV 帯域と容量が支配する <b>decode の TPOT とバッチ上限</b>にほぼそのまま効きます。
+    覚えておく基準: MQA / GQA は<b>「計算量は不変、メモリ帯域と KV 容量だけを削る」</b>手法です。演算 (GEMM) 側は変わらないので TTFT (最初のトークンが出るまでの時間) への効きは薄く、KV 帯域と容量が支配する <b>decode の TPOT (トークンあたりの生成時間) とバッチ上限</b>にほぼそのまま効きます。
   </div>
 </section>
 
 <section id="s4">
   <h2><span class="num">4</span>【構成】KV ヘッド共有のアーキテクチャ</h2>
-  <p class="lead">Q ヘッドは $h$ 本のまま、KV ヘッドだけがグループ数 $g$ に減り、同じグループの Q ヘッドが同じ KV を指す様子を見ます。$g$ を動かすと MHA ($g=h$) から GQA、MQA ($g=1$) まで連続的に変わります。</p>
+  <p class="lead">Q ヘッドは $h$ 本のまま、KV ヘッドだけがグループ数 $g$ に減り、同じグループの Q ヘッドが同じ KV を指す様子を見ます。$g$ を動かすと MHA ($g=h$) から GQA、MQA ($g=1$) まで段階的に変わります。</p>
   <div class="canvas-wrap">
     <canvas id="cvArch" width="840" height="380"></canvas>
   </div>
@@ -161,16 +161,15 @@
     <div class="slider">KV グループ数 $g$ <input id="archG" type="range" min="1" max="8" value="8"></div>
   </div>
   <div class="legend">
-    <span><span class="dot" style="background:var(--q)"></span>Query ヘッド</span>
-    <span><span class="dot" style="background:var(--k)"></span>Key ヘッド (グループ)</span>
-    <span><span class="dot" style="background:var(--v)"></span>Value ヘッド (グループ)</span>
+    <span><span class="dot" style="background:var(--q)"></span>Query ヘッド (色はグループ番号に対応)</span>
+    <span><span class="dot" style="background:var(--k)"></span>KV グループ (K・V を1組として描画。色はグループ番号に対応)</span>
   </div>
-  <p>上段の Q ヘッドは常に $h$ 本のまま並びます。下段の K・V は $g$ 本のグループに減り、同じ色の矢印でつながった Q ヘッドたちが 1 つのグループの KV を共有します。$g=h$ にすると 1 対 1 (MHA)、$g=1$ にすると全ヘッドが 1 つの KV に集まる (MQA) 様子が見えます。</p>
+  <p>上段の Q ヘッドは常に $h$ 本のまま並びます。下段の K・V は $g$ 本のグループに減り、同じ色の矢印でつながった Q ヘッドたちが 1 つのグループの KV を共有します。$g=h$ にすると 1 対 1 (MHA)、$g=1$ にすると全ヘッドが 1 つの KV に集まる (MQA) 様子が見えます。図では K と V をまとめて 1 つの「KV」ボックスとして描き、色はグループごとに割り当てているため、グループ数 $g$ によって使われる色数も変わります。なお $g$ が $h$ を割り切らない場合、デモは便宜的に不均等なグループ分けをします (実装では $h$ の約数となる $g$ を選ぶのが一般的です)。</p>
 </section>
 
 <section id="s5">
   <h2><span class="num">5</span>【体験】グループ数と KV-Cache のトレードオフ</h2>
-  <p class="lead">KV グループ数 $g$ (= $n_{kv}$) を動かして、KV-Cache のバイト数がどこまで縮むかを見ます。文脈長 $N$・層数 $L$・ヘッド次元 $d=128$、fp16 で概算します。</p>
+  <p class="lead">KV グループ数 $g$ (= $n_{kv}$) を動かして、KV-Cache のバイト数がどこまで縮むかを見ます。文脈長 $N$・層数 $L=64$ (固定)・ヘッド次元 $d=128$、fp16 で概算します。</p>
   <div class="canvas-wrap">
     <canvas id="cvKV" width="840" height="320"></canvas>
   </div>
@@ -190,8 +189,8 @@
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
   <p class="lead">MQA と GQA は登場時期も系譜も異なりますが、どちらも「MHA の KV ヘッドを減らす」という同じ軸の上にあります。</p>
-  <p><b>MQA</b> (Shazeer, "Fast Transformer Decoding: One Write-Head is All You Need", 2019-11) は PaLM や Falcon などで採用され、decode を軽くする古典的な一手として先行しました。ただし $n_{kv}=1$ まで削ると品質劣化が目立つ場合があり、これを緩めたのが <b>GQA</b> (Ainslie et al., "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints", 2023-05) です。GQA は Llama 2 や Mistral 7B で採用され、2023 年以降ほぼすべての dense モデルの標準装備になりました。</p>
-  <p>系統としては、<b>MHA → MQA → GQA</b> という順に登場しましたが、設計空間としては GQA が $g$ の値で MHA ($g=h$) と MQA ($g=1$) の両方を内包する上位概念にあたります。次章の MLA は、この GQA の延長線上で「KV をグループ単位で持つ」のではなく「KV を低ランクの潜在表現に圧縮して 1 つだけ持つ」ところまで進めます。</p>
+  <p><b>MQA</b> (Shazeer, "Fast Transformer Decoding: One Write-Head is All You Need", 2019-11) は PaLM や Falcon などで採用され、decode を軽くする古典的な一手として先行しました。ただし $n_{kv}=1$ まで削ると品質劣化が目立つ場合があり、これを緩めたのが <b>GQA</b> (Ainslie et al., "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints", 2023-05) です。GQA 論文の核心は新しいアーキテクチャの提案だけではなく、<b>既存の MHA チェックポイントを少量の追加学習 (uptraining) だけで GQA に変換できる</b>と示した点にあります。既存の $h$ 組の Key・Value を平均プーリングして $g$ 組の初期値を作り、そこから軽く再学習するだけで済むため、モデルをゼロから学習し直す必要がありません。この導入コストの低さが GQA が急速に広まった実務的な理由の1つです。GQA は Llama 2 では 34B/70B のみが採用しており (7B/13B は通常の MHA のまま)、Mistral 7B も GQA を採用しており、多くの主要オープンモデルで事実上の標準になりました。</p>
+  <p>系統としては、<b>MHA → MQA → GQA</b> という順に登場しましたが、設計空間としては GQA が $g$ の値で MHA ($g=h$) と MQA ($g=1$) の両方を内包する上位概念にあたります。次章の MLA は、この GQA の延長線上で「KV をグループ単位で持つ」のではなく「KV を低ランクの潜在表現に圧縮して 1 つだけ持つ」ところまで進めます。なお $n_{kv}$ を減らす軸とは別に、層方向に KV を共有する Cross-Layer Attention や、KV の各要素のビット数 $b_{\text{KV}}$ を落とす KV-Cache 量子化も、同じ KV バイト式 $2Nn_{kv}d\,b_{\text{KV}}L$ の別の因子を狙う派生として知られています。</p>
   <div class="key">
     覚えておく系譜: <b>MQA が先行し、GQA がその品質劣化を緩めた中間案として広く普及</b>しました。次章 MLA は GQA と同じ「KV ヘッドを減らす」動機から出発しつつ、削り方を「グループ化」から「低ランク圧縮」へ質的に変えます。
   </div>
@@ -204,10 +203,10 @@
     <tr><td>やること</td><td>Q ヘッドは $h$ 本のまま、KV ヘッドだけを $n_{kv}$ 本に減らして共有する</td></tr>
     <tr><td>MQA</td><td>$n_{kv}=1$。全 Q ヘッドが 1 組の $K,V$ を共有</td></tr>
     <tr><td>GQA</td><td>$n_{kv}=g$。$g$ グループ内の Q ヘッドが KV を共有 ($1<g<h$ で MHA と MQA の中間)</td></tr>
-    <tr><td>時間計算量</td><td>$O(N^2 d_{\text{model}})$。MHA と不変 (演算量は減らない)</td></tr>
+    <tr><td>時間計算量</td><td>$O(N^2 d_{\text{model}})$。MHA と不変 (K/V 射影分の演算はわずかに減るが支配項ではない)</td></tr>
     <tr><td>KV-Cache</td><td>$\approx 2 N n_{kv} d\, b_{\text{KV}} L$。$n_{kv}$ を $h\to g\to 1$ と下げるほど線形に縮む</td></tr>
     <tr><td>効くフェーズ</td><td>decode のメモリ帯域と KV 容量 (TPOT・同時実行数上限)。prefill の演算量には効かない</td></tr>
-    <tr><td>代表モデル</td><td>MQA: PaLM, Falcon / GQA: Llama 2, Mistral 7B</td></tr>
+    <tr><td>代表モデル</td><td>MQA: PaLM, Falcon / GQA: Llama 2 (34B/70B のみ。7B/13B は MHA), Mistral 7B</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>MQA / GQA は、KV バイト式 $2Nn_{kv}d\,b_{\text{KV}}L$ の中で <b>$n_{kv}$ という 1 つの因子だけ</b>を狙い撃ちで叩く、最初にして最も普及した KV 削減策です。計算量には手を付けず、Q ヘッド数による表現力もほぼ保ったまま、decode のメモリ帯域と KV 容量を大きく軽くします。次章の MLA は、この「$n_{kv}$ を減らす」発想をさらに進め、$n_{kv}\cdot d$ そのものを低ランクの潜在次元に圧縮します。
@@ -291,6 +290,7 @@
   function upd(){
     const h=+sH.value;
     if(+sG.value>h) sG.value=h;
+    sG.max=h;
     draw(h,+sG.value);
   }
   sH.oninput=upd; sG.oninput=upd; upd();

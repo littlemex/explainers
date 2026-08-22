@@ -84,7 +84,7 @@
   <p class="lead">この記事は Attention の基礎 (Query が Key を見て Value を混ぜる、なぜ $N^2$ で重いか、FlashAttention) を前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> を読んでください。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    <b>MHA (Multi-Head Attention)</b> は、Attention を 1 本ではなく <b>$h$ 本のヘッドに分けて並列に</b>行う仕組みです。各ヘッドが違う「見方」で関連を測り、最後に結合します。表現力は上がりますが、この後のシリーズで戦う相手 ― <b>推論で効いてくる KV-Cache のメモリ</b> ― は、この MHA の「全ヘッドが自前の Key と Value を持つ」構造から生まれます。以降の GQA・MLA・SWA・線形 Attention は、すべて<b>この KV の重さをどう削るか</b>の物語です。
+    <b>MHA (Multi-Head Attention)</b> は、Attention を 1 本ではなく <b>$h$ 本のヘッドに分けて並列に</b>行う仕組みです。各ヘッドが違う「見方」で関連を測り、最後に結合します。表現力は上がりますが、この後のシリーズで戦う相手 ― <b>推論で効いてくる KV-Cache のメモリ</b> ― は、この MHA の「全ヘッドが自前の Key と Value を持つ」構造から生まれます。以降の MQA・GQA・MLA・SWA・DSA・線形 Attention (Mamba・DeltaNet 含む) は、ほぼすべて<b>この KV の重さをどう削るか</b>の物語です (Gated Attention のように KV を変えず品質だけを上げる手法は例外です)。
   </div>
   <div class="toc">
     <a href="#s1">1. なぜヘッドを分けるのか</a>
@@ -103,7 +103,7 @@
   <p>素の Attention は、Query と Key の内積ひとつで関連度を決めます。しかし言語では、あるトークンは<b>直前の単語との文法的なつながり</b>を見たいこともあれば、<b>遠くの主語との照応</b>を見たいこともあります。1 本の内積では、これらを同時にうまく捉えきれません。</p>
   <p>そこで MHA は、$d_{\text{model}}$ 次元のベクトルを <b>$h$ 個の低次元ヘッド (各 $d = d_{\text{model}}/h$ 次元) に分割</b>し、ヘッドごとに独立した Attention を並列に走らせます。各ヘッドは別々の射影行列を持つので、<b>それぞれ違う「関連の観点」</b>を学べます。最後に全ヘッドの出力を結合して 1 本に戻します。</p>
   <div class="key">
-    ヘッド分割は「<b>同じトークンを複数の観点から同時に見る</b>」ための仕組みです。次元を割って並べるだけなので、<b>総計算量は 1 本の Attention とほぼ変わりません</b> (各ヘッドが $d/h$ 次元になるため)。ただし、<b>各ヘッドが自前の Key・Value を持つ</b>点が、後で KV-Cache の重さとして効いてきます。
+    ヘッド分割は「<b>同じトークンを複数の観点から同時に見る</b>」ための仕組みです。次元を割って並べるだけなので、<b>総計算量は 1 本の Attention とほぼ変わりません</b> (各ヘッドが $d_{\text{model}}/h$ 次元になるため。$h$ 本 × ヘッド次元 $d_{\text{model}}/h$ で相殺されます)。ただし、<b>各ヘッドが自前の Key・Value を持つ</b>点が、後で KV-Cache の重さとして効いてきます。
   </div>
 </section>
 
@@ -146,13 +146,13 @@
   <h3>時間計算量 (学習 / Prefill)</h3>
   <p>スコア行列 $Q K^{\top}$ は各ヘッドで $N\times N$。全 $h$ ヘッド合わせると、ヘッド次元が $d=d_{\text{model}}/h$ なので、総計算量は 1 本の Attention と同じ<b>$O(N^2 d_{\text{model}})$</b> になります (ヘッドで割った分が本数で戻る)。$N$ について二乗、というのは素の Attention と変わりません。</p>
   <h3>Decode 時のボトルネック</h3>
-  <p>1 トークンを生成するたびに、<b>過去 $N$ トークン全部の Key と Value を HBM から読み直します</b>。これが <b>KV-Cache</b> です。読む量は $N$ に比例して増えるのに計算は Query 1 本分だけなので、Decode は強く <b>memory-bound</b> になります。</p>
+  <p>再計算を避けるために、過去のすべての Key と Value を保存しておいたものが <b>KV-Cache</b> です。1 トークンを生成するたびに、この <b>KV-Cache を過去 $N$ トークン分 HBM から読み出します</b>。読み出すバイト数も演算数もともに $N$ に比例して増えますが、読み出した各 K・V は Query 1 本分の内積にしか使えず再利用できないため、1 バイトあたりの演算数 (演算強度) が極端に低く、Decode は強く <b>memory-bound</b> になります。</p>
   <h3>KV メモリの大きさ</h3>
   <p>KV-Cache のバイト数は、本シリーズ共通のこの式で見積もれます。</p>
   $$ \text{KV bytes} \approx 2 \cdot N \cdot n_{kv} \cdot d \cdot b_{\text{KV}} \cdot L $$
   <p>先頭の $2$ は Key と Value の 2 つ分、$n_{kv}$ は KV ヘッド数、$d$ はヘッド次元、$b_{\text{KV}}$ は 1 要素のバイト数 (fp16 なら 2)、$L$ は層数です。<b>MHA では $n_{kv}=h$ が最大</b>なので、この式のすべての因子が最大値を取ります。次章以降は、この式の $n_{kv}$ (MQA/GQA)、$n_{kv}\cdot d$ (MLA)、$N$ (SWA・線形) をそれぞれ叩いて KV を削っていきます。</p>
   <div class="key">
-    覚えておく基準: <b>MHA の KV-Cache は $2 N h d\, b_{\text{KV}} L$</b>。文脈長 $N$ が伸びるほど線形に膨らみ、長文 LLM ではモデル重みに匹敵、あるいは超える大きさになります。この一点が、Attention 進化のほぼすべての動機です。
+    覚えておく基準: <b>MHA の KV-Cache は $2 N h d\, b_{\text{KV}} L$</b>。文脈長 $N$ が伸びるほど線形に膨らみ、長文 LLM ではモデル重みに匹敵、あるいは超える大きさになります。これは推論側では最大の動機のひとつです (学習・Prefill 側では $O(N^2)$ の時間計算量そのものを削ることも、SWA や線形 Attention 系にとっては大きな動機になります)。
   </div>
 </section>
 
@@ -172,22 +172,24 @@
     <div class="box"><span class="big" id="kv_bytes">—</span><span class="lbl">KV-Cache (fp16)</span></div>
     <div class="box"><span class="big" id="kv_perTok">—</span><span class="lbl">1 トークンあたり</span></div>
   </div>
-  <p>棒グラフは 1 シーケンスあたりの KV-Cache サイズです。$N$・$h$・$L$ のどれを上げても<b>線形に膨らみ</b>、長文・多ヘッド・深いモデルでは数十 GB に達します。バッチを増やせばさらに掛け算で増えます。<b>「$h$ (=$n_{kv}$) を下げると素直に KV が減る」</b> ― これが次章 MQA / GQA の発想の芽です。スライダで $h$ を下げてみてください。</p>
+  <p>棒グラフは 1 シーケンスあたりの KV-Cache サイズです。$N$・$h$・$L$ のどれを上げても<b>線形に膨らみ</b>、長文・多ヘッド・深いモデルでは数十 GB に達します。バッチを増やせばさらに掛け算で増えます。このデモではヘッド次元 $d=128$ を固定しているため、<b>$h$ (=$n_{kv}$) を下げると KV は素直に減ります</b>。ただし MHA のまま $h$ そのものを減らすと、Q ヘッド数 (=表現力) も一緒に落ちてしまうのが問題です。次章の MQA / GQA は、この $h$ を保ったまま $n_{kv}$ だけを減らす発想です。スライダで $h$ を下げてみてください。</p>
 </section>
 
 <section id="s6">
   <h2><span class="num">6</span>系統上の位置 — 何が次章の課題になるか</h2>
   <p class="lead">MHA はすべての起点です。以降の手法は「MHA の何を削るか」で整理できます。</p>
   <table>
-    <tr><th>KV バイト式の因子</th><th>それを叩く手法</th><th>章</th></tr>
+    <tr><th>KV バイト式の因子 / 位置づけ</th><th>それを叩く手法</th><th>章</th></tr>
     <tr><td>$n_{kv}$ (KV ヘッド数) を減らす</td><td>MQA (=1) / GQA (=$g$)</td><td>02</td></tr>
     <tr><td>$n_{kv}\cdot d$ を低ランク潜在に圧縮</td><td>MLA</td><td>03</td></tr>
     <tr><td>参照する $N$ を窓で絞る</td><td>SWA</td><td>04</td></tr>
     <tr><td>参照する $N$ を top-k で疎選択</td><td>DSA</td><td>05</td></tr>
     <tr><td>$N$ 依存そのものを消す (固定状態)</td><td>Linear / Mamba / DeltaNet</td><td>06-09</td></tr>
-    <tr><td>softmax に非線形性を足す (KV は不変)</td><td>Gated Attention</td><td>10</td></tr>
+    <tr><td>$b_{\text{KV}}$ (1 要素のバイト数) を減らす</td><td>KV-Cache 量子化 (FP8 / INT4)</td><td>本シリーズ範囲外</td></tr>
+    <tr><td>$L$ (層数) 方向で共有する</td><td>層間 KV 共有 (CLA / YOCO)</td><td>本シリーズ範囲外</td></tr>
+    <tr><td>(番外) KV は不変・品質側の改善</td><td>Attention 出力にゲートを導入 → Gated Attention</td><td>10</td></tr>
   </table>
-  <p>MHA の代表モデルは Transformer 原論文 (2017) をはじめ、初期の GPT・BERT などほぼすべての初期 LLM です。表現力の基準でありながら、KV-Cache が最も重い構成でもあります。次章からは、この重さを削る旅が始まります。</p>
+  <p>MHA の代表モデルは Transformer 原論文 (2017) をはじめ、初期の GPT・BERT などほぼすべての初期 LLM です。表現力の基準でありながら、KV-Cache が最も重い構成でもあります。なお MHA は比較的小さいモデルでは今も現役です。例えば Llama 2 は 7B/13B が MHA のままで、GQA を採用したのは 34B/70B のみでした。メモリ管理側の工夫としては、断片化を防ぐ PagedAttention も広く使われています。次章からは、この重さを削る旅が始まります。</p>
 </section>
 
 <section id="s7">

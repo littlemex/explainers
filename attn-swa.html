@@ -113,19 +113,19 @@
 <section id="s2">
   <h2><span class="num">2</span>数式で見る SWA</h2>
   <p class="lead">Attention の対象集合を、直近 $w$ トークンの窓に限定するだけです。記号は本シリーズ共通のものを使います。</p>
-  <p>位置 $t$ のクエリ $q_t$ が参照できるキーの集合を、素の (causal) Attention では $\{s : s \le t\}$ でしたが、SWA ではこれを窓幅 $w$ で絞ります。</p>
+  <p>位置 $t$ のクエリ $q_t$ が参照できるキーの集合は、素の (causal) Attention では $\{s : s \le t\}$ でしたが、SWA ではこれを窓幅 $w$ で絞ります。</p>
   <div class="math">
     <span class="c"># 素の causal Attention: 過去全部を参照</span><br>
-    j &isin; \{\, s : s \le t \,\}<br>
+    j &isin; { j : j &le; t }<br>
     <span class="c"># SWA: 直近 w トークンだけに限定</span><br>
-    j &isin; \{\, s : t - w &lt; s \le t \,\}
+    j &isin; { j : t &minus; w &lt; j &le; t }
   </div>
   <p>この制限のもとで、通常の softmax Attention をそのまま計算します。</p>
   $$ o_t = \sum_{j:\, t-w < j \le t} \mathrm{softmax}_j\!\left(\frac{q_t^\top k_j}{\sqrt d}\right) v_j $$
   <p>窓の外 ($j \le t-w$) は、この層では単純に無視されます。しかし前節で述べたとおり、層を重ねると窓を経由して間接的に情報が伝わります。$L$ 層スタックした場合、最上層のトークンが (間接的にでも) 影響を受けられる範囲はおおよそ次のように広がります。</p>
   $$ \text{受容野} \approx L \cdot w $$
   <div class="key">
-    この式は厳密な保証ではなく、<b>CNN の受容野の議論を Attention の窓に当てはめた目安</b>です。各層が直近 $w$ トークンを混ぜるので、層を経由するたびに実質的な参照範囲が $w$ ずつ足されていく、という直感的な近似だと理解してください。実際にどこまで遠距離依存を捉えられるかは、窓幅 $w$・層数 $L$・タスクの性質に依存し、後述のとおり多くの実装は<b>一部の層を全結合 Attention に残すハイブリッド</b>でこの限界を補っています。
+    この式は厳密な保証ではなく、<b>CNN の受容野の議論を Attention の窓に当てはめた目安</b>です。各層が直近 $w$ トークンを混ぜるので、層を経由するたびに実質的な参照範囲が $w$ ずつ足されていく、という直感的な近似だと理解してください。窓は自トークンを含む定義 ($t-w<s\le t$) なので、1 層あたりの厳密な増分は $w-1$ であり、より正確には $L(w-1)+1$ 程度です。実際にどこまで遠距離依存を捉えられるかは、窓幅 $w$・層数 $L$・タスクの性質に依存し、後述のとおり多くの実装は<b>一部の層を全結合 Attention に残すハイブリッド</b>でこの限界を補っています。
   </div>
 </section>
 
@@ -176,17 +176,21 @@
   </div>
   <div class="cost">
     <div class="box"><span class="big" id="demo_n">—</span><span class="lbl">文脈長 N</span></div>
-    <div class="box"><span class="big" id="demo_full">—</span><span class="lbl">素の Attention が保持する KV</span></div>
-    <div class="box"><span class="big" id="demo_swa">—</span><span class="lbl">SWA が保持する KV</span></div>
+    <div class="box"><span class="big" id="demo_full">—</span><span class="lbl">素の Attention が保持する KV (トークン数換算)</span></div>
+    <div class="box"><span class="big" id="demo_swa">—</span><span class="lbl">SWA が保持する KV (トークン数換算)</span></div>
   </div>
   <p>上段の帯は、今のトークン (右端) が実際に参照する直近 $w$ トークン (緑) と、窓の外に追い出された古いトークン (暗い青、KV-Cache から捨てられる) の比率を示します。$N$ を伸ばすほど窓の割合は相対的に小さくなっていきます。下段の曲線は、素の Attention の KV サイズが $N$ に比例して線形に伸び続けるのに対し、SWA の KV サイズは $N$ が $w$ を超えた時点で<b>頭打ちになり一定</b>になる様子を示します。<b>数値は仕組みと大小関係を直感的に伝えるための模式的な可視化です。</b></p>
 </section>
 
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
-  <p class="lead">SWA の原型は 2020 年の Longformer に遡り、実運用では Mistral 7B が GQA と組み合わせて広めました。</p>
-  <p>局所化の代表が <b>Sliding Window Attention (SWA)</b> です。原型は Sparse Transformer や <b>Longformer</b> (Beltagy, Peters, Cohan, arXiv:2004.05150, 2020-04) ・ BigBird に遡ります。Longformer は局所窓 Attention に加えて、いくつかのトークンだけが全結合的に参照する「global attention」を併用するハイブリッド構成を提案しました。</p>
-  <p>実運用でこの発想を広めたのが <b>Mistral 7B</b> (arXiv:2310.06825, 2023-10) です。Mistral は SWA を <b>GQA と併用</b>し、KV ヘッド数の削減 (系統 1 の路線) と参照範囲の窓幅への限定 (系統 2 の路線) という<b>2 つの因子を同時に叩く</b>ことで、KV-Cache を大きく軽くしています。SWA は「$N$ を削る」という MHA 直下の分岐であり、GQA・MLA の「$n_{kv}\cdot d$ を削る」路線とは独立に組み合わせられる点が特徴です。</p>
+  <p class="lead">SWA の典拠は 2020 年の Longformer に遡り、実運用では Mistral 7B が GQA と組み合わせて広めました。</p>
+  <p>局所化の代表が <b>Sliding Window Attention (SWA)</b> です。先行研究の Sparse Transformer (2019) が局所的な疎パターンを提案し、これを局所窓・dilated 窓・global attention の 3 点構成として体系化し SWA の典拠となったのが <b>Longformer</b> (Beltagy, Peters, Cohan, arXiv:2004.05150, 2020-04) です。局所窓 Attention に加えて、間隔を空けて参照することで同じ計算量のまま受容野を広げる「dilated 窓」、そしていくつかのトークンだけが全結合的に参照する「global attention」を組み合わせています。やや後発の BigBird (2020-07) も類似の疎パターンを提案しました。</p>
+  <p>実運用でこの発想を広めたのが <b>Mistral 7B</b> (arXiv:2310.06825, 2023-10) です。Mistral は窓幅 <b>$w=4096$</b> の SWA を <b>GQA と併用</b>し、KV は窓幅ぶんだけの rolling buffer cache (窓幅で循環的に上書きするバッファ) で管理します。KV ヘッド数の削減 (系統 1 の路線、KV の中身を削る) と参照範囲の窓幅への限定 (系統 2 の路線、参照する範囲を削る) という<b>2 つの因子を同時に叩く</b>ことで、KV-Cache を大きく軽くしています (§5 デモの既定値 $w=4096$ もこれに合わせています)。SWA は「$N$ を削る」という MHA 直下の分岐であり、GQA・MLA の「$n_{kv}\cdot d$ を削る」路線とは独立に組み合わせられる点が特徴です。</p>
+  <p>層単位でハイブリッド構成をとる実装も広がっています。局所窓層と全結合 Attention 層を混在させることで §2 の受容野の限界を補う設計で、例えば Gemma 2 は局所層と全域層を 1:1 の比率で交互配置し、Gemma 3 は局所層 5 層につき全域層 1 層という 5:1 の比率で混在させています。</p>
+  <div class="warn">
+    <b>ただし窓運用には落とし穴があります。</b> 全結合 Attention で事前学習済みのモデル (Llama 系など) を推論時にのみ固定窓運用へ切り替えると、先頭付近のトークン (<b>attention sink</b>) を追い出した瞬間に生成品質が崩壊することが知られています (StreamingLLM, arXiv:2309.17453)。これは学習時と推論時で参照パターンが食い違うことが原因で、SWA を最初から学習に組み込んだ Mistral 7B のような設計とは状況が異なります。既存モデルに窓運用を後付けする場合は、先頭の少数トークン (sink) を常に保持する StreamingLLM 的な工夫が必要です。
+  </div>
   <div class="key">
     系統図の上で SWA は <b>MHA から直接分岐する</b>ノードです。GQA・MLA が「KV の中身」を圧縮する路線を深めていくのに対し、SWA は「参照する範囲」を削る、まったく別の軸を選びます。この 2 つの軸は排他ではなく、Mistral 7B のように<b>組み合わせて使う</b>のが実運用の主流です。
   </div>
@@ -213,6 +217,8 @@
   <div class="fn">
     参考: Iz Beltagy, Matthew E. Peters, Arman Cohan. "Longformer: The Long-Document Transformer." arXiv:<a href="https://arxiv.org/abs/2004.05150" target="_blank" rel="noopener">2004.05150</a>, 2020。<br>
     Albert Q. Jiang et al. "Mistral 7B." arXiv:<a href="https://arxiv.org/abs/2310.06825" target="_blank" rel="noopener">2310.06825</a>, 2023 (SWA + GQA 併用)。<br>
+    Guangxuan Xiao et al. "Efficient Streaming Language Models with Attention Sinks." arXiv:<a href="https://arxiv.org/abs/2309.17453" target="_blank" rel="noopener">2309.17453</a>, 2023。<br>
+    Gemma Team. "Gemma 2: Improving Open Language Models at a Practical Size." arXiv:<a href="https://arxiv.org/abs/2408.00118" target="_blank" rel="noopener">2408.00118</a>, 2024。 "Gemma 3 Technical Report." arXiv:<a href="https://arxiv.org/abs/2503.19786" target="_blank" rel="noopener">2503.19786</a>, 2025。<br>
     注意: 本ページのアニメーションと概算値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>
@@ -229,8 +235,9 @@
     ct.clearRect(0,0,W,H);
     ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
     ct.fillText('N×N 注意行列のうち、対角の幅 w='+w+' の帯だけが計算対象',20,26);
-    const gx=60, gy=50, gs=Math.min((W-120)/N,(H-110)/N);
+    const gy=50, gs=Math.min((W-120)/N,(H-110)/N);
     const gw=gs*N;
+    const gx=Math.max(60,(W-gw)/2);
     // 軸ラベル
     ct.fillStyle='#8fd6b4';ct.font='12px sans-serif';ct.textAlign='center';
     ct.fillText('キー位置 j →',gx+gw/2,gy-10);
@@ -268,6 +275,7 @@
   const W=cv.width,H=cv.height;
   function fmtN(n){if(n>=1024*1024)return (n/1024/1024).toFixed(1)+'M';if(n>=1024)return (n/1024).toFixed(0)+'K';return ''+n;}
   const N_MAX=131072;
+  const OUT_COLOR='#3d7dca', IN_COLOR='#198754';
 
   function drawBand(N,w,top){
     // 上段: 今のトークン(右端)から見た窓内/窓外の帯 (模式的な縮尺、実トークン数ではなく比率表示)
@@ -282,10 +290,9 @@
     ct.fillStyle='#fff';ct.font='12px sans-serif';ct.textAlign='center';
     if(outW>60) ct.fillText('窓外 (KV-Cache から捨てる)',bx+outW/2,by+bh/2+4);
     if(winW>50) ct.fillText('窓内 w='+fmtN(w),bx+outW+winW/2,by+bh/2+4);
-    ct.fillStyle='#ffd98f';ct.font='12px sans-serif';
+    ct.fillStyle='#ffd98f';ct.font='12px sans-serif';ct.textAlign='right';
     ct.fillText('現在位置 →',bx+bw-4,by+bh+16);
   }
-  const OUT_COLOR='#284a3f', IN_COLOR='#198754';
 
   function drawCurve(N,w,top,height){
     const px=60, py=top, pw=W-120, ph=height;

@@ -81,10 +81,10 @@
 
 <section>
   <h2><span class="num">0</span>この章の狙い</h2>
-  <p class="lead">この記事は Attention の基礎、そして前章 <a href="./attn-deltanet.html">DeltaNet / Gated DeltaNet</a> の delta 則と忘却ゲートを前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-deltanet.html">DeltaNet / Gated DeltaNet — delta 則で状態を直す</a> を読んでください。</p>
+  <p class="lead">この記事は Attention の基礎、そして前々章 <a href="./attn-deltanet.html">DeltaNet / Gated DeltaNet</a> の delta 則と忘却ゲートを前提にします。まだの方は先に <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> と <a href="./attn-deltanet.html">DeltaNet / Gated DeltaNet — delta 則で状態を直す</a> を読んでください。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    <b>KDA (Kimi Delta Attention)</b> は、Gated DeltaNet の忘却ゲート $g_t$ を「1 ステップ 1 スカラー」から「状態の成分ごとに独立な対角ゲート」へ細粒度化した手法です。状態行列の各チャネルが自分のペースで忘れられるようになり、線形 Attention の固定状態という制約の中で、忘却の表現力を一段上げます。chunk 化アルゴリズムで並列化され、KV-Cache を要らない状態固定の系譜に連なりながら、Kimi Linear のような MLA とのレイヤー毎ハイブリッド構成で実運用に持ち込まれています。
+    <b>KDA (Kimi Delta Attention)</b> は、Gated DeltaNet の忘却ゲート $g_t$ を「1 ステップ 1 スカラー」から「状態の成分ごとに独立な対角ゲート」へ細粒度化した手法です。状態行列の各チャネルが自分のペースで忘れられるようになり、線形 Attention の固定状態という制約の中で、忘却の表現力を一段上げます。chunk 化アルゴリズムで並列化され、KV-Cache を必要としない状態固定の系譜に連なりながら、Kimi Linear のような MLA とのレイヤー毎ハイブリッド構成で実運用に持ち込まれています。
   </div>
   <div class="toc">
     <a href="#s1">1. 何を解決する手法か</a>
@@ -99,27 +99,27 @@
 <section id="s1">
   <h2><span class="num">1</span>何を解決する手法か</h2>
   <p class="lead">Gated DeltaNet の忘却ゲート $g_t$ は 1 つのスカラーで、状態行列 $S_{t-1}$ 全体に一律に掛かります。</p>
-  <p>前章で見た Gated DeltaNet は、DeltaNet の delta 則更新に Mamba-2 流の忘却ゲート $g_t \in (0,1)$ を掛けて、状態を毎ステップ一律に減衰させました。$S_t = g_t\big(I - \beta_t k_t k_t^\top\big)S_{t-1} + \beta_t k_t v_t^\top$ という更新式で、$g_t$ はスカラーです。つまり状態行列のどの成分 (どのチャネル) も同じ速さで忘れられます。</p>
+  <p>前々章で見た Gated DeltaNet は、DeltaNet の delta 則更新に Mamba-2 流の忘却ゲート $g_t \in (0,1)$ を掛けて、状態を毎ステップ一律に減衰させました。$S_t = g_t\big(I - \beta_t k_t k_t^\top\big)S_{t-1} + \beta_t k_t v_t^\top$ という更新式で、$g_t$ はスカラーです。つまり状態行列のどの成分 (どのチャネル) も同じ速さで忘れられます。</p>
   <p>しかし状態行列の各チャネルが担っている「記憶の種類」は本来均質ではありません。ある成分は長く保持したい情報を、別の成分は短命でよい情報を持っているかもしれない。忘却の速さを 1 つのスカラーに縛ると、この違いを表現できません。KDA は、この忘却ゲートを<b>スカラーからチャネルごとに独立な対角ゲートへ細粒度化</b>することで、状態容量の使い方に自由度を与えます。</p>
   <div class="key">
-    KDA の着想は単純です。<b>「忘却の速さも、状態の成分ごとに学習させればいい」</b>。Gated DeltaNet が状態全体に 1 つの忘却率を掛けていたところを、対角行列 (チャネルごとに異なる値) に置き換えます。delta 則による誤差修正の骨格はそのまま引き継ぎ、忘却ゲートだけを精緻化するという、前章からの最小限かつ的を絞った拡張です。
+    KDA の着想は単純です。<b>「忘却の速さも、状態の成分ごとに学習させればいい」</b>。Gated DeltaNet が状態全体に 1 つの忘却率を掛けていたところを、対角行列 (チャネルごとに異なる値) に置き換えます。delta 則による誤差修正の骨格はそのまま引き継ぎ、忘却ゲートだけを精緻化するという、前々章からの最小限かつ的を絞った拡張です。
   </div>
 </section>
 
 <section id="s2">
   <h2><span class="num">2</span>数式で見る KDA</h2>
   <p class="lead">Gated DeltaNet の更新式から、忘却ゲート $g_t$ をスカラーから対角行列 $G_t$ に置き換えるだけです。記号は本シリーズ共通のものを使います。</p>
-  <p>前章の Gated DeltaNet の状態更新はこうでした。</p>
+  <p>前々章の Gated DeltaNet の状態更新はこうでした。</p>
   $$ S_t = g_t\big(I - \beta_t\, k_t k_t^\top\big)\,S_{t-1} + \beta_t\, k_t v_t^\top $$
   <p>KDA はここで、スカラーの $g_t$ を、状態の各チャネルに独立な値を持つ対角行列 $G_t = \mathrm{diag}(g_t^{(1)},\dots,g_t^{(d)})$ に置き換えます。概念的にはこう書けます。</p>
-  $$ S_t = G_t\big(I - \beta_t\, k_t k_t^\top\big)\,S_{t-1} + \beta_t\, k_t v_t^\top $$
+  $$ S_t = \big(I - \beta_t\, k_t k_t^\top\big)\,\big(G_t S_{t-1}\big) + \beta_t\, k_t v_t^\top $$
   <div class="math">
     <span class="c"># G_t は対角行列 (チャネルごとに独立な忘却率)</span><br>
     G_t = diag(g_t^(1), g_t^(2), ..., g_t^(d)),&nbsp;&nbsp; 各 g_t^(i) &isin; (0,1)
   </div>
-  <p>$G_t$ が状態行列 $S_{t-1}$ に左から掛かる (行方向、つまり出力側チャネルごと) ため、各行が自分専用の忘却率で減衰します。$G_t$ が単位行列にスカラーを掛けたものに退化すれば Gated DeltaNet と一致するので、KDA は Gated DeltaNet を包含する拡張です。</p>
+  <p>$G_t$ は状態行列 $S_{t-1}$ に左から掛かり (行方向、つまり key 次元のチャネルごと)、まず前状態 $S_{t-1}$ を $G_t$ で減衰させ、そのうえで delta 則の修正 $(I - \beta_t k_t k_t^\top)$ を適用します。出力は前々章までと同じ規約で $o_t = S_t^\top q_t$ です。$g_t$ がスカラーであれば減衰と delta 修正のどちらを先に掛けても結果は同じですが、$G_t$ が対角行列になると $(I-\beta_t k_t k_t^\top)$ と可換ではないため、掛ける順序は本質的な差になります。ここでは Kimi Linear の定式化に合わせて「先に減衰、次に delta 修正」の順で書いています。$G_t$ が単位行列にスカラーを掛けたものに退化すれば Gated DeltaNet と一致するので、KDA は Gated DeltaNet を包含する拡張です。</p>
   <div class="warn">
-    <b>ヘッジ。</b>ここに示したのは Gated DeltaNet の枠組みに対角ゲートを当てはめた概念式で、KDA 論文 (Kimi Linear, arXiv:2510.26692) 固有の chunk 化アルゴリズムの詳細な行列展開は、本稿が参照している原文の範囲では確認できていません。「対角ゲートへの細粒度化」という骨格は原文に明記されていますが、具体的な chunk 内演算の式は捏造せず、ここでは骨格のみを示しています。
+    <b>ヘッジ。</b>ここに示したのは Gated DeltaNet の枠組みに対角ゲートを当てはめた概念式です。KDA 論文 (Kimi Linear, arXiv:2510.26692) には chunk 化アルゴリズム (WY 表現に基づく展開) の記載がありますが、本稿ではその具体的な行列展開までは再掲・検証していません。「対角ゲートへの細粒度化」と「減衰→delta 修正の順序」という骨格は原文に基づきますが、chunk 内演算の詳細式は捏造せず、ここでは骨格のみを示しています。
   </div>
   <p>この対角ゲートは、DPLR (Diagonal-Plus-Low-Rank、対角+低ランク) と呼ばれる構造の一部を成します。delta 則の $(I - \beta_t k_t k_t^\top)$ の項自体が「単位行列 (対角) から低ランクの外積を引く」という DPLR 的な形をしており、KDA はこれに対角ゲート $G_t$ をさらに組み合わせることで、表現力を保ったまま chunk 単位の行列演算に展開できる構造を維持しています。</p>
 </section>
@@ -130,7 +130,7 @@
   <h3>時間計算量 (学習 / Prefill)</h3>
   <p>DPLR 構造専用の chunk 化アルゴリズムにより、系列長 $N$ に対して<b>$O(N)$</b> の chunk 並列で計算できます。DeltaNet / Gated DeltaNet と同じく、chunk 単位に行列演算へ展開することで GPU 上で並列に処理でき、$N^2$ のスコア行列を作らずに済みます。</p>
   <h3>Decode 時のボトルネック</h3>
-  <p>状態 $S_t$ は $d\times d$級の固定サイズで、過去の系列長 $N$ に依存しません。1 トークン生成ごとに読み直す量は状態サイズだけで、KV-Cache のように $N$ に比例して膨らみません。忘却ゲートが対角化された分、状態の情報保持の精度は上がりますが、状態のサイズそのものは変わらないため、decode のメモリ読み出し量は増えません。</p>
+  <p>状態 $S_t$ は $d_k \times d_v$ 級の固定サイズで、過去の系列長 $N$ に依存しません。1 トークン生成ごとに読み直す量は状態サイズだけで、KV-Cache のように $N$ に比例して膨らみません。忘却ゲートが対角化された分、状態の情報保持の精度は上がりますが、状態のサイズそのものは変わらないため、decode のメモリ読み出し量は増えません。</p>
   <h3>KV / 状態メモリの $N$ 依存</h3>
   <p>固定状態のため $N$ 依存が消えます。原文では、KDA を含む Kimi Linear のようなハイブリッド構成で <b>KV-Cache を最大 75% 削減</b>、<b>1M 文脈で decode スループットを最大 6 倍</b>にしたと報告されています ([報告]。ハイブリッド構成全体での数値であり、KDA 単体の寄与を分離した数値ではない点に注意してください)。</p>
   <div class="cost">
@@ -139,13 +139,13 @@
     <div class="box"><span class="big">最大75%減 / 最大6倍</span><span class="lbl">KV削減 / 1M文脈decode (報告値)</span></div>
   </div>
   <div class="key">
-    KDA の計算量の骨格は前章 Gated DeltaNet と同じ「chunk 並列 $O(N)$、状態固定」です。対角ゲートへの細粒度化はこの骨格を保ったまま、忘却の表現力だけを上げる拡張だと理解してください。
+    KDA の計算量の骨格は前々章 Gated DeltaNet と同じ「chunk 並列 $O(N)$、状態固定」です。対角ゲートへの細粒度化はこの骨格を保ったまま、忘却の表現力だけを上げる拡張だと理解してください。
   </div>
 </section>
 
 <section id="s4">
   <h2><span class="num">4</span>【構成】細粒度ゲートとハイブリッド配置</h2>
-  <p class="lead">左側は Gated DeltaNet (スカラーゲート) と KDA (対角ゲート) の状態更新の違い。右側は Kimi Linear のような MLA とのレイヤー毎ハイブリッド構造です。</p>
+  <p class="lead">下のボタンで2つのビューを切り替えます。1つ目は Gated DeltaNet (スカラーゲート) と KDA (対角ゲート) の状態更新の違い、2つ目は Kimi Linear のような MLA とのレイヤー毎ハイブリッド構造です。</p>
   <div class="canvas-wrap">
     <canvas id="cvArch" width="840" height="420"></canvas>
   </div>
@@ -153,20 +153,19 @@
     <button class="ghost active" data-v="gate" id="btnGate">細粒度ゲートの比較</button>
     <button class="ghost" data-v="hybrid" id="btnHybrid">MLA とのハイブリッド配置</button>
   </div>
-  <div class="legend">
-    <span><span class="dot" style="background:var(--k)"></span>KDA (線形, 状態固定)</span>
-    <span><span class="dot" style="background:var(--q)"></span>MLA (全結合, KV潜在)</span>
-    <span><span class="dot" style="background:var(--v)"></span>忘却ゲート成分</span>
+  <div class="legend" id="archLegend">
+    <span><span class="dot" style="background:var(--v)"></span>Gated DeltaNet (スカラーゲート)</span>
+    <span><span class="dot" style="background:var(--k)"></span>KDA (対角ゲート)</span>
   </div>
-  <p>左図では、Gated DeltaNet の状態がすべてのチャネルで同じ速さで薄くなっていくのに対し、KDA では各チャネルが自分のゲート値で独立に減衰します。右図は、Kimi Linear が採用するような構成 ― KDA 層を主体に、一定周期で MLA (全結合 Attention) の層を挟むレイヤー毎ハイブリッドです。線形層で状態を定数に保ちながら、全結合層で厳密な長距離参照を補うという役割分担です。</p>
+  <p>「細粒度ゲートの比較」ビューでは、Gated DeltaNet の状態がすべてのチャネルで同じ速さで薄くなっていくのに対し、KDA では各チャネルが自分のゲート値で独立に減衰します。「MLA とのハイブリッド配置」ビューは、Kimi Linear が採用する構成 ― KDA 層を主体に、一定周期で MLA (全結合 Attention) の層を挟むレイヤー毎ハイブリッドです (Kimi Linear 論文 (arXiv:2510.26692) 自体が KDA 層 3 に対し MLA 層 1 の比率を採用しており、[報告] ではなく論文由来の事実です)。線形層で状態を定数に保ちながら、全結合層で厳密な長距離参照を補うという役割分担です。</p>
 </section>
 
 <section id="s6">
   <h2><span class="num">5</span>代表モデルと系統上の位置</h2>
   <p class="lead">KDA は Gated DeltaNet の直接の子で、Kimi Linear の中核に採用されています。</p>
-  <p>KDA (Kimi Delta Attention) は Kimi Team の論文 "Kimi Linear: An Expressive, Efficient Attention Architecture" (arXiv:2510.26692, 2025-10) で提案されました。Gated DeltaNet の忘却ゲートをスカラーからチャネルごとに独立な対角ゲートへ細粒度化し、DPLR 構造専用の chunk 化アルゴリズムで効率的に計算します。代表モデルは <b>Kimi Linear</b> です。</p>
+  <p>KDA (Kimi Delta Attention) は Kimi Team の論文 "Kimi Linear: An Expressive, Efficient Attention Architecture" (arXiv:2510.26692, 2025-10) で提案されました。Gated DeltaNet の忘却ゲートをスカラーからチャネルごとに独立な対角ゲートへ細粒度化し、DPLR 構造専用の chunk 化アルゴリズムで効率的に計算します。代表モデルは <b>Kimi Linear</b> です。Kimi Linear では MLA 層を位置エンコーディングなし (NoPE) の全結合層として運用し、線形層と全結合層の役割分担を明確にしています。同時期には Gated DeltaNet 系の線形層と全結合層を同様の比率でレイヤー毎に混ぜる Qwen3-Next (2025-09) もあり、その中で KDA の新規性が細粒度ゲートそのものにある点が対照的です。</p>
   <div class="warn">
-    <b>ヘッジ (重要)。</b>2026 年後半の Kimi K3 は公式 blog で、線形の KDA と全結合系の Gated MLA を 3 対 1 の比率でレイヤー毎に交互に積むハイブリッド構成を採用していると述べています ([報告])。ただし本稿執筆時点で K3 の技術レポート・重みは未公開であり、<b>K3 が採用する「KDA」が本章で扱う KDA (arXiv:2510.26692, Kimi Linear) と厳密に同一の実装かどうかの一次資料での確認はできていません</b>。本章の代表モデルは、一次情報 (arXiv 論文) が確認できる <b>Kimi Linear</b> とします。K3 との対応は断定せず、参考情報として扱ってください。
+    <b>ヘッジ (重要)。</b>Kimi K3 (2026 年公開) は公式 blog で、線形の KDA と全結合系の Gated MLA を 3 対 1 の比率でレイヤー毎に交互に積むハイブリッド構成を採用していると述べています ([報告])。ただし本稿執筆時点で K3 の技術レポート・重みは未公開であり、<b>K3 が採用する「KDA」が本章で扱う KDA (arXiv:2510.26692, Kimi Linear) と厳密に同一の実装かどうかの一次資料での確認はできていません</b>。本章の代表モデルは、一次情報 (arXiv 論文) が確認できる <b>Kimi Linear</b> とします。K3 との対応は断定せず、参考情報として扱ってください。
   </div>
   <table>
     <tr><th>系統上の位置</th><th>差分</th></tr>
@@ -174,7 +173,7 @@
     <tr><td>本章: KDA</td><td>忘却ゲートを対角行列 $G_t$ へ細粒度化、DPLR chunk 化アルゴリズムで効率化</td></tr>
     <tr><td>実運用: Kimi Linear</td><td>KDA を主体に、MLA とレイヤー毎ハイブリッド配置</td></tr>
   </table>
-  <p>DeltaNet からの系譜 (Linear Attention → RWKV/RetNet/GLA → DeltaNet → Gated DeltaNet → KDA) の中で、KDA は現時点で最も細かい粒度の忘却ゲートを持つ手法です。次章 <b>Gated Attention</b> は逆に、softmax 系 (KV を持つ全結合 Attention) の側にゲートを足すアプローチで、線形系の KDA とは出発点が異なります。</p>
+  <p>DeltaNet からの系譜 (概念上の位置づけであり発表順ではない: Linear Attention → RWKV/RetNet/GLA → DeltaNet → Gated DeltaNet → KDA) の中で、GLA (Gated Linear Attention) はすでにチャネルごとの対角減衰を採用しています。KDA の新規性は「ゲートの細かさ」そのものではなく、delta 則 (誤差修正型の状態更新) の系譜で初めてこの細粒度ゲートを chunk 並列で効率的に計算できる形にした点にあります。なお DeltaNet 自体の起源 (Schlag ら, 2021) は RWKV/RetNet/GLA (2023年前後) より早く、上の矢印は発展的な位置づけの整理であって年代順ではありません。次章 <b>Gated Attention</b> は逆に、softmax 系 (KV を持つ全結合 Attention) の側にゲートを足すアプローチで、線形系の KDA とは出発点が異なります。</p>
 </section>
 
 <section id="s7">
@@ -182,10 +181,10 @@
   <table>
     <tr><th>論点</th><th>要点</th></tr>
     <tr><td>やること</td><td>Gated DeltaNet の忘却ゲート $g_t$ (スカラー) を対角行列 $G_t$ (チャネルごと) へ細粒度化</td></tr>
-    <tr><td>数式</td><td>$S_t = G_t(I-\beta_t k_t k_t^\top)S_{t-1} + \beta_t k_t v_t^\top$ (概念式。DPLR 構造)</td></tr>
+    <tr><td>数式</td><td>$S_t = (I-\beta_t k_t k_t^\top)(G_t S_{t-1}) + \beta_t k_t v_t^\top$ (概念式。DPLR 構造。対角ゲートは delta 修正の前に適用)</td></tr>
     <tr><td>時間計算量</td><td>$O(N)$。DPLR 専用 chunk 化アルゴリズムで並列</td></tr>
     <tr><td>状態 / メモリ</td><td>固定状態 ($N$ 非依存)。ハイブリッド構成で KV 最大75%減・1M文脈decode最大6倍 (報告値)</td></tr>
-    <tr><td>代表モデル</td><td>Kimi Linear (KDA単体の論文)。Kimi K3 は KDA+Gated MLA 3対1ハイブリッドと報告 (K3 での対応は一次資料未確認)</td></tr>
+    <tr><td>代表モデル</td><td>Kimi Linear (KDA の提案論文のモデル。論文自体が KDA 層 3:MLA 層 1 のハイブリッド構成)。Kimi K3 は KDA+Gated MLA 3対1ハイブリッドと報告 (K3 での対応は一次資料未確認)</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>KDA は、DeltaNet 系の「delta 則で状態を直す」骨格の上に、Gated DeltaNet が導入した忘却ゲートを<b>状態の成分ごとに独立化</b>することで、固定状態という制約の中での表現力を一段引き上げた手法です。単体では状態固定・$O(N)$ という線形系の性質を保ちながら、Kimi Linear のように MLA とレイヤー毎に組み合わせることで、長距離の厳密参照を全結合層に委ね、実運用に持ち込まれています。次章はアプローチを変え、softmax 系にゲートを足す <b>Gated Attention</b> へ進みます。
@@ -198,6 +197,8 @@
     参考: Kimi Team. "Kimi Linear: An Expressive, Efficient Attention Architecture." arXiv:2510.26692, 2025 (<a href="https://arxiv.org/abs/2510.26692" target="_blank" rel="noopener">arXiv:2510.26692</a>)。<br>
     参考: Yang et al. "Gated Delta Networks: Improving Mamba2 with Delta Rule." arXiv:2412.06464, 2024 (<a href="https://arxiv.org/abs/2412.06464" target="_blank" rel="noopener">arXiv:2412.06464</a>)。<br>
     参考: Yang et al. "Parallelizing Linear Transformers with the Delta Rule over Sequence Length." arXiv:2406.06484, 2024 (<a href="https://arxiv.org/abs/2406.06484" target="_blank" rel="noopener">arXiv:2406.06484</a>)。<br>
+    参考: DeepSeek-AI. "DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model." arXiv:2405.04434, 2024 (<a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener">arXiv:2405.04434</a>)。ハイブリッド構成で参照する MLA の詳細は <a href="./attn-mla.html">MLA の章</a> を参照。<br>
+    参考: Schlag et al. "Linear Transformers Are Secretly Fast Weight Programmers." arXiv:2102.11174, 2021 (<a href="https://arxiv.org/abs/2102.11174" target="_blank" rel="noopener">arXiv:2102.11174</a>)。DeltaNet の起源。<br>
     注意: Kimi K3 での KDA 採用・混合比 (3対1) は公式 blog に基づく報告であり、本稿執筆時点で技術レポート・重みは未公開のため、KDA (arXiv:2510.26692) との実装上の対応関係は一次資料で確認できていません。本ページのアニメーションは、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>
@@ -226,7 +227,7 @@
     const seg=barW/chans;
     for(let i=0;i<chans;i++){
       const x=x0+i*seg;
-      ct.fillStyle=K;ct.globalAlpha=0.35+0.5*scalarG;
+      ct.fillStyle=V;ct.globalAlpha=0.35+0.5*scalarG;
       ct.fillRect(x+3,y0,seg-6,rowH);
       ct.globalAlpha=1;ct.strokeStyle='#0d2b20';ct.lineWidth=2;
       ct.strokeRect(x+3,y0,seg-6,rowH);
@@ -241,7 +242,7 @@
     for(let i=0;i<chans;i++){
       const x=x0+i*seg;
       const g=gVals[i];
-      ct.fillStyle=V;ct.globalAlpha=0.3+0.55*g;
+      ct.fillStyle=K;ct.globalAlpha=0.3+0.55*g;
       ct.fillRect(x+3,y1,seg-6,rowH);
       ct.globalAlpha=1;ct.strokeStyle='#0d2b20';ct.lineWidth=2;
       ct.strokeRect(x+3,y1,seg-6,rowH);
@@ -292,8 +293,11 @@
   }
 
   const btnGate=document.getElementById('btnGate'), btnHybrid=document.getElementById('btnHybrid');
-  btnGate.onclick=()=>{btnGate.classList.add('active');btnHybrid.classList.remove('active');drawGate();};
-  btnHybrid.onclick=()=>{btnHybrid.classList.add('active');btnGate.classList.remove('active');drawHybrid();};
+  const legend=document.getElementById('archLegend');
+  const legendGate='<span><span class="dot" style="background:var(--v)"></span>Gated DeltaNet (スカラーゲート)</span><span><span class="dot" style="background:var(--k)"></span>KDA (対角ゲート)</span>';
+  const legendHybrid='<span><span class="dot" style="background:var(--k)"></span>KDA (線形, 状態固定)</span><span><span class="dot" style="background:var(--q)"></span>MLA (全結合, KV潜在)</span>';
+  btnGate.onclick=()=>{btnGate.classList.add('active');btnHybrid.classList.remove('active');drawGate();legend.innerHTML=legendGate;};
+  btnHybrid.onclick=()=>{btnHybrid.classList.add('active');btnGate.classList.remove('active');drawHybrid();legend.innerHTML=legendHybrid;};
   drawGate();
 })();
 </script>

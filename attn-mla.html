@@ -103,7 +103,7 @@
   <p>前章で見た GQA は、KV ヘッド数 $n_{kv}$ を $h$ から $g$ へ、さらに $1$ (MQA) へと減らすことで KV バイトを削りました。しかしこの削り方には限界があります。$g$ を小さくしすぎると、1 つの KV グループが担当する Q ヘッドの数が増え、そのグループの「見方」に押し付けられる Q ヘッドが増えて表現力の劣化が目立ちやすくなります。KV バイト式 $2 N n_{kv} d\, b_{\text{KV}} L$ の中で、GQA が叩けるのは $n_{kv}$ だけで、ヘッドあたりの次元 $d$ には手を付けていません。</p>
   <p>DeepSeek-V2 が導入した MLA は、この式のもっと根元、<b>$n_{kv} \cdot d$ という「KV 全体のサイズ」自体を、低ランクの潜在ベクトル $c_s$ (次元 $d_c$、$d_c \ll n_{kv} \cdot d$) に圧縮する</b>という発想へ質的に転換します。各トークンにつきキャッシュするのは低次元の $c_s$ だけで、実際に Attention で使う大きな Key・Value は、推論時に展開行列 $W_{UK}, W_{UV}$ で $c_s$ から復元します。ヘッドごとに別々の KV を持たせるのではなく、<b>全ヘッド共通の 1 本の潜在ベクトルから、必要な分だけ展開して使う</b>という設計です。</p>
   <div class="key">
-    ポイントは、<b>KV を「間引く」のではなく「圧縮する」</b>ことです。GQA はヘッドの本数という離散的な単位でしか削れませんでしたが、MLA は連続的な次元 $d_c$ を自由に選べるため、圧縮率をより細かく調整できます。さらに次節で見るとおり、<b>展開行列を Q 側の射影に吸収できる</b>ため、decode 時にキャッシュから読むのは圧縮済みの $c_s$ だけで済みます。
+    ポイントは、<b>KV を「間引く」のではなく「圧縮する」</b>ことです。GQA はヘッドの本数という離散的な単位でしか削れませんでしたが、MLA は連続的な次元 $d_c$ を自由に選べるため、圧縮率をより細かく調整できます。さらに次節で見るとおり、<b>展開行列を Q 側・出力側の射影に吸収できる</b>ため、decode 時にキャッシュから読むのは圧縮済みの $c_s$ (+ RoPE 用の $d_r$ 次元) で済みます。
   </div>
 </section>
 
@@ -120,11 +120,12 @@
   <p>クエリ側も同様に低次元の潜在ベクトル $q'_t$ を経由させ、展開行列 $W_{UQ}$ で Attention 空間へ写します。Attention スコアをこの潜在ベクトルのまま書くと、</p>
   $$ q_t^\top k_s = (W_{UQ}\, q'_t)^\top (W_{UK}\, c_s) = q'^{\,\top}_t \underbrace{(W_{UQ}^\top W_{UK})}_{\text{事前に 1 つの行列へ}} c_s $$
   <p>$W_{UQ}^\top W_{UK}$ を推論前に 1 つの行列へ畳み込んでおけば、decode 時にキャッシュから読み出すのは低次元の $c_s$ だけで済みます。展開後の大きな $k_s$ を実体化して保持する必要がありません。これが KV バイトを潜在次元 $d_c$ まで潰せる仕掛けです。</p>
+  <p>Value 側も同様の吸収が効きます。出力は $\sum_s \text{softmax}(\cdot)\, v_s = W_{UV}\Big(\sum_s \text{softmax}(\cdot)\, c_s\Big)$ と書けるため、$W_{UV}$ を Attention の外に出し、続く出力射影 $W_O$ 側へ畳み込めます。つまり<b>$W_{UK}$ は Q 側の射影へ、$W_{UV}$ は出力射影 $W_O$ 側へ</b>それぞれ吸収され、Key・Value のどちらも展開後の実体を保持せずに済みます。</p>
   <div class="warn">
-    <b>RoPE を入れると吸収が壊れます。</b> 位置 $t,s$ の回転行列 $R_t, R_s$ がクエリとキーの間に挟まると、その積が相対位置に依存する $R_{t-s}$ になり、位置に依らない 1 つの行列へ事前に畳み込めなくなります。そこで MLA は位置情報用に小さな次元 $d_r$ を別枠として分離し、$q_t, k_s$ を「圧縮された潜在部分」と「RoPE 専用の $d_r$ 次元部分」に分けて持ちます (DeepSeek-V2 では $d_c + d_r = 512 + 64$)。キャッシュする量は $d_c$ に加えてこの $d_r$ 分だけ増えます。
+    <b>RoPE を入れると吸収が壊れます。</b> 位置 $t,s$ の回転行列 $R_t, R_s$ がクエリとキーの間に挟まると、その積 $R_t^\top R_s = R_{s-t}$ が相対位置 $s-t$ に依存するため、位置に依らない 1 つの行列へ事前に畳み込めなくなります。そこで MLA は位置情報用に小さな次元 $d_r$ を別枠として分離し、$q_t, k_s$ を「圧縮された潜在部分」と「RoPE 専用の $d_r$ 次元部分」に分けて持ちます (DeepSeek-V2 では $d_c + d_r = 512 + 64$)。RoPE 専用の Key ($d_r$ 次元) は $c_s$ を経由せず入力 $x_s$ から直接生成され、全ヘッドで共有される 1 本だけをキャッシュします。キャッシュする量は $d_c$ に加えてこの $d_r$ 分だけ増えます。
   </div>
   <div class="key">
-    まとめると、MLA は KV 側を潜在次元 $d_c$ に圧縮し、展開行列を Q 側へ吸収することで<b>decode 時に読むキャッシュを $c_s$ (+ RoPE 用 $d_r$) だけに縮める</b>手法です。次節で見るとおり、これは KV バイトの式の $n_{kv}\cdot d$ を $d_c$ に置き換えることに相当します。
+    まとめると、MLA は KV 側を潜在次元 $d_c$ に圧縮し、展開行列を Q 側・出力側へ吸収することで<b>decode 時に読むキャッシュを $c_s$ (+ RoPE 用 $d_r$) だけに縮める</b>手法です。次節で見るとおり、これは KV バイトの式の $n_{kv}\cdot d$ を $d_c+d_r$ に置き換えることに相当します。
   </div>
 </section>
 
@@ -132,20 +133,21 @@
   <h2><span class="num">3</span>計算量</h2>
   <p class="lead">MLA が削るのは KV バイトだけです。全トークンを参照する構造そのものは変えないため、計算量のオーダーは MHA・GQA と同じです。</p>
   <h3>時間計算量 (学習 / Prefill)</h3>
-  <p>スコア行列の計算は依然 $N\times N$ で、ヘッドをまたいで見た総計算量は<b>$O(N^2 d)$</b> のままです。MLA は「参照するトークンの数」を減らすわけではなく「1 トークンあたりに保存する KV のサイズ」を減らすので、$O(L^2)$ に相当する演算量そのものは潰れません。TTFT を支配する prefill の演算コストには効きません。</p>
+  <p>スコア行列の計算は依然 $N\times N$ で、ヘッドをまたいで見た総計算量は<b>$O(N^2 d)$</b> のままです。MLA は「参照するトークンの数」を減らすわけではなく「1 トークンあたりに保存する KV のサイズ」を減らすので、$O(N^2)$ に相当する演算量そのものは潰れません。TTFT (Time To First Token、初トークンまでの時間) を支配する prefill の演算コストには効きません。</p>
   <h3>Decode 時のボトルネック</h3>
-  <p>1 トークン生成ごとに読み直す KV は、展開後の大きな $k_s,v_s$ ではなく<b>圧縮済みの $c_s$ (+ $d_r$ 次元の RoPE 部分) だけ</b>です。読む量が小さくなる分だけ decode の帯域負荷が下がり、TPOT とバッチ上限の両方に効きます。</p>
+  <p>1 トークン生成ごとに読み直す KV は、展開後の大きな $k_s,v_s$ ではなく<b>圧縮済みの $c_s$ (+ $d_r$ 次元の RoPE 部分) だけ</b>です。読む量が小さくなる分だけ decode の帯域負荷が下がり、TPOT (Time Per Output Token、トークンあたりの生成時間) とバッチ上限の両方に効きます。</p>
   <h3>KV メモリの $N$ 依存</h3>
-  <p>KV バイト式の $n_{kv}\cdot d$ が潜在次元 $d_c$ (+ $d_r$) に置き換わります。</p>
-  $$ \text{KV bytes} \approx 2 \cdot N \cdot d_c \cdot b_{\text{KV}} \cdot L $$
-  <p>先頭の $2$ を外してよい設計もありますが、本シリーズの基準式に合わせて $K,V$相当分として残しています。重要なのは<b>係数がヘッド数 $n_{kv}$ に依存しなくなった</b>ことで、$N$ への線形依存は保ちつつ、係数側の圧縮率を $d_c$ で自由に調整できます。DeepSeek-V2 の論文は、この圧縮によって<b>KV cache を 93.3% 削減し、最大生成スループットを 5.76 倍にした</b>と報告しています (この比較対象は DeepSeek 67B、すなわち MLA 以前の DeepSeek 自身の稠密モデルです)。同論文はまた、<b>MLA の KV サイズが GQA を 2.25 グループまで削った場合に相当する</b>ほど小さいとも述べています。</p>
+  <p>KV バイト式の $n_{kv}\cdot d$ が潜在次元 $d_c + d_r$ に置き換わります。</p>
+  $$ \text{KV bytes} \approx N \, (d_c + d_r)\, b_{\text{KV}} \cdot L $$
+  <p>MHA・GQA の係数 $2$ は K と V を別々にキャッシュすることに由来しますが、MLA では K・V が単一の潜在ベクトル $c_s$ に統合されるため、この係数 $2$ 自体が消えます。これは設計上の選択ではなく、K と V を 1 本にまとめて圧縮するという MLA の構造そのものから来る効果です。重要なのは<b>係数がヘッド数 $n_{kv}$ に依存しなくなった</b>ことで、$N$ への線形依存は保ちつつ、係数側の圧縮率を $d_c$ で自由に調整できます。DeepSeek-V2 の論文は、この圧縮によって<b>KV cache を 93.3% 削減し、最大生成スループットを 5.76 倍にした</b>と報告しています (この比較対象は DeepSeek 67B、すなわち MLA 以前の DeepSeek 自身の稠密モデルです)。同論文はまた、<b>MLA の KV サイズが GQA を 2.25 グループまで削った場合に相当する</b>ほど小さいとも述べています ($d_c+d_r=512+64=576=2\times2.25\times128$)。</p>
+  <p>ただし計算量そのものは無償で減るわけではありません。decode で 1 トークンあたり参照する次元は $d=128$ から $d_c+d_r=576$ へ増えるため、Attention のヘッドあたり演算量 (FLOPs) はむしろ増えます。それでも decode はメモリ帯域律速のため、読むバイト数が減ることの方が実効速度に直結し、結果としてスループット向上につながります。</p>
   <div class="cost">
     <div class="box"><span class="big">O(N²d)</span><span class="lbl">時間計算量 (不変)</span></div>
     <div class="box"><span class="big">d_c</span><span class="lbl">KV はヘッド数非依存</span></div>
     <div class="box"><span class="big">93.3%</span><span class="lbl">KV削減 (DeepSeek67B比)</span></div>
   </div>
   <div class="key">
-    覚えておく基準: MLA は<b>「計算量は不変、KV バイトの係数だけを $n_{kv}\cdot d \to d_c$ に置き換える」</b>手法です。GQA が「ヘッド数」という離散的な単位で削るのに対し、MLA は「潜在次元」という連続的な単位で削るため、より深い圧縮に到達できます。
+    覚えておく基準: MLA は<b>「prefill の計算量は不変、KV バイトの係数を $n_{kv}\cdot d \to d_c+d_r$ に置き換え、係数 $2$ も K/V統合で消える」</b>手法です。GQA が「ヘッド数」という離散的な単位で削るのに対し、MLA は「潜在次元」という連続的な単位で削るため、より深い圧縮に到達できます。decode のヘッドあたり FLOPs はわずかに増えますが、帯域律速のため実効速度では勝ります。
   </div>
 </section>
 
@@ -156,7 +158,7 @@
     <canvas id="cvArch" width="840" height="380"></canvas>
   </div>
   <div class="controls">
-    <div class="slider">潜在次元 $d_c$ <input id="archDc" type="range" min="32" max="512" value="512" step="32"></div>
+    <div class="slider">潜在次元 $d_c$ <input id="archDc" type="range" min="32" max="512" value="128" step="32"></div>
   </div>
   <div class="legend">
     <span><span class="dot" style="background:var(--k)"></span>展開後の Key (ヘッドごと)</span>
@@ -181,14 +183,14 @@
     <div class="box"><span class="big" id="kv_bytes">—</span><span class="lbl">MLA KV-Cache (fp16)</span></div>
     <div class="box"><span class="big" id="kv_ratio">—</span><span class="lbl">MHA 比</span></div>
   </div>
-  <p>3 本の棒は MHA ($n_{kv}=32$)・GQA ($n_{kv}=8$)・MLA (潜在次元 $d_c$、+ RoPE 用 $d_r=64$) の KV-Cache サイズです。$d_c$ を DeepSeek-V2 の設定値 512 から下げていくと MLA の棒がさらに縮み、$d_c$ が十分小さい領域では GQA より軽くなる様子が見えます。DeepSeek-V2 の報告では、この圧縮で <b>KV cache を DeepSeek 67B (MHA 相当) 比 93.3% 削減</b>し、KV サイズは<b>GQA を 2.25 グループまで削った場合に相当</b>するとされています。</p>
+  <p>3 本の棒は MHA ($n_{kv}=32$)・GQA ($n_{kv}=8$)・MLA (潜在次元 $d_c$、+ RoPE 用 $d_r=64$) の KV-Cache サイズです。$d_c$ を DeepSeek-V2 の設定値 512 から下げていくと MLA の棒がさらに縮む様子が見えます。この設定 (GQA: $n_{kv}=8$) では $d_c=512$ (+ $d_r=64$) の時点で MLA はすでに GQA より軽く、$d_c$ を下げるほど差はさらに開きます。DeepSeek-V2 の報告では、この圧縮で <b>KV cache を DeepSeek 67B (MHA 相当) 比 93.3% 削減</b>し、KV サイズは<b>GQA を 2.25 グループまで削った場合に相当</b>するとされています。</p>
 </section>
 
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
   <p class="lead">MLA は GQA の延長線上にありながら、削り方を「グループ化」から「低ランク圧縮」へ質的に変えた手法です。</p>
-  <p>MLA (Multi-head Latent Attention) は DeepSeek-V2 (DeepSeek-AI, 2024-05, arXiv:2405.04434) が導入し、DeepSeek-V3 でも継承されました。論文は MLA の採用によって<b>KV cache を 93.3% 削減し、最大生成スループットを 5.76 倍にした</b>と報告しています (比較対象は MLA 導入前の DeepSeek 67B)。同時に、DeepSeek-V2 自身のアブレーションでは MLA が MHA と同等以上の性能を示したとも報告されており、<b>「KV を低ランクに圧縮しても品質がほぼ落ちない」</b>という経験的観測がこの系統を支えています。Kimi K2.5 もこの MLA を採用し、KV の潜在次元 $d_c$ を 512、Q の射影次元を 1536 に取っています。</p>
-  <p>系統としては、MLA は前章の GQA の延長線上に位置づけられますが、削る単位が「ヘッド数 (離散)」から「潜在次元 (連続)」へ変わる点で質的な転換です。次章 DSA は、この MLA が圧縮した KV の上に軽量な Indexer を載せ、「圧縮された KV の中から、クエリごとに重要な部分だけを動的に選ぶ」役割をさらに追加します。DeepSeek-V4 はこの MLA をさらに進め、CSA・HCA と呼ぶ圧縮 Attention のハイブリッドで層ごとに圧縮率を使い分けるとされていますが、本稿執筆時点で一次資料が限定的なため、詳細は次々章で慎重に扱います。</p>
+  <p>MLA (Multi-head Latent Attention) は DeepSeek-V2 (DeepSeek-AI, 2024-05, arXiv:2405.04434) が導入し、DeepSeek-V3 でも継承されました。論文は MLA の採用によって<b>KV cache を 93.3% 削減し、最大生成スループットを 5.76 倍にした</b>と報告しています (比較対象は MLA 導入前の DeepSeek 67B)。同時に、DeepSeek-V2 自身のアブレーションでは MLA が MHA と同等以上の性能を示したとも報告されており、<b>「KV を低ランクに圧縮しても品質がほぼ落ちない」</b>という経験的観測がこの系統を支えています。Kimi K2 系もこの MLA を採用し、KV の潜在次元 $d_c$ を 512、Q の射影次元を 1536 に取っています。推論を高速化する専用カーネル FlashMLA や、既存の GQA/MHA モデルの重みを事後変換して MLA 化する TransMLA 系の研究も登場しており、MLA は理論だけでなく実装レベルでも定着が進んでいます。</p>
+  <p>系統としては、MLA は前章の GQA の延長線上に位置づけられますが、削る単位が「ヘッド数 (離散)」から「潜在次元 (連続)」へ変わる点で質的な転換です。この MLA が圧縮した KV の上に軽量な Indexer を載せ、「圧縮された KV の中から、クエリごとに重要な部分だけを動的に選ぶ」役割をさらに追加するのが、後の章で扱う DSA です。DeepSeek-V4 はこの MLA をさらに進め、<a href="https://arxiv.org/abs/2606.19348" target="_blank" rel="noopener">CSA・HCA (arXiv:2606.19348)</a> と呼ぶ圧縮 Attention のハイブリッドで層ごとに圧縮率を使い分けています。</p>
   <div class="key">
     覚えておく系譜: <b>MQA/GQA が「ヘッドを共有して減らす」のに対し、MLA は「KV を潜在ベクトルへ低ランク圧縮する」</b>という別の軸に進みました。両者とも decode の KV 帯域を叩く系統1に属しますが、MLA の方がより深い圧縮に到達でき、かつ展開行列を Q 側へ吸収できるぶん品質劣化が小さいと報告されています。
   </div>
@@ -201,14 +203,14 @@
     <tr><td>やること</td><td>KV を低次元の潜在ベクトル $c_s$ (次元 $d_c$) に圧縮してキャッシュし、展開行列を Q 側へ吸収する</td></tr>
     <tr><td>数式</td><td>$c_s=W_{DKV}x_s$、$k_s=W_{UK}c_s,\,v_s=W_{UV}c_s$、$q_t^\top k_s=q'^\top_t(W_{UQ}^\top W_{UK})c_s$</td></tr>
     <tr><td>RoPE 対応</td><td>展開の吸収が壊れるため、位置情報用に小さな次元 $d_r$ を別枠で分離 (DeepSeek で $d_c+d_r=512+64$)</td></tr>
-    <tr><td>時間計算量</td><td>$O(N^2 d)$。MHA・GQA と不変 (演算量は減らない)</td></tr>
-    <tr><td>KV-Cache</td><td>$\approx 2 N d_c\, b_{\text{KV}} L$。$n_{kv}$ の代わりに潜在次元 $d_c$ に比例し、ヘッド数非依存</td></tr>
+    <tr><td>時間計算量</td><td>$O(N^2 d)$ (prefill)。MHA・GQA と不変。decode のヘッドあたり FLOPs は $d_c+d_r>d$ の分わずかに増えるが帯域律速なので実効速度は向上</td></tr>
+    <tr><td>KV-Cache</td><td>$\approx N (d_c+d_r)\, b_{\text{KV}} L$。K/V統合で係数2が消え、$n_{kv}$ の代わりに $d_c+d_r$ に比例、ヘッド数非依存</td></tr>
     <tr><td>効くフェーズ</td><td>decode のメモリ帯域と KV 容量。prefill の $O(N^2)$ 計算には効かない</td></tr>
     <tr><td>報告されている効果</td><td>KV cache 93.3% 削減・生成スループット 5.76倍 (DeepSeek 67B比)。KV サイズは GQA 2.25 グループ相当</td></tr>
-    <tr><td>代表モデル</td><td>DeepSeek-V2 / V3、Kimi K2.5 ($d_c=512$)</td></tr>
+    <tr><td>代表モデル</td><td>DeepSeek-V2 / V3、Kimi K2 系 ($d_c=512$)</td></tr>
   </table>
   <div class="key">
-    <b>結論。</b>MLA は、GQA が「ヘッド数」という離散的な単位で KV を削っていたのに対し、<b>「潜在次元」という連続的な単位で KV を低ランク圧縮する</b>ことで、より深い削減と小さな品質劣化を同時に達成しました。ただし削れるのは KV バイトだけで、全トークンを参照する $O(N^2)$ の構造そのものは変わりません。次章 DSA は、この MLA が圧縮した KV の上に「読む対象を動的に絞る」役割を追加し、prefill の計算量そのものにも踏み込みます。
+    <b>結論。</b>MLA は、GQA が「ヘッド数」という離散的な単位で KV を削っていたのに対し、<b>「潜在次元」という連続的な単位で KV を低ランク圧縮する</b>ことで、より深い削減と小さな品質劣化を同時に達成しました。ただし削れるのは KV バイトだけで、全トークンを参照する $O(N^2)$ の構造そのものは変わりません。後の章で扱う DSA は、この MLA が圧縮した KV の上に「読む対象を動的に絞る」役割を追加し、prefill の計算量そのものにも踏み込みます。
   </div>
   <div class="seriesnav">
     前の章 ← <a href="./attn-mqa-gqa.html">02. MQA / GQA — KV ヘッドを共有して減らす</a><br>
@@ -300,7 +302,7 @@
   const N_MAX=131072;
   const maxBytes=2*N_MAX*H_MHA*d*bkv*L;
   function kvBytesHeaded(N,nkv){return 2*N*nkv*d*bkv*L;}
-  function kvBytesMLA(N,dc){return 2*N*(dc+dr)*bkv*L;}
+  function kvBytesMLA(N,dc){return N*(dc+dr)*bkv*L;}
   function draw(N,dc){
     ct.clearRect(0,0,W,H);
     const bMHA=kvBytesHeaded(N,H_MHA);

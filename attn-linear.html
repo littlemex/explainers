@@ -87,7 +87,7 @@
   </div>
   <div class="key">
     <b>一言でいうと</b><br>
-    softmax があるせいで $QK^\top$ という $N\times N$ の行列を作らざるを得ませんでした。<b>softmax を外し、カーネル内積 $\phi(q)^\top\phi(k)$ に置き換えると、行列積の結合則が使えるようになり</b>、$(\phi(K)^\top V)$ を先に $N$ に依らない固定サイズへ畳み込んでから $\phi(Q)$ を掛けられます。これで計算量が $O(N^2)$ から <b>$O(N)$</b> に落ち、KV-Cache の代わりに<b>状態行列 $S$ (サイズ固定)</b> を持てば十分になります。
+    softmax があるせいで $QK^\top$ という $N\times N$ の行列を作らざるを得ませんでした。<b>softmax を外し、カーネル内積 $\phi(q)^\top\phi(k)$ に置き換えると、行列積の結合則が使えるようになり</b>、$(\phi(K)^\top V)$ を先に $N$ に依らない固定サイズへ畳み込んでから $\phi(Q)$ を掛けられます。これで計算量が $O(N^2 d)$ から <b>$O(N d^2)$</b> に落ち ($N \gg d$ の長系列で効きます)、KV-Cache の代わりに<b>状態行列 $S$ (サイズ固定)</b> を持てば十分になります。
   </div>
   <div class="toc">
     <a href="#s1">1. 何を解決する手法か</a>
@@ -104,31 +104,31 @@
   <h2><span class="num">1</span>何を解決する手法か</h2>
   <p class="lead">softmax があるかぎり、$QK^\top$ を丸ごと作るしかない。</p>
   <p>前章までの MQA・GQA・MLA・SWA・DSA は、いずれも「KV をどう減らす・選ぶか」という同じ土台の上で工夫していました。しかし、その土台自体 ― <b>KV-Cache が $N$ に比例して増え続ける</b>という構造 ― は誰も変えていません。素の Attention に戻って考えると、この構造は $\mathrm{softmax}(QK^\top/\sqrt d)V$ という式の $\mathrm{softmax}$ の存在に由来します。$\mathrm{softmax}$ は各クエリ $q_t$ について $\exp(q_t^\top k_s)$ を全キー $s\le t$ で計算してから正規化するため、<b>$Q$ と $K$ の間に他の演算を挟めず、$N\times N$ のスコア行列を必ず経由</b>してしまいます。だからこそ、これまでの章は「KV というデータそのもの」を削るしかなかったのです。</p>
-  <p>ここで問われる着想はシンプルです。<b>もし softmax がなければ、$QK^\top V$ の計算順序を変えられるのではないか</b>。実際、$\mathrm{softmax}$ を外して $\exp(q_t^\top k_s)$ をカーネル内積 $\phi(q_t)^\top \phi(k_s)$ で近似すると、行列積の結合則が使えるようになります。$(QK^\top)V$ を先に計算する代わりに、$Q(K^\top V)$ の順で計算してよくなり、$K^\top V$ は $N$ に依存しない固定サイズの行列に畳み込めます。<b>Katharopoulos et al. の "Transformers are RNNs" (arXiv:2006.16236)</b> が示したのは、まさにこの置き換えにより Attention が固定状態を持つ RNN と等価になるという事実です。</p>
+  <p>ここで問われる着想はシンプルです。<b>もし softmax がなければ、$QK^\top V$ の計算順序を変えられるのではないか</b>。実際、$\mathrm{softmax}$ を外して $\exp(q_t^\top k_s)$ を別のカーネル $\phi(q_t)^\top \phi(k_s)$ に<b>置き換える</b>と、行列積の結合則が使えるようになります (これは指数カーネルの近似ではなく、類似度関数そのものの置き換えです。$\exp$ を不偏推定で近似する路線には Performer (FAVOR+, arXiv:2009.14794) があります)。$(QK^\top)V$ を先に計算する代わりに、$Q(K^\top V)$ の順で計算してよくなり、$K^\top V$ は $N$ に依存しない固定サイズの行列に畳み込めます。<b>Katharopoulos et al. の "Transformers are RNNs" (arXiv:2006.16236)</b> が示したのは、まさにこの置き換えにより Attention が固定状態を持つ RNN と等価になるという事実です。</p>
   <div class="key">
-    <b>KV を減らす路線と、KV をやめる路線。</b> これまでの章は「MHA の $2Nn_{kv}db_{\text{KV}}L$ という式のどの因子を叩くか」でした。Linear Attention はこの式自体を手放し、<b>$N$ 依存が消えた固定サイズの状態 $S$</b> に置き換えます。得るものは $O(N)$ の計算量と一定サイズのメモリ、失うものは「どんな遠いトークンでも厳密に参照できる」という素の Attention の強みです (この代償は次節以降で詳述します)。
+    <b>KV を減らす路線と、KV をやめる路線。</b> これまでの章は「MHA の $2Nn_{kv}db_{\text{KV}}L$ という式のどの因子を叩くか」でした。Linear Attention はこの式自体を手放し、<b>$N$ 依存が消えた固定サイズの状態 $S$</b> に置き換えます。得るものは $O(N d^2)$ の計算量と一定サイズのメモリ、失うものは「どんな遠いトークンでも厳密に参照できる」という素の Attention の強みです (この代償は次節以降で詳述します)。
   </div>
 </section>
 
 <section id="s2">
   <h2><span class="num">2</span>数式で見る Linear Attention</h2>
   <p class="lead">$\mathrm{softmax}$ をカーネル内積に置換すると、Attention は状態の累積更新として書けます。記号は本シリーズ共通のものを使います。</p>
-  <p>素の Attention は $\mathrm{softmax}(QK^\top)V$ で、指数カーネル $\exp(q_t^\top k_s)$ を経由していました。これを特徴写像 $\phi(\cdot)$ の内積で近似します。</p>
+  <p>素の Attention は $\mathrm{softmax}(QK^\top)V$ で、指数カーネル $\exp(q_t^\top k_s)$ を経由していました。これを特徴写像 $\phi(\cdot)$ の内積に置き換えます (なお $\sqrt d$ によるスケーリングは $\phi$ の設計に吸収できるため、以降は省略して書きます)。</p>
   $$ \exp(q_t^\top k_s) \;\longrightarrow\; \phi(q_t)^\top \phi(k_s) $$
-  <p>この置き換えにより、出力 $o_t$ は次のように書けます。</p>
-  $$ \mathrm{softmax}(QK^\top)V \;\approx\; \phi(Q)\big(\phi(K)^\top V\big) $$
+  <p>この置き換えにより、(softmax の正規化を一旦除いた) 出力の分子部分は次のように書けます。</p>
+  $$ QK^\top V \;\longrightarrow\; \phi(Q)\big(\phi(K)^\top V\big) \quad (\text{正規化前}) $$
   <p>右辺の $\phi(K)^\top V$ は $d_k\times d_v$ の固定サイズの行列です。これを時刻ごとの累積として書き直すと、状態行列 $S_t$ の更新式になります。</p>
   <div class="math">
     <span class="c"># 状態 S_t は d_k×d_v の固定サイズ (系列長 N に依存しない)</span><br>
-    S_t = S_{t-1} + \phi(k_t)\, v_t^\top<br>
+    S_t = S_(t-1) + φ(k_t) v_tᵀ<br>
     <span class="c"># 正規化項 z_t も同様に累積</span><br>
-    z_t = z_{t-1} + \phi(k_t)
+    z_t = z_(t-1) + φ(k_t)
   </div>
   $$ S_t = S_{t-1} + \phi(k_t)\, v_t^\top, \qquad z_t = z_{t-1} + \phi(k_t) $$
-  <p>出力 $o_t$ は、この状態 $S_t$ にクエリ側の特徴写像 $\phi(q_t)$ を掛けて正規化するだけで得られます。</p>
-  $$ o_t = \frac{\phi(q_t)^\top S_t}{\phi(q_t)^\top z_t} $$
+  <p>出力 $o_t$ は、この状態 $S_t$ にクエリ側の特徴写像 $\phi(q_t)$ を掛けて正規化するだけで得られます (以下は $o_t$ を列ベクトルとして書いた形です。$\phi$ の出力次元は一般に $d_k$ と異なってもよく、その場合 $S_t$ は $d_\phi\times d_v$ になります)。</p>
+  $$ o_t = \frac{S_t^\top \phi(q_t)}{z_t^\top \phi(q_t)} $$
   <div class="key">
-    Attention が softmax という<b>非線形</b>を持つ間は、$Q$・$K$・$V$ の演算順序を変えられませんでした。カーネル近似で<b>線形</b>にした瞬間、結合則が使えるようになり、$(\phi(K)^\top V)$ を先に畳み込んで持ち運べる ― これが Linear Attention の核心です。$S_t$ が $d_k\times d_v$ の<b>固定サイズ</b>で、系列長 $N$ にまったく依存しない点に注目してください (以降の DeltaNet 系では分母 $z_t$ を落とし、正規化を別の形で行うのが主流です)。
+    Attention が softmax という<b>非線形</b>を持つ間は、$Q$・$K$・$V$ の演算順序を変えられませんでした。カーネル内積への置き換えで<b>線形</b>にした瞬間、結合則が使えるようになり、$(\phi(K)^\top V)$ を先に畳み込んで持ち運べる ― これが Linear Attention の核心です。$S_t$ が $d_k\times d_v$ の<b>固定サイズ</b>で、系列長 $N$ にまったく依存しない点に注目してください (以降の DeltaNet 系では分母 $z_t$ を落とし、正規化を別の形で行うのが主流です)。
   </div>
 </section>
 
@@ -137,6 +137,7 @@
   <p class="lead">KV-Cache という概念そのものが、$N$ に依存しない状態 $S$ に置き換わります。</p>
   <h3>時間計算量 (prefill / 学習時)</h3>
   <p>各時刻の状態更新 $S_t = S_{t-1} + \phi(k_t)v_t^\top$ は $\phi(k_t)$ ($d$ 次元) と $v_t$ ($d$ 次元) の外積で $O(d^2)$、これを $N$ ステップ繰り返すので、時間計算量は<b>$O(N d^2)$</b> です。素の Attention の $O(N^2 d)$ から $N$ の依存が二乗から線形に落ちます。</p>
+  <p>ただし、この逐次再帰形をそのまま $N$ ステップ順番に処理すると GPU 上で並列性が乗りません。実際の学習では、並列形 ($\phi(Q)(\phi(K)^\top V)$ に causal mask を掛ける形) や、系列をチャンクに分けて並列化する chunkwise 並列 (GLA の "Hardware-Efficient Training" や、DeltaNet の並列化 arXiv:2406.06484 が採用する方式) が使われます。<b>再帰形は推論 (decode) 向き、並列形/チャンク形は学習向き</b>という 2 つの顔がある点に注意してください。</p>
   <h3>Decode 時のボトルネック</h3>
   <p>1 トークンを生成するたびに、素の Attention は過去 $N$ 件分の KV を HBM から読み直す必要がありました。Linear Attention では、次のトークンの出力を出すのに必要なのは<b>直前の状態 $S_{t-1}$ だけ</b>です。<b>KV を読み出す必要がなく、固定サイズの状態を更新するだけ</b>で decode が完結します。</p>
   <h3>KV / 状態メモリの $N$ 依存</h3>
@@ -163,12 +164,12 @@
     <span><span class="dot" style="background:var(--k)"></span>Key</span>
     <span><span class="dot" style="background:var(--v)"></span>Value / 状態 S</span>
   </div>
-  <p><b>softmax 版</b>は、各クエリが全キーとの内積を取るため、$N\times N$ のスコア行列 (系列長に応じて面積が増える) を経由します。<b>線形版</b>に切り替えると、代わりに固定サイズの箱 (状態 $S$) が左から右へ流れ、各トークンの $\phi(k_t)v_t^\top$ を通過するたびに<b>箱のサイズを変えずに</b>更新されていく様子が見えます。系列がどれだけ長くなっても、箱の大きさは変わりません。</p>
+  <p><b>softmax 版</b>は、各クエリが全キーとの内積を取るため、$N\times N$ のスコア行列 (系列長に応じて面積が増える) を経由します。<b>線形版</b>に切り替えると、代わりに固定サイズの箱 (状態 $S$) が $S_0$ から $S_9$ までタイムライン上に並び、各トークンの $\phi(k_t)v_t^\top$ を反映して<b>箱のサイズを変えずに</b>更新されていく様子が見えます。系列がどれだけ長くなっても、箱の大きさは変わりません。</p>
 </section>
 
 <section id="s5">
   <h2><span class="num">5</span>【体験】系列長を伸ばすと何が起きるか</h2>
-  <p class="lead">系列長 $N$ スライダを動かして、softmax 版のメモリ (KV-Cache, $N^2$ に近い挙動) と線形版のメモリ (状態 $S$, 常に一定) を比較します。</p>
+  <p class="lead">系列長 $N$ スライダを動かして、softmax 版のメモリ (KV-Cache, $N$ に線形に増加) と線形版のメモリ (状態 $S$, 常に一定) を比較します。</p>
   <div class="canvas-wrap">
     <canvas id="cvDemo" width="840" height="340"></canvas>
   </div>
@@ -181,15 +182,16 @@
     <div class="box"><span class="big" id="demo_state">一定</span><span class="lbl">線形版 状態 S</span></div>
   </div>
   <p>$N$ を伸ばすほど、softmax 版の KV-Cache (橙の棒) は<b>線形に伸び続け</b>ます。一方、線形版の状態 $S$ (緑の棒) は<b>$N$ に一切依存せず、常に同じ高さ</b>のままです。これが「KV を持つか、固定状態を持つか」という 2 系統の分岐点そのものです。ただし、この一定の状態には<b>有限の容量</b>という別の制約があり、それは次章 DeltaNet で詳しく扱います。</p>
+  <p>なお §4 のスコア行列 ($N\times N$) は計算中に一時的に経由する中間テンソルで (FlashAttention 等ではタイル分割され実体化すらしません)、生成時にずっと持ち続けるメモリは KV-Cache であり、これは $N$ に線形です。時間計算量 $O(N^2 d)$ 自体は変わらない点に注意してください。</p>
 </section>
 
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
   <p class="lead">Linear Attention は「線形 / 状態系」という第 2 の系統の起点です。MHA から分岐し、RWKV・RetNet・GLA を経て DeltaNet 系へ精緻化されていきます。</p>
   <p>Linear Attention の骨格は Katharopoulos et al. "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention" (arXiv:2006.16236, 2020-06) で示されました。実運用のモデルというより、<b>softmax をカーネル内積に置き換えると Attention が固定状態の RNN と等価になる</b>という理論的な転換点を示した論文実験が起点です。</p>
-  <p>この骨格を土台に、<b>RWKV</b> (arXiv:2305.13048)・<b>RetNet</b> (arXiv:2307.08621)・<b>GLA</b> (Gated Linear Attention, arXiv:2312.06635) が、状態更新に減衰やゲートを加えるなどの改良を重ねて実モデルのスケールに乗せました。これらを経て、状態更新を「誤差修正」の形に精緻化する <b>DeltaNet</b> (次章) へとつながります。</p>
+  <p>この骨格を土台に、<b>RWKV</b> (arXiv:2305.13048、系譜的には AFT (Attention Free Transformer) にも連なる)・<b>RetNet</b> (arXiv:2307.08621)・<b>GLA</b> (Gated Linear Attention, arXiv:2312.06635) が、状態更新に減衰やゲートを加える改良を重ね、研究から中規模モデルでの検証を重ねてきました (RWKV は 14B 級まで到達)。さらに、<b>Lightning Attention</b> (Qin et al. の TransNormerLLM / Lightning Attention-2、arXiv:2401.04658、2024) を採用した <b>MiniMax-01</b> (arXiv:2501.08313、2025-01) は、Lightning Attention ブロック 7 層につき素の Softmax Attention ブロックを 1 層挟むハイブリッド構成 (8 層周期・80 層中 10 層が softmax) で、総パラメータ 456B (活性化 45.9B の MoE) の量産スケールに Linear Attention 系を載せた到達点です。これらを経て、状態更新を「誤差修正」の形に精緻化する <b>DeltaNet</b> (次章) へとつながります。</p>
   <div class="key">
-    <b>系統上の位置。</b> Linear Attention の親は MHA (前々節までの「素の Attention」) ですが、そこから分岐する先は MQA・GQA・MLA・SWA・DSA とは<b>別の系統</b>です。MHA を起点に「KV を減らす・選ぶ」softmax 系と、「softmax を外し固定状態で再帰する」線形 / 状態系の 2 本の道に分かれる ― この章がその分岐点にあたります。次章 DeltaNet は、この固定状態の「書き込み方」を精緻化する最初の一手です。
+    <b>系統上の位置。</b> Linear Attention の親は MHA (前章までの「素の Attention」) ですが、そこから分岐する先は MQA・GQA・MLA・SWA・DSA とは<b>別の系統</b>です。MHA を起点に「KV を減らす・選ぶ」softmax 系と、「softmax を外し固定状態で再帰する」線形 / 状態系の 2 本の道に分かれる ― この章がその分岐点にあたります。次章 DeltaNet は、この固定状態の「書き込み方」を精緻化する最初の一手です。
   </div>
 </section>
 
@@ -197,12 +199,12 @@
   <h2><span class="num">7</span>まとめ</h2>
   <table>
     <tr><th>論点</th><th>要点</th></tr>
-    <tr><td>やること</td><td>$\mathrm{softmax}$ の指数カーネルを特徴写像 $\phi$ の内積で近似し、結合則で計算順序を変える</td></tr>
-    <tr><td>数式</td><td>$\mathrm{softmax}(QK^\top)V \approx \phi(Q)(\phi(K)^\top V)$。状態 $S_t=S_{t-1}+\phi(k_t)v_t^\top$、$o_t=\phi(q_t)^\top S_t/z_t$</td></tr>
+    <tr><td>やること</td><td>$\mathrm{softmax}$ の指数カーネルを特徴写像 $\phi$ の内積に置き換え、結合則で計算順序を変える</td></tr>
+    <tr><td>数式</td><td>$QK^\top V \to \phi(Q)(\phi(K)^\top V)$ (正規化前)。状態 $S_t=S_{t-1}+\phi(k_t)v_t^\top$、$o_t=S_t^\top\phi(q_t)/(z_t^\top\phi(q_t))$</td></tr>
     <tr><td>時間計算量</td><td>$O(N d^2)$。素の Attention の $O(N^2 d)$ から $N$ が線形に</td></tr>
     <tr><td>状態 / メモリ</td><td>状態 $S$ は $d_k\times d_v$ の固定サイズ。$N$ に依存しない</td></tr>
     <tr><td>decode</td><td>状態更新のみで完結。KV の読み出しが不要</td></tr>
-    <tr><td>代表モデル</td><td>Katharopoulos et al. の論文実験。後継として RWKV・RetNet・GLA</td></tr>
+    <tr><td>代表モデル</td><td>Katharopoulos et al. の論文実験。後継として RWKV・RetNet・GLA。量産スケールでは MiniMax-01 の Lightning Attention</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>Linear Attention は、これまでの章とは異なる手段で KV-Cache の重さに答えました。KV を減らす・選ぶのではなく、<b>softmax を外して結合則を使えるようにし、$N$ 依存そのものを固定サイズの状態 $S$ に畳み込んで消した</b>のです。ここから始まる「線形 / 状態系」は、RWKV・RetNet・GLA を経て、状態の書き込み方を精緻化する DeltaNet へと続きます。次章では、この固定状態が持つ弱点 (有限容量) と、それを「誤差修正」で克服する delta 則を見ます。
@@ -216,6 +218,9 @@
     参考: Bo Peng et al. "RWKV: Reinventing RNNs for the Transformer Era." arXiv:<a href="https://arxiv.org/abs/2305.13048" target="_blank" rel="noopener">2305.13048</a>, 2023。<br>
     参考: Yutao Sun et al. "Retentive Network: A Successor to Transformer for Large Language Models." arXiv:<a href="https://arxiv.org/abs/2307.08621" target="_blank" rel="noopener">2307.08621</a>, 2023。<br>
     参考: Songlin Yang et al. "Gated Linear Attention Transformers with Hardware-Efficient Training." arXiv:<a href="https://arxiv.org/abs/2312.06635" target="_blank" rel="noopener">2312.06635</a>, 2023。<br>
+    参考: Krishna Choromanski et al. "Rethinking Attention with Performers." arXiv:<a href="https://arxiv.org/abs/2009.14794" target="_blank" rel="noopener">2009.14794</a>, 2020。<br>
+    参考: Zhen Qin et al. "TransNormerLLM: A Faster and Better Large Language Model with Improved TransNormer." arXiv:<a href="https://arxiv.org/abs/2401.04658" target="_blank" rel="noopener">2401.04658</a>, 2024 (Lightning Attention / Lightning Attention-2 の出典)。<br>
+    参考: MiniMax et al. "MiniMax-01: Scaling Foundation Models with Lightning Attention." arXiv:<a href="https://arxiv.org/abs/2501.08313" target="_blank" rel="noopener">2501.08313</a>, 2025。<br>
     注意: 本ページのアニメーションと概算値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>
@@ -257,7 +262,7 @@
   function drawLinear(){
     ct.clearRect(0,0,W,H);
     ct.fillStyle='#d7f5e6';ct.font='15px sans-serif';ct.textAlign='left';
-    ct.fillText('状態 S_t = S_{t-1} + φ(k_t) v_t^T — 固定サイズの箱を左から右へ再帰更新',20,28);
+    ct.fillText('状態 S_t = S_{t-1} + φ(k_t) v_t^T — タイムライン上に S_0…S_9 が並ぶ固定サイズの再帰更新',20,28);
     const N=10, x0=60, y0=190, step=(W-140)/(N-1), boxW=52,boxH=52;
     // タイムライン
     ct.strokeStyle='rgba(215,245,230,0.25)';ct.lineWidth=1.5;
@@ -302,7 +307,7 @@
   function fmtBytes(b){if(b>=1e9)return (b/1e9).toFixed(2)+' GB';if(b>=1e6)return (b/1e6).toFixed(1)+' MB';if(b>=1e3)return (b/1e3).toFixed(0)+' KB';return b+' B';}
   function fmtN(n){if(n>=1024)return (n/1024).toFixed(n%1024===0?0:1)+'K';return ''+n;}
   function kvBytes(N){return 2*N*nkv*d*bkv*L;}
-  const STATE_BYTES=d*d*bkv; // 固定サイズの状態 (d_k=d_v=d と近似)
+  const STATE_BYTES=nkv*L*d*d*bkv; // 全ヘッド・全層合計の状態 (d_k=d_v=d, n_kv=8, L=32 と近似。z_t 分は無視できるため省略)
   const maxKV=kvBytes(N_MAX);
 
   function draw(N){
@@ -326,10 +331,10 @@
     ct.fillStyle='#8fd6b4';ct.font='bold 20px sans-serif';ct.textAlign='center';
     ct.fillText(fmtBytes(STATE_BYTES),x2+bw/2,baseY-h2-14);
     ct.fillStyle='#d7f5e6';ct.font='13px sans-serif';
-    ct.fillText('線形版 状態 S',x2+bw/2,baseY+22);
+    ct.fillText('線形版 状態 S (全ヘッド・全層合計)',x2+bw/2,baseY+22);
     ct.fillText('(N を変えても一定)',x2+bw/2,baseY+40);
     ct.font='13px sans-serif';ct.fillStyle='#d7f5e6';ct.textAlign='left';
-    ct.fillText('概算: n_kv=8, d=128, L=32 層, fp16 (softmax 版)。状態は d_k×d_v×2byte (線形版)',20,H-14);
+    ct.fillText('概算: n_kv=8, d=128, L=32 層, fp16。状態は n_kv×L×d_k×d_v×2byte。緑バーの高さは可視化のため誇張 (実際の比率は概算で1%未満)',20,H-14);
   }
   const sN=document.getElementById('demoN');
   function upd(){
