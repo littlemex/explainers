@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>/kaggle validation — CV 設計と CV-LB 追跡</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0f2a1e; --draft:#b07d2b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:52px 24px 44px;text-align:center}
+  header .kicker{font-size:13px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.02em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  header p{margin:0;opacity:.92;font-size:16px}
+  header .tags{margin:14px 0 0;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  header .tag{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);
+    border-radius:20px;padding:3px 13px;font-size:13px}
+  main{max-width:860px;margin:0 auto;padding:30px 20px 80px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .draftbar{background:#fff6e6;border:1px solid #e6c684;color:#8a5a12;border-radius:12px;
+    padding:12px 18px;margin:0 0 22px;font-size:14.5px}
+  .draftbar b{color:var(--draft)}
+  .lead{background:#eaf5ef;border:1px solid var(--g4);border-radius:14px;padding:18px 22px;margin:0 0 24px;
+    font-size:16.5px;color:var(--g1);font-weight:600}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:20px 24px;margin:16px 0;box-shadow:0 2px 12px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:19px;margin:0 0 12px;border-left:6px solid var(--g3);padding-left:12px}
+  p{margin:0 0 10px}
+  ul{margin:6px 0 4px;padding-left:22px}
+  li{margin:4px 0}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 7px;font-size:13.5px;color:var(--g1);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre{background:var(--code);color:#e6f3ec;border-radius:12px;padding:16px 18px;overflow-x:auto;
+    font-size:13.5px;line-height:1.7;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre .c{color:#8fd6b4}
+  .kv{width:100%;border-collapse:collapse;font-size:14.5px}
+  .kv th{text-align:left;width:120px;color:var(--g1);vertical-align:top;padding:7px 12px 7px 0;white-space:nowrap}
+  .kv td{padding:7px 0;border-bottom:1px solid var(--line)}
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px}
+  .flow .step{background:#eaf5ef;border:1px solid var(--g4);border-radius:8px;padding:6px 12px;color:var(--g1);font-weight:600}
+  .flow .here{background:var(--g1);color:#fff;border-color:var(--g1)}
+  .flow .arw{color:#9aa}
+  .src{font-size:13.5px;color:var(--sub)}
+  .src code{font-size:13px}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">EXPLAINERS ・ skills ・ Kaggle ・ 03</p>
+  <h1>/kaggle validation</h1>
+  <p>CV 設計と CV-LB 追跡</p>
+  <div class="tags"><span class="tag">段階: 検証設計</span><span class="tag">類型: 予測系</span><span class="tag">優先度: 3</span></div>
+</header>
+<main>
+  <a class="back" href="./index.html">← Kaggle スキル群へ戻る</a>
+  <div class="draftbar"><b>ドラフト</b> ― このページは現時点で分かっている情報から書いた暫定版です。スキルの実体 (<code>.claude/skills/kaggle/SKILL.md</code>) はサブコマンドの仕様を定義済みですが、手順の細部は実装時に変わる可能性があります。</div>
+  <p class="lead">データ構造に合った CV split を組み、CV と public LB の相関を最初から追う。CV-LB の乖離を見つけたときの再点検の起点でもある。</p>
+
+  <section>
+    <h2>要点</h2>
+    <table class="kv">
+      <tr><th>発火条件</th><td>最初の学習前。または CV と LB が乖離したとき。</td></tr>
+      <tr><th>前提</th><td><code>BRIEF.md</code> (指標・データのグルーピング) を読んでいること。</td></tr>
+      <tr><th>入力</th><td>学習データ。</td></tr>
+      <tr><th>出力</th><td>split 実装 + CV-LB 追跡表 (adversarial validation を回した場合はその報告も)。</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>やること</h2>
+    <ul>
+      <li>正しい「実体」単位で GroupKFold を選ぶ。Eedi では <code>QuestionId</code> 単位より <code>ConstructId</code> 単位のほうが LB 相関が良かった、という実例がある。時系列は TimeSeriesSplit、不均衡は StratifiedKFold を根拠つきで。</li>
+      <li>多シード CV (例 5-fold × 複数シード) を基本にし、変更は paired t-test など有意差で採否を決める。提出枠をノイズに浪費しない (ISIC は 10 シードで p 値ゲート)。</li>
+      <li>特徴量エンジニアリングによる CV 改善は LB と相関しやすく、ハイパラ調整による CV 改善は相関が薄い (Home Credit)。この違いを踏まえて何を信じるか決める。</li>
+      <li>任意で adversarial validation (train 対 test の分類器) を回し、分布シフトと drift 上位の特徴量を検出する。</li>
+      <li>CV-LB 追跡表 (実験 → CV → public LB → 差) を最初から付け、相関を監視する。差が広がったらこのスキルを再実行する。</li>
+    </ul>
+  </section>
+  <section>
+    <h2>実行例</h2>
+    <pre><span class="c"># 最初の学習前、または CV-LB 乖離時</span>
+/kaggle validation
+
+<span class="c"># → split 実装 + CV-LB 追跡表 (抜粋)</span>
+split     : GroupKFold(ConstructId, k=5), seeds=[0,1,2]
+gate      : paired t-test, p&lt;0.05 のみ提出
+tracking  : exp / CV / LB / gap を追記中</pre>
+    
+  </section>
+
+  <section>
+    <h2>パイプラインの位置</h2>
+    <div class="flow">
+      <span class="step">01 brief</span><span class="arw">→</span><span class="step here">03 validation / 10 sim-agent</span><span class="arw">→</span><span class="step">05 exp ループ</span><span class="arw">→</span><span class="step">07 sub-check</span><span class="arw">→</span><span class="step">08 retro</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>境界と実体</h2>
+    <p>生データの取得と提出そのものは既存の <b>nvidia-kaggle</b> スキルが担当し、このスキルはその情報を戦略・検証・規律に変換する層に徹する。API 呼び出しは再実装しない。</p>
+    <p class="src">スキルの実体 (手順の正本): リポジトリの <code>.claude/skills/kaggle/SKILL.md</code>。このページは索引であり、手順の詳細は複製しない。</p>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

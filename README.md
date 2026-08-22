@@ -8,6 +8,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 
 | Series | Topic | Entry |
 |--------|-------|-------|
+| Skills | A catalog of my own Claude Code skills (slash commands) — what each does and when to fire it — so I don't have to remember them. First sub-series: Kaggle competition workflow | [skills/index.html](./skills/index.html) |
 | Paper reading | Reading one notable paper/blog post at a time — background, core equations, and conclusions in a single beginner-friendly, interactive page (episode 1: Lilian Weng's scaling laws; episode 2: Kimi K3's architecture) | [paper-index.html](./paper-index.html) |
 | ML basics | Transformer building blocks (Attention, FFN/MoE, normalization) and Flow Matching, each explained from scratch with live animations | [ml-basics-index.html](./ml-basics-index.html) |
 | Attention lineage | MHA to GQA/MLA, sparsification (SWA/DSA), and linear/state-space models (Mamba), traced along a release-time family tree | [attention-series-index.html](./attention-series-index.html) |
