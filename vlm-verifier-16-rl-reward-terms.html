@@ -69,7 +69,7 @@
   <p style="font-size:15px;color:#a8dcc4;margin:0 0 10px;letter-spacing:.06em">第 16 回・RL 実測</p>
   <h1>安い VLM を SFT なしの強化学習だけで鍛える</h1>
   <p>日本語の文書画像を Markdown に書き起こす課題で、7B の小さなモデルを「教師ありの模倣学習 (SFT) を一切せず」に強化学習だけで伸ばせるか、という検証の現在地です。<br>
-  結論は一言で言えます。<strong>報告する指標の項目を報酬が見ていないと、その項目は必ず払わされる。</strong></p>
+  結論は一言で言えます。<strong>報告する指標の項目を報酬が見ていないと、学習データがその項目を含まない限り、必ず払わされる。</strong></p>
 </div></header>
 
 <div class="wrap">
@@ -92,8 +92,10 @@
   <div>
     <button onclick="setPreset('base')">base (学習前)</button>
     <button onclick="setPreset('v2')">v2: 数式なしデータ + 2 項報酬</button>
-    <button onclick="setPreset('v3nf')">v3nf: 数式ありデータ + 2 項報酬</button>
-    <button onclick="setPreset('v3fr')">v3fr: 数式あり + 3 項報酬</button>
+    <button onclick="setPreset('v3nf')">v3nf 25: 数式ありデータ + 2 項報酬</button>
+    <button onclick="setPreset('v3fr')">v3fr 25: 数式あり + 3 項報酬</button>
+    <button onclick="setPreset('v3nf50')">v3nf 50: 倍の学習</button>
+    <button onclick="setPreset('v3fr50')">v3fr 50: 倍の学習</button>
     <button class="ghost" onclick="setPreset('graft')">合成 (base の数式を貼り戻す)</button>
   </div>
   <div class="kpi">
@@ -112,8 +114,10 @@
 const RUNS = {
   base:  {label:"base (学習前)",              text:71.34, table:73.01, form:82.33},
   v2:    {label:"v2 (数式なしデータ/2 項報酬)", text:78.65, table:76.63, form:74.00},
-  v3nf:  {label:"v3nf (数式ありデータ/2 項報酬)",text:77.01, table:77.01, form:79.81},
-  v3fr:  {label:"v3fr (数式あり/3 項報酬)",     text:78.11, table:77.86, form:85.17},
+  v3nf:  {label:"v3nf 25 step (数式ありデータ/2 項報酬)",text:77.01, table:77.01, form:79.81},
+  v3fr:  {label:"v3fr 25 step (数式あり/3 項報酬)",     text:78.11, table:77.86, form:85.17},
+  v3nf50:{label:"v3nf 50 step (同じ 2 項報酬のまま倍の学習)",text:77.31, table:78.01, form:82.14},
+  v3fr50:{label:"v3fr 50 step (dev が選ぶ報告値)",         text:77.49, table:78.41, form:83.73},
   graft: {label:"v2 + base の数式を貼り戻し",   text:78.52, table:76.63, form:85.09},
 };
 function fmt(x, d=2){return x.toFixed(d)}
@@ -137,7 +141,9 @@ function setPreset(key){
     base:"学習前の出発点です。数式項が 82.33 と、実は 3 項の中で一番高い。",
     v2:"partial は +5.5 と大きく上がったのに、Overall はほぼ動きません。数式項が -8.3 落ちて、上がった 2 項を打ち消しています。報酬が見ていない項目が代金を払った状態です。",
     v3nf:"合成データに数式を入れました。数式項の損失は -8.3 から -2.5 に縮みますが、まだ base より下で、Overall も有意に上がりません。データを足すだけでは足りない、が実測されました。",
-    v3fr:"報酬に数式項を足しました。数式項は base を超え (+2.8)、Overall は +4.8 で初めて統計的に有意になります。しかも partial も最良。第 3 項を見たら他の 2 項も良くなりました。",
+    v3fr:"報酬に数式項を足しました。数式項は base を超え (+2.8)、Overall は +4.8 で CI が 0 を除外します。しかも partial も最良。第 3 項を見たら他の 2 項も良くなりました。",
+    v3nf50:"同じ 2 項報酬のまま学習を倍にすると、数式項は base とほぼ同水準まで戻り (-0.19)、Overall も +3.6 で CI が 0 を跨がなくなります。<strong>25 step で見えた「報酬項が有意性を分ける」は、ここで崩れます。</strong>報酬が買っていたのは有意性ではなく到達の速さでした。",
+    v3fr50:"報告値はこちらです (checkpoint は dev が選ぶ)。Overall +4.315、CI [+1.41, +7.29]。数式項は 50 step でも base 超えを保ちます (+1.40)。両 checkpoint で残る差はここだけで、<strong>採点した項目だけが base を超える</strong>という形になります。",
     graft:"学習しない解法です。RL モデルの本文と表はそのまま、数式だけ学習前モデルの出力を貼り戻すと Overall +5.5。ただし推論を 2 回まわす必要があります。",
   };
   v.style.display="block"; v.innerHTML="<strong>"+r.label+"</strong>: "+msgs[key];
@@ -247,8 +253,10 @@ d2run();
 <tr><td>v2: GRPO 25 step (数式なしデータ)</td><td class="good">+5.460</td><td>+0.863</td><td>[-2.73, +4.45]</td><td class="bad">-8.33</td></tr>
 <tr><td>v2 seed 2 / seed 3 (再現)</td><td class="good">+5.143 / +4.140</td><td>+1.219 / -0.819</td><td>いずれも 0 を含む</td><td class="bad">-6.63 / -10.74</td></tr>
 <tr><td>LoRA SFT 1 epoch (同じデータ)</td><td class="good">+5.846</td><td class="bad">-2.651</td><td>[-6.79, +1.47]</td><td class="bad">-19.65</td></tr>
-<tr><td>v3nf: 数式ありデータ + 2 項報酬</td><td class="good">+4.836</td><td>+2.385</td><td>[-0.87, +5.62]</td><td class="bad">-2.52</td></tr>
-<tr><td><strong>v3fr: 数式あり + 3 項報酬</strong></td><td class="good">+5.809</td><td class="good">+4.819</td><td><strong>[+2.28, +7.48]</strong></td><td class="good">+2.84</td></tr>
+<tr><td>v3nf 25 step: 数式ありデータ + 2 項報酬</td><td class="good">+4.836</td><td>+2.385</td><td>[-0.87, +5.62]</td><td class="bad">-2.52</td></tr>
+<tr><td>v3fr 25 step: 数式あり + 3 項報酬</td><td class="good">+5.809</td><td class="good">+4.819</td><td><strong>[+2.28, +7.48]</strong></td><td class="good">+2.84</td></tr>
+<tr><td>v3nf 50 step: 同じ 2 項報酬で倍の学習</td><td class="good">+5.479</td><td class="good">+3.588</td><td><strong>[+0.74, +6.52]</strong></td><td>-0.19</td></tr>
+<tr><td><strong>v3fr 50 step: 報告値 (dev が選ぶ checkpoint)</strong></td><td class="good">+5.771</td><td class="good">+4.315</td><td><strong>[+1.41, +7.29]</strong></td><td class="good">+1.40</td></tr>
 <tr><td>v2 + base の数式を貼り戻し (学習なし)</td><td>+5.396</td><td class="good">+4.517</td><td><strong>[+1.91, +7.28]</strong></td><td class="good">+2.76</td></tr>
 </tbody>
 </table>
@@ -256,9 +264,13 @@ d2run();
 <p>読みどころは 3 つです。</p>
 <ul>
   <li><strong>SFT は同じデータで、公式指標では base より下に落ちます。</strong>数式項が -19.65。強化学習は -8.33 なので、<em>未学習カテゴリの壊し方が RL の方が穏やか</em>でした (直接比較で RL が +11.3pt、CI が 0 を除外)。理屈は素朴で、SFT は「数式のない書き方」を正解として能動的に教え、RL は「自分が既に出す答えの中で点の高い方に寄る」だけだからです。</li>
-  <li><strong>データを足すだけでは足りません。</strong>v3nf (データに数式あり・報酬は 2 項) は数式項をまだ base より下に留め、Overall も判定不能のままです。</li>
-  <li><strong>報酬項を足すと初めて有意になります。</strong>v3fr は Overall +4.819 で CI が 0 を除外。しかも partial も最良で、第 3 項を見たことで他の 2 項が悪くなるどころか良くなりました。</li>
+  <li><strong>報酬項を足すと 25 step の時点で有意になります。</strong>v3fr は Overall +4.819 で CI が 0 を除外。しかも partial も最良で、第 3 項を見たことで他の 2 項が悪くなるどころか良くなりました。</li>
+  <li><strong>ただし「報酬項が有意性を分ける」は 50 step で崩れます。</strong>これは本稿を書いた後に測った結果で、最初の書き方は言い過ぎでした。数式ありデータのまま報酬を 2 項に据え置いた v3nf も、学習を倍にすると Overall +3.588 で CI が 0 を跨がなくなります (数式項も -0.19 まで戻る)。アーム間の差は +0.726 で CI が 0 を含みます。</li>
 </ul>
+
+<div class="note"><strong>両方の checkpoint で残る主張はこれだけです。</strong>数式を採点したアームだけが数式項で <strong>base を超える</strong> (25 step +2.84 / 50 step +1.40)。採点しないアームは base の水準まで戻って止まります (-2.52 / -0.19)。つまり報酬項が買っているのは「その項目そのもの」と「到達の速さ」で、「その項目を上げられるかどうか」ではありません。データに入れておけば、遅れて base 相当までは戻ります。</div>
+
+<p>報告する値の選び方も書いておきます。checkpoint は dev の 121 ページで選ぶと事前に決めており、dev は step 50 を選びました。TEST では step 25 の方が 0.5pt 高いので、<strong>選択規則を守ったことで数字が 0.5pt 下がっています</strong> (ノイズ床 0.19pt より大きい差)。都合の良い checkpoint を後から選ばないための代金です。</p>
 
 <div class="demo">
   <h3>デモ 3: 学習しない解法「数式の貼り戻し」を体験する</h3>
@@ -444,8 +456,8 @@ d5pick(2);
 
 <h2>6. この検証で得られた再利用できる教訓</h2>
 <ul>
-  <li><strong>報酬は、報告する指標の全項目を覆う。</strong>覆っていない項目は必ず代金として払われる。今回は 3 項のうち 1 項を落とし、上がった 2 項をちょうど打ち消した。</li>
-  <li><strong>カテゴリをデータに足すだけでは直らない。</strong>データ被覆で損害の大半 (5.8pt) は戻るが、報酬項がないと base より下に留まり、公式スコアは判定不能のまま。</li>
+  <li><strong>報酬は、報告する指標の全項目を覆う。</strong>覆っておらず、かつ学習データにも入っていない項目は代金として払われる。今回は 3 項のうち 1 項を落とし、上がった 2 項をちょうど打ち消した。</li>
+  <li><strong>データ被覆と報酬項は、効く場所が違う。</strong>データに入れれば損害は戻る (25 step で 5.8pt、50 step でほぼ全額) が、戻る先は <em>base と同水準</em>まで。報酬で採点して初めて base を超える。報酬項が買うのは「その項目を上げられること」ではなく「上げる速さ」と「base を超える上限」だった。<strong>この 1 行は 25 step の結果だけを見て書いた最初の版から書き換えている</strong> (当時は「報酬項がないと有意にならない」と書いていた)。</li>
   <li><strong>「完璧な答えを入れて満点が返るか」を毎回確かめる。</strong>今回、公式の数式スコアが 0.29 と出て環境不良を疑ったが、真因は自前の自己診断コードが <code>$$</code> を二重に付けていたことだった。「同一入力を両側に入れたら 1.0 になるか」という単体の当たり判定 (identity probe) を作って初めて切り分けられた。</li>
   <li><strong>合成指標だけを見ない。</strong>「Overall は動かなかった」で終わらせると、実際に起きた「2 項は有意に改善し、1 項が有意に悪化した」という情報量の多い事実が消える。項別に信頼区間を出す。</li>
   <li><strong>ベンチマーク側の穴も測る。</strong>公式の数式スコアは余剰な数式を罰しないので、候補を増やすだけで約 1pt 稼げる。自分の報酬では余剰にペナルティと一致下限を入れた。</li>
