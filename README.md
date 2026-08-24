@@ -17,6 +17,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 | Distributed systems | CAP, consistency models, consensus (Raft/Paxos), replication — explained then quizzed | [distsys-index.html](./distsys-index.html) |
 | MLIR | Dialects, progressive lowering, SSA, pattern rewriting — explained then quizzed | [mlir-index.html](./mlir-index.html) |
 | Mathematical statistics | MLE, CLT, Bayesian inference, hypothesis testing — explained then quizzed | [mathstats-index.html](./mathstats-index.html) |
+| Cheap VLM, made strong | How far a small 7B VLM can be pushed with RL and verifiers — the verifier toolkit (episodes 1-15, including BNF-constrained decoding) and then measured GRPO results on OmniDocBench-JASyn (episode 16 onward) | [vlm-verifier-index.html](./vlm-verifier-index.html) |
 | Information theory | Entropy, KL divergence, mutual information, coding theorems — explained then quizzed | [infotheory-index.html](./infotheory-index.html) |
 
 ### ML basics series

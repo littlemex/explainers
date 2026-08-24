@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安い VLM を RL だけで鍛える — 現状と次にやれること</title>
+<style>
+  :root{
+    --ink:#12211a; --sub:#4a5c53; --line:#d7e4dd; --bg:#fbfdfc;
+    --g900:#0b3d2c; --g700:#12684a; --g500:#1f9d6b; --g100:#e4f3ec; --g050:#f2f9f5;
+    --warn:#8a5a00; --warnbg:#fff6e0; --bad:#8a2f2f; --badbg:#fdecec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+       font-size:18px;line-height:1.9}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 24px;font-size:14px}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600}
+  .topbar a:hover{text-decoration:underline}
+  header{background:linear-gradient(160deg,var(--g900),var(--g700));color:#fff;padding:56px 24px 44px;margin-bottom:40px}
+  header .wrap{padding-bottom:0}
+  h1{font-size:34px;line-height:1.45;margin:0 0 14px}
+  header p{font-size:19px;margin:0;color:#d6ece1;max-width:760px}
+  h2{font-size:27px;margin:56px 0 12px;padding-bottom:10px;border-bottom:3px solid var(--g100)}
+  h3{font-size:21px;margin:34px 0 8px;color:var(--g900)}
+  p{margin:14px 0}
+  code{background:var(--g050);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:0.9em}
+  table{border-collapse:collapse;width:100%;margin:20px 0;font-size:16px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--g100);color:var(--g900)}
+  tbody tr:nth-child(even){background:#fff}
+  .good{color:var(--g700);font-weight:700}
+  .bad{color:var(--bad);font-weight:700}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:26px 0}
+  .demo{background:var(--g050);border:2px solid var(--g100);border-radius:12px;padding:22px 24px;margin:26px 0}
+  .demo h3{margin-top:0}
+  .demo .hint{color:var(--sub);font-size:16px}
+  .note{background:var(--warnbg);border-left:5px solid var(--warn);padding:14px 18px;margin:20px 0;font-size:17px}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+  .kpi div{flex:1 1 180px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi b{display:block;font-size:28px;color:var(--g700);line-height:1.3}
+  .kpi span{color:var(--sub);font-size:15px}
+  button{font:inherit;font-size:16px;background:var(--g700);color:#fff;border:0;border-radius:8px;
+         padding:9px 16px;cursor:pointer;margin:4px 6px 4px 0}
+  button.ghost{background:#fff;color:var(--g900);border:1.5px solid var(--g500)}
+  button:active{transform:translateY(1px)}
+  label{display:inline-flex;align-items:center;gap:8px;margin:6px 18px 6px 0;font-size:17px}
+  input[type=checkbox]{width:20px;height:20px;accent-color:var(--g700)}
+  textarea{width:100%;min-height:150px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+           font-size:14px;line-height:1.7;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  pre{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;
+      font-size:14px;line-height:1.7}
+  .bar{height:26px;background:var(--g100);border-radius:6px;overflow:hidden;margin:6px 0 14px}
+  .bar i{display:block;height:100%;background:var(--g500)}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .row>div{flex:1 1 300px}
+  .tag{display:inline-block;background:var(--g100);color:var(--g900);border-radius:999px;
+       padding:2px 12px;font-size:14px;margin-right:8px}
+  .ok{color:var(--g700)} .ng{color:var(--bad)}
+  ul{margin:14px 0 14px 22px;padding:0} li{margin:8px 0}
+  footer{color:var(--sub);font-size:15px;border-top:1px solid var(--line);margin-top:60px;padding-top:20px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./vlm-verifier-index.html">← 安い VLM をどこまで強くできるか シリーズ 目次</a>　/　<a href="./index.html">アーカイブ一覧</a></div>
+<header><div class="wrap">
+  <p style="font-size:15px;color:#a8dcc4;margin:0 0 10px;letter-spacing:.06em">第 16 回・RL 実測</p>
+  <h1>安い VLM を SFT なしの強化学習だけで鍛える</h1>
+  <p>日本語の文書画像を Markdown に書き起こす課題で、7B の小さなモデルを「教師ありの模倣学習 (SFT) を一切せず」に強化学習だけで伸ばせるか、という検証の現在地です。<br>
+  結論は一言で言えます。<strong>報告する指標の項目を報酬が見ていないと、その項目は必ず払わされる。</strong></p>
+</div></header>
+
+<div class="wrap">
+
+<h2>0. 前提: 何を測っているのか</h2>
+
+<p>題材は <strong>OmniDocBench-JASyn</strong> という日本語文書のベンチマーク (518 ページ)。画像を入力し、Markdown を出力させて、次の <strong>3 つの項目</strong>で採点します。この 3 項目の平均が公式スコア <code>Overall</code> です。</p>
+
+<div class="row">
+<div class="card"><span class="tag">1</span><strong>本文</strong><br><span class="hint">正解テキストとの編集距離。1 に近いほど良い (100 点満点換算)。</span></div>
+<div class="card"><span class="tag">2</span><strong>表</strong><br><span class="hint">TEDS。表の木構造とセル内容の一致度。</span></div>
+<div class="card"><span class="tag">3</span><strong>数式</strong><br><span class="hint">CDM。LaTeX を実際に画像へ描画して文字を突き合わせる。</span></div>
+</div>
+
+<p>ここが今回の話の心臓部です。<strong>我々の学習の報酬は 1 と 2 しか見ていませんでした。</strong>3 の数式は「重いから」「合成データに入れていないから」学習の対象外でした。すると何が起きるか、次のデモで体感してください。</p>
+
+<div class="demo">
+  <h3>デモ 1: 2 項だけ上げると公式スコアはどうなるか</h3>
+  <p class="hint">実測値をボタンで切り替えられます。partial は我々が最適化した 2 項の平均、Overall は公式の 3 項平均です。</p>
+  <div>
+    <button onclick="setPreset('base')">base (学習前)</button>
+    <button onclick="setPreset('v2')">v2: 数式なしデータ + 2 項報酬</button>
+    <button onclick="setPreset('v3nf')">v3nf: 数式ありデータ + 2 項報酬</button>
+    <button onclick="setPreset('v3fr')">v3fr: 数式あり + 3 項報酬</button>
+    <button class="ghost" onclick="setPreset('graft')">合成 (base の数式を貼り戻す)</button>
+  </div>
+  <div class="kpi">
+    <div><span>本文項</span><b id="d1text">—</b><span id="d1textd"></span></div>
+    <div><span>表項</span><b id="d1table">—</b><span id="d1tabled"></span></div>
+    <div><span>数式項 (CDM)</span><b id="d1form">—</b><span id="d1formd"></span></div>
+  </div>
+  <div class="kpi">
+    <div><span>partial (2 項平均・我々が最適化した指標)</span><b id="d1partial">—</b><span id="d1partiald"></span></div>
+    <div><span>Overall (公式 3 項平均)</span><b id="d1overall">—</b><span id="d1overalld"></span></div>
+  </div>
+  <div id="d1verdict" class="note" style="display:none"></div>
+</div>
+
+<script>
+const RUNS = {
+  base:  {label:"base (学習前)",              text:71.34, table:73.01, form:82.33},
+  v2:    {label:"v2 (数式なしデータ/2 項報酬)", text:78.65, table:76.63, form:74.00},
+  v3nf:  {label:"v3nf (数式ありデータ/2 項報酬)",text:77.01, table:77.01, form:79.81},
+  v3fr:  {label:"v3fr (数式あり/3 項報酬)",     text:78.11, table:77.86, form:85.17},
+  graft: {label:"v2 + base の数式を貼り戻し",   text:78.52, table:76.63, form:85.09},
+};
+function fmt(x, d=2){return x.toFixed(d)}
+function setPreset(key){
+  const r = RUNS[key], b = RUNS.base;
+  const partial = (r.text + r.table)/2, overall = (r.text + r.table + r.form)/3;
+  const bp = (b.text + b.table)/2, bo = (b.text + b.table + b.form)/3;
+  const put=(id,v,d)=>{document.getElementById(id).textContent=v;
+    const e=document.getElementById(id+"d"); if(e){e.textContent=d;} };
+  const sign=(x)=> (x>=0?"+":"")+fmt(x);
+  const cls=(id,x)=>{document.getElementById(id).style.color = x>=0? "var(--g700)":"var(--bad)"};
+  put("d1text", fmt(r.text), key==="base"?"":"base 比 "+sign(r.text-b.text));
+  put("d1table",fmt(r.table),key==="base"?"":"base 比 "+sign(r.table-b.table));
+  put("d1form", fmt(r.form), key==="base"?"":"base 比 "+sign(r.form-b.form));
+  cls("d1form", r.form-b.form);
+  put("d1partial",fmt(partial),key==="base"?"":"base 比 "+sign(partial-bp));
+  put("d1overall",fmt(overall),key==="base"?"":"base 比 "+sign(overall-bo));
+  cls("d1overall", overall-bo);
+  const v=document.getElementById("d1verdict");
+  const msgs={
+    base:"学習前の出発点です。数式項が 82.33 と、実は 3 項の中で一番高い。",
+    v2:"partial は +5.5 と大きく上がったのに、Overall はほぼ動きません。数式項が -8.3 落ちて、上がった 2 項を打ち消しています。報酬が見ていない項目が代金を払った状態です。",
+    v3nf:"合成データに数式を入れました。数式項の損失は -8.3 から -2.5 に縮みますが、まだ base より下で、Overall も有意に上がりません。データを足すだけでは足りない、が実測されました。",
+    v3fr:"報酬に数式項を足しました。数式項は base を超え (+2.8)、Overall は +4.8 で初めて統計的に有意になります。しかも partial も最良。第 3 項を見たら他の 2 項も良くなりました。",
+    graft:"学習しない解法です。RL モデルの本文と表はそのまま、数式だけ学習前モデルの出力を貼り戻すと Overall +5.5。ただし推論を 2 回まわす必要があります。",
+  };
+  v.style.display="block"; v.innerHTML="<strong>"+r.label+"</strong>: "+msgs[key];
+}
+setPreset('base');
+</script>
+
+<h2>1. やったこと (初学者向けに一段ずつ)</h2>
+
+<h3>強化学習 (GRPO) とは、ここでは何をしているのか</h3>
+<p>SFT は「正解の書き起こしを丸ごと見せて真似させる」学習です。今回の強化学習 (GRPO) はそれをしません。代わりに次を繰り返します。</p>
+<ul>
+  <li>1 ページの画像に対し、モデルに <strong>8 通りの答えを書かせる</strong> (温度をつけてサンプリング)。</li>
+  <li>8 通りそれぞれを<strong>採点</strong>する。この採点関数が「報酬」で、今回は「本文の一致度」と「表の一致度」の平均。</li>
+  <li>同じページの 8 通りの中で<strong>平均より良かった答えの確率を上げ、悪かった答えの確率を下げる</strong>。</li>
+</ul>
+<p>正解文そのものを教えないので、モデルは「自分が既に出せる答えの中で、点が高い方に寄っていく」だけです。ここが後で重要になります。</p>
+
+<h3>合成データで学習し、公開ベンチマークで測る</h3>
+<p>学習データは自前で 1200 ページ生成しました (HTML と CSS で日本語の文書を組み、Chromium で画像化し、正解は DOM から機械的に取り出す)。評価は Stockmark 公開の JASyn 518 ページで、そのうち 121 ページだけを「選択用 (dev)」に使い、<strong>残り 397 ページ (test) は最後の一回しか触りません</strong>。学習中の判断に test を使うと数字が嘘になるためです。</p>
+
+<div class="note"><strong>ここで最初の落とし穴。</strong>合成データを作るとき「数式は公式指標の 2 項では採点されないから入れない」と判断しました。コードにその理由もコメントで残っています。この判断が、後で 3 項目のうち 1 項目を丸ごと失う原因になります。</div>
+
+<h2>2. 報酬は数式に対して「無関心」だった</h2>
+
+<p>「報酬が数式の省略を積極的に得点にしていたのでは?」という疑いは、実測で否定できます。完璧な答えから数式を消しても、報酬は <strong>1 桁も動きません</strong>。逆に、数式を <code>$$...$$</code> で囲まずに素のテキストとして書くと大きく減点されます。つまりモデルが見ている勾配は「数式を正しく囲んで書く = 無料、素テキストで書く = 高い罰、そもそも書かない = 無料」でした。</p>
+
+<div class="demo">
+  <h3>デモ 2: 報酬の本文項を、その場で計算する</h3>
+  <p class="hint">本物の報酬と同じ手順です。<em>(1) 表の行と数式ブロックを本文から除去 → (2) 空白を全部削除 → (3) 正解との編集距離を長さで正規化 → (4) 1 から引く。</em>下の「予測」を書き換えると即座に再計算します。</p>
+  <p><strong>正解の本文 (GT)</strong>: <code>当該プロセスにおいて需要変動を微分方程式で近似した。</code> ／ <strong>正解の数式</strong>: <code>E = mc^2</code></p>
+  <textarea id="d2pred">当該プロセスにおいて需要変動を微分方程式で近似した。
+
+$$ E = mc^2 $$</textarea>
+  <div>
+    <button onclick="d2set('keep')">数式を正しく書く</button>
+    <button onclick="d2set('drop')">数式を消す</button>
+    <button onclick="d2set('plain')">数式を素テキストで書く</button>
+    <button class="ghost" onclick="d2set('wrong')">数式を間違える</button>
+  </div>
+  <div class="kpi">
+    <div><span>報酬の本文項</span><b id="d2text">—</b><span id="d2textd"></span></div>
+    <div><span>報酬の数式項 (v3 で追加したもの)</span><b id="d2form">—</b><span id="d2formd"></span></div>
+  </div>
+  <div id="d2msg" class="note"></div>
+</div>
+
+<script>
+const GT_TEXT = "当該プロセスにおいて需要変動を微分方程式で近似した。";
+const GT_FORMULA = "E = mc^2";
+const D2 = {
+  keep:  "当該プロセスにおいて需要変動を微分方程式で近似した。\n\n$$ E = mc^2 $$",
+  drop:  "当該プロセスにおいて需要変動を微分方程式で近似した。",
+  plain: "当該プロセスにおいて需要変動を微分方程式で近似した。\n\nE = mc^2",
+  wrong: "当該プロセスにおいて需要変動を微分方程式で近似した。\n\n$$ E = mc^3 + 1 $$",
+};
+function lev(a,b){
+  const m=a.length,n=b.length; if(!m)return n; if(!n)return m;
+  let prev=[...Array(n+1).keys()], cur=new Array(n+1);
+  for(let i=1;i<=m;i++){cur[0]=i;
+    for(let j=1;j<=n;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));}
+    [prev,cur]=[cur,prev];}
+  return prev[n];
+}
+// 本文項: 数式・表行を除去 → 空白除去 → 正規化編集距離
+function textTerm(pred){
+  const stripped = pred.replace(/\$\$[\s\S]*?\$\$/g,' ').replace(/^\s*\|.*\|\s*$/gm,' ');
+  const p = stripped.replace(/\s+/g,''), g = GT_TEXT.replace(/\s+/g,'');
+  return Math.max(0, 1 - lev(p,g)/Math.max(p.length,g.length,1));
+}
+// 数式項: $$..$$ を取り出し正規形にして、正解との類似度 (v3 で追加した項)
+function canon(s){return s.replace(/\\(left|right|displaystyle)\b/g,'').replace(/\s+/g,'');}
+function formulaTerm(pred){
+  const found=[...pred.matchAll(/\$\$([\s\S]+?)\$\$/g)].map(m=>canon(m[1]));
+  if(!found.length) return 0;
+  const g=canon(GT_FORMULA);
+  const best=Math.max(...found.map(p=>1-lev(p,g)/Math.max(p.length,g.length,1)));
+  const surplus=Math.max(0,found.length-1);
+  return Math.max(0,(best<0.30?0:best) - 0.15*surplus);
+}
+function d2run(){
+  const pred=document.getElementById("d2pred").value;
+  const t=textTerm(pred), f=formulaTerm(pred);
+  document.getElementById("d2text").textContent=t.toFixed(5);
+  document.getElementById("d2form").textContent=f.toFixed(5);
+  const base=textTerm(D2.keep);
+  document.getElementById("d2textd").textContent="正しく書いた場合との差 "+((t-base)>=0?"+":"")+(t-base).toFixed(5);
+  document.getElementById("d2msg").innerHTML =
+    "<strong>読み方</strong>: 「数式を消す」を押すと本文項は <em>1 桁も動きません</em> (差 0.00000)。"
+    +"つまり v2 の報酬にとって数式の省略は完全に無料でした。一方「素テキストで書く」は本文項が下がります"
+    +" (JASyn 82 ページの実測では平均 -0.151)。だから最も安全な戦略は「書かない」になります。"
+    +"数式項 (v3 で追加) だけが、この省略に値札を付けます。";
+}
+function d2set(k){document.getElementById("d2pred").value=D2[k];d2run();}
+document.getElementById("d2pred").addEventListener("input",d2run);
+d2run();
+</script>
+
+<h2>3. 実測値 (未使用の 397 ページ)</h2>
+
+<p>学習の判断に一度も使っていない test 397 ページでの数字です。信頼区間はページ単位のペア bootstrap 10,000 回。<strong>「CI が 0 を含む」= この設計では有無を判定できない</strong>という意味で、効果ゼロの証明ではありません。</p>
+
+<table>
+<thead><tr><th>手法</th><th>partial (2 項)</th><th>公式 Overall</th><th>Overall の 95% CI</th><th>数式 CDM</th></tr></thead>
+<tbody>
+<tr><td>base (Qwen2.5-VL-7B)</td><td>72.178</td><td>75.561</td><td>—</td><td>0.8233</td></tr>
+<tr><td>v2: GRPO 25 step (数式なしデータ)</td><td class="good">+5.460</td><td>+0.863</td><td>[-2.73, +4.45]</td><td class="bad">-8.33</td></tr>
+<tr><td>v2 seed 2 / seed 3 (再現)</td><td class="good">+5.143 / +4.140</td><td>+1.219 / -0.819</td><td>いずれも 0 を含む</td><td class="bad">-6.63 / -10.74</td></tr>
+<tr><td>LoRA SFT 1 epoch (同じデータ)</td><td class="good">+5.846</td><td class="bad">-2.651</td><td>[-6.79, +1.47]</td><td class="bad">-19.65</td></tr>
+<tr><td>v3nf: 数式ありデータ + 2 項報酬</td><td class="good">+4.836</td><td>+2.385</td><td>[-0.87, +5.62]</td><td class="bad">-2.52</td></tr>
+<tr><td><strong>v3fr: 数式あり + 3 項報酬</strong></td><td class="good">+5.809</td><td class="good">+4.819</td><td><strong>[+2.28, +7.48]</strong></td><td class="good">+2.84</td></tr>
+<tr><td>v2 + base の数式を貼り戻し (学習なし)</td><td>+5.396</td><td class="good">+4.517</td><td><strong>[+1.91, +7.28]</strong></td><td class="good">+2.76</td></tr>
+</tbody>
+</table>
+
+<p>読みどころは 3 つです。</p>
+<ul>
+  <li><strong>SFT は同じデータで、公式指標では base より下に落ちます。</strong>数式項が -19.65。強化学習は -8.33 なので、<em>未学習カテゴリの壊し方が RL の方が穏やか</em>でした (直接比較で RL が +11.3pt、CI が 0 を除外)。理屈は素朴で、SFT は「数式のない書き方」を正解として能動的に教え、RL は「自分が既に出す答えの中で点の高い方に寄る」だけだからです。</li>
+  <li><strong>データを足すだけでは足りません。</strong>v3nf (データに数式あり・報酬は 2 項) は数式項をまだ base より下に留め、Overall も判定不能のままです。</li>
+  <li><strong>報酬項を足すと初めて有意になります。</strong>v3fr は Overall +4.819 で CI が 0 を除外。しかも partial も最良で、第 3 項を見たことで他の 2 項が悪くなるどころか良くなりました。</li>
+</ul>
+
+<div class="demo">
+  <h3>デモ 3: 学習しない解法「数式の貼り戻し」を体験する</h3>
+  <p class="hint">RL モデルの出力に数式が欠けているとき、学習前モデルの出力から数式だけ持ってきて貼るとどうなるか。実際のスクリプト <code>eval/formula_graft.py</code> と同じロジックです。</p>
+  <div class="row">
+    <div><strong>RL モデルの出力 (本文と表は良い)</strong>
+      <textarea id="d3rl" style="min-height:120px">## 実験結果
+
+本手法では処理効率を改善した。
+
+| 項目 | 値 |
+| --- | --- |
+| 誤差 | 0.12 |</textarea></div>
+    <div><strong>学習前モデルの出力 (数式は書けている)</strong>
+      <textarea id="d3base" style="min-height:120px">## 実験結果
+
+本手法では処理効率を改善した。以下の式で近似する。
+
+$$ \frac{\partial f}{\partial x} = \sigma \cdot y $$</textarea></div>
+  </div>
+  <button onclick="d3graft()">数式を貼り戻す</button>
+  <button class="ghost" onclick="d3reset()">元に戻す</button>
+  <div id="d3out"></div>
+</div>
+
+<script>
+const D3RL = document.getElementById("d3rl").value, D3BASE = document.getElementById("d3base").value;
+function blocksOf(md){return [...md.matchAll(/\$\$([\s\S]+?)\$\$/g)].map(m=>m[1].trim());}
+function d3graft(){
+  const rl=document.getElementById("d3rl").value, bs=document.getElementById("d3base").value;
+  const have=new Set(blocksOf(rl).map(canon));
+  const add=blocksOf(bs).filter(b=>!have.has(canon(b)));
+  const out=add.length? rl.trimEnd()+"\n\n"+add.map(b=>"$$ "+b+" $$").join("\n\n")+"\n" : rl;
+  document.getElementById("d3out").innerHTML =
+    "<p><strong>合成後の出力</strong> (追加した数式 "+add.length+" 個)</p><pre>"+
+    out.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))+"</pre>"+
+    "<div class='note'>実測 (518 ページ): 数式が欠けていた 51 ページに 109 個の数式が入り、公式 Overall は 76.424 → 80.078、"
+    +"数式 CDM は 0.740 → 0.851。代金は本文項 -0.10pt だけ、表項はちょうど 0。"
+    +"<br><strong>ただし注意</strong>: 公式 CDM は余分な数式を罰しません。数式を 2 重に書くだけで +0.95pt、"
+    +"デタラメな数式を 1 ページに 5 個 (計 2,590 個) 混ぜても +0.82pt 稼げてしまいます (実測)。"
+    +"どちらもノイズ床 1.04pt と同程度なので貼り戻しの 11〜14pt は説明できませんが、"
+    +"「候補を増やすと少し得」という穴があること自体は覚えておく必要があります。</div>";
+}
+function d3reset(){document.getElementById("d3rl").value=D3RL;document.getElementById("d3base").value=D3BASE;
+  document.getElementById("d3out").innerHTML="";}
+</script>
+
+<h2>4. まだやっていない: 検証器と文法 (BNF) を「推論時」に使う</h2>
+
+<p>ここまでは全部「学習で直す」話でした。もう一つの道が「モデルは触らず、出力の作り方だけ変える」推論時の工夫です。3 段階あります。</p>
+
+<div class="row">
+<div class="card"><span class="tag">A</span><strong>文法制約デコード (BNF)</strong><br>
+<span class="hint">出力トークンを文法で縛り、構文的に壊れた答えを<em>そもそも生成できなくする</em>。表の閉じタグ抜けや <code>$$</code> の片側落ちが原理的に消える。</span></div>
+<div class="card"><span class="tag">B</span><strong>検証器 (reference-free)</strong><br>
+<span class="hint">正解を見ずに答えの<em>健全性</em>だけ判定する関数。構文の整合、同じ行の反復、空セルだけの表、画像に無い文字列の混入など。</span></div>
+<div class="card"><span class="tag">C</span><strong>best-of-N 選択</strong><br>
+<span class="hint">N 個サンプリングして検証器が一番マシなものを選ぶ。学習不要で、モデルの持つ「当たり」を引き当てる。</span></div>
+</div>
+
+<div class="note"><strong>既に測って失敗した近縁の手法があります。</strong>「反復ループを罰する」デコード制約 (repetition_penalty, frequency_penalty) は dev で -3〜-35pt。日本語文書は表のセルや助詞が正当に反復するので、大域的なペナルティはループと表を区別できません。出力側でループを切り詰める後処理も -0.2pt。<strong>つまり「乱暴な制約」は効かない</strong>ことは分かっています。A の文法制約は「構文だけを縛り、内容には触らない」ので性質が違い、まだ未検証です。</div>
+
+<div class="demo">
+  <h3>デモ 4: 検証器を動かす (正解を見ずに健全性だけ見る)</h3>
+  <p class="hint">下の出力を編集すると、reference-free な検査が即座に走ります。<strong>正解は一切参照していません</strong>。壊し方を試してみてください (表の <code>|</code> を消す、<code>$$</code> を片方消す、同じ行を 4 回貼る、など)。</p>
+  <textarea id="d4">## 四半期の集計
+
+当該プロセスにおいて需要変動を微分方程式で近似した。
+
+| 項目 | 金額 | 前年比 |
+| --- | --- | --- |
+| 売上 | 12,300 | +4.1% |
+| 費用 | 9,800 | -1.2% |
+
+$$ \sum_{i=1}^{n} x_i = \mu $$</textarea>
+  <div id="d4out"></div>
+</div>
+
+<script>
+function verify(md){
+  const checks=[];
+  // 1. $$ の対応
+  const dd=(md.match(/\$\$/g)||[]).length;
+  checks.push({name:"数式デリミタ $$ が偶数個で閉じている", ok: dd%2===0,
+    detail:"$$ の個数 "+dd});
+  // 2. 数式が空でない
+  const empty=[...md.matchAll(/\$\$([\s\S]*?)\$\$/g)].filter(m=>!m[1].trim()).length;
+  checks.push({name:"空の数式ブロックがない", ok: empty===0, detail:"空ブロック "+empty+" 個"});
+  // 3. パイプ表の列数が揃っている
+  const rows=md.split(/\n/).filter(l=>/^\s*\|.*\|\s*$/.test(l));
+  const widths=[...new Set(rows.map(l=>l.split("|").length))];
+  checks.push({name:"表の各行の列数が揃っている", ok: rows.length===0 || widths.length===1,
+    detail: rows.length? "行数 "+rows.length+" / 列数の種類 "+widths.length : "表なし"});
+  // 4. 中身のないセルだけの表がない
+  const skeleton=rows.filter(l=>l.split("|").slice(1,-1).every(c=>!c.trim())).length;
+  checks.push({name:"空セルだけの行 (骨だけの表) がない", ok: skeleton===0, detail:"該当 "+skeleton+" 行"});
+  // 5. 同一行の 4 連続反復 (縮退ループ)
+  const lines=md.split(/\n/).map(s=>s.trim()).filter(s=>s.length>3);
+  let maxrep=1,cur=1;
+  for(let i=1;i<lines.length;i++){cur = lines[i]===lines[i-1]? cur+1 : 1; maxrep=Math.max(maxrep,cur);}
+  checks.push({name:"同じ行が 4 回以上続いていない", ok: maxrep<4, detail:"最大連続 "+maxrep+" 回"});
+  // 6. HTML タグの釣り合い
+  const open=(md.match(/<(table|tr|td|th)\b/gi)||[]).length, close=(md.match(/<\/(table|tr|td|th)>/gi)||[]).length;
+  checks.push({name:"HTML の表タグが釣り合っている", ok: open===close, detail:"開 "+open+" / 閉 "+close});
+  // 7. 出力が空でない
+  checks.push({name:"出力が空でない", ok: md.trim().length>20, detail:md.trim().length+" 文字"});
+  return checks;
+}
+function d4run(){
+  const md=document.getElementById("d4").value, cs=verify(md);
+  const pass=cs.filter(c=>c.ok).length;
+  document.getElementById("d4out").innerHTML =
+    "<div class='bar'><i style='width:"+(100*pass/cs.length)+"%'></i></div>"+
+    "<p><strong>検証器スコア "+pass+" / "+cs.length+"</strong> (正解を参照せずに判定)</p>"+
+    "<ul style='font-size:16px'>"+cs.map(c=>"<li><span class='"+(c.ok?"ok":"ng")+"'>"
+      +(c.ok?"合格":"不合格")+"</span> "+c.name+" <span class='hint'>("+c.detail+")</span></li>").join("")+"</ul>";
+}
+document.getElementById("d4").addEventListener("input",d4run); d4run();
+</script>
+
+<div class="demo">
+  <h3>デモ 5: best-of-N を検証器で選ぶと、なぜ危ないのか</h3>
+  <p class="hint">同じページに対する 3 通りの答えです。<strong>検証器 (正解を見ない)</strong> と <strong>公式指標 (正解を見る)</strong> が、どれを選ぶかを比べてください。</p>
+  <div>
+    <button onclick="d5pick(0)">候補 1: 内容は正しいが表の列数が乱れている</button>
+    <button onclick="d5pick(1)">候補 2: 構文は完璧だが中身が薄い</button>
+    <button onclick="d5pick(2)">候補 3: 内容も構文も良い</button>
+  </div>
+  <div id="d5out"></div>
+</div>
+
+<script>
+const D5=[
+ {md:"## 四半期の集計\n\n当該プロセスにおいて需要変動を微分方程式で近似した。売上は前年比 4.1% 増。\n\n| 項目 | 金額 | 前年比 |\n| --- | --- |\n| 売上 | 12,300 | +4.1% |\n\n$$ \\sum_{i=1}^{n} x_i = \\mu $$", official:78, why:"本文と数式は正しく、表も中身がある。だが区切り行の列数が 1 つ足りない。"},
+ {md:"## 四半期の集計\n\n集計結果を示す。\n\n| 項目 | 金額 | 前年比 |\n| --- | --- | --- |\n| — | — | — |\n\n$$ x $$", official:41, why:"構文は完全に整っている。しかし本文が要約に化け、表は空、数式も中身がない。"},
+ {md:"## 四半期の集計\n\n当該プロセスにおいて需要変動を微分方程式で近似した。売上は前年比 4.1% 増。\n\n| 項目 | 金額 | 前年比 |\n| --- | --- | --- |\n| 売上 | 12,300 | +4.1% |\n| 費用 | 9,800 | -1.2% |\n\n$$ \\sum_{i=1}^{n} x_i = \\mu $$", official:93, why:"本文・表・数式すべて正しい。"},
+];
+function d5pick(i){
+  const rows=D5.map((c,idx)=>{
+    const cs=verify(c.md), pass=cs.filter(x=>x.ok).length;
+    return {idx, pass, total:cs.length, official:c.official, why:c.why};
+  });
+  const vBest=rows.slice().sort((a,b)=>b.pass-a.pass)[0];
+  const oBest=rows.slice().sort((a,b)=>b.official-a.official)[0];
+  document.getElementById("d5out").innerHTML =
+    "<table><thead><tr><th>候補</th><th>検証器 (正解なし)</th><th>公式指標 (正解あり)</th><th>中身</th></tr></thead><tbody>"
+    + rows.map(r=>"<tr"+(r.idx===i?" style='background:var(--g100)'":"")+"><td>候補 "+(r.idx+1)+"</td><td>"
+      +r.pass+" / "+r.total+"</td><td>"+r.official+"</td><td style='text-align:left;font-size:15px'>"+r.why+"</td></tr>").join("")
+    + "</tbody></table>"
+    + "<div class='note'><strong>検証器が選ぶのは候補 "+(vBest.idx+1)+"、公式指標が選ぶのは候補 "+(oBest.idx+1)+"</strong>。"
+    + "構文だけを見る検証器は「整っているが中身が薄い」答えを高く評価しがちです。実際、我々の Stage 0 の実測でも"
+    + "<em>構造スコアは品質と逆相関</em>しました。だから検証器を best-of-N の選択器に使うなら、"
+    + "構文の合否 (= 落とすためのゲート) と、内容の接地 (= 画像に実在する文字列か、表のセルが OCR と一致するか) を"
+    + "必ず組み合わせる必要があります。文法制約 (BNF) の役目は点を稼ぐことではなく、<strong>構文で落ちる答えを最初から作らせない</strong>ことです。</div>";
+}
+d5pick(2);
+</script>
+
+<h2>5. 次にやれること (費用と、何が分かるか)</h2>
+
+<table>
+<thead><tr><th>実験</th><th>何が分かるか</th><th>費用の目安</th><th>優先度</th></tr></thead>
+<tbody>
+<tr><td><strong>VQA 非劣化の確認</strong><br><span class="hint">文書 QA のスコアを学習前後で測る</span></td>
+    <td>当初の主命題そのもの。Stockmark は SFT で VQA 0.862 → 0.825 に落としている。RL が VQA を保ったまま文書パースを上げるなら「劣化なしで伸ばす recipe」という主張が立つ。数式項で見えた「RL は未学習カテゴリを壊しにくい」がタスク横断で成立するかの検証にもなる。</td>
+    <td>GPU 1 枚 x 数時間</td><td>最優先</td></tr>
+<tr><td><strong>検証器 best-of-N</strong><br><span class="hint">N=4〜8 をサンプリングし、検証器で選択</span></td>
+    <td>学習を一切せずに何 pt 取れるか。同時に「oracle 選択 (正解で選ぶ)」も測れば、モデルが内部に持つ伸びしろ (天井) と、正解なしで届く範囲の差が出る。デモ 5 の危険 (構文優先で中身が薄い答えを選ぶ) が実データで起きるかも分かる。</td>
+    <td>GPU 1 枚 x 1〜2 時間</td><td>高</td></tr>
+<tr><td><strong>文法制約デコード (BNF)</strong><br><span class="hint">xgrammar で表と数式の構文だけ縛る</span></td>
+    <td>構文破綻は base では 518 ページ中 2〜4 件しかないので、点の上積みは小さいはず。むしろ価値は「best-of-N の候補を全部有効にする」土台と、崩れた表を原理的に消すこと。効かなければ「このベンチでは文法制約は戦力にならない」と切れる。</td>
+    <td>GPU 1 枚 x 1 時間</td><td>中</td></tr>
+<tr><td><strong>2 本目のベンチマーク</strong></td>
+    <td>いまの主張は「特定の合成分布 → JASyn」に閉じている。実文書のベンチで再現すれば一般性が付く。</td>
+    <td>評価のみ</td><td>中</td></tr>
+<tr><td><strong>v3 の seed 追加と 50 step</strong></td>
+    <td>今回の +4.819pt が seed 差でないことの確認。2 項目の伸びと 3 項目の伸びの両立が偶然でないか。</td>
+    <td>GPU 4 枚 x 3 時間 / seed</td><td>中</td></tr>
+</tbody>
+</table>
+
+<h2>6. この検証で得られた再利用できる教訓</h2>
+<ul>
+  <li><strong>報酬は、報告する指標の全項目を覆う。</strong>覆っていない項目は必ず代金として払われる。今回は 3 項のうち 1 項を落とし、上がった 2 項をちょうど打ち消した。</li>
+  <li><strong>カテゴリをデータに足すだけでは直らない。</strong>データ被覆で損害の大半 (5.8pt) は戻るが、報酬項がないと base より下に留まり、公式スコアは判定不能のまま。</li>
+  <li><strong>「完璧な答えを入れて満点が返るか」を毎回確かめる。</strong>今回、公式の数式スコアが 0.29 と出て環境不良を疑ったが、真因は自前の自己診断コードが <code>$$</code> を二重に付けていたことだった。「同一入力を両側に入れたら 1.0 になるか」という単体の当たり判定 (identity probe) を作って初めて切り分けられた。</li>
+  <li><strong>合成指標だけを見ない。</strong>「Overall は動かなかった」で終わらせると、実際に起きた「2 項は有意に改善し、1 項が有意に悪化した」という情報量の多い事実が消える。項別に信頼区間を出す。</li>
+  <li><strong>ベンチマーク側の穴も測る。</strong>公式の数式スコアは余剰な数式を罰しないので、候補を増やすだけで約 1pt 稼げる。自分の報酬では余剰にペナルティと一致下限を入れた。</li>
+</ul>
+
+<div class="card" style="background:var(--g050)">
+  <strong>シリーズの中でのこの回</strong>
+  <p style="margin:8px 0 0">第 1〜14 回は「AI の出力を信じず、形式的な検算器で確かめる」道具立てを作る話でした
+  (<a href="./vlm-verifier-13-synthesis.html">第 13 回</a> で形式制約の視点に統合、
+  <a href="./vlm-verifier-14-format-graph.html">第 14 回</a> で書類フォーマットのグラフ化)。
+  <a href="./graph-bnf-constrained-decoding.html">第 15 回</a> は文法 (BNF) で生成を縛る境界の話です。
+  本回からは主題を「<strong>安い VLM を実際にどこまで強くできるか</strong>」に移し、公開ベンチマーク上の実測に入りました。
+  検算器と文法制約は捨てたのではなく、第 4 節の「推論時に使う」候補として次の実験待ちです。</p>
+</div>
+
+<footer>
+  数値の一次情報と再現手順: <code>verifier-grpo-docparse/experiments/v2_results.md</code> (v2 と診断)、
+  <code>experiments/v3_results.md</code> (v3)、<code>experiments/v3_plan.md</code> (結果前に書いた事前登録)。
+  評価は OmniDocBench commit <code>193627ae</code>、データは Stockmark 公開 OmniDocBench-JASyn snapshot <code>73ecb246</code>、
+  モデルは Qwen2.5-VL-7B-Instruct、学習は EasyR1 の GRPO、4x L40S。
+  信頼区間はすべてページ単位のペア bootstrap 10,000 回。
+  <br><a href="./vlm-verifier-index.html">← シリーズ目次に戻る</a>
+</footer>
+</div>
+</body>
+</html>
