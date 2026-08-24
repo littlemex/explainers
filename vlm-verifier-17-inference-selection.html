@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重みを触らずに選ぶ — 検証器で選ぶと下がり、合意で選ぶと上がる</title>
+<style>
+  :root{
+    --ink:#12211a; --sub:#4a5c53; --line:#d7e4dd; --bg:#fbfdfc;
+    --g900:#0b3d2c; --g700:#12684a; --g500:#1f9d6b; --g100:#e4f3ec; --g050:#f2f9f5;
+    --warn:#8a5a00; --warnbg:#fff6e0; --bad:#8a2f2f; --badbg:#fdecec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+       font-size:18px;line-height:1.9}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 24px;font-size:14px}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600}
+  .topbar a:hover{text-decoration:underline}
+  header{background:linear-gradient(160deg,var(--g900),var(--g700));color:#fff;padding:56px 24px 44px;margin-bottom:40px}
+  header .wrap{padding-bottom:0}
+  h1{font-size:34px;line-height:1.45;margin:0 0 14px}
+  header p{font-size:19px;margin:0;color:#d6ece1;max-width:760px}
+  h2{font-size:27px;margin:56px 0 12px;padding-bottom:10px;border-bottom:3px solid var(--g100)}
+  h3{font-size:21px;margin:34px 0 8px;color:var(--g900)}
+  p{margin:14px 0}
+  code{background:var(--g050);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:0.9em}
+  table{border-collapse:collapse;width:100%;margin:20px 0;font-size:16px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--g100);color:var(--g900)}
+  tbody tr:nth-child(even){background:#fff}
+  .good{color:var(--g700);font-weight:700}
+  .bad{color:var(--bad);font-weight:700}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:26px 0}
+  .demo{background:var(--g050);border:2px solid var(--g100);border-radius:12px;padding:22px 24px;margin:26px 0}
+  .demo h3{margin-top:0}
+  .demo .hint,.hint{color:var(--sub);font-size:16px}
+  .note{background:var(--warnbg);border-left:5px solid var(--warn);padding:14px 18px;margin:20px 0;font-size:17px}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+  .kpi div{flex:1 1 180px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi b{display:block;font-size:28px;color:var(--g700);line-height:1.3}
+  .kpi span{color:var(--sub);font-size:15px}
+  button{font:inherit;font-size:16px;background:var(--g700);color:#fff;border:0;border-radius:8px;
+         padding:9px 16px;cursor:pointer;margin:4px 6px 4px 0}
+  button.ghost{background:#fff;color:var(--g900);border:1.5px solid var(--g500)}
+  button:active{transform:translateY(1px)}
+  label{display:inline-flex;align-items:center;gap:8px;margin:6px 18px 6px 0;font-size:17px}
+  input[type=checkbox]{width:20px;height:20px;accent-color:var(--g700)}
+  textarea{width:100%;min-height:130px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+           font-size:14px;line-height:1.7;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  pre{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;
+      font-size:14px;line-height:1.7}
+  .bar{height:26px;background:var(--g100);border-radius:6px;overflow:hidden;margin:6px 0 14px}
+  .bar i{display:block;height:100%;background:var(--g500)}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .row>div{flex:1 1 300px}
+  .tag{display:inline-block;background:var(--g100);color:var(--g900);border-radius:999px;
+       padding:2px 12px;font-size:14px;margin-right:8px}
+  .ok{color:var(--g700)} .ng{color:var(--bad)}
+  ul{margin:14px 0 14px 22px;padding:0} li{margin:8px 0}
+  footer{color:var(--sub);font-size:15px;border-top:1px solid var(--line);margin-top:60px;padding-top:20px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./vlm-verifier-index.html">← 安い VLM をどこまで強くできるか シリーズ 目次</a>　/　<a href="./index.html">アーカイブ一覧</a></div>
+<header><div class="wrap">
+  <p style="font-size:15px;color:#a8dcc4;margin:0 0 10px;letter-spacing:.06em">第 17 回・推論時の選択</p>
+  <h1>重みを触らずに選ぶ</h1>
+  <p><a href="./vlm-verifier-16-rl-reward-terms.html" style="color:#fff">前回</a>の最後に「検算器や文法制約を学習ではなく<strong>推論時</strong>に使ったらどうなるか」を宿題として置きました。測りました。<br>
+  結論は予想外の形で出ました。<strong>構造の健全性で選ぶと、選ばない方がましなほど下がります。</strong>一方で、正解を見ずに「他の答えと最も一致する答え」を選ぶと上がります。</p>
+</div></header>
+
+<div class="wrap">
+
+<h2>0. 何を測ったのか</h2>
+
+<p>モデルの重みは一切触りません。同じ 1 ページに対して<strong>温度をつけて 4 通り答えさせ</strong>、その 4 つから 1 つを選ぶ、という後処理だけを変えます。選び方は 3 通りです。</p>
+
+<div class="row">
+<div class="card"><span class="tag">A</span><strong>構造検証器で選ぶ</strong><br><span class="hint">正解を見ません。表の閉じ、LaTeX の括弧の均衡、合計行が実際に足し算として合っているか、といった<strong>形式的な健全性</strong>だけで点をつけて、最も高いものを取ります。</span></div>
+<div class="card"><span class="tag">B</span><strong>合意で選ぶ</strong><br><span class="hint">正解を見ません。4 つの答えを互いに比べ、<strong>他の 3 つと最も似ている答え</strong>を取ります。統計的決定理論でいう最小ベイズリスク (MBR) 選択です。</span></div>
+<div class="card"><span class="tag">C</span><strong>正解で選ぶ (oracle)</strong><br><span class="hint">実運用では不可能な反則技です。ページごとに公式スコアを見て最良を取ります。<strong>「完璧な選択器なら何点か」という天井</strong>を知るためだけに測ります。</span></div>
+</div>
+
+<p>採点は毎回、選び終わった予測集合を丸ごと公式評価器に 1 回通して行います。ページごとに公式スコアを摘み食いして足すのは公式指標ではないからです。</p>
+
+<h2>1. まず、検証器はほとんど何も言えていなかった</h2>
+
+<p>実装を疑ったのは、選択結果が「ほぼ常に 1 番目の候補」になっていたからです。調べると、<strong>518 ページのうち 513 ページで 4 つの答えすべてが同点 1.0</strong> でした。原因は単純です。検証器は表を <code>&lt;table&gt;</code> というHTML タグで探していたのに、モデルが実際に書くのは Markdown のパイプ表 (<code>| 項目 | 値 |</code>) で、<strong>518 ページ中 422 ページがパイプ表・HTML は 10 ページだけ</strong>でした。つまり表に関する全シグナルが「表が無いので満点」を返していたのです。</p>
+
+<div class="note">同じ罠を、我々は報酬の側で一度踏んでいます。表の報酬もかつて <code>&lt;table&gt;</code> だけを見ていて、公式 TEDS が 0.71 のページで報酬 0.00 を返していました。<strong>「予測の中の表とは何か」の定義は 1 箇所に置いて共有する</strong>しかありません。</div>
+
+<div class="demo">
+  <h3>デモ 1: 検証器が表を見つけられるか、切り替えて確かめる</h3>
+  <p class="hint">下のテキストは Qwen2.5-VL がよく出す形の答えです。「HTML タグだけ見る」に切り替えると、表のシグナルが全部満点になって差が消えます。</p>
+  <textarea id="d1a">## 売上報告
+
+本年度の売上は堅調に推移しました。
+
+| 項目 | 上期 | 下期 |
+| --- | --- | --- |
+| 製品 A | 40 | 60 |
+| 製品 B | 30 | 20 |
+| 合計 | 70 | 80 |
+</textarea>
+  <div>
+    <label><input type="checkbox" id="d1html"> HTML タグだけ見る (修正前の実装)</label>
+    <button onclick="d1run()">採点する</button>
+    <button class="ghost" onclick="d1break()">合計行を壊す</button>
+    <button class="ghost" onclick="d1ragged()">1 行だけセル数を減らす</button>
+  </div>
+  <div class="kpi">
+    <div><span>見つけた表の数</span><b id="d1n">—</b></div>
+    <div><span>矩形性 (行のセル数が揃うか)</span><b id="d1rect">—</b></div>
+    <div><span>合計行の整合</span><b id="d1arith">—</b></div>
+    <div><span>総合スコア</span><b id="d1score">—</b></div>
+  </div>
+  <div id="d1msg" class="note" style="display:none"></div>
+</div>
+
+<p>パイプ表も公式と同じ手順で HTML に変換してから見るよう直すと、差がつくページは 5 から 69 に増えました。それでも <strong>449 ページはまだ同点</strong>です。当たり前でした。4 つの答えは「表が閉じているかどうか」で違うのではなく、<strong>中身に何が書かれているか</strong>で違うのです。構造の健全性は、この課題ではすでに飽和しています。</p>
+
+<h2>2. 構造で選ぶと、下がる</h2>
+
+<p>学習前の base モデル (Qwen2.5-VL-7B) で、未使用の 397 ページを公式 3 項で採点した結果です。比較の基準は同じモデルの通常の 1 パス (greedy) です。</p>
+
+<table>
+<thead><tr><th>選び方</th><th>公式 Overall</th><th>greedy との差</th><th>95% 信頼区間</th></tr></thead>
+<tbody>
+<tr><td>greedy (1 パス、基準)</td><td>75.561</td><td>—</td><td>—</td></tr>
+<tr><td>4 サンプルの平均 (選ばない)</td><td>74.282</td><td class="bad">-1.279</td><td>—</td></tr>
+<tr><td><strong>A. 構造検証器で選ぶ</strong></td><td>72.917</td><td class="bad">-2.644</td><td>[-5.33, +0.10]</td></tr>
+<tr><td><strong>B. 合意で選ぶ</strong></td><td class="good">76.819</td><td class="good">+1.258</td><td>[-1.06, +3.66]</td></tr>
+<tr><td>C. oracle (到達不能な天井)</td><td>82.409</td><td>+6.848</td><td>[+4.60, +9.27]</td></tr>
+</tbody>
+</table>
+
+<p>読み方が 3 つあります。</p>
+
+<p><strong>天井が高い。</strong>たった 4 つの候補から完璧に選べれば 82.409 に届きます。これは<strong>強化学習を 50 step 回して得られた +4.315pt より大きい</strong>伸びで、しかも一切学習していないモデルの話です。難しさは全部「選ぶ」側にあります。</p>
+
+<p><strong>構造で選ぶのは、選ばないより悪い。</strong>72.917 は greedy より 2.6pt 低いだけでなく、<strong>4 つのサンプルのどれ単独よりも低い</strong>のです。理由は考えれば当たり前で、<strong>形式的に安全でいる最も簡単な方法は「書かないこと」</strong>です。表を書かなければ閉じ忘れも起きず、数式を書かなければ <code>$$</code> の片側落ちも起きません。構文で選ぶことは、この課題では中身と逆相関します。</p>
+
+<p><strong>合意で選ぶと、正解を見ずに天井の 18% を回収できる。</strong>76.819 は greedy より 1.258pt 高く、サンプル平均より 2.5pt 高い。ただし公式 Overall の信頼区間は 0 を跨ぎます (2 項だけの部分指標では +1.752、区間 [+0.196, +3.414] で 0 を跨ぎません)。誠実に言えば「点推定では greedy に勝ち、部分指標での改善は有意、公式 3 項では 397 ページではまだ判定できない」です。</p>
+
+<div class="demo">
+  <h3>デモ 2: 合意選択を手で動かす</h3>
+  <p class="hint">3 つの答えのうち 1 つだけ内容が違います。構造はどれも完璧なので検証器は差をつけられません。合意 (他の答えとの平均一致度) は差をつけます。文章を書き換えて、多数派を入れ替えてみてください。</p>
+  <div class="row">
+    <div><span class="hint">候補 1</span><textarea id="c1">## 売上報告
+
+本年度の売上は堅調に推移しました。
+
+| 項目 | 値 |
+| --- | --- |
+| 売上 | 100 |
+</textarea></div>
+    <div><span class="hint">候補 2</span><textarea id="c2">## 売上報告
+
+本年度の売上は堅調に推移しています。
+
+| 項目 | 値 |
+| --- | --- |
+| 売上 | 100 |
+</textarea></div>
+    <div><span class="hint">候補 3</span><textarea id="c3">## 別の見出し
+
+全く違う内容が書かれている頁です。
+</textarea></div>
+  </div>
+  <div><button onclick="d2run()">2 つの選び方で採点する</button></div>
+  <div id="d2out"></div>
+</div>
+
+<h2>3. 学習後のモデルに載せると、話が変わる</h2>
+
+<p>同じ後処理を、強化学習後のモデル (<code>v3fr</code> step 50) に載せます。base の greedy 75.561 を出発点として、学習とハーネスの 2 軸を足し算で読めるように並べます。</p>
+
+<table>
+<thead><tr><th>システム</th><th>公式 Overall</th><th>base greedy との差</th><th>95% 信頼区間</th></tr></thead>
+<tbody>
+<tr><td>base、greedy</td><td>75.561</td><td>—</td><td>—</td></tr>
+<tr><td>学習のみ (v3fr、greedy)</td><td>79.876</td><td>+4.315</td><td>[+1.41, +7.29]</td></tr>
+<tr><td>学習 + 温度サンプリング 1 発 (平均)</td><td>80.955</td><td>+5.394</td><td>—</td></tr>
+<tr><td>学習 + A. 構造検証器で選ぶ</td><td>80.031</td><td>+4.470</td><td>[+1.87, +7.22]</td></tr>
+<tr><td><strong>学習 + B. 合意で選ぶ</strong></td><td class="good">81.117</td><td class="good">+5.556</td><td>[+3.29, +8.03]</td></tr>
+<tr><td>学習 + C. oracle (天井)</td><td>84.773</td><td>+9.212</td><td>[+7.08, +11.65]</td></tr>
+</tbody>
+</table>
+
+<p><strong>2 軸は素直に足し算になりました。</strong>75.561 から 81.117 まで、+5.556pt、信頼区間は 0 を含みません。SFT なし、1 モデル、推論時に正解を一切見ない構成での本プロジェクト最良値です。</p>
+
+<p>ただし内訳は自慢できる形ではありません。<strong>学習後は、温度をつけて 1 回サンプリングするだけで greedy を 4 seed 全部で上回りました</strong> (+0.70 から +1.58pt)。伸びは主に数式項に出ています (CDM が greedy 0.8373 に対しサンプル平均 0.8703)。強化学習は、<strong>argmax の経路がこの指標での最良経路ではない</strong>状態にモデルを置いたわけです。その上に合意選択を足しても、<strong>「1 発サンプリング」に対する上乗せは +0.16pt しかありません</strong>。ハーネスの +1.241pt のほとんどはサンプリングの寄与で、選択の寄与ではないのです。</p>
+
+<div class="note">そして<strong>天井は縮まらず、広がりました</strong>。学習後モデルの oracle は 84.773 (base greedy 比 +9.212)。サンプル平均との差はまだ 3.7pt あり、試した 2 つのラベル不要選択器はどちらも届きません。<strong>開いている問題はサンプリングではなく選択です。</strong></div>
+
+<div class="demo">
+  <h3>デモ 3: 学習とハーネスの寄与を分解する</h3>
+  <p class="hint">クリックで積み上げます。何が効いていて、何が残っているかを目で見てください。</p>
+  <div>
+    <button onclick="d3set(0)">base greedy</button>
+    <button onclick="d3set(1)">+ 学習 (GRPO)</button>
+    <button onclick="d3set(2)">+ 温度サンプリング</button>
+    <button onclick="d3set(3)">+ 合意で選ぶ</button>
+    <button class="ghost" onclick="d3set(4)">+ 完璧な選択 (反則)</button>
+  </div>
+  <div id="d3bars"></div>
+  <div id="d3note" class="note" style="display:none"></div>
+</div>
+
+<h2>4. なぜ「文法で縛る」だけでは足りないのか</h2>
+
+<p><a href="./graph-bnf-constrained-decoding.html">第 15 回</a>で扱った文法制約デコード (BNF) は、構文的に壊れた出力を<strong>そもそも生成できなくする</strong>技術です。今回の結果は、その価値を否定しませんが、<strong>期待値を正しい場所に置き直します</strong>。</p>
+
+<ul>
+  <li>この課題で候補間の差を作っているのは構文ではなく中身です。構造シグナルは 518 ページ中 449 ページで<strong>同点</strong>にしかなりません。文法で縛って得られるのは、その同点の集合をさらに固めることです。</li>
+  <li>しかも構文的な安全さを<strong>選択の基準</strong>にすると積極的に害になります (2.6pt の劣化)。文法制約は「生成の下限を上げる」道具であって、「候補を並べて選ぶ」道具ではない、という切り分けが実測で出ました。</li>
+  <li>逆に効いたのは、正解を使わないという制約は同じまま、<strong>基準を構文から内容の一致に変える</strong>ことでした。検算器の発想を捨てる必要はなく、検算の対象を「形が整っているか」から「他の答えと世界像が一致するか」に移す、という方向です。</li>
+</ul>
+
+<h2>5. 次にやれること</h2>
+
+<table>
+<thead><tr><th>やること</th><th>何が分かるか</th><th>費用感</th></tr></thead>
+<tbody>
+<tr><td><strong>選択器を良くする</strong><br><span class="hint">合意の一致度の重み付け、長さの補正、報酬モデルによる再ランキング</span></td><td>残っている 3.7pt を取りに行く。今の合意選択は重み無調整の素朴版なので、伸びしろが最も大きいのはここ</td><td>GPU 不要。ページ単位の混合が公式値と桁まで一致するので、ローカル集計で候補を絞ってから 1 回だけ公式評価</td></tr>
+<tr><td><strong>N を 4 から増やす</strong></td><td>天井が N でどう伸びるか、合意の利得がどこで飽和するか</td><td>サンプリング 1 本あたり 14 分程度</td></tr>
+<tr><td><strong>VQA の非劣化を確認する</strong></td><td>当初の主命題。文書 QA の能力を落とさずに書き起こしを伸ばせているか</td><td>推論のみ</td></tr>
+<tr><td><strong>学習後モデルへの数式の貼り戻し</strong></td><td>2 モデル構成の松葉杖が、学習後にも上乗せとして効くか</td><td>推論 1 パス追加</td></tr>
+</tbody>
+</table>
+
+<h2>6. この回で得られた再利用できる教訓</h2>
+
+<ul>
+  <li><strong>選択の基準を「壊れていないこと」に置くな。</strong>壊れていない最も簡単な方法は書かないことなので、構文的健全性で選ぶと中身の薄い答えが勝つ。実測で 2.6pt の劣化。</li>
+  <li><strong>参照なしで使える強い信号は「他の答えとの一致」である。</strong>正解を持たない運用でも、同じ入力に複数回答えさせれば比較対象は自分で作れる。</li>
+  <li><strong>「何を数えているか」の定義は 1 箇所に置く。</strong>表の定義がずれていただけで、検証器は 513/518 ページで同点を返し、選択器は「常に 1 番目」に退化していた。同じ罠を報酬側で先に踏んでいたのに、検証器側では再発した。</li>
+  <li><strong>指標がページ単位の平均なら、混合は厳密に計算できる。</strong>ページごとに別 run の結果を混ぜた集合の公式値は、その集合を評価器に通した値と桁まで一致する。おかげで選択器の試作を評価コストなしで選別できる。</li>
+  <li><strong>学習後の greedy を最良と決めつけない。</strong>強化学習後は温度サンプリング 1 発が 4 seed 全部で greedy を上回った。デコード設定は学習の前後で測り直す。</li>
+</ul>
+
+<div class="card" style="background:var(--g050)">
+  <strong>シリーズの中でのこの回</strong>
+  <p style="margin:8px 0 0">第 1〜14 回は「AI の出力を信じず、形式的な検算器で確かめる」道具立て、
+  <a href="./graph-bnf-constrained-decoding.html">第 15 回</a> は文法 (BNF) で生成を縛る話、
+  <a href="./vlm-verifier-16-rl-reward-terms.html">第 16 回</a> は公開ベンチマークでの強化学習の実測でした。
+  本回はその 2 本を突き合わせて、<strong>検算器を学習ではなく推論時の選択に使ったら何が起きるか</strong>を測っています。
+  答えは「そのままでは害になる。ただし基準を内容の一致に変えれば効く」でした。</p>
+</div>
+
+<footer>
+  数値の一次情報と再現手順: <code>verifier-grpo-docparse/experiments/harness_results.md</code> (本回)、
+  <code>experiments/v3_results.md</code> (学習側)。選択器の実装は <code>vgd.harness.select</code>、
+  CLI は <code>eval/select_best_of_n.py</code>。
+  評価は OmniDocBench commit <code>193627ae</code> に CDM を有効化 (環境の妥当性は GT-as-pred の Overall 99.766 で確認)、
+  データは Stockmark 公開 OmniDocBench-JASyn snapshot <code>73ecb246</code>、モデルは Qwen2.5-VL-7B-Instruct。
+  サンプリングは温度 0.7 / top_p 0.95 / seed 1-4、報告は未使用の 397 ページ。
+  信頼区間はすべてページ単位のペア bootstrap 10,000 回。
+  <br><a href="./vlm-verifier-index.html">← シリーズ目次に戻る</a>
+</footer>
+</div>
+
+<script>
+// ---- shared: the benchmark's view of a table (pipe tables converted like the official eval)
+function pipeToHtml(md){
+  const out=[]; let rows=[];
+  const flush=()=>{ if(rows.length>=2){ out.push("<table>"+rows.map(r=>"<tr>"+r.map(c=>"<td>"+c+"</td>").join("")+"</tr>").join("")+"</table>"); } rows=[]; };
+  for(const line of md.split("\n")){
+    const s=line.trim();
+    if(s.startsWith("|")&&s.endsWith("|")&&(s.split("|").length-1)>=2){
+      const cells=s.slice(1,-1).split("|").map(c=>c.trim());
+      if(cells.every(c=>/^:?-{2,}:?$/.test(c||"-"))) continue;
+      rows.push(cells);
+    } else { flush(); out.push(line); }
+  }
+  flush(); return out.join("\n");
+}
+function extractTables(md, htmlOnly){
+  const re=/<table\b[\s\S]*?<\/table>/gi;
+  const html=md.match(re)||[];
+  if(htmlOnly) return html;
+  const rest=md.replace(re," ");
+  const pipes=(rest.match(/\|[^\n]*\|/g)||[]).length;
+  if(pipes>=2){ return html.concat(pipeToHtml(rest).match(re)||[]); }
+  return html;
+}
+function rowsCells(t){
+  return (t.match(/<tr\b[\s\S]*?<\/tr>/gi)||[]).map(r=>
+    (r.match(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)||[]).map(c=>c.replace(/<[^>]*>/g,"").trim()));
+}
+function num(s){ const m=(s||"").replace(/[^\d.-]/g,""); return m===""?null:parseFloat(m); }
+function rectScore(tables){
+  if(!tables.length) return 1;
+  let acc=0;
+  for(const t of tables){
+    const rows=rowsCells(t).filter(r=>r.length);
+    if(rows.length<2){ acc+=rows.length?1:0; continue; }
+    const w=rows.map(r=>r.length);
+    const mode=w.slice().sort((a,b)=>w.filter(x=>x===b).length-w.filter(x=>x===a).length)[0];
+    acc+=w.filter(x=>x===mode).length/w.length;
+  }
+  return acc/tables.length;
+}
+function arithScore(tables){
+  const checks=[];
+  for(const t of tables){
+    const rows=rowsCells(t).filter(r=>r.length);
+    const ti=rows.map((r,i)=>r.some(c=>/合計|小計|計|total|sum/i.test(c))?i:-1).filter(i=>i>=0).pop();
+    if(ti===undefined||rows.length<2) continue;
+    const body=rows.slice(0,ti), tot=rows[ti];
+    for(let col=0;col<tot.length;col++){
+      const tv=num(tot[col]); if(tv===null) continue;
+      const vals=body.map(r=>num(r[col])).filter(v=>v!==null);
+      if(vals.length>=2) checks.push(Math.abs(tv-vals.reduce((a,b)=>a+b,0))<1e-9?1:0);
+    }
+  }
+  return checks.length?checks.reduce((a,b)=>a+b,0)/checks.length:1;
+}
+function latexScore(md){
+  if(!md.includes("$$")&&!md.includes("{")) return 1;
+  return (md.split("$$").length-1)%2===0 && (md.split("{").length===md.split("}").length) ? 1 : 0;
+}
+function verifierScore(md, htmlOnly){
+  const t=extractTables(md, htmlOnly);
+  const parts={html:1, rect:rectScore(t), latex:latexScore(md), arith:arithScore(t), nondeg:md.trim().length<20?0:1};
+  const w={html:.3, rect:.2, latex:.2, arith:.2, nondeg:.1};
+  let s=0; for(const k in w) s+=parts[k]*w[k];
+  return {score:s, n:t.length, rect:parts.rect, arith:parts.arith};
+}
+// ---- demo 1
+function d1run(){
+  const md=document.getElementById("d1a").value;
+  const htmlOnly=document.getElementById("d1html").checked;
+  const r=verifierScore(md, htmlOnly);
+  document.getElementById("d1n").textContent=r.n;
+  document.getElementById("d1rect").textContent=r.rect.toFixed(3);
+  document.getElementById("d1arith").textContent=r.arith.toFixed(3);
+  document.getElementById("d1score").textContent=r.score.toFixed(3);
+  const msg=document.getElementById("d1msg");
+  if(r.n===0){
+    msg.style.display="block";
+    msg.innerHTML="表が <b>0 個</b>と判定されました。表に関するシグナルは全部「表が無いので満点」を返すので、"+
+      "どんなに表を壊しても総合スコアは <b>1.000</b> のままです。これが 513/518 ページで同点になっていた理由です。";
+  } else {
+    msg.style.display="block";
+    msg.innerHTML="表を <b>"+r.n+" 個</b>見つけました。この状態なら、壊し方に応じてスコアが動きます。";
+  }
+}
+function d1break(){
+  const el=document.getElementById("d1a");
+  el.value=el.value.replace(/\| 合計 \| 70 \| 80 \|/, "| 合計 | 99 | 80 |");
+  d1run();
+}
+function d1ragged(){
+  const el=document.getElementById("d1a");
+  el.value=el.value.replace(/\| 製品 B \| 30 \| 20 \|/, "| 製品 B | 30 |");
+  d1run();
+}
+d1run();
+// ---- demo 2
+function textNorm(s){
+  return s.replace(/<table[\s\S]*?<\/table>/gi," ")
+          .replace(/^[^\S\n]*\|.*\|[^\S\n]*$/gm," ")
+          .replace(/\$\$[\s\S]*?\$\$/g," ")
+          .replace(/<[^>]+>/g," ")
+          .replace(/\s+/g,"");
+}
+function ratio(a,b){
+  if(!a&&!b) return 1;
+  const m=a.length, n=b.length;
+  if(!m||!n) return 0;
+  let prev=Array.from({length:n+1},(_,j)=>j), cur=new Array(n+1);
+  for(let i=1;i<=m;i++){
+    cur[0]=i;
+    for(let j=1;j<=n;j++){
+      cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    }
+    [prev,cur]=[cur,prev];
+  }
+  return 1 - prev[n]/Math.max(m,n);
+}
+function agree(a,b){
+  const terms=[ratio(textNorm(a), textNorm(b))];
+  const ta=extractTables(a,false).join(" "), tb=extractTables(b,false).join(" ");
+  if(ta||tb) terms.push(ratio(ta,tb));
+  return terms.reduce((x,y)=>x+y,0)/terms.length;
+}
+function d2run(){
+  const c=[1,2,3].map(i=>document.getElementById("c"+i).value);
+  const ver=c.map(x=>verifierScore(x,false).score);
+  const con=c.map((x,i)=>{ const o=c.filter((_,j)=>j!==i).map(y=>agree(x,y)); return o.reduce((a,b)=>a+b,0)/o.length; });
+  const pick=a=>a.indexOf(Math.max(...a));
+  const tie=a=>a.filter(v=>Math.abs(v-Math.max(...a))<1e-12).length>1;
+  let h="<table><thead><tr><th>候補</th><th>構造検証器のスコア</th><th>合意 (他との平均一致度)</th></tr></thead><tbody>";
+  for(let i=0;i<3;i++){
+    h+="<tr><td>候補 "+(i+1)+"</td><td>"+ver[i].toFixed(3)+"</td><td>"+con[i].toFixed(3)+"</td></tr>";
+  }
+  h+="</tbody></table>";
+  h+="<p><b>検証器の選択:</b> 候補 "+(pick(ver)+1)+(tie(ver)?" <span class='ng'>(同点なので先頭を機械的に採用。実質「選べていない」)</span>":"")+"</p>";
+  h+="<p><b>合意の選択:</b> 候補 "+(pick(con)+1)+(tie(con)?" (同点)":" <span class='ok'>(差がついている)</span>")+"</p>";
+  document.getElementById("d2out").innerHTML=h;
+}
+d2run();
+// ---- demo 3
+const D3=[
+  {label:"base greedy", v:75.561, note:""},
+  {label:"+ 学習 (GRPO 50 step)", v:79.876,
+   note:"学習だけで +4.315pt (区間 [+1.41, +7.29])。数式を報酬に入れたことが効いています。"},
+  {label:"+ 温度サンプリング 1 発 (平均)", v:80.955,
+   note:"学習後は greedy より温度つきサンプリングの方が良い。4 seed 全部で上回りました。ここまで <b>選択は一切していません</b>。"},
+  {label:"+ 合意で選ぶ", v:81.117,
+   note:"選択の寄与は <b>+0.16pt だけ</b>。ラベル不要で通しての最良値 (base 比 +5.556、区間 [+3.29, +8.03]) ですが、内訳の主役はサンプリングです。"},
+  {label:"+ 完璧な選択 (oracle・反則)", v:84.773,
+   note:"天井は <b>84.773</b>。サンプル平均からまだ 3.7pt 残っています。開いている問題はサンプリングではなく選択です。"},
+];
+function d3set(k){
+  const max=86, min=74;
+  let h="";
+  for(let i=0;i<=k;i++){
+    const w=Math.max(0,(D3[i].v-min)/(max-min)*100);
+    h+="<div><span class='hint'>"+D3[i].label+"</span><div class='bar'><i style='width:"+w.toFixed(1)+"%"+
+       (i===4?";background:#b9d9c9":"")+"'></i></div><b style='color:var(--g700)'>"+D3[i].v.toFixed(3)+"</b>"+
+       (i>0?" <span class='hint'>(前段から "+(D3[i].v-D3[i-1].v>=0?"+":"")+(D3[i].v-D3[i-1].v).toFixed(3)+")</span>":"")+"</div>";
+  }
+  document.getElementById("d3bars").innerHTML=h;
+  const n=document.getElementById("d3note");
+  if(D3[k].note){ n.style.display="block"; n.innerHTML=D3[k].note; } else { n.style.display="none"; }
+}
+d3set(0);
+</script>
+</body>
+</html>
