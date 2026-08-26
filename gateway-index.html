@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安いモデルはどこまで代われるか — ルーティングの実測記</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:40px 24px 90px}
+a{color:var(--g)}
+header{border-bottom:3px solid var(--g);padding-bottom:20px;margin-bottom:28px}
+h1{font-size:28px;margin:0 0 10px;line-height:1.4}
+.lead{font-size:17px;color:var(--ink2);margin:0}
+h2{font-size:20px;margin:44px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+.hero{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:26px 24px;margin:24px 0}
+.hero .big{display:flex;gap:18px;align-items:stretch;flex-wrap:wrap;margin:6px 0 14px}
+.hero .num{flex:1 1 200px;text-align:center;padding:16px 10px;border-radius:8px;background:var(--gp)}
+.hero .num b{display:block;font-size:40px;line-height:1.1;color:var(--gd);font-variant-numeric:tabular-nums}
+.hero .num span{font-size:13px;color:var(--ink2)}
+.hero .mid{flex:0 0 100%;text-align:center;font-size:15px;font-weight:600;color:var(--gd);margin:2px 0}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd)}
+ol.toc{list-style:none;padding:0;margin:0}
+ol.toc li{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g2);
+border-radius:0 8px 8px 0;padding:16px 18px;margin-bottom:12px}
+ol.toc a{font-weight:600;font-size:17px;text-decoration:none}
+ol.toc p{margin:6px 0 0;font-size:14.5px;color:var(--ink2)}
+.tag{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:11px;background:var(--gp);color:var(--gd);border:1px solid var(--line);margin-left:6px}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>安いモデルはどこまで代われるか — ルーティングの実測記</h1>
+  <p class="lead">安いモデルを混ぜれば安くなる。だが、どこまで安くなるかを決めるのは、ルータの賢さより仕事の形だった。</p>
+</header>
+
+<div class="hero">
+  <div class="big">
+    <div class="num"><b>24%</b><span>私たちの実測。完全な予知能力があっても、削減はここまで</span></div>
+    <div class="num"><b>58%</b><span>ある論文の本番運用での削減。同じ「ルーティング」で 2 倍以上の差</span></div>
+    <div class="mid">違いはルータではなく、安いモデルで足りる仕事の割合だった</div>
+  </div>
+  <p style="margin:0;font-size:14.5px;color:var(--ink2)">
+  同じ発想でこれだけ差が出る理由と、そこから「自前の GPU に何を吸わせるか」へ視点が反転していく過程を、
+  測った数字だけで追う 4 章。各章に動かせるデモが 1 つあり、それぞれ 1 つの誤解を壊すために置いてある。</p>
+</div>
+
+<h2>この研究は何をしているのか</h2>
+
+<p>高性能なモデルは高い。Claude Fable 5 は 100 万トークンの入力で 10 ドル、出力で 50 ドルかかる。
+一方 claude-haiku-4-5 は 1 ドルと 5 ドルで、10 分の 1 の値段だ。だったら簡単な仕事は安いモデルに流し、
+難しいところだけ高いモデルを呼べば、品質を落とさずに安くできるはずである。加えて自前の GPU も
+1 台ある。時間で課金される固定費なので、そこに仕事を吸わせられれば API への支払いはそのぶん消える。</p>
+
+<p>この「はずである」を、推測でなく実測で確かめていくのがこのシリーズだ。結果として、当初の見立ては
+2 回ひっくり返り、値付けの誤りが 2 回見つかり、最後に問いそのものが差し替わった。その過程を隠さずに
+並べてある。</p>
+
+<div class="note">
+  <b>読み方</b>
+  数字はすべて実際に測ったもので、測っていないことは「測っていない」と書いてある。途中で私が間違えた
+  ところは、間違いのまま残して訂正を並べている。結論だけ知りたい場合は各章の冒頭の 3 行を読めば足りる。
+</div>
+
+<h2>登場する層と、その値段</h2>
+
+<table>
+  <tr><th>層</th><th>正体</th><th>入力 $/Mtok</th><th>出力 $/Mtok</th><th>キャッシュ読み</th></tr>
+  <tr><td>premium</td><td>Claude Fable 5</td><td>10.00</td><td>50.00</td><td>1.00</td></tr>
+  <tr><td>cheap</td><td>GPT-5.6-terra</td><td>2.20</td><td>13.20</td><td>0.22</td></tr>
+  <tr><td>cheapest</td><td>claude-haiku-4-5</td><td>1.00</td><td>5.00</td><td>0.10</td></tr>
+  <tr><td>自前の箱</td><td>Qwen3.6-35B-A3B on L40S x 4</td><td colspan="3">時間課金 $15.2174/h。単価は測ったスループットから導く (第 3 章)</td></tr>
+</table>
+
+<p><b>「Mtok」は 100 万トークン</b>のことで、トークンはおおよそ単語や文字の断片の単位。日本語なら
+1 文字が 1 トークン前後になる。<b>入力</b>はモデルに読ませた文章、<b>出力</b>はモデルが書いた文章で、
+値段が 5 倍ほど違う点が後で効いてくる。<b>キャッシュ読み</b>は「前回と同じ文章をもう一度読ませたとき」の
+割引価格で、これが第 3 章の主役になる。</p>
+
+<h2>章立て</h2>
+
+<ol class="toc">
+  <li>
+    <a href="gateway-01-price.html">第 1 章 — 値段の構造。何が費用を決めているのか</a>
+    <span class="tag">デモ: 入力長と出力長を動かす</span>
+    <p>同じ「1 リクエスト」でも、長い文章を読ませる仕事と長い文章を書かせる仕事では、どのモデルが安いかが
+    入れ替わる。まず API 同士で確かめ、自前の箱には別の物差しが必要だという予告をする。</p>
+  </li>
+  <li>
+    <a href="gateway-02-nested.html">第 2 章 — 安いモデルの成功は、高いモデルの成功の部分集合だった</a>
+    <span class="tag">デモ: 仕事の難易度構成を動かす</span>
+    <p>SWE-bench Verified という「実際のバグを直せるか」のベンチマークで 5 方式を測ったら、
+    安い側だけが解けたタスクは 20 組中 0 件だった。ここから節約の上限が計算でき、24% と 58% の
+    差の正体もわかる。Sakana Fugu との違いもここで整理する。</p>
+  </li>
+  <li>
+    <a href="gateway-03-fixedcost.html">第 3 章 — 固定費の箱をどう値付けするか。2 回間違えた話</a>
+    <span class="tag">デモ: 稼働率を動かす</span>
+    <p>前半は会計の物差し。時間で課金される箱にトークン単価を付けようとして 2 回間違えた。後半は工学で、
+    同じ箱から仕事量を増やす話。モデルを替えて 3.6 倍、テンソル並列の幅を変えて入力の単価が半額になった。</p>
+  </li>
+  <li>
+    <a href="gateway-04-offload.html">第 4 章 — 問いを反転させ、最初の実測を取る</a>
+    <span class="tag">デモ: 件数を動かして 2 つの問いを見比べる</span>
+    <p>箱は買ってある。だから問いは「API に勝てるか」ではなく「品質を保ったままどれだけ吸わせられるか」。
+    何を吸わせるべきかの原則を立て、日本語レビュー分類で最初の実測を取り、その評価設計の失敗と、
+    なぜ「対応あり」で判定しなければならないかを見る。</p>
+  </li>
+</ol>
+
+<h2>まだ言えないこと</h2>
+
+<p>この時点で確定しているのは費用の構造と 1 族分の配管である。品質については、実際に流したい業務の
+データで測り直すまで何も admission できない。第 4 章の分類の数字は公開データセットで取ったもので、
+配管が通ったことの証明にはなるが、ルーティングを変える根拠にはならない。その線引きも本文に書いてある。</p>
+
+<footer>
+  シリーズ: 安いモデルはどこまで代われるか / <a href="index.html">explainers の目次へ</a>
+</footer>
+</div>
+</body>
+</html>

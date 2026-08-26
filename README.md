@@ -18,6 +18,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 | MLIR | Dialects, progressive lowering, SSA, pattern rewriting — explained then quizzed | [mlir-index.html](./mlir-index.html) |
 | Mathematical statistics | MLE, CLT, Bayesian inference, hypothesis testing — explained then quizzed | [mathstats-index.html](./mathstats-index.html) |
 | Cheap VLM, made strong | How far a small 7B VLM can be pushed with RL and verifiers — the verifier toolkit (episodes 1-15, including BNF-constrained decoding), measured GRPO results on OmniDocBench-JASyn (episode 16), what an inference-time selector recovers without labels (episode 17), and the correction that most of the apparent headroom was a hindsight-oracle artefact (episode 18) | [vlm-verifier-index.html](./vlm-verifier-index.html) |
+| Cheap models, measured | Whether using the expensive model only where it matters actually saves money — why the same idea yields 24% and 58%, what a nested success set forbids, pricing a fixed-cost GPU box (and getting it wrong twice), and halving the input price by changing the tensor-parallel width | [gateway-index.html](./gateway-index.html) |
 | Information theory | Entropy, KL divergence, mutual information, coding theorems — explained then quizzed | [infotheory-index.html](./infotheory-index.html) |
 
 ### ML basics series

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 3 章 固定費の箱をどう値付けするか — 2 回間違えた話</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:10px 0}
+.ctl input[type=range]{width:100%;accent-color:var(--g2)}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.toggle{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:6px 0}
+.toggle button{border:0;background:var(--card);padding:8px 13px;font-size:13.5px;cursor:pointer;font-family:inherit}
+.toggle button.on{background:var(--gd);color:#fff}
+.out{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0 0}
+.out div{flex:1 1 140px;background:var(--gp);border-radius:8px;padding:12px 14px;text-align:center}
+.out b{display:block;font-size:23px;color:var(--gd);font-variant-numeric:tabular-nums;line-height:1.25}
+.out span{font-size:12.5px;color:var(--ink2)}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:13px;line-height:1.6}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 3 章</div>
+<h1>第 3 章 固定費の箱をどう値付けするか — 2 回間違えた話</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  時間で課金される GPU にトークン単価を付けようとして 2 回間違えた。1 回目は読む工程と書く工程を
+  同じ単価で数えたこと (実測 19 倍の速度差)、2 回目はキャッシュが単価を変えると書いたこと。
+  正しい物差しは「箱が仕事に使った時間 × 時間単価 ÷ 稼働率」で、その上でモデルと並列構成を変えて
+  入力の単価が半額になった。
+</div>
+
+<h2>前半: 会計の物差しを作る</h2>
+
+<p>自前の GPU は g6e.12xlarge というインスタンスで、NVIDIA L40S が 4 枚載っている。値段は
+<b>1 時間 15.2174 ドル</b>。リクエストが 1 件も来なくても、1 万件来ても、同じ額が出ていく。
+これが API との根本的な違いで、だから「1 リクエストいくら」という数字は<b>そのままでは存在しない</b>。
+存在させるには、その時間に何件処理したかを決める必要がある。</p>
+
+<pre>1 件あたりの費用 = 時間単価 ÷ (その 1 時間に終わった件数)
+            = 時間単価 × (その仕事が箱を使った秒数 / 3600) ÷ 稼働率</pre>
+
+<h3>間違い 1 — 読む工程と書く工程を同じ値段で数えた</h3>
+
+<p>最初に測ったのは「1 秒に何トークン書けるか」だった。同時に 48 件処理させると毎秒 396 トークン
+書けたので、時間単価から割り算して 100 万トークンあたり 10.68 ドルという単価を出した。そしてその単価を
+<b>入力にも出力にも</b>掛けてしまった。</p>
+
+<p>ここで見落としていたのが、<b>読む工程 (prefill) と書く工程 (decode) はまったく別</b>だということ。
+読むほうは文章全体を一度に並列処理できるので速い。書くほうは 1 トークンずつ順番に生成するしかないので
+遅い。実測するとこうなった。</p>
+
+<table>
+  <tr><th>工程</th><th class="n">速度 (実測)</th><th class="n">時間単価から導いた $/Mtok</th></tr>
+  <tr><td>読む (prefill)</td><td class="n">2,129 tok/s</td><td class="n">1.99</td></tr>
+  <tr><td>書く (decode, 1 件ずつ)</td><td class="n">110 tok/s</td><td class="n">38.54</td></tr>
+  <tr><td>書く (decode, 48 件同時)</td><td class="n">396 tok/s</td><td class="n">10.68</td></tr>
+</table>
+
+<p><b>読むのは書くのより 19 倍速い。</b>そして測ってみると、エージェントの仕事は
+<b>トークンの 99.5% が入力</b>だった。会話の履歴を毎ターン全部送り直すからで、22 エピソードで
+入力 929 万トークンに対し出力は 5 万トークンしかない。つまり請求のほぼ全部が「読む」ぶんなのに、
+それを「書く」の単価で計算していた。過大請求は 5 倍を超える。</p>
+
+<h3>間違い 2 — 「キャッシュが無いから単価が高い」と書いた</h3>
+
+<p>訂正した後、私はこう書いた。「自前の箱は prefix caching が使えないから単価が高い」。これも誤りで、
+指摘されて初めて気づいた。<b>箱は時間で課金されるので、キャッシュがあっても無くても単価は変わらない。</b>
+変わるのは<b>仕事にかかる時間</b>で、それが 1 時間に終わる件数を変え、結果として 1 件あたりの費用を変える。
+因果の鎖はこうなる。</p>
+
+<pre>キャッシュが効く → 同じ文章を読み直さない → 早く終わる
+              → 同じ時間に多く終わる → 1 件あたりが安い   (単価は動いていない)</pre>
+
+<p>この鎖で数えると、実測はこうだった。エージェントの 22 エピソードが箱を使った時間は
+<b>1.997 時間</b> (各呼び出しのレイテンシの合計)。そのうち<b>58% は前のターンと同じ文章を読み直すのに
+使われていた</b> (入力 929 万トークンのうち 881 万トークンが再読み込み)。完全なキャッシュがあれば
+1 時間に 11.0 件から 26.0 件に増える。単価はどこにも出てこない。</p>
+
+<h2>デモ: 稼働率を動かす</h2>
+
+<p>固定費の箱で一番効く変数は稼働率である。下のスライダーを動かすと、3 つの数字が同時に動く。
+どれが動いてどれが動かないかを見てほしい。</p>
+
+<div class="demo">
+  <h3>同じ仕事、同じ箱、稼働率だけ変える</h3>
+  <div>
+    <span style="font-size:14px;color:var(--ink2)">構成 (実測プリセット):</span>
+    <div class="toggle">
+      <button id="p1" class="on">Qwen3.8-27B, TP=4</button>
+      <button id="p2">Qwen3.6-35B-A3B, TP=4</button>
+      <button id="p3">同 MoE, TP=2 x 2 replicas</button>
+    </div>
+  </div>
+  <div class="ctl">
+    <label>稼働率 (箱が仕事で埋まっている時間の割合): <span class="val" id="vutil">100</span>%
+      <input type="range" id="rutil" min="10" max="100" step="5" value="100"></label>
+  </div>
+  <div class="out">
+    <div><b id="ohour">$15.22</b><span>時間単価 — 動かない</span></div>
+    <div><b id="oin">—</b><span>配賦後の入力 $/Mtok</span></div>
+    <div><b id="orate">—</b><span>1 時間に終わるエピソード数</span></div>
+    <div><b id="operep">—</b><span>1 エピソードの費用</span></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink2);margin:12px 0 0" id="omsg"></p>
+</div>
+
+<h3>動かして見えること</h3>
+
+<ul>
+  <li><b>時間単価は絶対に動かない。</b>これが固定費の意味である。動くのは配賦後の数字だけ。</li>
+  <li><b>稼働率 25% にすると 1 件あたりが 4 倍になる。</b>だから「買ってある箱はタダ」ではない。
+  遊ばせている時間の費用は、動かした仕事に乗る。</li>
+  <li><b>構成を切り替えると 1 時間の処理件数が動く。</b>これはスライダーではなく実測のプリセットで、
+  後半の工学の話がここに入ってくる。</li>
+</ul>
+
+<div class="note">
+  <b>「限界費用ゼロ」という言い方をしない理由</b>
+  すでに動いている箱に 1 件追加する費用は、たしかにほぼゼロである。しかしその言い方で API と比較すると、
+  埋没費用の誤謬を配ることになる。<b>買うかどうかの判断</b>では稼働率を明示した配賦費用で比べ、
+  <b>すでにある箱に何を流すかの判断</b>では別の目的関数を使う。後者が第 4 章の主題である。
+</div>
+
+<h2>後半: 同じ箱から仕事量を増やす</h2>
+
+<p>会計の物差しができたので、ここからは工学の話になる。1 時間の処理件数を増やせば、稼働率が同じでも
+1 件あたりが安くなる。3 つ試して、2 つ当たり、1 つは engine に断られた。</p>
+
+<h3>1. モデルを替える — dense 27B から MoE (活性 3B) へ</h3>
+
+<p>元は Qwen3.8-27B という「dense」モデル、つまり全パラメータを毎トークン使う型だった。これを
+Qwen3.6-35B-A3B に替えた。こちらは <b>MoE (Mixture of Experts)</b> で、256 個の専門家のうち
+8 個だけを毎トークン使う。総量は 35B だが<b>実際に計算に参加するのは約 3B</b>。読む工程は計算量で
+決まるので、ここが速くなるはずだと予測した。</p>
+
+<table>
+  <tr><th></th><th class="n">Qwen3.8-27B (dense)</th><th class="n">Qwen3.6-35B-A3B (MoE)</th><th class="n">比</th></tr>
+  <tr><td>読む速度</td><td class="n">2,129 tok/s</td><td class="n">7,676 tok/s</td><td class="n">3.6x</td></tr>
+  <tr><td>書く速度 (16 件同時)</td><td class="n">307 tok/s</td><td class="n">1,025 tok/s</td><td class="n">3.3x</td></tr>
+  <tr><td>入力 $/Mtok</td><td class="n">1.99</td><td class="n">0.551</td><td class="n">0.28x</td></tr>
+</table>
+
+<p>予測は「活性パラメータが 9 分の 1 なので 9 倍」だったが、実測は 3.6 倍だった。差は MoE の
+振り分け処理、専門家ごとの行列積が小さくなること、GPU 間の通信で消えている。<b>理論比は上限であって
+予測ではない</b>という教訓が残った。</p>
+
+<div class="flag">
+  <b>prefix caching は engine に断られた</b>
+  MoE に替えたので、キャッシュも使えるようになったかもしれないと考えて有効化した。同じ 37,792 トークンの
+  文章を 3 回送って計測すると 4.31 / 4.32 / 4.32 秒。まったく速くならない。engine の設定ダンプを見ると
+  <code>enable_prefix_caching=False</code> とあり、<b>vLLM が自分でこの構成には無理だと判断して
+  切っていた</b>。コマンドラインには何も出ない。<br><br>
+  理由は構造にある。このモデルは 40 層のうち 30 層が「linear attention」で、履歴を圧縮した状態を
+  持ち回る型になっている。その状態を復元するには文章を 1 層目から通し直すしかないので、
+  残り 10 層のキャッシュだけ再利用しても意味がない。全部まとめて保存できるか、何も得られないかの二択である。<br><br>
+  ここで学んだのは技術より手順のほうで、<b>設定の意図は効果の証拠にならない</b>。最初の計測は
+  無効化されたままの機能を測っていて、何も示していなかった。以後、デプロイ後に engine の実効値を
+  必ず出すようにした。
+</div>
+
+<h3>2. テンソル並列の幅を変える — KV を半分にする</h3>
+
+<p>GPU 4 枚でモデルを動かすとき、モデルを 4 分割して各カードに載せる方法を「テンソル並列 (TP=4)」という。
+ここで問題が起きていた。このモデルは <b>KV ヘッドが 2 個</b>しかない。2 は 4 で割り切れないので、
+vLLM は KV キャッシュを<b>4 枚全部に複製</b>する。つまり同じデータを 2 倍持っていた。</p>
+
+<p>TP=2 にすれば 2 で割り切れて複製が消える。測るとそうなった。しかも予想外のことが起きた。</p>
+
+<table>
+  <tr><th></th><th class="n">TP=4 (GPU 4 枚)</th><th class="n">TP=2 (GPU 2 枚)</th><th class="n">TP=2 x 2 (GPU 4 枚)</th></tr>
+  <tr><td>KV 1 トークンあたり</td><td class="n">40 KiB</td><td class="n">20.3 KiB</td><td class="n">20.3 KiB</td></tr>
+  <tr><td>KV 容量 (トークン)</td><td class="n">3,092,774</td><td class="n">2,173,090</td><td class="n">4,346,180</td></tr>
+  <tr><td>読む速度</td><td class="n">7,676 tok/s</td><td class="n">7,252 tok/s</td><td class="n">17,947 tok/s</td></tr>
+  <tr class="hl"><td>入力 $/Mtok</td><td class="n">0.551</td><td class="n">0.583</td><td class="n">0.236</td></tr>
+</table>
+
+<p><b>GPU 2 枚の TP=2 が、GPU 4 枚の TP=4 の 94% の速度を出した。</b>つまり 1 枚あたりの生産性が
+ほぼ 2 倍。だから 4 枚を「2 枚 × 2 セット」に分けて 2 つの engine を並べると、同じハードで
+読む速度が 2.3 倍、入力の単価が半額になる。量子化も品質のリスクもなく、並列の幅を変えただけである。</p>
+
+<div class="good">
+  <b>ここまでで箱はこうなった</b>
+  入力 <b>$0.236/Mtok</b>、出力 <b>$4.12/Mtok</b> (どちらも稼働率 100% の配賦)。比較すると
+  claude-haiku-4-5 が 1.00 / 5.00、GPT-5.6-terra が 2.20 / 13.20。<b>箱はどの API より入力も出力も安い。</b>
+  例外は 1 つだけで、API の<b>キャッシュ読み</b> ($0.10〜0.22) は箱の入力 $0.236 より安い。
+  だから毎ターン同じ文章を送り直す多ターンのエージェントは API のほうが安く、単発で長い文章を読ませる
+  仕事は箱のほうが安い。これが第 4 章の出発点になる。
+</div>
+
+<h2>この章で壊しておきたい誤解</h2>
+
+<table>
+  <tr><th>よくある思い込み</th><th>実際は</th></tr>
+  <tr><td>入力トークンと出力トークンは同じ 1 単位</td><td>読む工程と書く工程は別で、実測で 19 倍の速度差。エージェントの仕事は 99.5% が入力</td></tr>
+  <tr><td>キャッシュが無いと単価が上がる</td><td>時間課金なので単価は動かない。動くのは所要時間と 1 時間の処理件数</td></tr>
+  <tr><td>買ってある箱はタダ</td><td>稼働率 25% なら 1 件あたりは 4 倍。遊ばせた時間は動かした仕事に乗る</td></tr>
+  <tr><td>活性 3B は小さいモデルということ</td><td>総量は 35B。速くなったのは実測だが、品質が足りるかはまったく別の話で未計測</td></tr>
+  <tr><td>GPU を多く束ねれば速くなる</td><td>割り切れない分割は KV を複製する。TP=2 が 2 枚で TP=4 の 94% を出した</td></tr>
+  <tr><td>設定したから有効になっている</td><td>engine は黙って断ることがある。実効値を読むまで信じない</td></tr>
+</table>
+
+<footer>
+  <a href="gateway-index.html">シリーズ目次</a> / 前: <a href="gateway-02-nested.html">第 2 章</a> /
+  次: <a href="gateway-04-offload.html">第 4 章 問いを反転させ、最初の実測を取る</a>
+</footer>
+</div>
+
+<script>
+const HOURLY = 15.2174;
+// 実測プリセット: 読む速度 (tok/s) と、22 エピソードが箱を使った時間から出した 1 時間の処理件数。
+const PRESETS = {
+  p1: {label:"Qwen3.8-27B, TP=4",            prefill:2129,  epPerHour:11.0},
+  p2: {label:"Qwen3.6-35B-A3B, TP=4",        prefill:7676,  epPerHour:19.6},
+  p3: {label:"同 MoE, TP=2 x 2 replicas",     prefill:17947, epPerHour:34.0},
+};
+let current = 'p1';
+for (const key of Object.keys(PRESETS)) {
+  document.getElementById(key).onclick = () => {
+    current = key;
+    for (const k of Object.keys(PRESETS)) document.getElementById(k).classList.toggle('on', k === current);
+    draw();
+  };
+}
+const rutil = document.getElementById('rutil');
+function draw(){
+  const util = +rutil.value / 100;
+  const p = PRESETS[current];
+  document.getElementById('vutil').textContent = +rutil.value;
+  document.getElementById('ohour').textContent = '$' + HOURLY.toFixed(2);
+  const inUsd = HOURLY / (p.prefill * 3600) * 1e6 / util;
+  const perEp = HOURLY / (p.epPerHour * util);
+  document.getElementById('oin').textContent = '$' + inUsd.toFixed(3);
+  document.getElementById('orate').textContent = (p.epPerHour * util).toFixed(1) + ' 件';
+  document.getElementById('operep').textContent = '$' + perEp.toFixed(3);
+  let msg = `構成は「${p.label}」。読む速度 ${p.prefill.toLocaleString('en-US')} tok/s は実測値で、`
+    + `スライダーでは動かない。`;
+  if (util === 1) msg += ' 稼働率 100% は理想で、実験機の現実はもっと低い。';
+  else msg += ` 稼働率 ${(util*100).toFixed(0)}% なので、配賦後の数字はすべて ${(1/util).toFixed(1)} 倍になっている。`;
+  if (current === 'p3' && util >= 0.95) msg += ' この点が現在の構成で、入力 $0.236/Mtok の出所。';
+  document.getElementById('omsg').textContent = msg;
+}
+rutil.addEventListener('input', draw); draw();
+</script>
+</body>
+</html>
