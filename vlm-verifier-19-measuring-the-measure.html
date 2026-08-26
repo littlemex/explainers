@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本番前に「良くなったか」を判定できる道具が無かった — 測定器をつくる</title>
+<style>
+  :root{
+    --ink:#12211a; --sub:#4a5c53; --line:#d7e4dd; --bg:#fbfdfc;
+    --g900:#0b3d2c; --g700:#12684a; --g500:#1f9d6b; --g100:#e4f3ec; --g050:#f2f9f5;
+    --warn:#8a5a00; --warnbg:#fff6e0; --bad:#8a2f2f; --badbg:#fdecec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+       font-size:18px;line-height:1.9}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+  .topbar{max-width:960px;margin:0 auto;padding:14px 24px;font-size:14px}
+  .topbar a{color:var(--g700);text-decoration:none;font-weight:600}
+  .topbar a:hover{text-decoration:underline}
+  header{background:linear-gradient(160deg,var(--g900),var(--g700));color:#fff;padding:56px 24px 44px;margin-bottom:40px}
+  header .wrap{padding-bottom:0}
+  h1{font-size:34px;line-height:1.45;margin:0 0 14px}
+  header p{font-size:19px;margin:0;color:#d6ece1;max-width:760px}
+  h2{font-size:27px;margin:56px 0 12px;padding-bottom:10px;border-bottom:3px solid var(--g100)}
+  h3{font-size:21px;margin:34px 0 8px;color:var(--g900)}
+  p{margin:14px 0}
+  code{background:var(--g050);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:0.9em}
+  table{border-collapse:collapse;width:100%;margin:20px 0;font-size:16px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--g100);color:var(--g900)}
+  tbody tr:nth-child(even){background:#fff}
+  .good{color:var(--g700);font-weight:700}
+  .bad{color:var(--bad);font-weight:700}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:26px 0}
+  .demo{background:var(--g050);border:2px solid var(--g100);border-radius:12px;padding:22px 24px;margin:26px 0}
+  .demo h3{margin-top:0}
+  .demo .hint,.hint{color:var(--sub);font-size:16px}
+  .note{background:var(--warnbg);border-left:5px solid var(--warn);padding:14px 18px;margin:20px 0;font-size:17px}
+  .wrong{background:var(--badbg);border-left:5px solid var(--bad);padding:14px 18px;margin:20px 0;font-size:17px}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+  .kpi div{flex:1 1 180px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi b{display:block;font-size:28px;color:var(--g700);line-height:1.3}
+  .kpi span{color:var(--sub);font-size:15px}
+  button{font:inherit;font-size:16px;background:var(--g700);color:#fff;border:0;border-radius:8px;
+         padding:9px 16px;cursor:pointer;margin:4px 6px 4px 0}
+  button.ghost{background:#fff;color:var(--g900);border:1.5px solid var(--g500)}
+  button:active{transform:translateY(1px)}
+  label{display:inline-flex;align-items:center;gap:8px;margin:6px 18px 6px 0;font-size:17px}
+  input[type=range]{width:230px;accent-color:var(--g700)}
+  pre{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;
+      font-size:14px;line-height:1.7}
+  .bar{height:24px;background:var(--g100);border-radius:6px;overflow:hidden;margin:5px 0 12px}
+  .bar i{display:block;height:100%;background:var(--g500)}
+  .bar i.ghosty{background:#b9d9c9}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .row>div{flex:1 1 300px}
+  .tag{display:inline-block;background:var(--g100);color:var(--g900);border-radius:999px;
+       padding:2px 12px;font-size:14px;margin-right:8px}
+  .ok{color:var(--g700)} .ng{color:var(--bad)}
+  ul{margin:14px 0 14px 22px;padding:0} li{margin:8px 0}
+  footer{color:var(--sub);font-size:15px;border-top:1px solid var(--line);margin-top:60px;padding-top:20px}
+  canvas{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:8px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="./vlm-verifier-index.html">← 安い VLM をどこまで強くできるか シリーズ 目次</a>　/　<a href="./index.html">アーカイブ一覧</a></div>
+<header><div class="wrap">
+  <p style="font-size:15px;color:#a8dcc4;margin:0 0 10px;letter-spacing:.06em">第 19 回・測定器をつくる</p>
+  <h1>本番前に「良くなったか」を<br>判定できる道具が無かった</h1>
+  <p>学習の step 数を 3 倍にしたら、公式スコアが <strong>+2.935pt</strong> 上がりました。本プロジェクト最大の一撃です。ところが、どの checkpoint を採用するか決めるために使っている手元の評価セットは、同じ比較を <strong>−0.070</strong> と読みました。<br>
+  モデルの話ではありません。<strong>測定器の話</strong>です。今回はそれを直した記録です。</p>
+</div></header>
+
+<div class="wrap">
+
+<h2>0. 一言で</h2>
+
+<div class="card">
+  <p style="margin-top:0">公式スコアは 3 つの項の平均です。<strong>本文</strong>・<strong>表</strong>・<strong>数式</strong>。このうち数式の項は、手元の判定用セットではたった <strong>19 ページ</strong>で決まっています。3 分の 1 の重みが 19 枚に乗っている状態です。</p>
+  <p>しかも悪いことに、この 19 枚は<strong>ほとんど動きません</strong>。比較した 2 つの checkpoint は、19 枚すべてで数式の点数が 1 ビットも違いませんでした。動かないのに重い項があると、残りの 2 項が本当に良くなっても、合計はその「動かない項の端数」に引っ張られて逆を向くことがあります。今回それが起きました。</p>
+  <p style="margin-bottom:0">つまり必要だったのは、より良いモデルではなく、<strong>数式ページを十分に持った評価セット</strong>でした。作りました。そして<strong>使う前に較正しました</strong> — 較正のルールを、数字が出る前に文書に固定してから。</p>
+</div>
+
+<div class="kpi">
+  <div><span>学習を 125 step まで伸ばして</span><b>82.810</b></div>
+  <div><span>従来最良 (50 step) 比</span><b>+2.935</b></div>
+  <div><span>判定用セットは同じ比較を</span><b class="bad" style="color:var(--bad)">−0.070</b></div>
+  <div><span>差の原因である数式ページ数</span><b>19 枚</b></div>
+</div>
+
+<h2>1. 19 枚に 3 分の 1 の重みが乗るとどうなるか</h2>
+
+<p>これは推定でも統計でもなく、割り算です。数式の項は「数式のあるページの平均点 × 100」で、公式スコアはその項を 3 分の 1 の重みで含みます。ということは、1 ページの点数が動いたときスコアがどれだけ動くかは、<strong>ページ数だけで決まります</strong>。</p>
+
+<div class="demo">
+  <h3>デモ 1: 1 枚が跳ぶと全体がどれだけ動くか</h3>
+  <p class="hint">数式ページの枚数と、そのうち何枚が変化したかを動かしてください。1 枚あたりの点数変化は 0 から 1 の範囲です (公式の数式スコアは 0〜1 の CDM という指標です)。</p>
+  <div>
+    <label>数式ページの枚数: <input type="range" id="d1n" min="10" max="320" step="1" value="19"><b id="d1nv">19</b></label>
+    <label>変化した枚数: <input type="range" id="d1k" min="0" max="20" step="1" value="1"><b id="d1kv">1</b></label>
+    <label>1 枚あたりの変化: <input type="range" id="d1d" min="5" max="100" step="5" value="50"><b id="d1dv">0.50</b></label>
+  </div>
+  <div class="kpi">
+    <div><span>数式の項の変化</span><b id="d1term">—</b></div>
+    <div><span>公式スコアの変化</span><b id="d1ov">—</b></div>
+    <div><span>本文+表の実際の改善を打ち消すか</span><b id="d1kill">—</b></div>
+  </div>
+  <div id="d1msg" class="note"></div>
+  <p class="hint">初期値 (19 枚・1 枚・0.50) が、判定用セットで実際に起きていた規模です。<strong>たった 1 枚で公式スコアが 0.88pt 動きます</strong>。本文と表の改善が +0.6pt しか見えていない場では、これは十分に符号を反転させます。ページ数を 313 (実文書ベンチマークの数式ページ数) まで上げると、同じ 1 枚の影響は 0.05pt まで落ちます。</p>
+</div>
+
+<div class="note"><strong>ここが今回の一番の学びです。</strong>数式の項は「ノイズが多い項」ではありません。<strong>ほとんど凍っていて、まれに数枚だけ跳ぶ項</strong>です。比較した 2 つの checkpoint では、判定用 19 枚は<strong>全枚数で完全一致</strong>、本番用 63 枚でも<strong>63 枚中 7 枚しか変化しませんでした</strong>。だから区間は広いのに、値は数枚の都合で決まります。統計を厚くしても直りません。枚数を増やすしかありません。</div>
+
+<h2>2. 判定用セットで「推奨」を決めてはいけない</h2>
+
+<p>実際に起きたことを並べます。本番用 (一度しか読まない 397 ページ) と判定用 (121 ページ) で、同じ 2 つの checkpoint を比べた結果です。</p>
+
+<table>
+<thead><tr><th>比較の場</th><th>公式スコアの差</th><th>本文+表だけの差</th><th>数式の項の差</th></tr></thead>
+<tbody>
+<tr><td>判定用 dev (121 ページ・数式 19 枚)</td><td class="bad">−0.070</td><td class="good">+0.636</td><td class="bad">−1.482</td></tr>
+<tr><td>本番 TEST (397 ページ・数式 63 枚)</td><td class="good">+2.935</td><td class="good">+2.834</td><td>+3.137</td></tr>
+</tbody>
+</table>
+
+<p><strong>本文+表の差は両方で同じ符号です</strong> (+0.6 と +2.8)。ひっくり返しているのは数式の項だけ。もし「判定用で上がらなければ採用しない」という運用にしていたら、<strong>本プロジェクト最良のモデルを捨てていました</strong>。実際には判定用は「同じ run の中でどの step を採るか」にしか使っていなかったので報告は成立しますが、これは運が良かっただけです。</p>
+
+<div class="wrong"><strong>やってはいけない運用</strong>: 小さい判定用セットで「レシピ同士」を比べて採否を決める。<br>
+<strong>この件で確定した限界</strong>: 3 項のうち 1 項が数十枚で決まっている評価セットは、<strong>レシピの優劣を判定する道具として使えません</strong>。step の選択 (同じ run 内の比較) はできます。</div>
+
+<h2>3. 測定器を自分で作る ― ただし使う前に較正する</h2>
+
+<p>そこで、数式ページを大量に含む評価セットを合成で作りました。1,500 ページ、うち<strong>数式ページ 463 枚</strong>。公式ベンチマークの 82 枚に対して 5.6 倍です。</p>
+
+<p>ただし、自分で作った評価セットには決定的な弱点があります。<strong>学習データと同じ生成器から出ている</strong>ので、学習が進んだモデルは「文書を読む力」ではなく「この生成器の癖」に適応した分だけ得をします。だから、次のルールを<strong>数字が出る前に</strong>文書に固定しました。</p>
+
+<div class="card">
+  <p style="margin-top:0"><span class="tag">ルール 1</span> 公式ベンチマークが<strong>有意に判定できたペアだけ</strong>を対象に、符号が一致するかを見る。区間が 0 を跨ぐペアで符号を比べるのは、ノイズとノイズの比較にすぎない。</p>
+  <p><span class="tag">ルール 2</span> 符号の一致は<strong>項ごとに</strong>要求する。追随しない項は「使える項」から落とす。合計だけ合っていても中身が逆なら道具として危険。</p>
+  <p style="margin-bottom:0"><span class="tag">ルール 3</span> 倍率は<strong>報告する。仮定しない</strong>。合成側の差と本番側の差の比が安定していれば「大きさ」も翻訳できる。ばらつくなら<strong>順位付けだけに使う</strong>と明記する。</p>
+</div>
+
+<p>そのうえで、公式スコアが分かっている 4 つの checkpoint (base / 50 step / 100 step / 125 step) を合成セットに流し、6 つのペアで両者を突き合わせました。</p>
+
+<div class="demo">
+  <h3>デモ 2: 較正の実測データ ― 項を切り替えてみてください</h3>
+  <p class="hint">横軸が公式ベンチマークでの差、縦軸が合成セットでの差です。<strong>実測値そのもの</strong>です。灰色の点は「公式側の区間が 0 を跨いでいる = 判定できないペア」で、較正の対象から外れます。</p>
+  <div>
+    <button onclick="d2set('overall')">公式スコア (3 項)</button>
+    <button onclick="d2set('partial')">本文+表 (2 項)</button>
+    <button onclick="d2set('text')">本文</button>
+    <button onclick="d2set('table')">表</button>
+    <button class="ghost" onclick="d2set('formula')">数式</button>
+  </div>
+  <canvas id="d2c" width="900" height="420"></canvas>
+  <div class="kpi">
+    <div><span>判定できたペア</span><b id="d2n">—</b></div>
+    <div><span>符号の反転</span><b id="d2inv">—</b></div>
+    <div><span>倍率のばらつき (最大/最小)</span><b id="d2fold">—</b></div>
+  </div>
+  <div id="d2msg" class="note"></div>
+</div>
+
+<h3>結果 ― 順位は付けられる。大きさは 1 項だけ。数式は永久に検証できない</h3>
+
+<table>
+<thead><tr><th>項</th><th>判定できたペア</th><th>符号の反転</th><th>倍率</th><th>使い方</th></tr></thead>
+<tbody>
+<tr><td>公式スコア (3 項)</td><td>5</td><td class="good">0</td><td>0.53 〜 1.82</td><td>順位付けのみ</td></tr>
+<tr><td>本文+表 (2 項)</td><td>5</td><td class="good">0</td><td>0.92 〜 1.39</td><td class="good">順位も大きさも</td></tr>
+<tr><td>本文</td><td>6</td><td class="good">0</td><td>0.41 〜 1.15</td><td>順位付けのみ</td></tr>
+<tr><td>表</td><td>3</td><td class="good">0</td><td>2.12 〜 2.49</td><td class="good">順位と大きさ (2.2 で割る)</td></tr>
+<tr><td>数式</td><td class="bad">0</td><td>—</td><td>—</td><td class="bad">使用禁止 (未検証)</td></tr>
+</tbody>
+</table>
+
+<p><strong>符号の反転はゼロでした</strong>。判定できた 5 ペアすべてで、合成セットは公式ベンチマークと同じ向きを示しました。これは「順位付けの道具としては使える」という意味です。</p>
+
+<p>一方で<strong>公式スコアそのものの大きさは翻訳できません</strong>。倍率が 0.53 から 1.82 まで散ります。散り方には理由があって、合成セットは<strong>表の改善を約 2.2 倍に、本文の改善を約 0.5 倍に歪めます</strong> — 生成器は公式ベンチマークの表の形に合わせて作ってあるので表の改善が出やすく、本文は本物のスキャン文書より易しいので改善が圧縮されます。公式スコアはこの 2 つの歪みと未検証の数式項を混ぜた量なので、翻訳は不能です。</p>
+
+<div class="note">事前に心配していた「生成器への適応で全部が過大に出る」は、<strong>そうなっていませんでした</strong>。base から学習後への差は倍率 1 より大きく (1.3〜1.8)、学習後どうしの差は 1 より小さい (0.53〜0.69)。合成セットは<strong>最初の大きな飛躍を過大に、その後の細かい改善を過小に</strong>言います。歪みが単調なので、順位付けだけは生き残ります。</div>
+
+<p>そして<strong>数式の項は「不合格」ではなく「試験そのものが成立しない」</strong>ことが分かりました。公式ベンチマークはこの 4 つの checkpoint のどのペアでも数式の項を判定できません (すべて区間が 0 を跨ぐ)。照合すべき正解の符号が存在しないので、合成セットの数式項は永久に検証できません。<strong>数式についての主張は、このベンチマークでは作れない</strong>ということです。</p>
+
+<h2>4. おまけ ― 「5.6pt の勝ち」が無から生まれかけた話</h2>
+
+<p>今回の測定を組み直す途中で、同じ予測ファイルを別の採点ジョブに通したら公式スコアが <strong>75.561 と 69.990</strong> に分かれました。5.6pt です。モデルも予測も 1 バイトも違いません。</p>
+
+<p>原因は採点側の数式レンダリングでした。公式の数式スコアは LaTeX を実際に画像に起こして比べるので、フォントやパッケージが 1 つ欠けると数式がほぼ全滅します。<strong>そしてそれは採点結果を見ても分かりません</strong> — 「数式が苦手なモデル」と見分けが付かないからです。</p>
+
+<div class="demo">
+  <h3>デモ 3: 壊れた採点環境を検出する</h3>
+  <p class="hint">「正解をそのまま予測として入れる」という検査を各採点ジョブに必ず走らせています。健全な環境なら満点近くを返すはずです。</p>
+  <div>
+    <button onclick="d3set(true)">健全な採点環境</button>
+    <button class="ghost" onclick="d3set(false)">壊れた採点環境</button>
+  </div>
+  <div class="kpi">
+    <div><span>正解を予測として入れた数式スコア</span><b id="d3probe">—</b></div>
+    <div><span>base の公式スコア (同じ予測ファイル)</span><b id="d3base">—</b></div>
+    <div><span>学習後との差として報告されたはずの値</span><b id="d3delta">—</b></div>
+  </div>
+  <div id="d3msg" class="note"></div>
+  <p class="hint">この検査値は 0.99383 と 0.2903 で即座に見分けが付きます。いまは<strong>表を組み立てる道具そのものが、この検査を通っていない採点結果を受け付けません</strong>。加えて、比較する全アームが同じ正解ファイル (ハッシュ照合) と同じ採点器 (コミット照合) で採点されたことも要求します。人間が思い出す必要がある確認は、いつか忘れられます。</p>
+</div>
+
+<h2>5. いまの最良値</h2>
+
+<p>ここまでの積み上げです。すべて一度しか読まない 397 ページでの公式スコアです。</p>
+
+<table>
+<thead><tr><th>構成</th><th>公式スコア</th><th>base からの差</th></tr></thead>
+<tbody>
+<tr><td>base (Qwen2.5-VL-7B, そのまま)</td><td>75.561</td><td>—</td></tr>
+<tr><td>GRPO 50 step (数式報酬あり)</td><td>79.876</td><td class="good">+4.315</td></tr>
+<tr><td>GRPO 125 step</td><td>82.810</td><td class="good">+7.249</td></tr>
+<tr><td>GRPO 150 step</td><td>81.920</td><td>+6.359</td></tr>
+<tr><td><strong>GRPO 125 step + 合意 best-of-8</strong></td><td class="good"><strong>83.807</strong></td><td class="good"><strong>+8.246</strong></td></tr>
+</tbody>
+</table>
+
+<p>最後の行が本プロジェクト最高値です。ただし正直に書くと、<strong>推論時の合意選択が上乗せした約 1pt は公式スコアの上では有意ではありません</strong> (区間が 0 を跨ぐ)。有意なのは本文+表の 2 項 (+0.855) と本文の項 (+1.264) です。第 17 回で測ったときは公式スコアでも有意だったのに、なぜ弱くなったのか。理由は機構的で、<strong>合意選択は「サンプルが食い違うページ」を回収する仕組みなので、ポリシーが強くなって自己不一致が減ると取り分も減ります</strong>。</p>
+
+<p>150 step が 125 step に負けているのも今回の確認です。−0.891 で区間は 0 を含みますが、本文の項は有意に悪化しています。<strong>このデータで買えるものは 125 step で尽きています</strong>。</p>
+
+<h2>6. 残っているもの</h2>
+
+<p>最良の checkpoint がどこで負けているかをページ単位で見ると、はっきりした偏りがあります。</p>
+
+<table>
+<thead><tr><th>文書の種類</th><th>ページ数</th><th>残っている本文誤差のうち</th><th>誤差 (base)</th></tr></thead>
+<tbody>
+<tr><td>縦書きの書籍</td><td>42</td><td class="bad">18.3%</td><td>0.316 (0.517)</td></tr>
+<tr><td>実験ノート</td><td>25</td><td>10.1%</td><td>0.291 (0.298)</td></tr>
+<tr><td>報告書</td><td>32</td><td>9.5%</td><td>0.215 (0.304)</td></tr>
+<tr><td>手書きメモ</td><td>27</td><td>7.9%</td><td>0.211 (0.270)</td></tr>
+</tbody>
+</table>
+
+<p><strong>縦書き</strong> (書籍 + 新聞) はページ数では 14.6% なのに、残っている本文誤差の <strong>25.3%</strong> を占めます。ただし「縦書きの学習データを増やせばよい」という話には<strong>なりませんでした</strong>。生成器はすでに 5 分の 1 を縦書きにしていて、学習データ側は本番より縦書きが多いのです。しかも縦書きは学習で最も大きく改善した種類でもあります (0.517 → 0.316)。</p>
+
+<p>足りていないのは<strong>枚数ではなく難しさ</strong>です。CSS で縦組みにした合成文書には、本物の縦書き書籍にあるルビ・縦中横の数字・スキャンの歪みがありません。実験ノートには対応する合成文書がそもそも存在しません。いまの被覆チェックは「その構造があるか」を測りますが、「その構造が同じくらい難しいか」は測っていません。次に作るべき診断はそれです。</p>
+
+<div class="card">
+  <p style="margin-top:0"><strong>いま走っているもの</strong></p>
+  <ul style="margin-bottom:0">
+    <li>被覆チェックを通した新しいデータでの学習 (150 step)。今回作った測定器で順位を付けてから、本番を 1 回だけ読みます</li>
+    <li><strong>実文書 1,651 ページ</strong> (公式ベンチマークの親データセット、日本語を含まない) での回帰チェック。合成日本語で学習したモデルが、本物の英語・中国語の文書で壊れていないかを見ます。ここは<strong>数式ページが 313 枚</strong>あるので、このプロジェクトで初めて数式の項を判定できる場になります</li>
+  </ul>
+</div>
+
+<footer>
+  第 19 回 / 2026-08-26。数値はすべて公式 OmniDocBench 評価器 (commit 193627ae) による実測で、比較する両アームは同一の採点環境・同一の正解ファイル・同一の生成条件です。
+  <br><a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</div>
+
+<script>
+/* ---------- デモ 1: 1 枚が跳ぶ影響 ---------- */
+function d1(){
+  const n = +d1n.value, k = Math.min(+d1k.value, n), d = +d1d.value/100;
+  d1nv.textContent = n; d1kv.textContent = k; d1dv.textContent = d.toFixed(2);
+  const term = k*d/n*100;           // 数式項 (0-100) の変化
+  const ov = term/3;                // 公式スコアは 3 項平均
+  d1term.textContent = term.toFixed(2)+'pt';
+  d1ov.textContent = ov.toFixed(2)+'pt';
+  const realGain = 0.636*2/3;       // dev で見えていた本文+表の改善の公式スコア寄与
+  const kills = ov >= realGain;
+  d1kill.textContent = kills ? '打ち消す' : '打ち消さない';
+  d1kill.style.color = kills ? 'var(--bad)' : 'var(--g700)';
+  d1msg.innerHTML = `数式ページが <b>${n}</b> 枚のとき、<b>${k}</b> 枚が <b>${d.toFixed(2)}</b> 動くと数式の項は <b>${term.toFixed(2)}pt</b>、`
+    + `公式スコアは <b>${ov.toFixed(2)}pt</b> 動きます。判定用セットで実際に見えていた本文+表の改善は公式スコアに換算して <b>${realGain.toFixed(2)}pt</b> でした`
+    + (kills ? ' — <b>これを上回るので、符号は数式の都合で決まります</b>。' : ' — これを下回るので、符号は本文+表で決まります。');
+}
+[d1n,d1k,d1d].forEach(e=>e.addEventListener('input',d1));
+
+/* ---------- デモ 2: 較正の実測データ ---------- */
+const PAIRS = [
+  {name:'base → 50 step',    overall:[+4.315,+7.835,true],  partial:[+5.771,+7.998,true],  text:[+6.144,+2.536,true],  table:[+5.398,+13.459,true], formula:[+1.403,+7.510,false]},
+  {name:'base → 100 step',   overall:[+7.154,+9.339,true],  partial:[+7.855,+10.049,true], text:[+8.963,+5.766,true],  table:[+6.747,+14.333,true], formula:[+5.753,+7.917,false]},
+  {name:'base → 125 step',   overall:[+7.249,+9.866,true],  partial:[+8.604,+10.598,true], text:[+10.434,+6.430,true], table:[+6.775,+14.766,true], formula:[+4.539,+8.402,false]},
+  {name:'50 → 100 step',     overall:[+2.840,+1.503,true],  partial:[+2.084,+2.051,true],  text:[+2.819,+3.230,true],  table:[+1.349,+0.873,false], formula:[+4.350,+0.407,false]},
+  {name:'50 → 125 step',     overall:[+2.935,+2.031,true],  partial:[+2.834,+2.601,true],  text:[+4.291,+3.894,true],  table:[+1.377,+1.307,false], formula:[+3.137,+0.892,false]},
+  {name:'100 → 125 step',    overall:[+0.095,+0.528,false], partial:[+0.749,+0.549,false], text:[+1.471,+0.665,true],  table:[+0.027,+0.433,false], formula:[-1.213,+0.484,false]},
+];
+const D2LABEL = {overall:'公式スコア (3 項)', partial:'本文+表 (2 項)', text:'本文', table:'表', formula:'数式'};
+const D2NOTE = {
+  overall:'倍率が 0.53〜1.82 まで散るので<b>順位付けのみ</b>。表の改善を約 2.2 倍に、本文を約 0.5 倍に歪める合成セットで、その 2 つを混ぜた量だから翻訳できません。',
+  partial:'倍率 0.92〜1.39 = ほぼ 1 対 1。<b>この項だけは合成セットの差をそのまま期待値として語れます</b>。',
+  text:'符号は 6 ペア全部で一致しますが、倍率が 0.41〜1.15。合成文書の本文は本物より易しいので改善が圧縮されます。',
+  table:'倍率が 2.1〜2.5 で安定。<b>合成セットの表の改善は 2.2 で割ってから語る</b>必要があります。生成器を公式ベンチマークの表の形に合わせて作った副作用です。',
+  formula:'公式側で判定できたペアが <b>0</b>。照合すべき符号が存在しないので、<b>この項は検証できません</b>。合成側の区間は狭いのに、比べる相手がいない状態です。',
+};
+let d2term = 'overall';
+function d2set(t){ d2term = t; d2draw(); }
+function d2draw(){
+  const c = document.getElementById('d2c'), g = c.getContext('2d');
+  const W = c.width, H = c.height, m = {l:74,r:22,t:26,b:52};
+  g.clearRect(0,0,W,H);
+  const rows = PAIRS.map(p=>({name:p.name, x:p[d2term][0], y:p[d2term][1], ok:p[d2term][2]}));
+  const lim = Math.max(2, ...rows.flatMap(r=>[Math.abs(r.x),Math.abs(r.y)]))*1.15;
+  const X = v => m.l + (v+lim)/(2*lim)*(W-m.l-m.r);
+  const Y = v => H-m.b - (v+lim)/(2*lim)*(H-m.t-m.b);
+  // 軸
+  g.strokeStyle='#d7e4dd'; g.lineWidth=1;
+  g.beginPath(); g.moveTo(m.l,Y(0)); g.lineTo(W-m.r,Y(0)); g.moveTo(X(0),m.t); g.lineTo(X(0),H-m.b); g.stroke();
+  // y=x (倍率 1)
+  g.strokeStyle='#b9d9c9'; g.setLineDash([5,4]);
+  g.beginPath(); g.moveTo(X(-lim),Y(-lim)); g.lineTo(X(lim),Y(lim)); g.stroke(); g.setLineDash([]);
+  g.fillStyle='#4a5c53'; g.font='13px sans-serif';
+  g.fillText('公式ベンチマークでの差 (pt)', W/2-80, H-16);
+  g.save(); g.translate(18,H/2+70); g.rotate(-Math.PI/2); g.fillText('合成セットでの差 (pt)', 0, 0); g.restore();
+  g.fillText('倍率 1', X(lim*0.72)+4, Y(lim*0.72)-6);
+  // 点
+  rows.forEach(r=>{
+    g.beginPath(); g.arc(X(r.x), Y(r.y), r.ok?7:5, 0, 7);
+    g.fillStyle = r.ok ? '#1f9d6b' : '#b9c6bf'; g.fill();
+    g.fillStyle = r.ok ? '#0b3d2c' : '#8a9a92'; g.font='12px sans-serif';
+    g.fillText(r.name, X(r.x)+10, Y(r.y)-8);
+  });
+  g.fillStyle='#0b3d2c'; g.font='bold 15px sans-serif';
+  g.fillText(D2LABEL[d2term], m.l, 18);
+  const res = rows.filter(r=>r.ok);
+  const inv = res.filter(r=>(r.x>0)!==(r.y>0));
+  const ratios = res.filter(r=>Math.abs(r.x)>1e-9).map(r=>Math.abs(r.y/r.x));
+  d2n.textContent = res.length + ' / 6';
+  d2inv.textContent = inv.length + ' 件';
+  d2inv.style.color = inv.length ? 'var(--bad)' : 'var(--g700)';
+  d2fold.textContent = ratios.length ? (Math.max(...ratios)/Math.min(...ratios)).toFixed(2) + ' 倍' : '—';
+  d2msg.innerHTML = D2NOTE[d2term];
+}
+
+/* ---------- デモ 3: 採点環境の検査 ---------- */
+function d3set(healthy){
+  d3probe.textContent = healthy ? '0.99383' : '0.2903';
+  d3probe.style.color = healthy ? 'var(--g700)' : 'var(--bad)';
+  d3base.textContent = healthy ? '75.561' : '69.990';
+  d3delta.textContent = healthy ? '+7.249' : '+12.820';
+  d3delta.style.color = healthy ? 'var(--g700)' : 'var(--bad)';
+  d3msg.innerHTML = healthy
+    ? '正解をそのまま入れて 0.99383。<b>この採点結果は使えます</b>。学習後 82.810 との差 +7.249pt が報告値です。'
+    : '正解をそのまま入れても 0.2903 しか返りません。<b>数式のレンダリングが壊れています</b>。この環境で base を採点し、健全な環境で学習後を採点すると、差は <b>+12.820pt</b> になります。実際に報告できる +7.249 に対して、<b>5.6pt が無から生まれます</b> — しかも採点結果の見た目はもっともらしいままです。';
+}
+d1(); d2draw(); d3set(true);
+</script>
+</body>
+</html>
