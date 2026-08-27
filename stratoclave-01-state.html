@@ -64,14 +64,14 @@ footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:v
 <tr><td>競合比較の主張を精査した</td><td><b>4 件が事実に合わなくなっていた</b>ので取り下げた</td></tr>
 <tr><td>稼働中のデプロイを外から叩いた</td><td>3 つの API がすべて 200。サーバ側の記録がクライアント受信値と<b>完全一致</b></td></tr>
 <tr><td>ローカルだけで動く経路を作った</td><td>DynamoDB だけローカル、推論は実 Bedrock。<b>コード変更ゼロ</b>で成立</td></tr>
-<tr><td>自分の断定を検算した</td><td><b>3 回外していた</b>。全部、実物を読んで訂正した</td></tr>
+<tr><td>自分の断定を検算した</td><td><b>4 回外していた</b>。全部、実物を動かすか読むかして訂正した</td></tr>
 </table>
 
 <h2>main に対する現在地</h2>
 
-<p>作業は <code>docs/accurate-positioning</code> というブランチに 4 コミット溜まっている状態で、
+<p>作業は <code>docs/accurate-positioning</code> というブランチに 6 コミット溜まっている状態で、
 <b>まだ main にマージしていない</b>。main 自体は動いていて、デプロイも稼働している。
-差分は 13 ファイル、新規 6 / 変更 7、1,456 行の追加と 56 行の削除である。</p>
+差分は 17 ファイル、1,834 行の追加と 57 行の削除である。</p>
 
 <table>
 <tr><th>コミット</th><th>中身</th></tr>
@@ -83,6 +83,10 @@ footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:v
     <td>証拠の段位に <code>deployed-live</code> を新設し、実測結果と<b>証明できなかったこと</b>を記録</td></tr>
 <tr><td><code>2455a9f</code> feat(local): run the whole gateway on one machine against real Bedrock</td>
     <td>compose、テーブル作成、seed、デモ、Makefile、<code>docs/LOCAL.md</code>。README も書き直し</td></tr>
+<tr><td><code>e9bdfc2</code> ci: keep the credential-free paths from rotting unnoticed</td>
+    <td>認証情報の要らない経路を CI に載せる。壊れても誰も気づかない経路だったので</td></tr>
+<tr><td><code>58ed74a</code> fix(ci): DynamoDB Local rejects a key id it cannot use as a file name</td>
+    <td>その CI が即座に見つけた欠陥の修正。詳細は後述</td></tr>
 </table>
 
 <h2>取り下げた 4 つの主張</h2>
@@ -195,33 +199,53 @@ compose に入っていなかったこと。README には「3 経路を叩く」
 
 <pre>reserve_ms=9485.2  settle_ms=3866.3  upstream_ms=1571.7  unaccounted_ms=8.1</pre>
 
-<p>Bedrock は 1.6 秒しか使っていない。<b>予約と精算、つまり DynamoDB 側が支配的</b>だった。
-原因は、この環境で DynamoDB Local の代わりに使った代役 (moto) が、
-複数項目のトランザクションの扱いで本物と最も違う場所だったことである。</p>
+<p>Bedrock は 1.6 秒しか使っていない。<b>予約と精算、つまり状態を置く側が支配的</b>だった。
+この時点で書いた結論は「ローカルの時間は信じるな」だった。</p>
+
+<p>それは<b>間違った教訓だった</b>。後日 JDK を入れて本物の DynamoDB Local で同じ呼び出しを測ったら、
+数字がまるごと入れ替わった。</p>
+
+<table>
+<tr><th>状態を置く先</th><th class="n">予約</th><th class="n">精算</th><th class="n">推論</th><th class="n">合計</th></tr>
+<tr><td><b>DynamoDB Local 2.x</b></td><td class="n">13.7 ms</td><td class="n">13.3 ms</td><td class="n">1,217.2 ms</td><td class="n">1,255.6 ms</td></tr>
+<tr><td>代役 (moto)</td><td class="n">9,485.2 ms</td><td class="n">3,866.3 ms</td><td class="n">1,571.7 ms</td><td class="n">約 14,900 ms</td></tr>
+<tr><td>デプロイ実経路</td><td class="n">未計測</td><td class="n">未計測</td><td class="n">未計測</td><td class="n">1,112 ms</td></tr>
+</table>
+
+<p>本物なら台帳は 1.26 秒のうち <b>27 ms</b> で、支配しているのは推論である。
+デプロイ実経路の 1,112 ms とほぼ同じ形をしている。予約だけで約 <b>690 倍</b>の差を作っていたのは代役だった。</p>
+
+<div class="note">
+<b>教訓を書き換えた</b>
+正しくは「<b>ローカルの時間を信じるな</b>」ではなく「<b>代役の時間を信じるな</b>」である。
+前者だとローカルモードの価値を自分で削ってしまうし、事実として誤っている。
+代役の数字は「膨らんでいる」のではなく<b>意味がない</b>。複数項目トランザクションと
+条件付き更新の再試行は、代役が本物から最も外れる場所だからである。
+</div>
 
 <div class="demo">
 <h3>予約と精算の重さを動かす</h3>
 <p style="margin-top:0;font-size:14.5px;color:var(--ink2)">
-状態を置く先が遅いと、推論の速さは体感に効かなくなる。左のスライダを動かすと、
-1 リクエストの内訳が変わる。実測した 3 点 (デプロイ実経路 / ローカルの代役 / 直接 Bedrock) を
-プリセットとして置いてある。</p>
+状態を置く先が遅いと、推論の速さは体感に効かなくなる。スライダを動かすと
+1 リクエストの内訳が変わる。実測した 3 点 (本物の DynamoDB Local / 代役の moto /
+デプロイ実経路) をプリセットとして置いてある。</p>
 
 <div class="ctl">
-  <label>状態を置く先の 1 リクエストあたりの重さ (予約 + 精算): <span class="val" id="vdb">13.4</span> 秒
-    <input type="range" id="rdb" min="0.05" max="15" step="0.05" value="13.35"></label>
-  <label>推論そのもの (Bedrock): <span class="val" id="vup">1.6</span> 秒
-    <input type="range" id="rup" min="0.5" max="6" step="0.1" value="1.6"></label>
+  <label>状態を置く先の 1 リクエストあたりの重さ (予約 + 精算): <span class="val" id="vdb">0.027</span> 秒
+    <input type="range" id="rdb" min="0.005" max="15" step="0.005" value="0.027"></label>
+  <label>推論そのもの (Bedrock): <span class="val" id="vup">1.2</span> 秒
+    <input type="range" id="rup" min="0.5" max="6" step="0.1" value="1.2"></label>
 </div>
 
 <p style="font-size:13.5px;margin:6px 0 0">
 プリセット:
-<a href="#" id="p1">デプロイ実経路の合計に合わせる (1.1 秒)</a> /
-<a href="#" id="p2">ローカルの代役 (14.9 秒)</a> /
-<a href="#" id="p3">状態が理想的に速い場合</a>
+<a href="#" id="p1">本物の DynamoDB Local (1.26 秒)</a> /
+<a href="#" id="p2">代役の moto (14.9 秒)</a> /
+<a href="#" id="p3">デプロイ実経路の合計に合わせる (1.1 秒)</a>
 </p>
 <p style="font-size:13px;margin:6px 0 0;color:var(--ink2)">
-内訳を実測したのは 2 番目だけである。1 番目は<b>合計 1,112 ms しか測っていない</b>ので、
-内訳はこのデモの上で合計を合わせただけの値であり、実測ではない。3 番目は仮想である。</p>
+内訳を実測したのは 1 番目と 2 番目である。3 番目は<b>合計 1,112 ms しか測っていない</b>ので、
+内訳はこのデモの上で合計を合わせただけの値であり、実測ではない。</p>
 
 <div class="bar" id="bar"></div>
 <div class="legend">
@@ -239,14 +263,77 @@ compose に入っていなかったこと。README には「3 経路を叩く」
 
 <h3>動かして見えること</h3>
 <p>状態を置く先が速いと合計は推論に近づき、遅いと推論の速さは見えなくなる。
-だから<b>代役の環境で測った時間を製品の性能として読んではいけない</b>。
-逆に、この 3 分割が最初から出ているおかげで、遅いときに 3 つのどれかを当てにいける。
-推測でなく特定になる。</p>
+本物の保存先なら台帳は 27 ms で、支配しているのは推論である。
+だから<b>代役の環境で測った時間を製品の性能として読んではいけない</b>。逆に言えば、
+<b>本物のローカルなら読んでよい</b>。ここを一緒くたに「ローカルは信じるな」と書いたのが
+最初の誤りだった。そして、この 3 分割が最初から出ているおかげで、
+遅いときに 3 つのどれかを当てにいける。推測でなく特定になる。
+なおこの計測行を出しているのは <code>/v1/chat/completions</code> だけで、残り 2 経路には無い。</p>
 </div>
 
-<h2>自分が 3 回外した記録</h2>
+<h2>CI に載せた初日に、CI が欠陥を 4 つ見つけた</h2>
 
-<p>1 日で 3 回、事実でないことを断定した。3 回とも、訂正のきっかけは<b>実物を読んだこと</b>だった。</p>
+<p>認証情報の要らない経路を CI に載せた。壊れても誰も気づかない経路だからである。
+そして初回の実行で落ちた。返ってきたのはこれだった。</p>
+
+<pre>botocore.exceptions.ClientError: An error occurred (UnrecognizedClientException)
+when calling the DescribeTable operation:
+The Access Key ID or security token is invalid.</pre>
+
+<p>AWS が偽の鍵を拒んだように見える。だから「環境変数が効かず実 AWS に飛んでいる」と考えた。
+確かめる方法は簡単で、<b>偽の鍵で実 AWS を叩いて文言を見比べればいい</b>。</p>
+
+<pre>実 AWS  : The security token included in the request is invalid.
+CI に出た: The Access Key ID or security token is invalid.</pre>
+
+<p><b>文言が違う</b>。つまり返したのは AWS ではなく、ローカルの保存先だった。
+接続先は合っていて、拒まれていたのは<b>鍵の文字列そのもの</b>だった。
+JDK を入れて本物の DynamoDB Local を手元で立て、鍵を変えながら総当たりしたら境界が出た。</p>
+
+<table>
+<tr><th>渡した access key id</th><th>結果</th></tr>
+<tr><td><code>AKIAIOSFODNN7EXAMPLE</code></td><td>通る</td></tr>
+<tr><td><code>abc123</code></td><td>通る</td></tr>
+<tr><td><code>ci-local</code> / <code>ci_local</code> / <code>ci.local</code> / <code>ci local</code></td><td><b>拒否</b></td></tr>
+</table>
+
+<p>規則は「英数字以外を含む鍵を拒否する」だった。DynamoDB Local は
+<b>access key id をデータベースのファイル名に使う</b>ので、ファイル名にできない文字を弾く。
+CI が渡していたのは <code>ci-local-placeholder</code> で、ハイフンが入っていた。</p>
+
+<div class="flag">
+<b>エラーメッセージが別人のふりをすると、原因の捜索先ごと間違える</b>
+この文言は AWS からの拒否としか読めない。だから最初の仮説は全部
+「なぜ実 AWS に飛んだのか」の方向に向いた。<b>文言を実物と突き合わせる</b>までは、
+接続先が正しいことすら分からなかった。
+</div>
+
+<p>そして CI は、CI 自身の不備ではなく<b>成果物の欠陥</b>を 3 つ道連れで暴いた。</p>
+
+<table>
+<tr><th style="width:42%">露出した欠陥</th><th>意味</th></tr>
+<tr><td>スクリプトはバックエンドの package を import するのに、手順書がホスト側の依存を要求していなかった</td>
+    <td>Docker だけ持っている読者は必ず失敗する。<code>make up</code> が先に確認して、
+    3 手先の <code>ImportError</code> ではなく<b>打つべき pip コマンド</b>を出すようにした</td></tr>
+<tr><td>ゲートウェイの容器に資格情報が 1 つも渡っていなかった</td>
+    <td>テーブル作成が直っても、次の認証チェックで落ちていた。
+    compose が既に mount している <code>~/.aws</code> に書くことで、<b>mount 自体も検証される</b>形にした</td></tr>
+<tr><td>認証しない保存先なのに、署名のために資格情報が必要だった</td>
+    <td>AWS アカウントを持たない読者は <code>make up</code> すら通らない。
+    無い場合は AWS 公開の例示鍵に自動で落ちて、そう言うようにした</td></tr>
+</table>
+
+<div class="good">
+<b>ついでに、実 AWS を壊しうる穴が 1 つ埋まった</b>
+元のガードは「環境変数が<b>設定されているか</b>」しか見ていなかった。
+この変数を解釈しないほど古い botocore なら、変数は黙って無視され、
+スクリプトはローカルの宛先を表示したまま<b>実 AWS アカウントに 23 個のテーブルを作る</b>。
+今は botocore が<b>実際に解決した宛先</b>を見て、AWS のホスト名なら止まる。
+</div>
+
+<h2>自分が 4 回外した記録</h2>
+
+<p>4 回、事実でないことを断定した。訂正のきっかけは毎回<b>実物を読むか動かすか</b>だった。</p>
 
 <table>
 <tr><th style="width:34%">断定した内容</th><th>実際</th></tr>
@@ -256,12 +343,14 @@ compose に入っていなかったこと。README には「3 経路を叩く」
     <td><b>偽</b>。パス検索で見つからなかったから断定したが、実際は 5 系統の接続先がある。正しく言えるのは「エンジン内部状態を使ったルーティングは確認できていない」まで</td></tr>
 <tr><td>読み戻し API の 404 は文書と実挙動の差だ</td>
     <td><b>正しい挙動だった</b>。ドル建ての動きは予約が pool されたときだけ走るので、プールを設定していないテナントでは課金行が存在しない。バグはどこにもなかった</td></tr>
+<tr><td>CI が落ちたのは <code>localhost</code> が IPv6 に解決されたからだ</td>
+    <td><b>外れ</b>。接続は届いていて、返ってきたのは DynamoDB の API エラーだった。ログを読まずに、両ジョブが同じステップで落ちたという間接的な事実だけで断定していた</td></tr>
 </table>
 
 <div class="note">
-<b>教訓は「grep で断定するな」だった</b>
-3 回とも、パス検索や文書の突き合わせという<b>間接的な証拠</b>で断定していた。
-実装の呼び出し箇所を 1 つ開けば数分で分かることばかりだった。
+<b>教訓は「間接的な証拠で断定するな」だった</b>
+4 回とも、パス検索・文書の突き合わせ・落ちたステップの一致という<b>間接的な証拠</b>で断定していた。
+実装の呼び出し箇所を 1 つ開くか、コマンドを 1 回打てば数分で分かることばかりだった。
 証拠に段位を付ける仕組みをこの製品が持っているのは、たぶん同じ失敗を通ったからだと思う。
 </div>
 
@@ -275,10 +364,15 @@ compose に入っていなかったこと。README には「3 経路を叩く」
 実装でも DynamoDB の挙動でもない。文書からも「double-counting cannot occur」という書き方を消して、
 「モデル化された遷移が二重計上しないことを機械検査した」に下げた。</p>
 
-<p>ローカルモードにも穴がある。このマシンにはコンテナの実行環境がなく、
-<b>compose のビルド経路そのものは誰も通していない</b>。検証したのは配線 (環境変数、
-テーブルスキーマ、seed、3 経路、台帳の読み戻し) までである。
-そして<b>台帳が競合下でどう振る舞うかは、ローカルモードでは検証されない</b>。
+<p>ローカルモードにも穴が残っている。このマシンにはコンテナの実行環境がないので、
+<b>compose のビルド経路は手元では通せない</b>。CI の側では 1 度ビルドとスタック起動に
+成功しており、<code>Dockerfile</code> と配線は動くと言える。ただし資格情報の修正を入れた次の実行では
+同じステップが落ちていて、<b>まだ緑になっていない</b>。スクリプトは成功時と 1 文字も違わず、
+容器と同じ資格情報の状態を手元で再現してもゲートウェイは正常に起動するので、
+ビルドか image の取得を疑っているが、<b>これは仮説であって特定ではない</b>。ログを読むのが次の一手である。</p>
+
+<p>そして<b>台帳が競合下でどう振る舞うかは、ローカルモードでは原理的に検証できない</b>。
+DynamoDB Local は単一ノードでスロットリングもパーティション競合もないからである。
 一番大事にしている性質がまさに抜けているので、そこを曖昧にすると意味がない。</p>
 
 <h2>この章で壊しておきたい誤解</h2>
@@ -304,13 +398,14 @@ compose に入っていなかったこと。README には「3 経路を叩く」
   var bar=document.getElementById('bar');
   var oTotal=document.getElementById('oTotal'), oShare=document.getElementById('oShare');
   var oVerdict=document.getElementById('oVerdict');
-  // 実測の予約:精算の比 (9485 : 3866)
-  var RESERVE_SHARE = 9485.2/(9485.2+3866.3);
+  // 予約 : 精算 の比は保存先で変わる。実測は
+  //   DynamoDB Local 13.7 : 13.3 / moto 9485.2 : 3866.3
+  var reserveShare = 13.7/(13.7+13.3);
 
   function draw(){
     var db=parseFloat(rdb.value), up=parseFloat(rup.value);
-    vdb.textContent=db.toFixed(2); vup.textContent=up.toFixed(1);
-    var res=db*RESERVE_SHARE, set=db*(1-RESERVE_SHARE), total=db+up;
+    vdb.textContent=db.toFixed(3); vup.textContent=up.toFixed(1);
+    var res=db*reserveShare, set=db*(1-reserveShare), total=db+up;
     var seg=[['s1','予約',res],['s2','精算',set],['s3','推論',up]];
     bar.innerHTML=seg.map(function(s){
       var pct=(s[2]/total*100);
@@ -328,11 +423,13 @@ compose に入っていなかったこと。README には「3 経路を叩く」
       oVerdict.innerHTML='<span class="ng">状態側が支配的</span>。ここで測った時間を製品の性能として読むと間違える';
     }
   }
-  function preset(db,up){ return function(e){ e.preventDefault(); rdb.value=db; rup.value=up; draw(); }; }
-  // デプロイ実経路: 合計 1.1 秒のうち推論が大半だった実測に合わせる
-  document.getElementById('p1').onclick=preset(0.25,0.85);
-  document.getElementById('p2').onclick=preset(13.35,1.6);
-  document.getElementById('p3').onclick=preset(0.05,1.6);
+  function preset(db,up,share){
+    return function(e){ e.preventDefault(); reserveShare=share; rdb.value=db; rup.value=up; draw(); };
+  }
+  // 1: DynamoDB Local 実測 / 2: moto 実測 / 3: デプロイは合計のみ実測、内訳は未計測
+  document.getElementById('p1').onclick=preset(0.027,1.217,13.7/(13.7+13.3));
+  document.getElementById('p2').onclick=preset(13.352,1.572,9485.2/(9485.2+3866.3));
+  document.getElementById('p3').onclick=preset(0.03,1.08,0.5);
   rdb.oninput=draw; rup.oninput=draw; draw();
 })();
 </script>
