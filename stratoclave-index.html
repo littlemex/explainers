@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>証拠のない主張を消していく — ゲートウェイ開発の現在地</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:40px 24px 90px}
+a{color:var(--g)}
+header{border-bottom:3px solid var(--g);padding-bottom:20px;margin-bottom:28px}
+h1{font-size:28px;margin:0 0 10px;line-height:1.4}
+.lead{font-size:17px;color:var(--ink2);margin:0}
+h2{font-size:20px;margin:44px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+.hero{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:26px 24px;margin:24px 0}
+.hero .big{display:flex;gap:18px;align-items:stretch;flex-wrap:wrap;margin:6px 0 14px}
+.hero .num{flex:1 1 200px;text-align:center;padding:16px 10px;border-radius:8px;background:var(--gp)}
+.hero .num b{display:block;font-size:40px;line-height:1.1;color:var(--gd);font-variant-numeric:tabular-nums}
+.hero .num span{font-size:13px;color:var(--ink2)}
+.hero .mid{flex:0 0 100%;text-align:center;font-size:15px;font-weight:600;color:var(--gd);margin:2px 0}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd)}
+ol.toc{list-style:none;padding:0;margin:0}
+ol.toc li{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g2);
+border-radius:0 8px 8px 0;padding:16px 18px;margin-bottom:12px}
+ol.toc a{font-weight:600;font-size:17px;text-decoration:none}
+ol.toc p{margin:6px 0 0;font-size:14.5px;color:var(--ink2)}
+ol.toc li.wip{border-left-color:var(--line);opacity:.72}
+ol.toc li.wip span.t{font-weight:600;font-size:17px;color:var(--ink2)}
+.tag{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:11px;background:var(--gp);color:var(--gd);border:1px solid var(--line);margin-left:6px}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>証拠のない主張を消していく — ゲートウェイ開発の現在地</h1>
+  <p class="lead">自分の書いた比較が事実に追い越された日に、何を取り下げ、何を測り、何を作ったか。開発の途中を、途中のまま記録する。</p>
+</header>
+
+<div class="hero">
+  <div class="big">
+    <div class="num"><b>4</b><span>main に対して溜まっているコミット。まだマージしていない</span></div>
+    <div class="num"><b>4</b><span>事実に合わなくなって取り下げた比較の主張</span></div>
+    <div class="num"><b>3</b><span>デプロイ実経路で初めて通した API</span></div>
+    <div class="mid">結論を足すのではなく、支えを失った結論を引くほうが 1 日の成果になることがある</div>
+  </div>
+  <p style="margin:0;font-size:14.5px;color:var(--ink2)">
+  LLM ゲートウェイを個人で半年書いてきて、ある日、競合の実装を読み直したら
+  「うちにしかない」と書いていた機能が 2 つとも相手側に既にあった。同じ日に、
+  最大の弱点だった「デプロイ実経路の証拠がない」を実測で埋め、
+  ノート PC だけで実 Bedrock を叩ける経路を作った。その過程を、数字と差分で残す。</p>
+</div>
+
+<h2>このシリーズは何を記録するのか</h2>
+
+<p>ここで扱うのは <a href="https://github.com/littlemex/stratoclave">stratoclave</a> という
+Apache-2.0 のゲートウェイである。Amazon Bedrock の手前に立ち、呼び出しの<b>前</b>に予算を予約し、
+応答後に実測で精算し、その遷移を台帳に残す。どのモデルに送るかという<b>判断はしない</b>。
+判断は外部のルータのものだと設計文書で宣言してある。</p>
+
+<p>このシリーズが記録するのは製品の宣伝ではなく、<b>開発の途中の状態</b>である。
+何が main に入っていて、何がブランチで止まっていて、どの主張がどこまで検証されているか。
+とくに<b>取り下げた主張</b>を残す。技術文書で最も腐りやすいのは競合比較で、
+腐ったまま置いておくと、腐っていない部分まで信用されなくなる。</p>
+
+<div class="note">
+<b>このシリーズの書き方</b>
+数字は実行して得たものだけを書く。実行していないものは「未検証」と書く。
+自分の推論が外れたときは、外れた事実と、外れた理由を残す。
+第 1 章では実際に 3 回外している。
+</div>
+
+<h2>いま何が起きているのか (第 1 章の要約)</h2>
+
+<table>
+<tr><th>項目</th><th>状態</th></tr>
+<tr><td>main</td><td>ブランチの 4 コミットは<b>未マージ</b>。main 自体は動いていて、デプロイも稼働している</td></tr>
+<tr><td>取り下げた主張</td><td>競合比較の 4 件。相手が呼び出し前予約もルーティング知能も既に出荷していた</td></tr>
+<tr><td>デプロイ実経路の証拠</td><td>これまで in-process とモック止まりだったものを、公開エンドポイント経由で 3 API 通した</td></tr>
+<tr><td>ローカルモード</td><td>新規。DynamoDB だけローカル、推論は実 Bedrock。コード変更ゼロで成立した</td></tr>
+<tr><td>まだ検証できていないこと</td><td>並行負荷下のハード上限。製品の中核主張だが、権限の都合で自分では測れない</td></tr>
+</table>
+
+<h2>章</h2>
+
+<ol class="toc">
+  <li>
+    <a href="stratoclave-01-state.html">第 1 章 — 主張を 4 つ取り下げ、証拠を 2 つ足した日</a>
+    <span class="tag">main との差分 / 実測値 / 3 つの誤り</span>
+    <p>競合の実装を読み直したら、差別化として書いていた 2 つが相手側に既にあった。
+    取り下げの書き方、デプロイ実経路での初計測、ノート PC で実 Bedrock を叩く経路の作り方、
+    そして自分が 3 回断定を外した記録。main に対する 4 コミットの中身を全部並べる。</p>
+  </li>
+  <li class="wip">
+    <span class="t">第 2 章 — 並行負荷下で上限は守られるか (予定)</span>
+    <span class="tag">未着手</span>
+    <p>製品の中核主張は「同時に叩いても 1 円も超えない」である。ところがこれを測るには
+    小さい予算を設定する権限が必要で、第 1 章の時点では測れていない。
+    測れる形にしてから書く。</p>
+  </li>
+  <li class="wip">
+    <span class="t">第 3 章 — 上流に部品を出す (予定)</span>
+    <span class="tag">未着手</span>
+    <p>判断を外部に置くと決めたので、外部のルータと接ぐ契約が必要になる。
+    実課金に基づく決定結果を上流へ返すスキーマと、最初の PR の記録。</p>
+  </li>
+</ol>
+
+<h2>まだ言えないこと</h2>
+
+<p>この時点で言えるのは、<b>デプロイ実経路で 3 API が通り、サーバ側の記録がクライアントの受信値と
+一致した</b>ことと、<b>ノート PC だけで同じ経路が動いた</b>ことである。
+言えないのは、それが誰かに必要とされるかどうかである。利用者は作者 1 人で、star は 0 のままだ。</p>
+
+<p>技術的にも大きな穴が 1 つ残っている。この製品が一番大事にしている性質は
+「並行負荷下でも予算を超えない」ことだが、それを検証するには小さい予算を設定する管理権限が必要で、
+第 1 章の検証では手が出ていない。<b>形式証明があるのは状態遷移のモデルに対してであって、
+実装や DynamoDB の挙動に対してではない</b>。この区別を曖昧にしないことが、
+このシリーズで守りたい唯一の規律である。</p>
+
+<footer>
+  シリーズ: 証拠のない主張を消していく / <a href="index.html">explainers の目次へ</a>
+</footer>
+</div>
+</body>
+</html>
