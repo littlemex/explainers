@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 10 章 毎時 8,000 リクエストという損益の境目</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:10px 0}
+.ctl input[type=range]{width:100%;accent-color:var(--g2)}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.twocol{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+.twocol>div{flex:1 1 190px;background:var(--gp);border-radius:8px;padding:14px 16px;text-align:center}
+.twocol h4{margin:0 0 8px;font-size:13.5px;color:var(--gd)}
+.twocol b{font-size:23px;display:block;font-variant-numeric:tabular-nums;color:var(--gd);line-height:1.2}
+.twocol .verdict{font-size:12.5px;margin-top:4px;color:var(--ink2)}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-top:8px}
+.legend span i{display:inline-block;width:16px;height:3px;border-radius:2px;margin-right:5px;vertical-align:3px}
+ol.steps{padding-left:22px}
+ol.steps li{margin:10px 0}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 10 章</div>
+<h1>第 10 章 毎時 8,000 リクエストという損益の境目</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  到着率を実測で振ったら、答えは 1 本のしきい値だった。<b>毎時 8,000 リクエストを境に、箱は gemma-4 より
+  安くなる。</b>下ではどれだけキャッシュが効いても負ける。予想していた「2 つ目の制約」— 混みすぎるとキャッシュが
+  死ぬ — は現れず、むしろ<b>混むほどヒット率は上がった</b>。そしてこの実験の途中で、8 割の効果を持っていた
+  会話アフィニティのルータが<b>2 日間死んでいた</b>ことに気づいた。
+</div>
+
+<h2>実際の会話の形で測る</h2>
+
+<p>合成の共有 prefix ではなく、実際のエージェント会話に近い形を作った。<b>12,000 トークンの共有前置き</b>、
+そこから<b>1 ターンごとに約 1,500 トークン</b>を積み、<b>6 ターン</b>続ける。この形で流すと、
+箱は入力トークンの <b>82.5%</b> をキャッシュ読みに変えた。</p>
+
+<table>
+  <tr><th></th><th class="n">箱</th><th class="n">gemma-4</th></tr>
+  <tr><td>この形での 1 リクエストの費用比</td><td class="n" colspan="2">箱が 1.31 倍安い</td></tr>
+  <tr class="hl"><td>出力の長さを揃えたあとの比</td><td class="n" colspan="2">箱が 1.20 倍安い</td></tr>
+  <tr><td>同じ指示に対する出力トークン数</td><td class="n">213</td><td class="n">690</td></tr>
+</table>
+
+<p>1.31 倍という最初の比には、gemma-4 のほうが<b>饒舌</b>という事実が混ざっている。同じ指示に対して
+gemma-4 は 690 トークン書き、箱は 213 トークンしか書かない。出力の量で比べているのではないので、
+これを揃えて初めて<b>1.20 倍</b>という比較可能な数字になる。</p>
+
+<h2>箱の優位は、丸ごと入力側にある</h2>
+
+<p>箱の出力単価は <b>$4.12/Mtok</b>、gemma-4 は <b>$0.40/Mtok</b>。<b>箱の出力は 10 倍以上高い。</b>
+だから箱が勝てるとしたら理由は入力側 (キャッシュ) しかなく、必要なヒット率は<b>その仕事の
+入力対出力比</b>に依存する。</p>
+
+<table>
+  <tr><th>入力 : 出力 の比</th><th class="n">損益分岐に必要なヒット率</th><th>備考</th></tr>
+  <tr><td>19 : 1</td><td class="n">100% (到達不能)</td><td>出力の比重が大きく、キャッシュを 100% にしても届かない</td></tr>
+  <tr class="hl"><td>63 : 1</td><td class="n">71.4%</td><td>第 6 章の生存曲線が示した「崖」の位置と同じ数字</td></tr>
+  <tr class="hl"><td>117 : 1 (実測コーパス)</td><td class="n">58.8%</td><td>393 本のエージェント会話コーパスの実際の比</td></tr>
+</table>
+
+<p>実測の 82.5% は 58.8% を上回っている。<b>だから今回の形は最初から損益分岐点の内側にいた。</b>
+比が 19:1 に近い仕事 (出力を多く書かせる仕事) では、キャッシュがどれだけ効いても届かない。</p>
+
+<div class="flag">
+  <b>1 回、測り方を間違えた</b>
+  この実験の前段では出力を 96 トークンで打ち切っていて、そのときの入力対出力比は 1326:1、
+  比較は <b>2.01 倍</b>安いという結果だった。だがこれは<b>入力の長さは実物に忠実でも、出力の長さは
+  実物に忠実ではない</b>形である。<b>prefill を実物に似せることと、仕事の形を実物に似せることは別物</b>で、
+  出力を打ち切ると箱の一番の弱点 (出力単価の高さ) を測定から締め出してしまう。
+</div>
+
+<h2>本番 — 到着率を振る</h2>
+
+<p>ここからが決め手になる測定である。<b>ポアソン到着の開ループ</b>で、箱がどれだけ空いていても
+費用は<b>稼働率を仮定せず</b>こう計算する。</p>
+
+<pre>1,000 件あたりの費用 = 時間単価 × 経過した時間 ÷ 完了したリクエスト数 × 1,000</pre>
+
+<p>暇な箱は暇なだけ課金される。gemma-4 は同じ形の負荷に対して<b>$1.953/1k リクエストで一定</b>
+(償却するものが無いので、負荷が変わっても動かない)。</p>
+
+<h2>デモ: 到着率を動かすと、損益がひっくり返る</h2>
+
+<div class="demo">
+  <h3>到着率 λ (session/秒) を動かす</h3>
+  <div class="ctl">
+    <label>λ: <span class="val" id="vlam">—</span>
+      <input type="range" id="rlam" min="0" max="7" step="1" value="4"></label>
+  </div>
+  <svg id="chart" viewBox="0 0 780 340" role="img" aria-label="到着率ごとの1000件あたり費用"></svg>
+  <div class="legend">
+    <span><i style="background:#0f4a2e"></i>箱 (実測)</span>
+    <span><i style="background:#8f2f2f"></i>gemma-4 $1.953/1k で一定</span>
+  </div>
+  <div class="twocol">
+    <div><h4>1 時間のリクエスト数</h4><b id="oreq">—</b></div>
+    <div><h4>同時に処理中</h4><b id="oflight">—</b></div>
+    <div><h4>キャッシュヒット率</h4><b id="ohit">—</b></div>
+    <div><h4>p95 遅延</h4><b id="op95">—</b></div>
+    <div><h4>箱 $/1k 件</h4><b id="ocost">—</b></div>
+    <div><h4>gemma-4 との比</h4><b id="ovs">—</b><div class="verdict" id="vvs"></div></div>
+  </div>
+</div>
+
+<h3>動かして見えること</h3>
+
+<ul>
+  <li><b>毎時 3,295 件 (λ=0.20) では箱が 2.4 倍高い。毎時 8,329 件 (λ=0.40) では箱が 1.07 倍安くなる。</b>
+  境目はこの 2 点の間、<b>だいたい毎時 8,000 リクエスト</b>である。</li>
+  <li><b>右に動かすほどヒット率も上がっている。</b>負荷が低いところでキャッシュが一番効くという
+  直感とは逆の動きで、この理由が次の節の主題になる。</li>
+</ul>
+
+<h2>予想していた「2 つ目の制約」は現れなかった</h2>
+
+<p>この実験の前に立てていた予想はこうだった。箱で得をするには<b>償却できるほど混んでいて、かつ
+キャッシュが崩れないほど空いている</b>という板挟みの領域が必要で、その領域が空である可能性がある。
+根拠は第 6 章の生存曲線で、そこでは 60,000 トークンの prefix を使い、同時会話数 12 で 99.1%、
+20 で 71.0%、<b>32 で 0%</b> という崖を測っていた。損益分岐に必要な 71.4% は、まさにその崖の
+真上に立っていた。</p>
+
+<div class="good">
+  <b>実際には逆だった — ヒット率は負荷と共に上がった</b>
+  同時実行 1 で 88.4%、34 で <b>94.3%</b>。混むほど prefix が「常駐している確率」が上がるからである。
+  同じ共有前置きに向かうリクエストが増えれば、それだけ<b>直前の誰かが同じ前置きを使ったばかり</b>という
+  状況が増える。崖はリクエスト数の関数ではなく、<b>常駐しているトークン量</b>の関数で、
+  今回の会話は 12,000 + 数千トークンの prefix、第 6 章の崖は 60,000 トークンの prefix で測っていた
+  — 崖の位置がそもそも違う場所にある。
+</div>
+
+<h2>途中で見つかったもの — ルータが 2 日間死んでいた</h2>
+
+<p>到着率を上げていく途中、ヒット率が第 6 章の 92.53% よりさらに高い値を出し始めた。理由を追うと、
+今回の測定が使っていた会話アフィニティのルータ自体に問題が見つかった。</p>
+
+<div class="flag">
+  <b>nginx の upstream は、pod が入れ替わると宛先を失う</b>
+  オープンソース版の nginx は <code>upstream {}</code> の中で名前を再解決できないため、設定は
+  <b>pod の IP を直接書き込む</b>形になっていた。裏側の replica が再スケジュールされて IP が変わると、
+  ルータは<b>誰も持っていないアドレス</b>を指したままになる。<br><br>
+  それでも Deployment は Ready のまま、Service はエンドポイントを持ったまま、DNS も答え続けていた。
+  <b>何も壊れて見えなかった。</b>その間の測定は、気づかれないまま素の round-robin の Service を
+  経由していた。<b>2 日間、誰も気づかなかった。</b>
+</div>
+
+<p>ルータ自身のアクセスログを見て復旧を確認した。<b>これは偽装できない検査</b>である。ある会話 ID が
+2 回とも同じ replica に着地し、別の会話 ID がもう一方に着地していることをログで確かめた。
+ハッシュキーが渡っていない場合は全リクエストが 1 つの upstream にハッシュされて「完璧なアフィニティ」に
+見えてしまうので、<b>1 対 1 の対応が壊れていないことまで見て初めて証拠になる</b>。</p>
+
+<div class="good">
+  <b>復旧後の効果 — 同じ負荷で 82.5% → 88.4%</b>
+  アフィニティが正しく効いた状態と、効いていない (round-robin だけの) 状態を同じ負荷で比べると、
+  ヒット率は 82.5% から 88.4% に上がった。上の到着率スイープの表は<b>復旧後</b>の数字である。
+</div>
+
+<h2>運用のルール — 出会う順に並べる</h2>
+
+<ol class="steps">
+  <li><b>まず、毎時およそ 8,000 件の再利用可能なリクエストを維持できないなら、箱には一切流さない。</b>
+  これは 1 件ごとの判断ではなく、<b>容量計画の問い</b>である。</li>
+  <li><b>その水準を超えたら、prefix が常駐している会話の 2 ターン目以降を箱に流す。</b>
+  会話アフィニティのルータがあれば、これは <code>X-Correlation-ID</code> で振り分けることと同じ意味になる。</li>
+  <li><b>アラームは同時実行数ではなく、KV プールの占有割合に張る。</b>第 6 章で確認したとおり、
+  実行中のシーケンスしか数えないゲージは、キャッシュが全滅していても「空いている」と表示する。</li>
+  <li><b>出力が支配的な仕事は、負荷に関係なく gemma-4 に流す。</b>入力対出力比が損益分岐に届かない
+  仕事に、箱側の工夫で追いつく余地は無い。</li>
+</ol>
+
+<h2>この章で壊しておきたい誤解</h2>
+
+<table>
+  <tr><th>よくある思い込み</th><th>実際は</th></tr>
+  <tr><td>入力の長さだけ実物に似せれば実測になる</td><td>出力を打ち切ると箱の弱点が測定から消える。比が 1326:1 になり 2.01 倍という数字が出たが、これは仕事の形を似せていない</td></tr>
+  <tr><td>キャッシュが効くなら箱はどんな負荷でも得</td><td>入力対出力比が悪い仕事は 100% ヒットでも損益分岐に届かない。19:1 がその例</td></tr>
+  <tr><td>混みすぎるとキャッシュが死んで損益分岐が消える</td><td>今回の prefix サイズでは逆で、混むほどヒット率が上がった。崖の位置は常駐トークン量で決まり、今回はそこに届いていない</td></tr>
+  <tr><td>Deployment が Ready で Service にエンドポイントがあれば経路は健全</td><td>nginx の upstream は pod 再スケジュールで宛先を失っても Ready のまま壊れる。アクセスログでの相関 ID 確認が必要</td></tr>
+  <tr><td>暇な箱はタダで待っている</td><td>時間単価 × 経過時間で課金され続ける。毎時 8,000 件を切ると箱は API より高くつく</td></tr>
+</table>
+
+<footer>
+  <a href="gateway-index.html">シリーズ目次</a> / 前: <a href="gateway-09-cachecost.html">第 9 章</a>
+</footer>
+</div>
+
+<script>
+const GEMMA = 1.953;
+const ROWS = [
+  {lam:0.02, rph:313,    flight:1,  hit:0.884, p50:0.31, p95:2.43, slo:1.00, cost:48.647},
+  {lam:0.05, rph:868,    flight:2,  hit:0.914, p50:0.31, p95:2.50, slo:1.00, cost:17.524},
+  {lam:0.10, rph:1574,   flight:3,  hit:0.926, p50:0.31, p95:2.54, slo:1.00, cost:9.670},
+  {lam:0.20, rph:3295,   flight:5,  hit:0.926, p50:0.31, p95:2.71, slo:1.00, cost:4.619},
+  {lam:0.40, rph:8329,   flight:13, hit:0.915, p50:0.54, p95:4.25, slo:1.00, cost:1.827},
+  {lam:0.60, rph:12439,  flight:15, hit:0.938, p50:0.39, p95:4.60, slo:1.00, cost:1.223},
+  {lam:0.90, rph:17889,  flight:21, hit:0.938, p50:0.44, p95:6.32, slo:1.00, cost:0.851},
+  {lam:1.30, rph:23476,  flight:34, hit:0.943, p50:0.52, p95:7.72, slo:0.99, cost:0.648},
+];
+const $ = id => document.getElementById(id);
+const rlam = $('rlam');
+
+function drawChart(selIdx){
+  const W = 780, H = 340, L = 62, R = 16, T = 18, B = 46;
+  const xs = ROWS.map(r => Math.log10(r.rph));
+  const ys = ROWS.map(r => r.cost).concat([GEMMA]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y1 = Math.max(...ys) * 1.08;
+  const px = v => L + (Math.log10(v) - x0) / (x1 - x0) * (W - L - R);
+  const py = v => H - B - (v / y1) * (H - T - B);
+  const path = ROWS.map((r, i) => `${i ? "L" : "M"}${px(r.rph).toFixed(1)},${py(r.cost).toFixed(1)}`).join(" ");
+  const dots = ROWS.map((r, i) =>
+    `<circle cx="${px(r.rph).toFixed(1)}" cy="${py(r.cost).toFixed(1)}" r="${i===selIdx?7:4.5}" fill="${i===selIdx?'#2f9e63':'#0f4a2e'}"/>`).join("");
+  const ticks = [313, 1574, 8329, 23476].map(t =>
+    `<text x="${px(t).toFixed(1)}" y="${H - B + 20}" font-size="11.5" text-anchor="middle"
+      fill="#3c5a4c">${t.toLocaleString()}</text>`).join("");
+  const grid = [0.5, 1, 2, 5, 10, 20, 50].filter(v => v <= y1).map(v =>
+    `<line x1="${L}" y1="${py(v).toFixed(1)}" x2="${W - R}" y2="${py(v).toFixed(1)}"
+      stroke="#e6ece8"/><text x="${L - 8}" y="${(py(v) + 4).toFixed(1)}" font-size="11.5"
+      text-anchor="end" fill="#3c5a4c">$${v}</text>`).join("");
+  $("chart").innerHTML = `
+    ${grid}
+    <line x1="${L}" y1="${py(GEMMA).toFixed(1)}" x2="${W - R}" y2="${py(GEMMA).toFixed(1)}"
+      stroke="#8f2f2f" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="${W - R}" y="${(py(GEMMA) - 7).toFixed(1)}" font-size="11.5" text-anchor="end"
+      fill="#8f2f2f">gemma-4 $1.953/1k で一定</text>
+    <path d="${path}" fill="none" stroke="#0f4a2e" stroke-width="3"/>
+    ${dots}
+    ${ticks}
+    <text x="${(L + W - R) / 2}" y="${H - 6}" font-size="12.5" text-anchor="middle"
+      fill="#3c5a4c">1 時間あたりのリクエスト数 (対数)</text>`;
+}
+
+function draw(){
+  const i = +rlam.value;
+  const r = ROWS[i];
+  $('vlam').textContent = r.lam.toFixed(2);
+  $('oreq').textContent = r.rph.toLocaleString('en-US');
+  $('oflight').textContent = r.flight;
+  $('ohit').textContent = (r.hit*100).toFixed(1) + '%';
+  $('op95').textContent = r.p95.toFixed(2) + ' 秒';
+  $('ocost').textContent = '$' + r.cost.toFixed(3);
+  const cheaper = r.cost < GEMMA;
+  const ratio = cheaper ? GEMMA / r.cost : r.cost / GEMMA;
+  $('ovs').textContent = (cheaper ? '−' : '+') + ratio.toFixed(2) + 'x';
+  $('vvs').innerHTML = cheaper
+    ? `<span class="ok">箱が ${ratio.toFixed(2)} 倍安い</span>`
+    : `<span class="ng">箱が ${ratio.toFixed(2)} 倍高い</span>`;
+  drawChart(i);
+}
+rlam.addEventListener('input', draw); draw();
+</script>
+</body>
+</html>
