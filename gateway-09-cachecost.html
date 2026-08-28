@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 9 章 箱のキャッシュ読みトークンはいくらなのか</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:10px 0}
+.ctl input[type=range]{width:100%;accent-color:var(--g2)}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.twocol{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+.twocol>div{flex:1 1 220px;background:var(--gp);border-radius:8px;padding:14px 16px}
+.twocol h4{margin:0 0 8px;font-size:14.5px;color:var(--gd)}
+.twocol b{font-size:24px;display:block;font-variant-numeric:tabular-nums;color:var(--gd);line-height:1.2}
+.twocol .verdict{font-size:13px;margin-top:6px}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 9 章</div>
+<h1>第 9 章 箱のキャッシュ読みトークンはいくらなのか</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 6 章で有効にした箱の prefix caching に、初めて単価を付けた。16 件同時実行で測ると、
+  キャッシュ読みトークンは新規トークンの <b>8.2%</b> ($0.0188 対 $0.2295/Mtok) — API が付ける
+  「10 分の 1」とほぼ同じ幅である。ところがこの測定を直列 (同時実行 1) でやると 3.0% に見えてしまい、
+  <b>3 倍近い誤差が箱を有利な側に振る</b>。同時実行数を、比較する既存単価と揃えないと数字は意味を持たない。
+</div>
+
+<h2>測り方 — レイテンシを直線に当てはめる</h2>
+
+<p>プロンプトの長さを何点か振り、出力は 1 トークンだけにして、レイテンシを測った。前置きが
+<b>キャッシュに無い版</b>と<b>キャッシュに当たる版</b>で 2 本の直線が取れる。</p>
+
+<pre>レイテンシ = 固定の立ち上がり時間 + トークン数 ÷ スループット</pre>
+
+<p>この直線の傾き (トークン数が 1 増えるごとにレイテンシがどれだけ伸びるか) の逆数が、
+そのプロンプト処理のスループットになる。</p>
+
+<h2>16 件同時実行での実測</h2>
+
+<table>
+  <tr><th></th><th class="n">スループット</th><th class="n">$/Mtok</th></tr>
+  <tr class="hl"><td>新規トークン (キャッシュ無し)</td><td class="n">18,417 tok/s</td><td class="n">$0.2295</td></tr>
+  <tr class="hl"><td>キャッシュ読みトークン</td><td class="n">224,620 tok/s</td><td class="n">$0.0188</td></tr>
+</table>
+
+<div class="good">
+  <b>まず、この測定器が正しいことを確かめた</b>
+  新規トークンの $0.2295/Mtok は、第 3 章で公開している $0.236/Mtok を<b>再現している</b> (差 2.8%)。
+  違う日に違う測り方で取った数字が同じ場所に落ちるということは、この測定器が既存の単価と同じ基準で
+  動いているということである。この確認が無ければ、以下の 8.2% という数字も信じる理由が無い。
+</div>
+
+<p><b>キャッシュ読みトークンは新規トークンの 8.2%。</b>API が付ける「キャッシュ読みは 10 分の 1」と
+ほぼ同じ幅の割引を、箱も自分の prefix cache で持っている。第 1 章末尾の「自前の箱にはこの割引が
+使えない」という記述は、この実測によって誤りだったことが確定した。</p>
+
+<h2>同時実行を落とすと、数字が 3 倍化ける</h2>
+
+<p>同じ測定を<b>直列</b> (同時に 1 件だけ) でやり直すと、キャッシュ読みは新規トークンの
+<b>3.0%</b> に見えた。8.2% より小さい、つまり<b>割引が実際より大きく見える</b>方向の誤差で、
+比にすると約 3 倍。</p>
+
+<div class="flag">
+  <b>なぜ直列だと箱に有利な誤差が出るのか</b>
+  <b>1 本のストリームでは機械を満たせない。</b>16 件同時なら GPU は常にほぼ全部の計算資源を使っているが、
+  1 件だけだと新規トークンの計算 (行列積主体で GPU を使い切る) は本来の速度を出せず、見かけの
+  スループットが下がる。キャッシュ読みトークンの計算はそもそも軽いので、この「1 本では埋まらない」
+  影響を受けにくい。結果として<b>新規側だけが遅く見え、比が縮む</b>。<br><br>
+  第 3 章で公開している $0.236/Mtok という基準は<b>16 件同時実行で測った数字</b>である。
+  それと比べるキャッシュ読みの単価も、同じ同時実行数で測らなければ比較にならない。
+</div>
+
+<h2>デモ: 同じ実験を、同時実行数だけ変えて再生する</h2>
+
+<div class="demo">
+  <h3>キャッシュ読みトークンは新規トークンの何 % か</h3>
+  <div class="ctl">
+    <label>同時実行数: <span class="val" id="vconc">16 (並列)</span>
+      <input type="range" id="rconc" min="0" max="1" step="1" value="1"></label>
+  </div>
+  <div class="twocol">
+    <div><h4>新規トークン $/Mtok</h4><b id="ofresh">—</b></div>
+    <div><h4>キャッシュ読み $/Mtok</h4><b id="ocached">—</b></div>
+    <div><h4>比 (キャッシュ ÷ 新規)</h4><b id="oratio">—</b><div class="verdict" id="vratio"></div></div>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink2);margin:12px 0 0" id="omsg"></p>
+</div>
+
+<h3>動かして見えること</h3>
+
+<ul>
+  <li><b>同時実行 1 (直列) では比が 3.0%、16 (並列) では 8.2%。</b>どちらも実測で、
+  補間ではない。動かしているのは測定条件だけで、キャッシュの中身は同じである。</li>
+  <li><b>第 3 章の基準単価 $0.236 は「16 並列」で測ったものだった。</b>だからキャッシュ読みの単価も
+  16 並列側の 8.2% を使うのが正しく、直列の 3.0% を使うと箱を実際より 2.7 倍有利に見せてしまう。</li>
+</ul>
+
+<h2>もう 1 つの補正 — キャッシュは 100% 当たらない</h2>
+
+<p>16 レーンが同じ 1 本の prefix を奪い合う条件では、キャッシュ側のヒット率は<b>最良でも 91.5%</b>で、
+100% には届かない。つまり測定中のキャッシュ読みの列にも、いくらか新規トークンが混ざっている。</p>
+
+<div class="note">
+  <b>だから $0.0188 は「解いた」値であって「読んだ」値ではない</b>
+  観測された混合スループットから、独立に測ってある新規トークンのスループット (18,417 tok/s) を使って
+  引き算し、<b>純粋にキャッシュだけが当たった場合の値を逆算</b>している。91.5% という実測の
+  ヒット率そのままを分母に使うのではなく、混合比を解いて片方の項を取り出す手順である。
+  これをやらずに混合値をそのまま「キャッシュの単価」と呼ぶと、8.2% は実際より少し高く出る。
+</div>
+
+<h2>この章で壊しておきたい誤解</h2>
+
+<table>
+  <tr><th>よくある思い込み</th><th>実際は</th></tr>
+  <tr><td>キャッシュ読みトークンは自前の箱では測れない (時間課金だから)</td><td>スループットの直線当てはめで測れる。8.2% という具体的な数字が出る</td></tr>
+  <tr><td>同時実行数を変えても比率は変わらない</td><td>直列では 3.0%、16 並列では 8.2%。3 倍近い差で、しかも箱に有利な方向に転ぶ</td></tr>
+  <tr><td>測定器の基準単価と別条件で測った新しい数字は、そのまま並べて比較できる</td><td>比較する既存の単価がどの同時実行数で測られたかを揃えないと、比較そのものが無意味になる</td></tr>
+  <tr><td>ヒット率が 100% でなければ測定は失敗</td><td>91.5% でも、独立に測った新規側のスループットで混合比を解けば純粋な値を取り出せる</td></tr>
+</table>
+
+<footer>
+  <a href="gateway-index.html">シリーズ目次</a> / 前: <a href="gateway-08-priceprice.html">第 8 章</a> /
+  次: <a href="gateway-10-threshold.html">第 10 章 毎時 8,000 リクエストという損益の境目</a>
+</footer>
+</div>
+
+<script>
+const MODES = [
+  {label:"1 (直列)",   fresh:0.2295, cached:0.2295*0.030},
+  {label:"16 (並列)",  fresh:0.2295, cached:0.0188},
+];
+const rconc = document.getElementById('rconc');
+function draw(){
+  const m = MODES[+rconc.value];
+  document.getElementById('vconc').textContent = m.label;
+  document.getElementById('ofresh').textContent = '$' + m.fresh.toFixed(4);
+  document.getElementById('ocached').textContent = '$' + m.cached.toFixed(4);
+  const ratio = m.cached / m.fresh * 100;
+  document.getElementById('oratio').textContent = ratio.toFixed(1) + '%';
+  document.getElementById('vratio').innerHTML = +rconc.value === 1
+    ? '<span class="ok">基準単価 $0.236 と同じ条件 (16 並列) — これが正しい値</span>'
+    : '<span class="ng">直列は機械を満たせていない — 割引が実際より大きく見える</span>';
+  document.getElementById('omsg').textContent = +rconc.value === 1
+    ? 'キャッシュ読みは新規の 8.2%。第 1 章末尾の訂正の根拠がこれである。'
+    : 'キャッシュ読みは新規の 3.0% に見える。だがこれは 1 本のストリームが機械を満たせていないための artefact。';
+}
+rconc.addEventListener('input', draw); draw();
+</script>
+</body>
+</html>
