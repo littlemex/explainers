@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 8 章 値段の値段 — 一番公式に見えたものが一番間違っていた</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:10px 0}
+.ctl input[type=range]{width:100%;accent-color:var(--g2)}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.bars{margin:16px 0 6px}
+.bar{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:14px}
+.bar .lb{flex:0 0 190px;color:var(--ink2)}
+.bar .fill{height:22px;border-radius:3px;background:var(--g2);min-width:2px;transition:width .15s}
+.bar .fill.bad{background:var(--bad)}
+.bar .fill.win{background:var(--gd)}
+.bar .amt{font-variant-numeric:tabular-nums;font-weight:600}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 8 章</div>
+<h1>第 8 章 値段の値段 — 一番公式に見えたものが一番間違っていた</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  ここまでの章で使った層の単価は、手入力 → ゲートウェイ自身のレートカード → AWS Price List API と
+  3 回出どころを変えた。2 回目の「もっと公式に見えたもの」が実は一番ひどく、gemma-4 の入力単価を
+  正しい $0.14 の <b>36 倍</b>にしていた。正しい値の取り方にも 3 つの落とし穴があり、
+  そのすべてに一度は引っかかった。
+</div>
+
+<h2>1 回目 — 手入力、単純な打ち間違い</h2>
+
+<p>最初、各層の単価はハーネスに<b>手で打ち込んで</b>あった。ドキュメントを読んで転記しただけなので、
+古い数字を見ていたり単純に読み違えたりする。実際に gemma-4 の入力単価は <b>$0.30</b> と入力されていたが、
+AWS が公開している値は <b>$0.14</b> だった。これ自体は珍しい話ではなく、値の出どころを 1 か所に
+まとめる動機になっただけである。</p>
+
+<h2>2 回目 — もっと公式に見えたものが、もっと悪かった</h2>
+
+<p>次に、単価をゲートウェイ自身のレートカード (課金のために社内で持っている設定) から<b>読み込む</b>方式に
+変えた。ハーネスの外にある、システムが実際に使っている値なので、手入力より信頼できるはずだと考えた。</p>
+
+<div class="flag">
+  <b>13 行のうち 5 行が同じ行を指していた</b>
+  そのレートカードには 13 モデルぶんの行があったが、<b>うち 5 行が同一の <code>default</code> 行</b>を
+  参照していた。このカード自身のコメントによれば、<code>default</code> は「レートが分からないモデルに
+  意図的に高い値をあてがう」ための行で、料金を取り過ぎることで<b>誤って安全側に振る</b>ガードレールだった。
+  ガードレールとしては正しい設計である。単価表として読み込むには、<b>それを単価だと思って読み込んだ側</b>
+  が間違っていた。
+</div>
+
+<p>gemma-4 はこの <code>default</code> 行を引いていて、値は<b>入力 $5.00</b>。AWS の $0.14 との比は
+<b>36 倍</b>。結果として、この系列でもっとも安いはずの層が、比較対象の中で<b>もっとも高い層</b>として
+扱われることになった。</p>
+
+<h2>デモ: gemma-4 の入力単価は、聞く相手で 36 倍動く</h2>
+
+<p>スライダーで 3 つの出どころを切り替えてみてほしい。値そのものは全部実測 (実際にそう入力/参照/取得された値) で、
+補間は無い。</p>
+
+<div class="demo">
+  <h3>gemma-4 の入力単価 $/Mtok</h3>
+  <div class="ctl">
+    <label>出どころ: <span class="val" id="vsrc">手入力</span>
+      <input type="range" id="rsrc" min="0" max="2" step="1" value="0"></label>
+  </div>
+  <div class="bars" id="bars"></div>
+  <p style="font-size:13.5px;color:var(--ink2);margin:10px 0 0" id="verdict"></p>
+</div>
+
+<h3>動かして見えること</h3>
+
+<ul>
+  <li><b>「ゲートウェイ自身の値」が一番信頼できそうに見えて、一番遠い。</b>手入力の間違いは 2.1 倍だが、
+  レートカードの <code>default</code> 行は 36 倍。<b>出どころの見た目の公式さと、値の正しさは無関係</b>。</li>
+  <li><b>間違った値は、間違って見えない。</b>$5.00 という数字だけを見て「gemma-4 は高い層だ」と
+  結論するのは、その 1 個の数字を疑わなければ自然な読み方である。</li>
+</ul>
+
+<h2>3 回目 — 正しく取っても、3 つの落とし穴がある</h2>
+
+<p>いまは <b>AWS Price List API</b> から、モデルごとの Bedrock 提供リージョンと <code>standard</code>
+サービスティアを指定して取得している。この「正しい取り方」自体にも、最初に取ったときは全部で 3 回間違えた。</p>
+
+<table>
+  <tr><th>落とし穴</th><th>具体的に何が起きるか</th></tr>
+  <tr><td>リージョンはモデルごとに違う</td><td>Claude 系は us-east-1、gemma-4 と gpt-5.x 系は us-east-2、grok-4.6 は us-west-2 から取る必要がある。1 リージョンに固定すると一部のモデルの行が存在しないか別の値になる</td></tr>
+  <tr class="hl"><td>サービスティアは名指ししないと決まらない</td><td>AWS は同じモデルに <code>standard</code>、<code>flex</code>、<code>priority</code>、<code>batch</code>、<code>global-</code> 系の行を公開していて、値は最大 5 倍離れる。grok-4.6 は 1 リージョンだけで 18 行ある</td></tr>
+  <tr><td>最小値を取ってはいけない</td><td>複数行から機械的に最安値を選ぶと、誰も選んでいないサービスレベルを黙って選んだことになる</td></tr>
+</table>
+
+<div class="note">
+  <b>なぜ「最小値」が罠なのか</b>
+  <code>batch</code> や <code>flex</code> は速度や可用性を落として安くするサービスレベルで、
+  今回の層の比較が前提にしている「同時実行を捌く」用途には合わない。値だけ見て一番安い行を拾うと、
+  比較の対象そのものが静かに変わってしまう。<b>この章の表と第 1 章の追加行は、すべて
+  <code>standard</code> ティアで統一している。</b>
+</div>
+
+<h2>この章で壊しておきたい誤解</h2>
+
+<table>
+  <tr><th>よくある思い込み</th><th>実際は</th></tr>
+  <tr><td>システムが実際に使っている値が一番信頼できる</td><td>その値がなぜそこにあるかを確認しないと、意図的な過大請求のガードレールを単価だと思い込む</td></tr>
+  <tr><td>値の出どころが公式に見えれば正しい</td><td>ゲートウェイ自身のレートカードは一番公式に見えて 36 倍外れていた</td></tr>
+  <tr><td>1 つの API から取れば地域差の問題は消える</td><td>モデルごとに提供リージョンが違う。1 リージョンに固定すると一部のモデルの値が欠けるか変わる</td></tr>
+  <tr><td>公開されている値なら 1 モデルに 1 つの値段しかない</td><td>サービスティアで最大 5 倍違う行が並ぶ。名指ししないと決まらない</td></tr>
+  <tr><td>複数の値があるなら安いほうを使えばよい</td><td>最小値は誰も選んでいないサービスレベルを黙って選ぶことになる</td></tr>
+</table>
+
+<footer>
+  <a href="gateway-index.html">シリーズ目次</a> / 前: <a href="gateway-07-turnboundary.html">第 7 章</a> /
+  次: <a href="gateway-09-cachecost.html">第 9 章 箱のキャッシュ読みトークンの値段</a>
+</footer>
+</div>
+
+<script>
+const SOURCES = [
+  {label:"手入力", price:0.30},
+  {label:"ゲートウェイ自身のレートカード (default 行)", price:5.00},
+  {label:"AWS Price List API (us-east-2, standard)", price:0.14},
+];
+const AWS = 0.14;
+const rsrc = document.getElementById('rsrc');
+function money(v){ return "$" + v.toFixed(2); }
+function draw(){
+  const s = SOURCES[+rsrc.value];
+  document.getElementById('vsrc').textContent = s.label;
+  const max = Math.max(...SOURCES.map(x => x.price));
+  document.getElementById('bars').innerHTML = SOURCES.map((x, i) => {
+    const cls = i === +rsrc.value ? (x.price === AWS ? 'win' : 'bad') : '';
+    return `<div class="bar"><span class="lb">${x.label}</span>`
+      + `<span class="fill ${cls}" style="width:${Math.max(2, x.price/max*380)}px"></span>`
+      + `<span class="amt">${money(x.price)}</span></div>`;
+  }).join('');
+  const ratio = (s.price / AWS);
+  let msg;
+  if (s.price === AWS) msg = 'これが AWS Price List API の値で、以後の章はこれを基準にしている。';
+  else msg = `AWS の値 ${money(AWS)} との比は ${ratio.toFixed(1)} 倍。`
+    + (ratio > 10 ? ' レートカードの default 行は「わざと高くする」設計なので、単価としては使えない。' : ' 手入力の単純な誤りである。');
+  document.getElementById('verdict').textContent = msg;
+}
+rsrc.addEventListener('input', draw); draw();
+</script>
+</body>
+</html>
