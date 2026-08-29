@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 11 章 箱の 0 点は、能力ではなく直列化だった</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:10px 0}
+.ctl input[type=range]{width:100%;accent-color:var(--g2)}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.twocol{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+.twocol>div{flex:1 1 190px;background:var(--gp);border-radius:8px;padding:14px 16px;text-align:center}
+.twocol h4{margin:0 0 8px;font-size:13.5px;color:var(--gd)}
+.twocol b{font-size:23px;display:block;font-variant-numeric:tabular-nums;color:var(--gd);line-height:1.2}
+.twocol .verdict{font-size:12.5px;margin-top:4px;color:var(--ink2)}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+svg{width:100%;height:auto;display:block}
+ol.steps{padding-left:22px}
+ol.steps li{margin:10px 0}
+.pick{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 14px}
+.pick button{font:inherit;font-size:13.5px;padding:7px 12px;border-radius:7px;border:1px solid var(--line);
+background:var(--card);color:var(--ink2);cursor:pointer}
+.pick button.on{background:var(--gd);border-color:var(--gd);color:#fff;font-weight:600}
+.verdicts{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}
+.verdicts>div{flex:1 1 180px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--bg)}
+.verdicts h4{margin:0 0 6px;font-size:13px;color:var(--gd)}
+.verdicts .r{font-size:14px;font-weight:600}
+.verdicts .why{font-size:12.5px;color:var(--ink2);margin-top:4px;line-height:1.6}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 11 章</div>
+<h1>第 11 章 箱の 0 点は、能力ではなく直列化だった</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  自前の箱を新しいモデルに替えたら、エージェントの全ステップが失敗し、40 ステップの予算を <b>15 秒</b>で
+  使い切った。原因はバグでも能力でもなく、<b>ハーネスが決めた書式が、そのモデルが訓練された書式に
+  似ていて一致しない</b>ことだった。書式を変えるだけで、同じ箱・同じ問題・同じ予算で
+  <b>解けた数が 0 から 6 になり、使えなかった手が 68.8% から 1.0% に落ちた</b>。
+</div>
+
+<h2>何が起きたか</h2>
+
+<p>これまでの章で箱に流していたのは分類や要約で、いずれも<b>1 往復</b>で終わる仕事だった。第 2 章の
+SWE-bench はそうではない。モデルはファイルを検索し、読み、パッチを書き、テストを走らせる。
+つまり<b>道具を呼ぶ</b>必要がある。</p>
+
+<p>箱のモデルを <code>Qwen3.6-35B-A3B-FP8</code> に替えてこれを回したところ、結果は 1 行で書ける。
+<b>全ステップ失敗、40 ステップを 15 秒で消費、パッチは 1 バイトも書かれない。</b></p>
+
+<p>15 秒という数字がヒントだった。1 ステップあたり 0.4 秒。これはモデルが考えている時間ではなく、
+<b>返ってきた答えをハーネスが受け取れずに捨てて、次を聞いているだけ</b>の時間である。実際にモデルを
+直接叩くと、正しい道具の名前を毎回選んでいた。壊れていたのは<b>道具の呼び方の書き方</b>だけだった。</p>
+
+<h2>ハーネスの書式と、モデルが訓練された書式</h2>
+
+<p>このハーネスは道具の呼び出しを<b>テキスト</b>でやり取りしている。システムプロンプトはこう指示する。</p>
+
+<pre>&lt;action tool="search"&gt;
+pattern: def prepare_body
+&lt;/action&gt;</pre>
+
+<p>読み取り側は <code>&lt;action&gt;</code> の中の <code>キー: 値</code> の行を引数として拾う。
+テキストにしているのは理由があってのことで、<b>送るバイト列がどの層でも完全に同一</b>になり、目で読めて、
+提供元のライブラリではなくこちらの手元で版を管理できる。</p>
+
+<p>ところがこの箱のモデルは、道具呼び出しを<b>別の書式で訓練されている</b>。vLLM を
+<code>--tool-call-parser=qwen3_coder</code> で起動していることがその宣言になっている。そちらの書式はこうだ。</p>
+
+<pre>&lt;parameter=pattern&gt;
+def prepare_body
+&lt;/parameter&gt;</pre>
+
+<div class="flag">
+  <b>2 つは似ている。だから混ざる</b>
+  どちらも山括弧のタグで、どちらも「名前と値」を並べる。<b>まったく違う書式なら、モデルは指示された方を
+  そのまま真似た</b>はずである。近すぎるせいで、モデルは 2 つの書式の断片を<b>混ぜた</b>ものを書いた。
+  これは能力の問題ではなく、こちらが選んだ書式が<b>そのモデルの訓練分布のすぐ隣</b>にあったという問題である。
+</div>
+
+<h3>チャットテンプレートは無罪だった</h3>
+
+<p>最初に疑うべきはこちらの設定である。サーバがプロンプトを組み立てる段で余計なものを注入していれば、
+モデルは指示を見ていないことになる。そこでサーバが実際に組み立てたトークン列を出させた。
+道具を宣言しない状態では、system と user のメッセージだけで<b>21 トークン</b>、注入は何もなかった。</p>
+
+<p><b>設定の不具合ではなく、モデルの事前分布である。</b>第 6 章では逆に、フラグ 1 個の書き忘れが結論を
+壊していた。今回は同じ形の疑いを持って調べ、<b>今回は設定が正しかった</b>という結論になった。
+どちらも「先に自分を疑う」手順から出た答えで、答えが違うだけである。</p>
+
+<h2>崩れ方は 1 種類ではなかった</h2>
+
+<p>実際に返ってきたものを並べる。ここが判断の分かれ目になった。</p>
+
+<table>
+  <tr><th>返ってきた形</th><th>何が起きているか</th><th>受理したか</th></tr>
+  <tr><td><code>&lt;parameter=pattern&gt;qdp&lt;/parameter&gt;</code></td>
+      <td>素の方言。名前と値は曖昧さなく読める</td><td class="ok">受理する</td></tr>
+  <tr><td><code>&lt;parameter=pattern"&gt;</code></td>
+      <td>囲いタグ側の属性の引用符が、引数名に混入している</td><td class="ng">受理しない</td></tr>
+  <tr><td><code>&lt;/path&gt;</code></td>
+      <td><code>&lt;action&gt;</code> で開いたブロックを、引数の名前で閉じている</td><td class="ng">受理しない</td></tr>
+  <tr><td><code>pattern:</code> (値なし)</td>
+      <td>キーだけ書いて値を書いていない。書式ではなく中身の欠落</td><td class="ng">モデルの失敗</td></tr>
+  <tr><td><code>run_command</code> / <code>run</code></td>
+      <td>存在しない道具の発明</td><td class="ng">モデルの失敗</td></tr>
+</table>
+
+<p>1 種類目だけを受理する読み取り側を作り、そこで<b>凍結</b>した。これを文法 v2 と呼ぶ。</p>
+
+<div class="note">
+  <b>なぜ 3 種類目で手を止めたのか</b>
+  1 種類目を受理するのは<b>読み取り側の瑕疵の修正</b>と言える。名前と値が曖昧さなく書かれているのに
+  読めていなかったのだから。だが 2 種類目、3 種類目と足していくと、それは瑕疵の修正ではなく
+  <b>そのモデル専用のパーサを書いている</b>ことになる。ベンチマークを測定対象に合わせて曲げる作業で、
+  同じことを次のモデルにやれば数字は誰とも比べられなくなる。<b>後付けの一般化は 1 回までなら直せる穴、
+  連続すればチューニング</b>である。だから文法は v2 で止め、代わりに書式そのものを変える実験
+  (この章の後半) をした。
+</div>
+
+<h2>この変更は 1 つの層しか助けない。だからそう書く</h2>
+
+<p>文法 v2 はコードの上ではどの層にも等しく適用される。だがそれを「中立」と呼ぶのは誤りである。
+記録済みの全ステップについて、<b>道具の名前は読めたが引数の対象が一度も名指しされなかった</b>手を数えると、
+こうなる。</p>
+
+<table>
+  <tr><th>層</th><th class="n">ステップ数</th><th class="n">引数なし</th><th class="n">手そのものが無い</th></tr>
+  <tr><td>gpt-5.6-terra</td><td class="n">1,330</td><td class="n">0 (0.0%)</td><td class="n">14</td></tr>
+  <tr><td>claude-fable-5</td><td class="n">258</td><td class="n">0 (0.0%)</td><td class="n">5</td></tr>
+  <tr><td>前世代の箱 (Qwen3.8-27B)</td><td class="n">640</td><td class="n">8 (1.2%)</td><td class="n">4</td></tr>
+  <tr class="hl"><td>今回の箱 (Qwen3.6-35B-A3B)</td><td class="n">320</td><td class="n">220 (68.8%)</td><td class="n">74</td></tr>
+</table>
+
+<p>API 2 層はこの形を <b>1,588 ステップ中 0 回</b>しか出していない。つまり文法 v2 は
+<b>構造的に API の点数を動かせず、得をするのは測定対象である 1 層だけ</b>である。
+測定対象が落ちているのを見た<b>後で</b>読み取り側を緩めた、という事実は消えない。</p>
+
+<div class="good">
+  <b>擁護は「中立だから」ではなく、3 つの手続きである</b>
+  <b>版で凍結する</b> — 文法は v2 で止め、次のモデルのために拡張しない。<br>
+  <b>本物の失敗は吸収しない</b> — 値のない引数、発明された道具、壊れた JSON はモデルの失敗として計上し、
+  読み取り側が埋めたり言い換えたりしない。<b>どの書式でも「最初に現れた空でない値が勝ち、値を合成しない」</b>
+  という規則を通した。<br>
+  <b>緩めた分を毎回数える</b> — v1 なら拒否されていた読み方で受理した手の数を、全エピソードに併記する。
+  脚注ではなく本表に置く。
+</div>
+
+<h2>デモ: 同じバイト列を、3 つの読み取り側に読ませる</h2>
+
+<div class="demo">
+  <h3>返ってきた形を選ぶ</h3>
+  <div class="pick" id="pick"></div>
+  <pre id="raw">—</pre>
+  <div class="verdicts">
+    <div><h4>文法 v1 (キー: 値 だけ)</h4><div class="r" id="r1">—</div><div class="why" id="w1"></div></div>
+    <div><h4>文法 v2 (方言 1 種を追加)</h4><div class="r" id="r2">—</div><div class="why" id="w2"></div></div>
+    <div><h4>提供元の道具呼び出し API</h4><div class="r" id="r3">—</div><div class="why" id="w3"></div></div>
+  </div>
+</div>
+
+<h3>動かして見えること</h3>
+
+<ul>
+  <li><b>v2 が助けるのは 1 行目だけである。</b>引用符が混入した形と閉じタグが違う形は、v2 でも読めない。
+  受理する範囲を広げる作業は、ここから先が急に「そのモデル専用」になる。</li>
+  <li><b>値のない引数と発明された道具は、どの読み取り側でも失敗のままである。</b>これは書式の問題ではないので、
+  吸収したら測定が壊れる。</li>
+  <li><b>提供元の API はどの行も通る。</b>形式の合意をこちらで発明しないので、混ざる余地がそもそも無い。</li>
+</ul>
+
+<h2>書式を変えると何が変わったか</h2>
+
+<p>15 件の問題を選び、同じ箱・同じステップ予算・同じトークン予算で、<b>書式だけを変えて</b>3 回測った。
+選び方は測る前に宣言してある — 対象一覧の中でリポジトリごとに 1 件目、3 件以上あるリポジトリは 2 件目まで。
+後から都合のいい部分集合を選べないようにするための手順である。</p>
+
+<table>
+  <tr><th></th><th class="n">テキスト・文法 v1</th><th class="n">テキスト・文法 v2</th><th class="n">道具呼び出し API</th></tr>
+  <tr class="hl"><td>解けた</td><td class="n">0 / 8</td><td class="n">3 / 15</td><td class="n">6 / 15</td></tr>
+  <tr><td>パッチを 1 バイトでも書けた</td><td class="n">0 / 8</td><td class="n">6 / 15</td><td class="n">13 / 15</td></tr>
+  <tr class="hl"><td>使えなかった手</td><td class="n">68.8%</td><td class="n">41.9%</td><td class="n">1.0%</td></tr>
+  <tr><td>うち、手そのものが無い</td><td class="n">ステップの 23%</td><td class="n">180 (35.2%)</td><td class="n">1</td></tr>
+  <tr><td>うち、道具の発明</td><td class="n">2</td><td class="n">6</td><td class="n">0</td></tr>
+  <tr><td>うち、対象を名指しせず拒否された</td><td class="n">220</td><td class="n">28</td><td class="n">4</td></tr>
+  <tr><td>ステップ数</td><td class="n">320</td><td class="n">511</td><td class="n">490</td></tr>
+  <tr><td>使った額</td><td class="n">$0.124</td><td class="n">$0.4697</td><td class="n">$0.7505</td></tr>
+  <tr><td>解決 1 本あたり</td><td class="n">—</td><td class="n">$0.1566</td><td class="n">$0.1251</td></tr>
+</table>
+
+<p>v1 の列は中断した走行で 8 件しか含まないので、<b>向きだけを読む数字</b>として扱う。
+v2 と道具呼び出しの列は同じ 15 件である。</p>
+
+<div class="flag">
+  <b>v2 で解けた 3 件は、全部が緩めた読み方に依存していた</b>
+  それぞれ 10 手・11 手・8 手が v1 なら拒否されていた読み方で通っている。つまり<b>凍結した v1 の文法では、
+  この箱はこの 15 件で 1 件も解かない</b>。第 2 章の表で箱が最下位にいるのは、この状態で測った数字である。
+</div>
+
+<h2>本質的な教訓は、指標を 2 つに割ったこと</h2>
+
+<p>この件で一番効いたのは、パーサの改良ではない。<b>「道具を駆動できたか」と「バグを直せたか」を
+別の数字として記録するようにした</b>ことである。</p>
+
+<p>それまでは「解けた率」しか無かった。0 点という数字は、能力が低いのか、道具を呼べていないのかを
+<b>区別できない</b>。同じ 0 点が 2 つのまったく違う原因から出るのに、報告する数字が 1 つしか無かった。
+いまはエピソードごとに、手そのものが無かった回数、存在しない道具を呼んだ回数、引数を名指ししなかった回数、
+緩めた読み方で通した回数が、解けたかどうかとは<b>別に</b>記録される。</p>
+
+<div class="good">
+  <b>1 つの数字は 2 つの問いに答えられない</b>
+  第 5 章は「物差しが嘘をつく」話だったが、こちらは<b>物差しが 1 本しか無い</b>話である。
+  嘘をついていたのではなく、<b>2 つ質問しているのに答えの欄が 1 つしか無かった</b>。
+</div>
+
+<h3>エラー文面がモデルを契約から遠ざけていた</h3>
+
+<p>引数が無い呼び出しを拒否するとき、ハーネスは <code>search needs a pattern</code> とだけ返していた。
+要求は伝えているが、<b>書き方は何も示していない</b>。実測したのはその後の挙動である。</p>
+
+<div class="flag">
+  <b>そのエラーを受けたモデルは、方言側へさらに寄った</b>
+  「pattern が必要だ」と言われた次の手で、モデルは <code>&lt;parameter=pattern&gt;</code> 形式に
+  切り替えた。<b>こちらのエラー文が、モデルを契約から遠ざけていた。</b>文面を「埋めた形をそのまま見せる」
+  ものに変えた — 骨組みではなく、値まで入った実例を返す。骨組みを送り返しても、モデルが既に空で
+  送ってきているのは骨組みだからである。
+</div>
+
+<p>これは特定のモデルへの対応ではなく、<b>どの層に対しても質の低い環境だった</b>という話である。
+拒否の理由だけ言って正解の形を示さないのは、人間の同僚に対してもやらない。</p>
+
+<h3>自分の集計にも 1 つ間違いがあった</h3>
+
+<div class="flag">
+  <b>成功した手を故障に数えていた</b>
+  <code>list_dir</code> は引数 <code>dir</code> を省略するとチェックアウトの根を一覧して<b>成功する</b>。
+  ところが集計は「対象を名指ししていない手」を一律に故障として数えていて、この成功した手も混ぜていた。
+  結果、テキスト書式の「使えなかった手」を <b>45.2%</b> と 3.3 ポイント過大に出していた
+  (正しくは <b>41.9%</b>)。故障の計上は<b>拒否された手に限る</b>ように直した。<br><br>
+  誠実さを保つために置いた欄が、その欄自身のせいで水増しされていた。第 5 章の物差しの話と同じ形の失敗で、
+  <b>厳しく数えているつもりの場所が、いちばん検算されない</b>。
+</div>
+
+<h2>この結果が言っていないこと</h2>
+
+<p><b>提供元の道具呼び出し API のほうが良い書式である、とは言っていない。</b>あちらに変えると、
+どの層でも同一だったバイト列が<b>層ごとに違う変換器</b>に置き換わる。この箱では vLLM の
+<code>qwen3_coder</code> パーサ、他の層では各提供元の実装で、それらは同一でもなく同じ品質でもない。
+つまり測っているものが「モデル」から「モデルと変換器の組」になる。この章が言えるのは
+<b>この箱・この問題群では、テキスト書式が解けた数の半分と 100 手のうち 42 手を奪っていた</b>という
+狭い事実だけである。</p>
+
+<p><b>自作の書式を中立にできる、とも言っていない。</b>どんな書式も、どこかのモデルの訓練分布には
+他より近い。今回のものは <code>Qwen3.6-35B-A3B</code> が出すよう訓練された形の<b>すぐ隣</b>にあり、
+近いからこそ混ざった。取れる対策は「もっと良い書式を発明する」ことではなく、
+<b>書式の遵守と課題の達成を 2 つの数字で報告する</b>ことである。</p>
+
+<p><b>この章の箱は「考えずに」答えている。</b>箱の vLLM は
+<code>--default-chat-template-kwargs={"enable_thinking": false}</code> で起動していて、
+上の 3 列はいずれも思考を切った状態の箱である。相手の API 側は思考を使うので、
+<b>そこは揃っていない</b>。この軸をどう揃えるかは第 12 章の主題になる。</p>
+
+<p><b>15 件、1 つの問題群である。</b>解けた数の差は 15 件のうち 3 件の移動で出ていて、
+確率の主張ではない。使えなかった手の率は 490〜511 手を数えたものなので、そちらは件数の影響を受けにくい。</p>
+
+<h2>運用のルール</h2>
+
+<ol class="steps">
+  <li><b>自作の書式でモデルを評価する前に、そのモデルが訓練された書式を確認する。</b>
+  提供元が公開しているパーサ名 (<code>--tool-call-parser</code> に渡す値) がその宣言になっている。
+  近い書式は、遠い書式より危ない。</li>
+  <li><b>0 点を見たら、まず「呼べていない」を疑う。</b>ステップあたりの所要時間が異常に短ければ、
+  それは考えていない時間である。</li>
+  <li><b>書式の遵守と課題の達成を、別の欄に記録する。</b>後から分離することはできない。
+  記録していなければ、0 点の原因は永久に判別できない。</li>
+  <li><b>拒否のメッセージには、通る形を値まで入れて書く。</b>要求だけ伝える文面は、モデルを
+  自分の癖のほうへ押し戻す。</li>
+  <li><b>読み取り側を緩めたら、緩めた回数を結果に併記する。</b>そして「後から緩めた」と書く。
+  緩めた事実を書かない限り、それは測定ではなく調整である。</li>
+</ol>
+
+<div class="note">
+  <b>記録が無いと、後からやり直せない</b>
+  この件で困ったのは、既に支払い済みの 2,228 ステップについて<b>モデルが実際に返した文字列が
+  保存されていなかった</b>ことである。残っていたのは解釈済みの要約だけで、新しい読み取り側で
+  読み直すことができず、API 2 層への影響が無いことを間接的な数え方で確認するしかなかった。
+  いまは各エピソードに返答そのものを保存している。<b>再実行と再解釈の違いは、生の記録があるかどうかで決まる。</b>
+</div>
+
+<h2>この章で壊しておきたい誤解</h2>
+
+<table>
+  <tr><th>よくある思い込み</th><th>実際は</th></tr>
+  <tr><td>全ステップ失敗ならモデルの能力の問題</td><td>ステップ 0.4 秒は考えている時間ではない。直接叩けば正しい道具を選んでいた</td></tr>
+  <tr><td>指示された書式と違う書式を出すのは指示追従の失敗</td><td>訓練された書式と近すぎると混ざる。遠い書式のほうが素直に真似される</td></tr>
+  <tr><td>パーサを緩めるのは公平な修正</td><td>コード上は全層に等しくても、API 2 層は 1,588 手中 0 回この形を出していない。得をするのは測定対象だけ</td></tr>
+  <tr><td>読み取り側を緩めれば直る</td><td>崩れ方は 3 種類あり、緩めて救えたのは 1 種類。残りを追うとそのモデル専用パーサになる</td></tr>
+  <tr><td>厳しく数えている欄は信頼できる</td><td>成功した <code>list_dir</code> を故障に数えて 3.3 ポイント水増ししていた。厳しい欄ほど検算されない</td></tr>
+  <tr><td>解けた率が 1 つあれば品質は測れている</td><td>道具を駆動できたかと直せたかは別の問い。1 つの数字は両方に答えられない</td></tr>
+</table>
+
+<footer>
+  <a href="gateway-index.html">シリーズ目次</a> / 前: <a href="gateway-10-threshold.html">第 10 章</a>
+</footer>
+</div>
+
+<script>
+// 実際に返ってきた 5 つの形と、3 つの読み取り側がそれぞれどう扱うか。
+// 判定は本文の表と同じもので、デモのために作った値は無い。
+const CASES = [
+  {
+    label: "素の方言",
+    raw: '<action tool="search">\n<parameter=pattern>\nqdp\n</parameter>\n</action>',
+    v1: ["読めない", "<code>キー: 値</code> の行が 1 つも無いので、引数は空になる"],
+    v2: ["読める", "名前と値が曖昧さなく書かれている。この 1 種類だけを受理して凍結した"],
+    fc: ["読める", "書式の合意をこちらで発明していないので、そもそも混ざらない"]
+  },
+  {
+    label: "引用符の混入",
+    raw: '<action tool="search">\n<parameter=pattern">\nUnrecognized QDP line\n</parameter>\n</action>',
+    v1: ["読めない", "同上"],
+    v2: ["読めない", "引数名が <code>pattern\"</code> になっている。ここを許すと引数名の綴りが際限なく増える"],
+    fc: ["読める", "同上"]
+  },
+  {
+    label: "閉じタグが引数名",
+    raw: '<action tool="read_file">\npath: /testbed/src/_pytest/skipping.py\n</path>',
+    v1: ["読めない", "<code>&lt;/action&gt;</code> で閉じていないのでブロックとして成立しない"],
+    v2: ["読めない", "中身は正しい <code>キー: 値</code> なのに、囲いが閉じていないので届かない"],
+    fc: ["読める", "同上"]
+  },
+  {
+    label: "値のない引数",
+    raw: '<action tool="search">\npattern:\n</action>',
+    v1: ["失敗", "キーはあるが値が無い。<b>モデルの失敗</b>として計上する"],
+    v2: ["失敗", "値を合成しない規則があるので、v2 でも埋めない"],
+    fc: ["失敗", "必須引数が空。書式ではなく中身の欠落なので、どの書式でも失敗"]
+  },
+  {
+    label: "道具の発明",
+    raw: '<action tool="run_command">\n<parameter=command>\nls\n</parameter>\n</action>',
+    v1: ["失敗", "<code>run_command</code> という道具は無い"],
+    v2: ["失敗", "存在しない名前を実在する名前に読み替えない。<b>モデルの失敗</b>"],
+    fc: ["失敗", "宣言していない道具なので、名前の時点で拒否"]
+  }
+];
+const $ = id => document.getElementById(id);
+let sel = 0;
+$("pick").innerHTML = CASES.map((c, i) =>
+  `<button data-i="${i}" class="${i === 0 ? "on" : ""}">${c.label}</button>`).join("");
+function paint(){
+  const c = CASES[sel];
+  $("raw").textContent = c.raw;
+  [["1", c.v1], ["2", c.v2], ["3", c.fc]].forEach(([n, v]) => {
+    const ok = v[0] === "読める";
+    $("r" + n).innerHTML = `<span class="${ok ? "ok" : "ng"}">${v[0]}</span>`;
+    $("w" + n).innerHTML = v[1];
+  });
+  document.querySelectorAll("#pick button").forEach(b =>
+    b.classList.toggle("on", +b.dataset.i === sel));
+}
+$("pick").addEventListener("click", e => {
+  if (e.target.dataset.i === undefined) return;
+  sel = +e.target.dataset.i; paint();
+});
+paint();
+</script>
+</body>
+</html>
