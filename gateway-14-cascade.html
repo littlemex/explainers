@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 14 章 入れ子は、ルーティングをエスカレーションの問題に変える</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:10px 0}
+.ctl select{font-size:14px;padding:4px 8px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--ink)}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.twocol{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+.twocol>div{flex:1 1 190px;background:var(--gp);border-radius:8px;padding:14px 16px;text-align:center}
+.twocol h4{margin:0 0 8px;font-size:13.5px;color:var(--gd)}
+.twocol b{font-size:23px;display:block;font-variant-numeric:tabular-nums;color:var(--gd);line-height:1.2}
+.twocol .verdict{font-size:12.5px;margin-top:4px;color:var(--ink2)}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-top:8px}
+.legend span i{display:inline-block;width:16px;height:3px;border-radius:2px;margin-right:5px;vertical-align:3px}
+ol.steps{padding-left:22px}
+ol.steps li{margin:10px 0}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 14 章</div>
+<h1>第 14 章 入れ子は、ルーティングをエスカレーションの問題に変える</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  能力が入れ子だと節約の形は 1 つに決まる。<b>安い層で試して、落ちたら投げ直す</b>。
+  そこで<b>ずっと計算していなかった構成</b>を測った。箱を 1 段も挟まない「安い API から高い API へ」が
+  20 件を $5.9960 で解き、箱入りの最良が $5.0412。<b>箱の寄与は 1 タスク 4.8 セント、15.9%</b>である。
+  そしてその 15.9% は<b>オラクルを前提にした数字</b>で、本番にオラクルは無い。
+</div>
+
+<h2>入れ子だと、節約の形は 1 つしか残らない</h2>
+
+<p>第 12 章で 3 層の能力が厳密な入れ子だと分かった。第 3 章で外していた 9 件も加えて 24 件を測り直し、
+通信の失敗で終わった 4 件を除いた<b>有効 20 件でも反例は 1 件も出なかった</b>。箱が解けた課題は必ず安い
+API も解け、安い API が解けた課題は必ず高い API も解けている。20 件で 0 件なので真の割合の上限は
+おおよそ 15% と言える。</p>
+
+<p>入れ子には強い含意がある。<b>ルーティングでは品質が上がらない</b>。箱は上の層が取りこぼしたものを
+拾えないので、どう賢く振り分けても到達できる上限は「一番強い層を単体で使ったとき」のままである。
+残る効果は費用だけで、しかも費用を下げる形も 1 つに決まる。<b>安い層で試して、駄目なら上に投げ直す</b>。
+先に難易度を予測して振り分ける必要はない。箱に投げること自体が、いちばん精度の高い難易度の探りになる。</p>
+
+<h2>ずっと計算していなかった構成: 箱を 1 段も挟まない</h2>
+
+<p>ここまでの章はすべて「箱から始める」構成を値付けしてきた。ところが<b>箱を使わない 2 段構成</b>、
+つまり安い API で試して落ちたら高い API に投げ直す形を、一度も計算していなかった。固定費ゼロ、
+キャパシティ計画ゼロ、上限を突き抜ける心配ゼロの構成である。</p>
+
+<p>実測 20 件の 1 件ごとの請求額を、どの段でも「落ちたことが分かる」前提で足すとこうなる。</p>
+
+<table>
+  <thead><tr><th>構成</th><th class="n">解けた</th><th class="n">総額</th></tr></thead>
+  <tbody>
+    <tr><td>高い API だけ</td><td class="n">20 / 20</td><td class="n">$14.5899</td></tr>
+    <tr><td>安い API だけ</td><td class="n">16 / 20</td><td class="n">$2.9545</td></tr>
+    <tr><td>箱だけ</td><td class="n">14 / 20</td><td class="n">$0.8997</td></tr>
+    <tr><td><b>安い API → 高い API (箱なし)</b></td><td class="n">20 / 20</td><td class="n"><b>$5.9960</b></td></tr>
+    <tr class="hl"><td>箱 → 高い API</td><td class="n">20 / 20</td><td class="n">$5.0412</td></tr>
+    <tr><td>箱 → 安い API → 高い API</td><td class="n">20 / 20</td><td class="n">$5.2461</td></tr>
+  </tbody>
+</table>
+
+<p><b>箱の寄与は $0.9548、20 件で割って 1 タスク 4.8 セント、15.9% である。</b>機械を 1 台も持たない構成に
+対して、オラクルを持たせてなお 15.9% しか差がつかない。そして 3 段にすると $5.2461 で、
+<b>2 段より悪くなる</b>。段を足せば安くなるわけではない。</p>
+
+<div class="demo">
+  <h3>構成を選ぶ (実測 20 件、値はすべて実測)</h3>
+  <div class="ctl">
+    <label>構成 &nbsp;
+      <select id="arr">
+        <option value="cheap,exp" selected>安い API → 高い API (箱なし)</option>
+        <option value="box,exp">箱 → 高い API</option>
+        <option value="box,cheap,exp">箱 → 安い API → 高い API</option>
+        <option value="box,cheap">箱 → 安い API</option>
+        <option value="exp">高い API だけ</option>
+        <option value="cheap">安い API だけ</option>
+        <option value="box">箱だけ</option>
+      </select>
+    </label>
+  </div>
+  <div class="twocol">
+    <div><h4>総額</h4><b id="total">–</b><div class="verdict" id="stages">–</div></div>
+    <div><h4>解けた</h4><b id="solved">–</b><div class="verdict" id="perSolve">–</div></div>
+    <div><h4>箱なし 2 段との差</h4><b id="delta">–</b><div class="verdict" id="deltaNote">–</div></div>
+  </div>
+  <p style="font-size:14px;color:var(--ink2);margin-top:10px" id="explain">–</p>
+  <p style="font-size:13px;color:var(--ink2);margin-top:8px">
+    デモは 1 件ごとの請求額を 4 桁に丸めた値を足しているので、合計が上の表と 1 セントの何分の一かずれる。
+  </p>
+</div>
+
+<h2>その 15.9% で機械代が払えるのか</h2>
+
+<p>箱は使われていようといまいと時間あたり $15.2174 を請求する。1 タスク 4.8 セントの節約でそれを
+回収するには、<b>毎時 319 タスク</b>を通し続ける必要がある。</p>
+
+<p>実測では箱の 1 エピソードが中央値 76 秒・平均 105 秒だった。同時に走らせる本数で割ると
+到達できる本数はこうなる。</p>
+
+<table>
+  <thead><tr><th class="n">同時に走らせる本数</th><th class="n">1 本 105 秒での毎時タスク数</th></tr></thead>
+  <tbody>
+    <tr><td class="n">4</td><td class="n">137</td></tr>
+    <tr class="hl"><td class="n">16</td><td class="n">547</td></tr>
+    <tr><td class="n">48</td><td class="n">1,642</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>この数字は 1 度動いている。そこが今回いちばん面白い</b>
+  開発用の 12 件だけで計算していたときは、箱の寄与が 1 タスク 2.7 セントで損益分岐が<b>毎時 571 タスク</b>
+  だった。これは 16 並列で出せる 547 の<b>外側</b>で、つまり「箱は自分のスループット上限を超えないと
+  元が取れない」= 実現不可能という結論だった。9 件を足して 20 件で測り直すと <b>319</b> になり、
+  547 の<b>内側</b>に入った。<b>実現不可能から、要求が厳しいだけへ変わった</b>のである。
+</div>
+
+<h2>足した 9 件が、なぜ答えを動かしたのか</h2>
+
+<p>後から測った 9 件は、最初の 15 件とまったく違う顔をしていた。</p>
+
+<table>
+  <thead><tr><th>層</th><th class="n">開発 12 件</th><th class="n">後から測った 8 件</th><th class="n">合わせて 20 件</th></tr></thead>
+  <tbody>
+    <tr><td>箱が解けた</td><td class="n">6 (50%)</td><td class="n"><b>8 (100%)</b></td><td class="n">14 (70%)</td></tr>
+    <tr><td>安い API が解けた</td><td class="n">8 (67%)</td><td class="n"><b>8 (100%)</b></td><td class="n">16 (80%)</td></tr>
+    <tr><td>高い API が解けた</td><td class="n">12 (100%)</td><td class="n">8 (100%)</td><td class="n">20 (100%)</td></tr>
+    <tr><td>箱の請求</td><td class="n">$0.5714</td><td class="n">$0.3283</td><td class="n">$0.8997</td></tr>
+    <tr><td>安い API の請求</td><td class="n">$1.9911</td><td class="n">$0.9634</td><td class="n">$2.9545</td></tr>
+    <tr><td>高い API の請求</td><td class="n">$8.1485</td><td class="n">$6.4415</td><td class="n">$14.5899</td></tr>
+  </tbody>
+</table>
+
+<div class="good">
+  <b>結果でまったく区別できず、価格だけが 20 倍違う集合が実在した</b>
+  後から測った 8 件では、<b>3 層が同じ 8 件を解き、同じ 1 件を落としている</b>。品質の差は 1 件も無い。
+  一方で請求は $0.3283 対 $0.9634 対 $6.4415 で、いちばん安い層といちばん高い層が 20 倍離れている。
+  この集合では<b>モデルを選ぶ理由が価格しかない</b>。統合値が箱の側に動いたのは、こういう集合が
+  母集団に含まれていたからである。
+</div>
+
+<p>ここで注意しておくと、これは「後から測った 9 件のほうが簡単だった」という話でもある。
+安い API も高い API もそこでは取りこぼしが減っているので、<b>箱だけが得意だった集合ではない</b>。
+入れ子は破れていない。</p>
+
+<h2>そして 15.9% は、オラクルを前提にした数字である</h2>
+
+<p>上の表のすべてに共通する前提を書いておく。<b>どの段でも「落ちたことが分かる」と仮定している</b>。
+ベンチマークではそれが成立する。エピソードが終わったあと、そのリポジトリ自身のテストがパッチを判定
+するからである。</p>
+
+<p>本番にそのテストは無い。<b>あればモデルに投げていない</b>。だから 15.9% は
+「実装できる方針の値段」ではなく<b>「実装できない方針の上限」</b>であって、実際に手に入るのは
+そのうち検出器が拾えるぶんだけになる。</p>
+
+<p>その検出器を探した結果が第 15 章である。先に結論を書いておくと、<b>3 系統とも事前に決めた基準を
+満たさなかった</b>。</p>
+
+<h2>この章で言えないこと</h2>
+
+<p><b>20 件である。</b>入れ子は「この 20 件でそうだった」という事実で、確率の主張ではない。
+3 つの対比較のうち有意水準 5% を切るのは箱と高い API の間だけで、箱と安い API の間は解けた数では
+分離できていない。<b>分離できているのは価格だけ</b>である。</p>
+
+<p><b>箱の 1 タスク 4.8 セントは限界費用である。</b>箱が仕事で埋まっているときのトークン単価で
+計算した数字で、稼働率が前提にある。エピソードの合間に遊んでいる箱は、それでも時間あたり $15.2174 を
+請求する。<b>これは請求書ではない</b>。</p>
+
+<p><b>レイテンシを 1 秒も測っていない。</b>箱を先に試す構成は、API の試行が始まる前に中央値 76 秒の
+箱の時間を積む。対話的な用途ではこれが費用とは無関係に失格の理由になりうるが、この章の表には
+その軸が入っていない。</p>
+
+<p><b>可用性の損失が両側にある。</b>高い API は 24 件のうち 4 件で、ゲートウェイが HTTP 200 と空の応答を
+返してエピソードが終わった。<b>うち 1 件は $9.2452 を課金したあと 28 手目で死んでいる</b>。
+箱の側も、15 件を走らせている途中でノードの containerd が落ちて 2 つの複製が別ノードへ移り、
+モデルを読み込む 5 分間の全リクエストを失って 3 件をやり直した。どちらもモデルの性質ではないが、
+<b>本番では再試行を通じてカスケードの算術を変える</b>。この章はそれを数えていない。</p>
+
+<p><b>箱を挟まない構成も同じ問題を抱えている。</b>$5.9960 もオラクルの数字で、安い API が落ちたことを
+知る必要がある。それでもこちらを基準線に置くのは、<b>固定費が無い</b>からである。判断を間違えたとき、
+箱なしの構成が無駄にするのは API 呼び出し 1 回だが、箱入りの構成は<b>呼び出し 1 回と、借りてしまった
+機械の時間</b>を無駄にする。</p>
+
+<footer>
+シリーズ: <a href="gateway-index.html">安いモデルはどこまで代われるか</a> /
+<a href="index.html">explainers の目次へ</a>
+</footer>
+</div>
+
+<script>
+// Twenty instances, pooled from both passes. Every value is measured: [usd, solved] per tier.
+var DATA = [
+ {id:"astropy/astropy-14365",            box:[0.0221,false], cheap:[0.0751,false], exp:[0.3679,true]},
+ {id:"astropy/astropy-14369",            box:[0.0750,false], cheap:[0.2177,false], exp:[1.2580,true]},
+ {id:"astropy/astropy-14995",            box:[0.0545,true],  cheap:[0.0607,true],  exp:[0.1761,true]},
+ {id:"django/django-11880",              box:[0.0533,true],  cheap:[0.0907,true],  exp:[0.1506,true]},
+ {id:"django/django-17084",              box:[0.0499,true],  cheap:[0.2768,true],  exp:[0.9190,true]},
+ {id:"matplotlib/matplotlib-26342",      box:[0.0633,true],  cheap:[0.1263,true],  exp:[3.9994,true]},
+ {id:"mwaskom/seaborn-3187",             box:[0.0578,false], cheap:[0.1951,false], exp:[0.3902,true]},
+ {id:"pallets/flask-5014",               box:[0.0097,true],  cheap:[0.0336,true],  exp:[0.7302,true]},
+ {id:"psf/requests-1142",                box:[0.0597,true],  cheap:[0.1624,true],  exp:[0.8061,true]},
+ {id:"psf/requests-2931",                box:[0.0508,true],  cheap:[0.1705,true],  exp:[0.4236,true]},
+ {id:"pydata/xarray-3993",               box:[0.0425,false], cheap:[0.3181,true],  exp:[0.7380,true]},
+ {id:"pydata/xarray-4094",               box:[0.1032,false], cheap:[0.2110,true],  exp:[0.3621,true]},
+ {id:"pydata/xarray-4695",               box:[0.0336,true],  cheap:[0.0858,true],  exp:[0.4245,true]},
+ {id:"pylint-dev/pylint-6386",           box:[0.0405,true],  cheap:[0.2515,true],  exp:[1.8262,true]},
+ {id:"pylint-dev/pylint-7277",           box:[0.0248,true],  cheap:[0.1394,true],  exp:[0.1890,true]},
+ {id:"pytest-dev/pytest-10356",          box:[0.0461,false], cheap:[0.2879,false], exp:[1.0254,true]},
+ {id:"pytest-dev/pytest-7432",           box:[0.0435,true],  cheap:[0.0510,true],  exp:[0.2023,true]},
+ {id:"pytest-dev/pytest-8399",           box:[0.0443,true],  cheap:[0.0736,true],  exp:[0.1771,true]},
+ {id:"scikit-learn/scikit-learn-14496",  box:[0.0178,true],  cheap:[0.0971,true],  exp:[0.2914,true]},
+ {id:"scikit-learn/scikit-learn-15100",  box:[0.0070,true],  cheap:[0.0303,true],  exp:[0.1328,true]}
+];
+var NAME = {box:"箱", cheap:"安い API", exp:"高い API"};
+
+function cascade(stages){
+  var total = 0, solved = 0, attempts = {};
+  stages.forEach(function(s){ attempts[s] = 0; });
+  DATA.forEach(function(d){
+    for (var k = 0; k < stages.length; k++){
+      var s = stages[k];
+      total += d[s][0];
+      attempts[s] += 1;
+      if (d[s][1]) { solved++; break; }
+    }
+  });
+  return {total: total, solved: solved, attempts: attempts};
+}
+
+var BASE = cascade(["cheap","exp"]);
+
+function fmt(v){ return "$" + v.toFixed(4); }
+
+function update(){
+  var stages = document.getElementById("arr").value.split(",");
+  var r = cascade(stages);
+  document.getElementById("total").textContent = fmt(r.total);
+  document.getElementById("stages").textContent =
+    stages.map(function(s){ return NAME[s] + " " + r.attempts[s] + " 本"; }).join(" · ");
+  document.getElementById("solved").textContent = r.solved + " / " + DATA.length;
+  document.getElementById("perSolve").textContent =
+    r.solved ? fmt(r.total / r.solved) + " / 本" : "解けた件が無い";
+
+  var diff = r.total - BASE.total;
+  var el = document.getElementById("delta");
+  el.textContent = (diff < 0 ? "−" : "+") + fmt(Math.abs(diff)).slice(1);
+  el.style.color = diff < 0 ? "#0f4a2e" : "#8f2f2f";
+  document.getElementById("deltaNote").textContent =
+    Math.abs(100 * diff / BASE.total).toFixed(1) + "% " + (diff < 0 ? "安い" : "高い");
+
+  var text;
+  if (r.solved < DATA.length) {
+    text = "この構成は " + r.solved + " 件しか解けていないので、総額を箱なし 2 段の " + fmt(BASE.total) +
+      " と比べてはいけない。安いのは解けていない分を払っていないからで、品質が違う構成の請求額は比較できない。";
+  } else if (diff < 0) {
+    text = "20 件すべて解いたうえで箱なし 2 段より " + fmt(Math.abs(diff)).slice(1) + " ドル安い。" +
+      "箱を " + r.attempts["box"] + " 本走らせ、そのうち落ちたぶんを上の層が引き受けている。";
+  } else {
+    text = "20 件すべて解いてはいるが、箱なし 2 段より高い。段を足すこと自体が費用を増やす領域である。";
+  }
+  document.getElementById("explain").textContent = text;
+}
+
+document.getElementById("arr").addEventListener("change", update);
+update();
+</script>
+</body>
+</html>
