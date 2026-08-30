@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>coding スキル群 — 発散と収束を分けて変更を通す 5 フェーズ</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --p1:#0f5132; --p2:#198754; --p3:#3d7dca; --p4:#b07d2b; --p5:#e07a5f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 50px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:34px;letter-spacing:.03em}
+  header p{margin:0 auto;opacity:.92;font-size:17px;max-width:760px}
+  main{max-width:1000px;margin:0 auto;padding:32px 20px 80px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:26px;margin:22px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g2);font-size:17px;margin:22px 0 8px}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .flow-node rect{rx:9;stroke-width:2}
+  .flow-node text{fill:#fff;font-weight:700;font-size:13px;text-anchor:middle;dominant-baseline:middle}
+  .flow-sub{fill:#4a5d54;font-size:11.5px;text-anchor:middle}
+  .flow-edge{stroke:#b9cabf;stroke-width:2;fill:none;marker-end:url(#arr)}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 7px;font-size:13px;color:var(--g1)}
+  pre{background:#0f231b;color:#dff3e9;padding:14px 16px;border-radius:10px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+  pre code{background:none;color:inherit;padding:0}
+  ul{margin:8px 0 8px 22px;padding:0}
+  li{margin:6px 0}
+  .phase{border-left:6px solid var(--g3);padding-left:16px;margin:26px 0 0}
+  .phase.p1{border-color:var(--p1)} .phase.p2{border-color:var(--p2)}
+  .phase.p3{border-color:var(--p3)} .phase.p4{border-color:var(--p4)} .phase.p5{border-color:var(--p5)}
+  .phase h3{margin-top:0;color:var(--ink)}
+  .phase .cmd{font-size:13px;color:var(--sub);margin:0 0 8px}
+  .note{background:#f3f9f6;border:1px dashed var(--g3);border-radius:12px;padding:16px 20px;font-size:14.5px;margin:16px 0}
+  .kpi{display:flex;gap:16px;flex-wrap:wrap;margin:18px 0 4px}
+  .kpi div{flex:1 1 170px;background:#f3f9f6;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .kpi span{display:block;font-size:12.5px;color:var(--sub)}
+  .kpi strong{font-size:22px;color:var(--g1)}
+  footer{color:var(--sub);text-align:center;font-size:13.5px;padding:10px 20px 40px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">CODING SKILLS</p>
+  <h1>発散と収束を分けて変更を通す 5 フェーズ</h1>
+  <p>公開リポジトリ、リファレンス実装、共有インフラへの変更を、設計監査から実機検証までの 5 段で通すスキル群。レビューが見つけた指摘の全部に手をつけないための contract が中核にあります。</p>
+</header>
+<main>
+  <a class="back" href="../index.html">← skills シリーズへ戻る</a>
+
+  <p class="intro">レビューは発散させると強く、そのままでは変更が発散します。この 5 フェーズは、発散 (独立した敵対的レビューを何度も回す) と収束 (何をやり、何をやらないかを決めて書き留める) を別の作業として扱います。両方を同時にやると、腰の引けた変更か、際限のない変更のどちらかになります。</p>
+
+  <section>
+    <h2>フェーズの流れ</h2>
+    <svg viewBox="0 0 960 250" role="img" aria-label="5 フェーズの流れ">
+      <defs>
+        <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="#b9cabf"/>
+        </marker>
+      </defs>
+      <g class="flow-node">
+        <rect x="14"  y="86" width="160" height="48" fill="#0f5132"/><text x="94"  y="110">1 design-audit</text>
+        <rect x="204" y="86" width="170" height="48" fill="#198754"/><text x="289" y="110">2 review-contract</text>
+        <rect x="404" y="86" width="150" height="48" fill="#3d7dca"/><text x="479" y="110">3 split-impl</text>
+        <rect x="584" y="86" width="150" height="48" fill="#b07d2b"/><text x="659" y="110">4 impl-audit</text>
+        <rect x="764" y="86" width="180" height="48" fill="#e07a5f"/><text x="854" y="110">5 real-machine-test</text>
+      </g>
+      <path class="flow-edge" d="M174,110 L200,110"/>
+      <path class="flow-edge" d="M374,110 L400,110"/>
+      <path class="flow-edge" d="M554,110 L580,110"/>
+      <path class="flow-edge" d="M734,110 L760,110"/>
+      <text class="flow-sub" x="94"  y="152">設計と責務</text>
+      <text class="flow-sub" x="94"  y="170">前提を実機で先に確認</text>
+      <text class="flow-sub" x="289" y="152">敵対 4 回 → 選別 3 回</text>
+      <text class="flow-sub" x="289" y="170">CONTRACT.md</text>
+      <text class="flow-sub" x="479" y="152">テスト実装者と</text>
+      <text class="flow-sub" x="479" y="170">コード実装者を分離</text>
+      <text class="flow-sub" x="659" y="152">contract 照合 2 回</text>
+      <text class="flow-sub" x="659" y="170">言と実の一致</text>
+      <text class="flow-sub" x="854" y="152">環境を作り直して</text>
+      <text class="flow-sub" x="854" y="170">実トラフィックで</text>
+      <path class="flow-edge" d="M659,80 C659,40 289,40 289,80" stroke-dasharray="5 4"/>
+      <text class="flow-sub" x="474" y="34">設計レベルの指摘が続くなら contract が薄い</text>
+      <path class="flow-edge" d="M94,140 C94,206 289,206 289,140" stroke-dasharray="5 4"/>
+      <text class="flow-sub" x="192" y="224">前提が崩れたらここで安く止まる</text>
+    </svg>
+    <div class="note">
+      <b>順序が価値です。</b> 上位設計が間違っていると後続すべてがやり直しになるので設計監査が先に来ます。そして設計が立っている前提のうち、崩れると設計が生き残らないものは、フェーズ 5 ではなくフェーズ 1 で、実機で確かめます。時間を買った検証枠の最初の 1 時間は、長い E2E ではなく前提の白黒に使います。
+    </div>
+  </section>
+
+  <section>
+    <h2>スキル一覧</h2>
+    <table>
+      <tr><th>フェーズ</th><th>スキル</th><th>答える問い</th><th>成果物</th></tr>
+      <tr><td>1</td><td><code>/design-audit</code></td><td>上位設計と責務の分割は正しいか</td><td>設計文、前提の検証結果</td></tr>
+      <tr><td>2</td><td><code>/review-contract</code></td><td>見つかったもののうち、実際に何を変えるか</td><td><code>CONTRACT.md</code></td></tr>
+      <tr><td>3</td><td><code>/split-impl</code></td><td>コードを見ずに書かれたテストで動くと言えるか</td><td>実装とテスト</td></tr>
+      <tr><td>4</td><td><code>/impl-audit</code></td><td>実装は contract のとおりか、記述は実装のとおりか</td><td>修正または contract 修正</td></tr>
+      <tr><td>5</td><td><code>/real-machine-test</code></td><td>作り直した環境で実トラフィックが流れるか</td><td>証拠</td></tr>
+      <tr><td>—</td><td><code>/change-pipeline</code></td><td>全体の入口。規約と成果物の置き場を持つ</td><td>—</td></tr>
+      <tr><td>1・2・4 に差す</td><td><code>/ml-infra-review</code></td><td>GPU 学習スタックで、その分類がどう現れるか</td><td>ドメイン固有の指摘</td></tr>
+    </table>
+
+    <div class="phase p1">
+      <h3>1. design-audit — 設計と、前提の先出し検証</h3>
+      <p class="cmd"><code>/design-audit</code></p>
+      <p>まず設計を書きます。書かれていない設計はレビューできず、行単位の指摘しか返ってきません。何のために存在するか、どの層が何を所有するか、境界ごとの契約 (失敗時の振る舞いを含む)、そして環境と上流とバージョンとデータについての前提。</p>
+      <p>視点を変えて複数回レビューします。責務の置き場 (後段の層で統計から故障を推測するなど、補償が起きていないか)、目的からの再導出、設計に対する敵対、そして周辺リポジトリや上流の慣習との整合。分類 D (順序依存)、G (知識の重複)、H (宣言されていない前提) はパッチではなく書き直しになるので、この段で当てます。</p>
+      <p>前提のうち「偽なら設計が生き残らない」ものは load-bearing です。それを決める最小の観測を実機で行います。システム全体のスモークではなく、その事実 1 点の観測です。コンテナランタイムが環境変数を尊重するか、その bash のバージョンでその構文が通るか、ライブラリが何を返して何を投げるか、プラットフォームがテンプレート変更で Pod を作り直すか。</p>
+    </div>
+
+    <div class="phase p2">
+      <h3>2. review-contract — 発散 4 回、収束 3 回</h3>
+      <p class="cmd"><code>/review-contract</code></p>
+      <p><b>発散。</b> 4 つの視点で 4 ラウンド、2 モデルを並列に回します。手をつける量よりはるかに多く出るのが正常です。視点は、敵対 (壊す入力・状態・タイミング)、言と実の一致 (文書とコメントとコミットメッセージの主張をコードと照合)、責務と抽象 (層の所有、重複、band-aid、過剰な一般化)、運用と互換 (文書をたどる読者、旧設定を持つ運用者、無人の長時間 run、自分のではない環境)。1 つの視点を 4 回繰り返してはいけません。</p>
+      <p><b>収束。</b> 同じリストに対して、別の問いを 3 回。</p>
+      <ul>
+        <li><b>交渉の余地がないもの。</b> 文書の手順が動かない、セキュリティ、その成果物の存在理由が壊れている (誤情報を与えるリファレンス、測っていない数値を報告するベンチマーク、同梱物から再現できない検証結果)、そして静かな汚染 (失敗がもっともらしい値になり、run が止まらずに間違って完走する)。ここは議論せず in scope に入れます。</li>
+        <li><b>やるべきか怪しいもの。</b> 直す欠陥より大きいリファクタリング、誰も気づかない細かすぎる修正、通り道で見つけた横道、新しい抽象や設定項目。判断は 3 つの角度から。半分の大きさで同じ効果の代替はないか、周辺と上流に既にある答えはないか、その修正は検証できるか。<b>少ない修正で成すことは洗練の証</b>で、手抜きの証ではありません。欠陥の<i>クラス</i>を消すなら大きさは正当化され、1 インスタンスを消すだけなら正当化されません。</li>
+        <li><b>全体の形。</b> in scope を 1 つの変更として読み、寄せ集めに見えるなら 2 つの変更です。同じ根本原因の項目は 1 コミットに統合します。簡単だからという理由だけで入っているものは外します。</li>
+      </ul>
+      <p><code>CONTRACT.md</code> は <b>out of scope の表を先に書きます</b>。やらないことを決めるのが難しい半分で、先にやらないと in scope が全部を吸収します。却下した代替も記録します。フェーズ 4 で誰かが同じ代替を再提案したとき、議論を再演せずに答えられるのはこの記録だけです。</p>
+    </div>
+
+    <div class="phase p3">
+      <h3>3. split-impl — テスト実装者とコード実装者を分ける</h3>
+      <p class="cmd"><code>/split-impl</code></p>
+      <p>同じ contract から、互いの出力を見られない 2 人が書きます。コードの後に書くテストはコードがたまたまやっていることを検証しがちで、テストが見えている実装はテストを満たしにいきがちです。分けると両方が消えます。</p>
+      <p>両者が受け取るのは contract の in scope 表と interface 節、リポジトリ、周辺コードの慣習だけです。テスト実装者は失敗系を主戦場にします。契約された振る舞いと「もっともらしい振る舞い」が実際に分かれるのはそこだからです。</p>
+      <p>合わせたとき、テストが落ちてどちらが悪いか明らかでないなら、<b>疑うのは interface です</b>。同じ contract を読んだ 2 人が分かれたということは、contract が 2 通りに読めたということです。失敗経路が未規定 (仕事ができないとき何を返すのか) が実際には最も多い原因です。テストをコードに合わせて直す、あるいは逆をやる、のはこのフェーズの価値を捨てる行為です。</p>
+    </div>
+
+    <div class="phase p4">
+      <h3>4. impl-audit — contract 照合 2 回</h3>
+      <p class="cmd"><code>/impl-audit</code></p>
+      <p>2 回で足りるのは contract が難しい部分を済ませているからです。ここで設計レベルの指摘が出続けるなら contract が薄かったので、1 つずつ吸収せずフェーズ 2 に戻します。</p>
+      <p>1 回目は contract との一致。項目ごとに、症状ではなく欠陥を直しているか、合意した大きさか、誰も頼んでいない変更が差分にないか (パスで機械的に確認)、却下した代替が黙って採用されていないか、各修正を revert するとテストが落ちるか。</p>
+      <p>2 回目は言と実の一致。<b>コミットメッセージが差分に対して真であること</b>を最も疑います。メッセージは最後の修正より前に書かれるので、ここが一番ずれます。コメントは現在の振る舞いだけを説明し、以前の挙動や過去の誤りへの反論は書きません。それはコミットメッセージの仕事で、旧版を知らない読者には唐突です。3 箇所に同じ説明があるなら、正本 1 つと参照 2 つにします。</p>
+      <p>修正は、直す対象を導入したコミットに畳み、そのメッセージも新しい内容に合わせます。「修正の修正」が並ぶ履歴は、最終状態が正しくても著者が分かっていなかったことを読者に伝えます。畳んだ後、木が変わっていないことを確認します。</p>
+    </div>
+
+    <div class="phase p5">
+      <h3>5. real-machine-test — 環境を作り直して実トラフィックで</h3>
+      <p class="cmd"><code>/real-machine-test</code></p>
+      <p>必須で、やらない判断は選べません。<code>validate</code>、<code>plan</code>、dry-run、unit テスト、モック、「import が通る」はいずれも実機検証ではありません。ある種の破損が無いことを示すだけで、動くことを示しません。スモークも足りません。「ジョブが SUCCEEDED になった」は「この変更が直した欠陥が消え、contract が約束した振る舞いが在る」とは別の問いです。</p>
+      <p><b>環境は作り直します。</b> 既存環境は自分が選んでいない前提を運んできます。誰かが付けたラベル、キャッシュされたイメージ、前回の残骸、別用途で付いた権限。まさにそれが、検証されていないものを検証済みに見せます。イメージは digest かこの run 用に上げたタグで引き、apply で上書きせず delete してから作ります。</p>
+      <p>contract の項目ごとに <b>再現と検証を対で</b> 書きます。base で欠陥を示す観測、変更後に契約どおりの振る舞いを示す同じ観測。原因に無関係な状態でも同じ出力が出るなら、それはどちらの証拠にもなりません。加えて、文書の手順を新しいシェルで頭から順に、変更が触っていないステップも含めて通します。「ステップ N が N+1 に必要なものを渡していない」という欠陥はこれ以外の方法では捕まりません。</p>
+      <p>報告には、検証していないことを検証していないと書きます。正直な穴は情報で、穴をカバレッジとして提示するのがこのフェーズが防ぐ失敗です。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>欠陥の分類 — レビューのレンズ</h2>
+    <p>リファレンス実装、インフラコード、同梱設定で繰り返し問題になるクラスです。レビューの視点として、モデルに渡すプロンプトとして、そして自分の差分の自己点検として使います。<b>コメントに対してではなく、コードに対して</b>問いを立てます。</p>
+    <table>
+      <tr><th>クラス</th><th>形</th><th>検出する問い</th></tr>
+      <tr><td>A 言と実の不一致</td><td>文書やコメントが、実装がやらないことを主張する。pin した digest に入っていない commit を引く。宣言された下限を解決済みバージョンとして書く</td><td>この文の隣のコードは、本当にこの文のことをやっているか</td></tr>
+      <tr><td>B 実行できないチェック</td><td>誰も設定しない変数で条件づけられたガード。言語が false と評価する検証。守りたかった失敗を飲み込む <code>|| true</code></td><td>このガードはどの入力で発火し、その入力は到達可能か</td></tr>
+      <tr><td>C 失敗が正当な値に化ける</td><td>例外が中立な値になり、正当な結果と区別できない。5xx を成功として受ける</td><td>全リクエストで失敗したら、呼び出し側には何が見え、誰が気づくか</td></tr>
+      <tr><td>D 順序と位置が意味を持つ</td><td>入力が確定する前に導出が走る。導出を読む上書きが後ろに置かれる</td><td>このファイルに 1 行足したら、前の行の意味が変わるか</td></tr>
+      <tr><td>E 対象の誤選択</td><td>複数一致し得るセレクタを先頭で解決する。運用者が編集した設定ではなく環境から context を取る</td><td>これは 2 つに一致し得るか、そのとき何が起きるか</td></tr>
+      <tr><td>F 置き換えでなく除去</td><td>「ここでは動かないから」と安全機構を無効化し、代わりを置かない</td><td>いま何がこれを担保しているか</td></tr>
+      <tr><td>G 知識の重複</td><td>同じ定数・式・名前が複数箇所にある。2 コピーを比較する assert は 3 つ目のコピー</td><td>この数字を変えるとき、いくつのファイルを直すか</td></tr>
+      <tr><td>H 宣言のない前提</td><td>必要なデバイスや権限なしに userspace 半分だけ入れる。機能しないものを版表に載せる</td><td>これが動くには他に何が真である必要があり、サンプルはそれを提供しているか</td></tr>
+      <tr><td>I 文書の手順が動かない</td><td>stub になった CLI、改名されたサブコマンド、次のステップが必要とするものを渡さないステップ</td><td>新しいシェルで頭から辿って、ステップ N は N+1 に必要なものを渡すか</td></tr>
+      <tr><td>J 再現できない結果</td><td>同梱されていない構成の測定値。数値を解釈可能にするパラメータの欠落</td><td>読者はリポジトリにあるものでこの行を再現できるか</td></tr>
+      <tr><td>K 環境の移植性</td><td>bash 4.4 未満の空配列展開、コンテナランタイム設定、レイヤキャッシュ、PodSecurity</td><td>これは実際にどの処理系のどのバージョンで走ったか、読者は何を使うか</td></tr>
+      <tr><td>L 設定の後方互換</td><td>新しい必須変数が空文字で render される。旧コードが持たない endpoint を probe する</td><td>前の版のこのファイルを持っている人には何が起きるか</td></tr>
+      <tr><td>M 資源のライフサイクル</td><td>減るだけで戻らない容量。cancel したつもりで走り続けるプロセス。故障モード自身が発火を妨げる回復機構</td><td>N 回失敗した後の定常状態は何で、それを戻すものはあるか</td></tr>
+      <tr><td>N 引数とログの秘密</td><td>コマンドラインのトークン、dashboard が露出する runtime env</td><td>この値を、読むべきでない誰が読めるか</td></tr>
+      <tr><td>O 分母の誠実さ</td><td>測っていないサンプルを含む平均。エラーを誤答として数える。ハーネスが壊れると改善する成功率</td><td>分母に入っているサンプルは、全部本当に測られたか</td></tr>
+    </table>
+    <div class="note">
+      <b>自分の修正が再生産しやすいのは C、F、M です。</b> このパイプライン自身の出力をレビューして分かったことで、故障をその場で報告せず統計から推測する health 機構、止められないタイムアウト、落としたまま作り直されない worker、という形で戻ってきます。フェーズ 4 の自己点検はここから始めます。
+    </div>
+  </section>
+
+  <section>
+    <h2>ドメインレンズ — 分類を「見つけられる」ようにする層</h2>
+    <p>欠陥の分類はドメインに依存しないので短く保てます。しかし特定のスタックでその分類を実際に見つけるには固有の知識が必要で、それはレンズに置きます。レンズは<b>汎用化しません</b>。罠と正確なフラグ名と失敗の署名を並べたもので、過剰に具体的に見える項目はたいてい誰かの 1 日を奪った項目です。</p>
+    <h3>/ml-infra-review が収録している範囲</h3>
+    <table>
+      <tr><th>節</th><th>収録している罠の例</th></tr>
+      <tr><td>Ray と KubeRay</td><td>head は <code>num-gpus 0</code> でも libcuda を要する (control actor が megatron 経由で transformer_engine を import する)。<code>NVIDIA_VISIBLE_DEVICES=void</code> はどのノードでもドライバを注入しない。placement group の bundle は worker を跨げないので総数は充足性ではない。配置不能はエラーではなくハングに見える。KubeRay は pod template 変更で Pod を作り直さない</td></tr>
+      <tr><td>EFA と NCCL</td><td>EFA は node の allocatable 全数を要求する。部分要求は throughput ではなく<b>正しさ</b>の問題で、all-reduce のスモークでは通り PP&gt;1 / EP&gt;1 の point-to-point でだけ落ちる。plugin のファイル名は installer 版で揺れる。<code>fi_info -p efa</code> はビルド時に使えない</td></tr>
+      <tr><td>CUDA とイメージ</td><td>compat が host driver より古いと Error 803。digest は commit を特定しない。<code>IfNotPresent</code> + タグ据え置きで 1 ジョブが 2 ビルドを走らせる</td></tr>
+      <tr><td>並列化のノブ</td><td><code>CUDA_DEVICE_MAX_CONNECTIONS=1</code> は TP&gt;1 で必須。<code>expandable_segments</code> は torch_memory_saver と非互換。<code>moe_tp&gt;1</code> かつ <code>moe_ep&gt;1</code> の FlashInfer fusion バグ。パーサが strict なら未知フラグは無視されず abort する</td></tr>
+      <tr><td>checkpoint と共有ストレージ</td><td>4B で 1 checkpoint 約 53 GB。Lustre は集計空き容量が数百 GB でも OST 単位の枯渇で ENOSPC。run ごとに専用ディレクトリ</td></tr>
+      <tr><td>報酬と評価</td><td><code>math_verify</code> の timeout は int 必須で float は空パースに化ける。<code>batched_async_rm</code> は <code>return_exceptions</code> なしで gather する。報酬 0.0 は正当な学習信号なので失敗時に返してはいけない。ラベルは数値で来る</td></tr>
+      <tr><td>時間買いの GPU 枠</td><td>枠前に GPU 不要な作業を全部終える。最初の 1 時間で前提の白黒を付けて期限を切る。成果物は走行中に逃がす</td></tr>
+    </table>
+    <p>レンズを足すときは <code>&lt;domain&gt;-review</code> という 1 つのスキルにし、サブシステムごとの節に、起きた失敗とその署名と見つける観測を並べます。フェーズ 2 で使うときは「ML infra をレビューして」ではなく<b>レンズの節を名指しして</b>依頼します。名指しすると具体的な答えが返り、ドメイン名だけだと一般論が返ります。</p>
+  </section>
+
+  <section>
+    <h2>CONTRACT.md の形</h2>
+    <p>節はすべて必須で、「なし」も意味のある記載です。</p>
+<pre><code># Contract: &lt;変更名&gt;
+
+Scope boundary: &lt;触ってよいパス。それ以外は触らない&gt;
+Base: &lt;起点の commit&gt;
+
+## In scope
+| # | 指摘 | クラス | なぜ直さねばならないか | 何で検証するか |
+
+## Out of scope, and why
+| # | 指摘 | クラス | なぜここではやらないか |
+
+## Alternatives considered and rejected
+| 指摘 | 代替 | なぜ採らなかったか |
+
+## Interface
+フェーズ 3 の 2 人が受け取るもの。関数、endpoint、ファイル、終了コード、エラー契約。
+実装ではなく振る舞い。ここが曖昧だと 2 人は必ず分かれる。
+
+## Verification plan
+フェーズ 5 が何を、どの環境で、何を証拠として行うか。
+
+## Amendments
+追記のみ。日付、何を変えたか、contract の何が間違っていたか。
+</code></pre>
+    <p>「やらない理由」は優先度が低いことではありません。他所で直す (どこかを名指しする)、この変更では決められない判断が必要、直す欠陥より大きい、この変更では検証できない、欠陥ではなく好み、のいずれかです。</p>
+  </section>
+
+  <section>
+    <h2>このパイプラインが生まれた経緯の数字</h2>
+    <p>公開リポジトリのリファレンス test case に対する、承認済みレビュー指摘 16 件への対応で組み上げたものです。</p>
+    <div class="kpi">
+      <div><span>回したレビューラウンド</span><strong>12</strong></div>
+      <div><span>自分の修正が作った blocker</span><strong>1</strong></div>
+      <div><span>収束で落とした指摘</span><strong>28</strong></div>
+      <div><span>引き算後の差分削減</span><strong>-27%</strong></div>
+    </div>
+    <p>学びは 3 つあります。1 つ、<b>修正は新しい欠陥を作ります</b>。空配列展開が bash 3.2 で落ちる blocker は、テストが PATH の bash 5.2 で走っていたので見えていませんでした。2 つ、<b>収束を明文化しないと変更は膨らみます</b>。落とした 28 件は、理由を書いたからこそ後から蒸し返さずに済みました。3 つ、<b>後から引き算すると設計が良くなります</b>。health 状態機械を HTTP ステータスに置き換え、導出を 1 箇所に集約し、字句解析を <code>envsubst --variables</code> に任せた結果、差分が 27% 縮んで振る舞いは強くなりました。</p>
+  </section>
+
+  <footer>スキルの実体は <code>claudecode/.claude/skills/</code> の各 <code>SKILL.md</code> にあります。このページは人間が思い出すための索引です。</footer>
+</main>
+</body>
+</html>
