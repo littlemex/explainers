@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 02: コンパイル経路の解剖</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 02</p>
+  <h1>コンパイル経路の解剖 ― Python から NEFF まで</h1>
+  <p>5 本の FX パスは何のために存在するのか。なぜ形状ごとに NEFF が必要なのか</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">第 1 回で「入口は torch.compile、出口は NEFF」という骨格を見ました。この回はその間で何が起きているかを開けます。ここを知らないと、移植中に出るコンパイルエラーが「なぜ起きたのか」まったく読めません。</p>
+
+  <p>筆者の経験では、移植で時間を取られるのは数式を書くところではありませんでした。<b>書いた数式がコンパイルを通らないとき、どの段で落ちたのかを切り分けるところ</b>です。段が分かれば対処が決まります。分からないと、手当たり次第に書き方を変えて試すことになります。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    経路は <b>グラフ捕捉 → 5 本の FX パス → HLO へ降ろす → NEFF</b> の 4 段です。5 本のパスはどれも<b>「PyTorch では自然だがデバイス上の静的グラフでは表現できないもの」を潰すため</b>にあります。そして NEFF は<b>形状ごとに 1 個</b>なので、サービングでは起動時に全形状ぶんをまとめて焼く「ウォームアップ」が要ります。移植中のエラーは、この 4 段のどこで出たかで意味がまったく違います。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 4 段のパイプライン</a>
+    <a href="#s2">2. なぜ FX パスが要るのか</a>
+    <a href="#s3">3. 5 本のパスを 1 本ずつ</a>
+    <a href="#s4">4. パスの順序に意味がある</a>
+    <a href="#s5">5. fullgraph という制約</a>
+    <a href="#s6">6. バケットと NEFF は 1 対 1</a>
+    <a href="#s7">7. ウォームアップとコンパイルキャッシュ</a>
+    <a href="#s8">8. デバイス無しでコンパイルする</a>
+    <a href="#s9">9. エラーが出た段の見分け方</a>
+    <a href="#s10">10. 設定リファレンス</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>4 段のパイプライン</h2>
+  <p class="lead">全体を先に置きます。段ごとに「何を入力に取り、何を出すか」を意識してください。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 400" role="img" aria-label="コンパイルパイプラインの 4 段">
+      <defs>
+        <marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <rect x="250" y="14" width="360" height="46" rx="10" fill="#fff" stroke="#0f5132" stroke-width="2"/>
+      <text x="430" y="43" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">モデルの Python コード (nn.Module)</text>
+      <line x1="430" y1="60" x2="430" y2="78" stroke="#4a5d54" stroke-width="2" marker-end="url(#a)"/>
+
+      <rect x="230" y="80" width="400" height="60" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="430" y="105" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">① グラフ捕捉 (Dynamo)</text>
+      <text x="430" y="128" font-size="14" fill="#12211a" text-anchor="middle">バイトコードを解析し、演算列を FX グラフとして取り出す</text>
+      <line x1="430" y1="140" x2="430" y2="158" stroke="#4a5d54" stroke-width="2" marker-end="url(#a)"/>
+
+      <rect x="180" y="160" width="500" height="82" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="430" y="185" font-size="16" font-weight="700" fill="#22548f" text-anchor="middle">② FX パス群 (5 本を順番に適用)</text>
+      <text x="430" y="208" font-size="14" fill="#12211a" text-anchor="middle">デバイス書き換え → エイリアス抽出 → インプレース除去</text>
+      <text x="430" y="230" font-size="14" fill="#12211a" text-anchor="middle">→ NKI カーネル指定 → 集団通信のグループ確定</text>
+      <line x1="430" y1="242" x2="430" y2="260" stroke="#4a5d54" stroke-width="2" marker-end="url(#a)"/>
+
+      <rect x="230" y="262" width="400" height="60" rx="10" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="430" y="287" font-size="16" font-weight="700" fill="#6b3fa0" text-anchor="middle">③ HLO へ降ろす</text>
+      <text x="430" y="310" font-size="14" fill="#12211a" text-anchor="middle">機種非依存の中間表現に変換</text>
+      <line x1="430" y1="322" x2="430" y2="340" stroke="#4a5d54" stroke-width="2" marker-end="url(#a)"/>
+
+      <rect x="250" y="342" width="360" height="50" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="430" y="366" font-size="16" font-weight="700" fill="#b5401f" text-anchor="middle">④ neuronx-cc が NEFF を出す</text>
+      <text x="430" y="385" font-size="13.5" fill="#4a5d54" text-anchor="middle">形状ごとに 1 個</text>
+    </svg>
+    <p class="cap">4 段。①と②は PyTorch の世界、③はコンパイラの世界、④はハードウェアの世界。エラーメッセージの語彙でどの段かが分かる</p>
+  </div>
+
+  <p>①はしばしば「FX トレース」と呼ばれますが、実体は Python を実行して記録する方式ではなく、<b>バイトコードを記号的に解析して FX グラフを取り出す</b>方式です (TorchDynamo)。この違いは、ガードと再コンパイルの挙動を理解するときに効いてきます。</p>
+
+  <p>段ごとに、失敗したときのエラーの見た目が違います。①で落ちれば PyTorch の Dynamo が「グラフを分断した」と言い、②で落ちればパスの名前が出て、③と④で落ちるとコンパイラの内部エラーコードが出ます。第 9 節でこの対応表を作ります。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>なぜ FX パスが要るのか</h2>
+  <p class="lead">5 本のパスを個別に説明する前に、共通の動機を押さえます。1 つの原則から全部が出てきます。</p>
+
+  <p>原則はこれです。<b>デバイス上で実行されるのは「入力を受けて出力を返す、副作用のない静的なグラフ」1 枚だけ</b>。PyTorch のモデルコードは、この条件を平気で破ります。</p>
+
+  <table>
+    <tr><th>PyTorch では自然なこと</th><th>静的グラフでは何が問題か</th></tr>
+    <tr><td>テンソルをインプレースで書き換える (<code>x.copy_(y)</code>、<code>x += 1</code>)</td><td>グラフは値の流れしか表せない。「書き換えた」という副作用を表現できない</td></tr>
+    <tr><td>モデル生成時のデバイスがコードに残る</td><td>トレース時は CPU、実行時はデバイス。食い違うとグラフが分断される</td></tr>
+    <tr><td>集団通信の相手を実行時に決める</td><td>どのランクと通信するかがグラフに焼かれていないと NEFF を作れない</td></tr>
+    <tr><td>低レベルカーネルを普通の関数として呼ぶ</td><td>コンパイラにとっては中身の分からないノード。どう扱うか指定が要る</td></tr>
+  </table>
+
+  <p>つまり FX パス群は<b>「PyTorch の書き味」と「静的グラフの制約」の差を吸収する層</b>です。この視点で見ると、5 本それぞれが何のために居るのかが一直線に理解できます。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>5 本のパスを 1 本ずつ</h2>
+  <p class="lead">名前と役割、そして「これが無いと何が壊れるか」を並べます。移植中に見るエラーの多くが、この 5 本のどれかに関係します。</p>
+
+  <h3>デバイス書き換え</h3>
+  <p>トレース時に確定してしまったデバイス指定を、実行対象のデバイスに書き換えます。これが無いと、デバイスへ移す操作が降ろせずにコンパイルが失敗したり、一部の演算がグラフの外に残ったりします。モデルコードの中に <code>device=</code> をハードコードしていると影響を受ける場所です。</p>
+
+  <h3>エイリアス出力の抽出</h3>
+  <p>グラフの中で「入力バッファをそのまま書き換えている」箇所を見つけ、その対応関係を取り出します。これが KV キャッシュや状態の持ち回りの土台です。取り出された対応は最終的に NEFF のエイリアス情報 (第 1 回で見た <code>alias</code>) になり、ランタイムが「この出力は入力と同じ場所」と理解します。</p>
+
+  <h3>インプレースから非インプレースへの書き換え</h3>
+  <p>インプレース演算を、値を返す形の演算に書き換えます。<b>ここが順序上の要点です</b>。エイリアスの抽出が先に走らないといけません。理由は次の節で説明します。</p>
+
+  <h3>NKI カーネルの指定書き込み</h3>
+  <p>グラフに現れた低レベルカーネルのノードに、コンパイラ向けの指定を書き込みます。これがあるおかげで、<b>素の PyTorch で書いた部分と、手で最適化したカーネルを 1 枚のグラフに混在させられます</b>。第 4 回で扱う「素直に書いて、要所だけ差し替える」という戦略が成り立つのは、この仕組みのおかげです。</p>
+
+  <h3>集団通信のグループ確定</h3>
+  <p>テンソル並列やエキスパート並列の通信について、どのランク集合で通信するかをグラフに焼き込みます。並列度が変わればグラフも変わる、という関係がここで生まれます。</p>
+
+  <div class="key">
+    <b>移植する人の視点で言い換えると</b><br>
+    自分が書くモデルコードは、この 5 本のパスが通せる形でなければなりません。具体的には、<b>状態の書き換えはエイリアスとして拾える素直な形にする</b> (奇をこらしたインプレースを避ける)、<b>デバイス指定をコードに埋め込まない</b>、<b>並列度に依存する形はカーネル呼び出し層に任せる</b>。この 3 つを守るだけで、②で落ちる確率がかなり下がります。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>パスの順序に意味がある</h2>
+  <p class="lead">実装の細部ですが、ここを知っていると「なぜ状態が持ち回れないのか」というバグの原因を最初に疑える場所が分かります。</p>
+
+  <p>エイリアス抽出はインプレース除去より<b>先</b>に走らなければなりません。理由は単純で、エイリアス抽出は<b>インプレース演算がまだグラフに残っている状態を見て</b>「どの入力がどの出力に化けるか」を判定するからです。先にインプレースを消してしまうと、判定材料が消えます。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 220" role="img" aria-label="パス順序の依存関係">
+      <defs>
+        <marker id="a2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <rect x="30" y="70" width="180" height="72" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="120" y="98" font-size="15" font-weight="700" fill="#22548f" text-anchor="middle">エイリアス抽出</text>
+      <text x="120" y="120" font-size="13" fill="#4a5d54" text-anchor="middle">インプレースを見て</text>
+      <text x="120" y="136" font-size="13" fill="#4a5d54" text-anchor="middle">対応関係を記録</text>
+
+      <line x1="210" y1="106" x2="256" y2="106" stroke="#4a5d54" stroke-width="2" marker-end="url(#a2)"/>
+
+      <rect x="258" y="70" width="180" height="72" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="348" y="98" font-size="15" font-weight="700" fill="#22548f" text-anchor="middle">インプレース除去</text>
+      <text x="348" y="120" font-size="13" fill="#4a5d54" text-anchor="middle">値を返す形に</text>
+      <text x="348" y="136" font-size="13" fill="#4a5d54" text-anchor="middle">書き換える</text>
+
+      <line x1="438" y1="106" x2="484" y2="106" stroke="#4a5d54" stroke-width="2" marker-end="url(#a2)"/>
+
+      <rect x="486" y="70" width="180" height="72" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="576" y="98" font-size="15" font-weight="700" fill="#b5401f" text-anchor="middle">NEFF のエイリアス情報</text>
+      <text x="576" y="122" font-size="13" fill="#4a5d54" text-anchor="middle">入力と出力が同じ場所</text>
+
+      <line x1="666" y1="106" x2="712" y2="106" stroke="#4a5d54" stroke-width="2" marker-end="url(#a2)"/>
+      <rect x="714" y="70" width="120" height="72" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="774" y="98" font-size="15" font-weight="700" fill="#0f5132" text-anchor="middle">状態が</text>
+      <text x="774" y="120" font-size="15" font-weight="700" fill="#0f5132" text-anchor="middle">持ち回れる</text>
+
+    </svg>
+    <p class="cap">エイリアス抽出が先でなければならない。逆順ではインプレースという判定材料が先に消え、状態が step 間で失われる</p>
+  </div>
+
+  <p>実務上の含意はこうです。<b>状態をモジュールのバッファに持ち、インプレースで書き込む形にすると、この経路がエイリアスに変換してくれるので、step をまたいで状態が生き残ります。</b>逆に、状態を引数と戻り値で明示的に受け渡す設計も可能で、そちらは第 7 回で扱います。どちらを選ぶかは設計判断で、第 4 回で扱う「状態の契約」(コスト層③) に直結します。前者と後者の比較は第 4 回 §4、後者を実際に使う話は第 7 回です。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>fullgraph という制約</h2>
+  <p class="lead">グラフが 1 枚であることは、コードの書き方をかなり縛ります。この縛りの正体を見ます。</p>
+
+  <p>プラグインはモデルを <code>fullgraph=True</code> でコンパイルします。これは「グラフの分断 (graph break) を許さない」という指定です。分断が許される設定では、Dynamo がトレースできない区間は<b>コンパイルされずに Python の eager 実行に戻ります</b> (CPU に落ちるわけではありません。テンソルはデバイス上のまま、演算ごとに実行されます)。<code>fullgraph=True</code> にすると、黙って eager に戻る代わりにエラーになります。</p>
+
+  <p>この設定のおかげで、性能が読めます。分断があると、分断点でホストの Python に制御が戻り、コンパイル済みの区間が細切れになるので、遅い上に遅さの原因が見えにくくなります。<code>fullgraph=True</code> は「静かに遅くなる」経路を塞いでいます。</p>
+
+  <p>代わりに、書けないコードがあります。テンソルの値で分岐する処理 (<code>if x.sum() &gt; 0:</code> のような形) は書けません。値はコンパイル時には分かりません。<b>だから移植では「データ依存の分岐」を、マスクや <code>where</code> による選択に書き換える作業がしばしば発生します</b>。第 4 回で実例を扱います。</p>
+
+  <div class="warn">
+    <b>デバッグ用の逃げ道はある</b>。プラグインにはデバッグ用の環境変数があり、それを立てると <code>fullgraph=False</code> になって分断が許されます。名前が示す通りデバッグ用の設定で、<code>print</code> を挟んで中を覗くためのものです。第 7 回では、この逃げ道が別の目的にも使えることに触れます。ただし本番の設定ではありません。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>バケットと NEFF は 1 対 1</h2>
+  <p class="lead">ここが Trainium サービングの運用感を決めている性質です。GPU との一番大きな違いのひとつでもあります。</p>
+
+  <p>NEFF は特定の形状に対してコンパイルされます。系列長 32 用の NEFF は系列長 33 では使えません。そこでサービングでは、あらかじめいくつかの形状 (バケット) を決めておき、<b>バケットごとに別の NEFF を焼きます</b>。実行時には、要求に合う最小のバケットを選んでそこにパディングします。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 260" role="img" aria-label="バケットと NEFF の 1 対 1 対応">
+      <rect x="40" y="24" width="330" height="200" rx="12" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="205" y="52" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">バケット (事前に決める形状)</text>
+      <rect x="70" y="70" width="120" height="34" rx="7" fill="#fff" stroke="#43b581"/>
+      <text x="130" y="93" font-size="14" fill="#12211a" text-anchor="middle">seq 128 / bs 1</text>
+      <rect x="70" y="112" width="120" height="34" rx="7" fill="#fff" stroke="#43b581"/>
+      <text x="130" y="135" font-size="14" fill="#12211a" text-anchor="middle">seq 512 / bs 1</text>
+      <rect x="70" y="154" width="120" height="34" rx="7" fill="#fff" stroke="#43b581"/>
+      <text x="130" y="177" font-size="14" fill="#12211a" text-anchor="middle">seq 128 / bs 4</text>
+      <text x="280" y="93" font-size="24" fill="#4a5d54">→</text>
+      <text x="280" y="135" font-size="24" fill="#4a5d54">→</text>
+      <text x="280" y="177" font-size="24" fill="#4a5d54">→</text>
+
+      <rect x="400" y="24" width="200" height="200" rx="12" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="500" y="52" font-size="16" font-weight="700" fill="#b5401f" text-anchor="middle">NEFF</text>
+      <rect x="425" y="70" width="150" height="34" rx="7" fill="#fff" stroke="#e07a5f"/>
+      <text x="500" y="93" font-size="13.5" fill="#12211a" text-anchor="middle">neff #1</text>
+      <rect x="425" y="112" width="150" height="34" rx="7" fill="#fff" stroke="#e07a5f"/>
+      <text x="500" y="135" font-size="13.5" fill="#12211a" text-anchor="middle">neff #2</text>
+      <rect x="425" y="154" width="150" height="34" rx="7" fill="#fff" stroke="#e07a5f"/>
+      <text x="500" y="177" font-size="13.5" fill="#12211a" text-anchor="middle">neff #3</text>
+
+      <rect x="630" y="24" width="200" height="200" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="730" y="52" font-size="16" font-weight="700" fill="#22548f" text-anchor="middle">実行時</text>
+      <text x="730" y="88" font-size="14" fill="#12211a" text-anchor="middle">要求 (seq 300)</text>
+      <text x="730" y="112" font-size="20" fill="#4a5d54" text-anchor="middle">↓</text>
+      <text x="730" y="136" font-size="14" fill="#12211a" text-anchor="middle">seq 512 に</text>
+      <text x="730" y="158" font-size="14" fill="#12211a" text-anchor="middle">パディングして実行</text>
+      <text x="730" y="192" font-size="13" fill="#b5401f" text-anchor="middle">212 ぶんは無駄</text>
+    </svg>
+    <p class="cap">バケット 1 個につき NEFF 1 個。合う最小のバケットにパディングして入るので、粒度が粗いと短い要求が損をする</p>
+  </div>
+
+  <table>
+    <tr><th>バケットを</th><th>起動時間</th><th>パディングの無駄</th></tr>
+    <tr><td>増やす</td><td>長くなる (焼く数が増える)</td><td>減る</td></tr>
+    <tr><td>減らす</td><td>短くなる</td><td>増える (短い要求が損をする)</td></tr>
+  </table>
+
+  <p>この構造から出てくる注意点が 2 つあります。</p>
+
+  <p><b>動的形状は使えません。</b>正確に言うと、<code>torch.compile</code> 自体は動的形状を扱えます。塞いでいるのは出口の方で、<b>NEFF が固定形状に対してしか作れない</b>ため、この経路では動的形状が無効化されています。だからバケット化するか、固定サイズのバッファを持つかのどちらかになります。</p>
+
+  <p><b>並列度や投機デコードもグラフを増やします。</b>集団通信のグループがグラフに焼かれるので、並列度が変わればグラフも変わります。投機デコードを有効にすると、通常のバケットに加えて追加のグラフが必要になります。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>ウォームアップとコンパイルキャッシュ</h2>
+  <p class="lead">バケットごとに NEFF が要るということは、起動時にまとめて焼く工程が要るということです。ここは運用の話ですが、移植中の反復速度にも直結します。</p>
+
+  <p>サービング起動時、リクエストを受ける前に全バケットぶんのコンパイルを走らせます。これがウォームアップです。移植作業中は、この工程が反復のたびに走るので、待ち時間の主成分になります。</p>
+
+  <p>そこでコンパイルキャッシュがあります。ローカルのキャッシュに加えて、共有ファイルシステム上の<b>リモートキャッシュ</b>を指定できます。これを使うと次のような運用ができます。</p>
+
+  <ol class="steps">
+    <li>コンパイルを 1 回どこかで走らせ、成果物をリモートキャッシュに置く</li>
+    <li>本番のインスタンス群は、そのキャッシュを読むだけで起動する</li>
+    <li>本番側では「キャッシュに無ければ即エラー」に設定しておく。黙ってコンパイルが走って起動が遅くなる事故を防ぐ</li>
+  </ol>
+
+  <p>移植作業でも同じ考え方が効きます。<b>キャッシュを永続ボリュームに置くと、コンテナ (Kubernetes なら Pod) を作り直しても再コンパイルが走りません。</b>逆に一時ボリュームに置いていると、作り直すたびにモデルの再ダウンロードと再コンパイルの両方が走ります。ここは最初に決めておく価値があります。</p>
+
+  <p>そしてキャッシュ以上に効く手が 1 つあります。<b>移植中はバケットを最小構成に絞る</b>ことです。短い系列長 1 つ、バッチ 1 だけにすれば、焼くグラフの数がそのまま減ります。本番相当のバケット構成に戻すのは、数値が固まってからで十分です。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>デバイス無しでコンパイルする</h2>
+  <p class="lead">アクセラレータは希少資源です。コンパイルだけなら実機が要らない、という経路があります。</p>
+
+  <p>プラグインには、CPU インスタンス上でコンパイルパイプラインを通す (実行はしない) モードがあります。トレース、FX パス、グラフの降ろしまでを全部走らせるので、<b>グラフの捕捉に失敗する種類の問題は実機無しで見つかります</b>。実機が無いのでプラットフォームを自動判定できず、対象機種を環境変数で明示する必要があります。</p>
+
+  <p>移植の観点でこれが嬉しい理由は 3 つあります。まず、実機の確保を待たずに「そもそもコンパイルが通る形か」を確認できます。次に、CPU インスタンスは並列に何台も立てられるので、コンパイル時間を横に並べて短縮できます。そして、焼いた成果物をリモートキャッシュに置けば、実機側は読むだけで済みます。</p>
+
+  <p>できないことも明確です。<b>数値が正しいかどうかは分かりません。</b>このモードは実行しないので、コンパイルが成功したという事実だけが得られます。数値の検証には別のモード (CPU 上で実際に計算する経路) があり、そちらは第 5 回で扱います。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>エラーが出た段の見分け方</h2>
+  <p class="lead">この回の実用的な結論です。移植中に見るエラーを 4 段に振り分けられるようにします。</p>
+
+  <table>
+    <tr><th>段</th><th>エラーの見た目</th><th>疑うべきこと</th></tr>
+    <tr><td>① グラフ捕捉</td><td>Dynamo がグラフを分断したと言う。<code>fullgraph</code> 違反</td><td>テンソルの値で分岐していないか。トレースできない Python 構文が混ざっていないか</td></tr>
+    <tr><td>② FX パス</td><td>パスの名前が出る。状態が持ち回れない、エイリアスが付かない</td><td>インプレースの書き方が素直か。デバイス指定を埋め込んでいないか</td></tr>
+    <tr><td>③ HLO へ降ろす</td><td>演算が未対応、形状が合わない</td><td>その演算がこの経路で表現できるか。カーネル呼び出し層に相当品がないか</td></tr>
+    <tr><td>④ neuronx-cc</td><td>コンパイラの内部エラーコード。資源が足りない</td><td>グラフの構造そのものが苦手な形になっていないか。1 グラフが大きすぎないか</td></tr>
+    <tr><td>⑤ 実行時 (NEFF のロードと実行)</td><td>ランタイムのエラー、デバイスメモリ不足、集団通信で無応答</td><td>全バケットぶんの NEFF と KV がデバイスメモリに収まるか。バケット数とブロック数の上限を絞れないか。並列度のグラフと起動構成が一致しているか</td></tr>
+  </table>
+
+  <p>⑤ を表に入れているのは、コンパイルが通っても実行時に落ちる種類の問題が確実に出るからです。とくにウォームアップで全バケットぶんの NEFF を載せた結果デバイスメモリが溢れる、という形は移植の後半でよく踏みます。</p>
+
+  <div class="key">
+    <b>④ が一番やっかいです</b><br>
+    ③ までは「書き方の問題」なので、書き換えれば直ります。④ はコンパイラ側の都合なので、同じ数式でも<b>構造を変えると通ることがあります</b>。たとえば、時間方向に依存が繋がる素直なループが構造的に通らず、同じ数式を行列積と累積和の形に書き換えると通る、ということが起こります。第 4 回でこの具体例を扱い、第 5 回で「別の経路なら素直な形が通る」という話に繋げます。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: FX パスの構成と順序、<code>fullgraph</code> の設定、バケットと NEFF の対応、コンパイルキャッシュとデバイス無しコンパイルの設定、および §10 の設定名は、いずれも <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ソースと同リポジトリの設計ドキュメントで確認できます。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-01-stack-map.html">← 01: スタックの地図</a>
+    <a href="./trn-porting-03-serving-contract.html">03: サービング契約 →</a>
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>設定リファレンス</h2>
+  <p class="lead">このシリーズで言及する設定を 1 箇所にまとめます。名前が分かれば、詰まったときにソースを検索できます。</p>
+
+  <p>下の名前はいずれもプラグインの公開ソースと公開ドキュメントで確認できるものです。<b>ただし名前と既定値はバージョンで変わるので、正はソースです。</b>定義は <code>vllm_neuron/envs.py</code> に集まっているので、まずそこを開いてください。</p>
+
+  <table>
+    <tr><th>目的</th><th>設定</th><th>言及する回</th></tr>
+    <tr><td>コンパイル経路を選ぶ</td><td><code>VLLM_NEURON_BACKEND</code></td><td>01, 06</td></tr>
+    <tr><td>CPU 上で実際に計算する (数値検証)</td><td><code>VLLM_NEURON_CPU_MODE</code></td><td>05</td></tr>
+    <tr><td>CPU 上でコンパイルだけ通す (実行しない)</td><td><code>VLLM_NEURON_CPU_COMPILE</code></td><td>02, 05</td></tr>
+    <tr><td>実機が無いので対象機種を明示する</td><td><code>NEURON_PLATFORM_TARGET_OVERRIDE</code></td><td>02</td></tr>
+    <tr><td>低レベルカーネルをシミュレータで検証する</td><td><code>NKI_SIMULATOR</code></td><td>05</td></tr>
+    <tr><td>グラフの分断を許す (デバッグ用)</td><td><code>VLLM_NEURON_DEBUG_MODE</code></td><td>02, 07</td></tr>
+    <tr><td>NEFF キャッシュの置き場</td><td><code>VLLM_CACHE_ROOT</code></td><td>02</td></tr>
+    <tr><td>共有ファイルシステム上のリモートキャッシュ</td><td><code>NEURON_LIBTORCH_REMOTE_CACHE</code></td><td>02</td></tr>
+    <tr><td>キャッシュミスを致命的エラーにする (本番)</td><td><code>VLLM_NEURON_DISABLE_WARMUP_COMPILE</code></td><td>02</td></tr>
+    <tr><td>並列コンパイルの並列数</td><td><code>NEURON_LIBTORCH_PARALLEL_COMPILE_WORKERS</code></td><td>02</td></tr>
+  </table>
+
+  <p>加えて、vLLM 側の設定として <code>enforce_eager</code> (コンパイルを飛ばす)、<code>tensor_parallel_size</code>、<code>max_model_len</code>、<code>max_num_seqs</code>、<code>num_gpu_blocks_override</code> (KV ブロック数の上限) がこのシリーズの話に関わります。バケットの構成はプラグインの追加設定で渡すので、<code>docs/design/vllm/additional-config.md</code> を参照してください。</p>
+</section>
+
+
+</main>
+</body>
+</html>

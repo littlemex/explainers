@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 03: サービング契約</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 03</p>
+  <h1>サービング契約 ― 移植とは何を実装することか</h1>
+  <p>KV キャッシュへの読み書き作法、並列分割、重み読み込み、デバイス上サンプリング</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">「モデルを移植する」という言葉の中身を、実装すべき項目のリストに変換します。この回が実装者にとってのシリーズの本体です。</p>
+
+  <p>第 1 回で、KV ブロックの割当と解放という管理は vLLM 本体が持ち、実体のテンソルはプラグインのランナーが確保し、形はモデルが申告する、と書きました。では自分が書くモデルは何を担うのか。答えは <b>「割り当てられた KV キャッシュ領域に、自分で正しく読み書きすること」</b>です。この作法の集まりをここでは<b>サービング契約</b>と呼びます。</p>
+
+  <p>契約という言葉を使う理由は、これが「実装の自由な部分」ではないからです。ランナーが特定の引数でモデルを呼び、モデルは特定の形で応答しなければならない。守らないと、動かないか、静かに間違った答えを出します。<b>後者が本当に怖い部分です。</b></p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    モデルが実装すべきは <b>5 つ</b>です。(1) レジストリ登録と設定からの生成、(2) <b>KV キャッシュの形の申告と受け取り</b>、(3) <b>prefill と decode で作法が違う forward</b>、(4) テンソル並列を意識した<b>重み読み込み</b>、(5) デバイス上サンプリングとの接続。このうち (2) と (3) が Trainium 固有の勘所で、(4) が最も静かなバグを生みます。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 契約の全体像</a>
+    <a href="#s2">2. レジストリと設定からの生成</a>
+    <a href="#s3">3. KV キャッシュの形を申告する</a>
+    <a href="#s4">4. prefill と decode は別の作法</a>
+    <a href="#s5">5. forward の引数と戻り値</a>
+    <a href="#s6">6. 並列化つきレイヤを使う</a>
+    <a href="#s7">7. 重み読み込みが一番静かに壊れる</a>
+    <a href="#s8">8. デバイス上サンプリング</a>
+    <a href="#s9">9. 実装チェックリスト</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>契約の全体像</h2>
+  <p class="lead">誰が誰を呼ぶのかを図にします。ここで「ランナー」と呼ぶのは、第 1 回でプラグインが差し替える部品として挙げた ModelRunner です。矢印の向きを覚えると、どこに何を書くべきかが自然に決まります。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 420" role="img" aria-label="ランナーとモデルの契約">
+      <defs>
+        <marker id="b" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <rect x="40" y="20" width="300" height="380" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="190" y="48" font-size="17" font-weight="700" fill="#22548f" text-anchor="middle">ランナー (プラグイン側)</text>
+
+      <rect x="62" y="66" width="256" height="52" rx="8" fill="#fff" stroke="#3d7dca"/>
+      <text x="190" y="88" font-size="14" fill="#12211a" text-anchor="middle">起動時: KV の形を問い合わせる</text>
+      <text x="190" y="108" font-size="13" fill="#4a5d54" text-anchor="middle">層ごとに何ヘッド・何次元・何型か</text>
+
+      <rect x="62" y="128" width="256" height="52" rx="8" fill="#fff" stroke="#3d7dca"/>
+      <text x="190" y="150" font-size="14" fill="#12211a" text-anchor="middle">起動時: KV の実体を渡す</text>
+      <text x="190" y="170" font-size="13" fill="#4a5d54" text-anchor="middle">ブロック単位で確保した大きな箱</text>
+
+      <rect x="62" y="190" width="256" height="52" rx="8" fill="#fff" stroke="#3d7dca"/>
+      <text x="190" y="212" font-size="14" fill="#12211a" text-anchor="middle">起動時: 重みを読ませる</text>
+      <text x="190" y="232" font-size="13" fill="#4a5d54" text-anchor="middle">自分のランクぶんだけ</text>
+
+      <rect x="62" y="252" width="256" height="66" rx="8" fill="#fff" stroke="#3d7dca"/>
+      <text x="190" y="274" font-size="14" fill="#12211a" text-anchor="middle">毎ステップ: forward を呼ぶ</text>
+      <text x="190" y="294" font-size="13" fill="#4a5d54" text-anchor="middle">トークン列・位置・メタデータ</text>
+      <text x="190" y="311" font-size="13" fill="#4a5d54" text-anchor="middle">どこに書くか (スロット) / どこから読むか (block)</text>
+
+      <rect x="62" y="328" width="256" height="52" rx="8" fill="#fff" stroke="#3d7dca"/>
+      <text x="190" y="350" font-size="14" fill="#12211a" text-anchor="middle">受け取る: logits または token</text>
+      <text x="190" y="370" font-size="13" fill="#4a5d54" text-anchor="middle">デバイス上サンプリングなら token</text>
+
+      <rect x="520" y="20" width="300" height="380" rx="12" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="670" y="48" font-size="17" font-weight="700" fill="#0f5132" text-anchor="middle">モデル (自分が書く)</text>
+      <text x="670" y="86" font-size="14.5" fill="#12211a" text-anchor="middle">KV の形を返す</text>
+      <text x="670" y="112" font-size="14.5" fill="#12211a" text-anchor="middle">渡された箱を層に配る</text>
+      <text x="670" y="150" font-size="14.5" fill="#12211a" text-anchor="middle">重みを並列分割して載せる</text>
+      <text x="670" y="176" font-size="13.5" fill="#4a5d54" text-anchor="middle">チェックポイントの並びを変換</text>
+      <text x="670" y="214" font-size="14.5" fill="#12211a" text-anchor="middle">prefill: 計算して KV に書く</text>
+      <text x="670" y="240" font-size="14.5" fill="#12211a" text-anchor="middle">decode: KV から集めて 1 手進める</text>
+      <text x="670" y="278" font-size="14.5" fill="#12211a" text-anchor="middle">カーネル呼び出し層を使う</text>
+      <text x="670" y="304" font-size="13.5" fill="#4a5d54" text-anchor="middle">attention / MLP / MoE / 集団通信</text>
+      <text x="670" y="342" font-size="14.5" fill="#12211a" text-anchor="middle">サンプラを最後に繋ぐ</text>
+      <text x="670" y="374" font-size="13.5" fill="#4a5d54" text-anchor="middle">静的グラフとして 1 枚で成立させる</text>
+
+      <line x1="340" y1="92" x2="516" y2="86" stroke="#4a5d54" stroke-width="2" marker-end="url(#b)"/>
+      <line x1="340" y1="154" x2="516" y2="112" stroke="#4a5d54" stroke-width="2" marker-end="url(#b)"/>
+      <line x1="340" y1="216" x2="516" y2="152" stroke="#4a5d54" stroke-width="2" marker-end="url(#b)"/>
+      <line x1="340" y1="285" x2="516" y2="226" stroke="#4a5d54" stroke-width="2" marker-end="url(#b)"/>
+      <line x1="516" y1="352" x2="342" y2="354" stroke="#4a5d54" stroke-width="2" marker-end="url(#b)"/>
+    </svg>
+    <p class="cap">左が呼ぶ側、右が実装する側。起動時に 3 回、毎ステップに 1 回の呼び出しがある</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>レジストリと設定からの生成</h2>
+  <p class="lead">最初の 2 つは形式的ですが、ここを外すと「モデルが見つからない」で終わります。</p>
+
+  <p>プラグインのモデルレジストリは、<b>Hugging Face の設定にある <code>architectures</code> の文字列</b>と、自分のモデルクラスを対応づけるリストです。公開レジストリに実際に並んでいる <code>LlamaForCausalLM</code> や <code>Qwen3ForCausalLM</code> のような文字列がキーになります。ここに登録しないと、そのアーキテクチャは存在しないものとして扱われます。</p>
+
+  <p>次に、設定オブジェクトから自分のモデルを組み立てるファクトリを書きます。ここで踏みやすい落とし穴が 1 つあります。<b>Hugging Face の設定オブジェクトを辞書に変換すると、別名 (alias) で定義されているフィールドが落ちることがあります。</b>層数やアーキテクチャのパターン文字列がこれで消えると、既定値にフォールバックして、まったく違う形のモデルが黙って組み上がります。</p>
+
+  <div class="warn">
+    <b>この失敗の見え方</b>: 層数が既定値になり、重みを読む段で「対応する重みが無い」パラメータが大量に残ります。エラーメッセージは重み読み込みの側に出るので、原因が設定変換にあることに気付きにくい。<b>設定を読んだ直後に、層数と主要な次元をログに出して目で確認する</b>のが安全です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>KV キャッシュの形を申告する</h2>
+  <p class="lead">ここから Trainium 固有の話です。KV キャッシュは vLLM 本体が確保しますが、形はモデルが決めます。</p>
+
+  <p>起動時、ランナーはモデルに「各層の KV はどんな形か」を問い合わせます。モデルは層ごとに、KV ヘッド数、ヘッド次元、データ型、そしてスライディングウィンドウやチャンクサイズといった付帯情報を返します。</p>
+
+  <p>ここで<b>層ごとに違う形を返せる</b>のが重要です。全層が同じ attention なら一様ですが、層の種類が混ざるアーキテクチャ (attention の層と、attention でない層が交互に来るもの) では、attention の層だけが KV を要求します。この不均一を申告できる設計になっています。</p>
+
+  <p>申告が済むと、ランナーはブロック単位で確保した大きなテンソルをモデルに渡します。形は <b>[ブロック数, KV ヘッド数, ブロックサイズ, ヘッド次元]</b> の並びです。ただし次元の順序は attention backend の定義が正なので、実装時はそこを確認してください。順序を取り違えても要素数が合ってしまう組み合わせ (ブロックサイズとヘッド次元が同値など) では例外が出ず、精度だけが崩れます。<b>書き込んだ直後に 1 ブロックを読み戻し、自分が書いた値と一致するかを確認するテストを最初に書いておく</b>のが安全です。モデルはこの箱を各層に配り、以降は自分で読み書きします。</p>
+
+
+  <div class="fig">
+    <svg viewBox="0 0 860 340" role="img" aria-label="paged KV キャッシュの空間構造とブロック表による間接参照">
+      <defs>
+        <marker id="f1" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+          <path d="M0,0 L9,3.5 L0,7 z" fill="#3d7dca"/>
+        </marker>
+      </defs>
+      <text x="60" y="34" font-size="15" font-weight="700" fill="#0f5132">ブロック単位で確保された 1 枚の大きなテンソル</text>
+      <g>
+        <rect x="60" y="46" width="90" height="46" rx="5" fill="#e7f0fb" stroke="#3d7dca"/><text x="105" y="74" font-size="13" text-anchor="middle" fill="#12211a">blk 0</text>
+        <rect x="156" y="46" width="90" height="46" rx="5" fill="#fff" stroke="#9aa8b0"/><text x="201" y="74" font-size="13" text-anchor="middle" fill="#4a5d54">blk 1</text>
+        <rect x="252" y="46" width="90" height="46" rx="5" fill="#e7f0fb" stroke="#3d7dca"/><text x="297" y="74" font-size="13" text-anchor="middle" fill="#12211a">blk 2</text>
+        <rect x="348" y="46" width="90" height="46" rx="5" fill="#fff" stroke="#9aa8b0"/><text x="393" y="74" font-size="13" text-anchor="middle" fill="#4a5d54">blk 3</text>
+        <rect x="444" y="46" width="90" height="46" rx="5" fill="#fff" stroke="#9aa8b0"/><text x="489" y="74" font-size="13" text-anchor="middle" fill="#4a5d54">blk 4</text>
+        <rect x="540" y="46" width="90" height="46" rx="5" fill="#e7f0fb" stroke="#3d7dca"/><text x="585" y="74" font-size="13" text-anchor="middle" fill="#12211a">blk 5</text>
+        <rect x="636" y="46" width="90" height="46" rx="5" fill="#fff" stroke="#9aa8b0"/><text x="681" y="74" font-size="13" text-anchor="middle" fill="#4a5d54">blk 6</text>
+        <rect x="732" y="46" width="68" height="46" rx="5" fill="#fff" stroke="#9aa8b0"/><text x="766" y="74" font-size="13" text-anchor="middle" fill="#4a5d54">…</text>
+      </g>
+      <text x="60" y="112" font-size="13" fill="#22548f">色付きが、ある 1 つの要求の履歴。連続していない</text>
+
+      <rect x="60" y="132" width="330" height="76" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="225" y="158" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">ブロック表 (decode で使う)</text>
+      <text x="225" y="180" font-size="13.5" fill="#12211a" text-anchor="middle">要求 → 使っているブロック番号の列</text>
+      <text x="225" y="199" font-size="13" fill="#4a5d54" text-anchor="middle">この例では [0, 2, 5]</text>
+
+      <rect x="470" y="132" width="330" height="76" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="635" y="158" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">スロット指示 (prefill で使う)</text>
+      <text x="635" y="180" font-size="13.5" fill="#12211a" text-anchor="middle">トークンごとの書き込み先の位置</text>
+      <text x="635" y="199" font-size="13" fill="#4a5d54" text-anchor="middle">どのブロックのどこに置くかが外から来る</text>
+
+      <line x1="140" y1="132" x2="105" y2="96" stroke="#3d7dca" stroke-width="1.8" marker-end="url(#f1)"/>
+      <line x1="225" y1="132" x2="297" y2="96" stroke="#3d7dca" stroke-width="1.8" marker-end="url(#f1)"/>
+      <line x1="320" y1="132" x2="585" y2="96" stroke="#3d7dca" stroke-width="1.8" marker-end="url(#f1)"/>
+
+      <rect x="230" y="240" width="400" height="66" rx="10" fill="#fff" stroke="#198754" stroke-width="2"/>
+      <text x="430" y="266" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">モデルは連続したバッファに触らない</text>
+      <text x="430" y="290" font-size="13.5" fill="#12211a" text-anchor="middle">ブロック表とスロット指示を経由した間接アクセスだけ</text>
+    </svg>
+    <p class="cap">モデルは連続バッファではなく、間接参照で KV に触る。Hugging Face 実装と持ち主が逆になる理由がこの構造</p>
+  </div>
+
+  <div class="key">
+    <b>ここが「汎用フォールバックを作れない」理由</b><br>
+    Hugging Face の実装は KV キャッシュを自分で持ちます (毎ステップ連結して伸びる形)。一方この契約では、<b>キャッシュの実体は外から渡され、モデルはそこに間接的に読み書きします</b>。データの持ち主が逆なので、Hugging Face の forward をそのまま呼ぶ受け皿にはなりません。作るなら KV へのアクセスを差し替える汎用のアダプタ層が必要で、現状のプラグインはそれを持っていません。第 1 回で触れた「レジストリが列挙式である」理由がこれです。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>prefill と decode は別の作法</h2>
+  <p class="lead">同じ層の同じ数式でも、prefill と decode でデータの動きが違います。ここを 1 つの関数で書こうとすると破綻します。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 330" role="img" aria-label="prefill と decode の KV 作法の違い">
+      <rect x="30" y="20" width="380" height="290" rx="12" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="220" y="48" font-size="17" font-weight="700" fill="#0f5132" text-anchor="middle">prefill (プロンプト全体)</text>
+      <rect x="60" y="66" width="320" height="40" rx="7" fill="#fff" stroke="#43b581"/>
+      <text x="220" y="91" font-size="14" fill="#12211a" text-anchor="middle">入力: トークン列 (長さ L)</text>
+      <text x="220" y="126" font-size="20" fill="#4a5d54" text-anchor="middle">↓</text>
+      <rect x="60" y="136" width="320" height="46" rx="7" fill="#fff" stroke="#43b581"/>
+      <text x="220" y="158" font-size="14" fill="#12211a" text-anchor="middle">L 個ぶんの K, V を計算</text>
+      <text x="220" y="176" font-size="13" fill="#4a5d54" text-anchor="middle">attention は L×L の因果マスクで一括</text>
+      <text x="220" y="202" font-size="20" fill="#4a5d54" text-anchor="middle">↓</text>
+      <rect x="60" y="212" width="320" height="46" rx="7" fill="#fff" stroke="#43b581"/>
+      <text x="220" y="234" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">書き込み: スロットの指示に従って散らす</text>
+      <text x="220" y="252" font-size="13" fill="#4a5d54" text-anchor="middle">どのブロックのどこに置くかは外から来る</text>
+      <text x="220" y="286" font-size="13.5" fill="#4a5d54" text-anchor="middle">計算量は系列長に対して重い。回数は少ない</text>
+
+      <rect x="450" y="20" width="380" height="290" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="640" y="48" font-size="17" font-weight="700" fill="#22548f" text-anchor="middle">decode (1 トークンずつ)</text>
+      <rect x="480" y="66" width="320" height="40" rx="7" fill="#fff" stroke="#3d7dca"/>
+      <text x="640" y="91" font-size="14" fill="#12211a" text-anchor="middle">入力: トークン 1 個</text>
+      <text x="640" y="126" font-size="20" fill="#4a5d54" text-anchor="middle">↓</text>
+      <rect x="480" y="136" width="320" height="46" rx="7" fill="#fff" stroke="#3d7dca"/>
+      <text x="640" y="158" font-size="14" font-weight="700" fill="#22548f" text-anchor="middle">読み出し: ブロック表で過去を集める</text>
+      <text x="640" y="176" font-size="13" fill="#4a5d54" text-anchor="middle">自分の履歴が散らばって置かれている</text>
+      <text x="640" y="202" font-size="20" fill="#4a5d54" text-anchor="middle">↓</text>
+      <rect x="480" y="212" width="320" height="46" rx="7" fill="#fff" stroke="#3d7dca"/>
+      <text x="640" y="234" font-size="14" fill="#12211a" text-anchor="middle">1 個ぶんを追記して 1 手進める</text>
+      <text x="640" y="252" font-size="13" fill="#4a5d54" text-anchor="middle">q は 1、k は履歴全部 (非対称)</text>
+      <text x="640" y="286" font-size="13.5" fill="#4a5d54" text-anchor="middle">1 回は軽い。回数がとても多い</text>
+    </svg>
+    <p class="cap">prefill は「書く」、decode は「集めて読む」。形状も非対称なので、同じカーネルが両方で使えるとは限らない</p>
+  </div>
+
+  <p>この非対称性から、実務上とても刺さる注意点が出ます。<b>prefill 用に作られた attention カーネルが decode の形状で正しく動くとは限りません。</b>prefill では query と key の長さが同じなので、因果マスクは正方の三角行列になります。decode では query が 1 個、key が履歴全部なので、マスクは 1 行の形になります。同じ作り方をすると意味が変わります。</p>
+
+  <div class="warn">
+    <b>実際に遭遇する形</b>: prefill は正しいのに decode の出力だけが崩れ、生成が繰り返しに落ちる。原因が数式ではなくマスクの形にあるので、層ごとの数値比較をしても prefill では差が出ず、切り分けに時間がかかります。<b>decode を専用の実装に分けて、prefill と decode の整合性を不変条件として検証する</b>のが確実です。検証方法は第 8 回で扱います。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>forward の引数と戻り値</h2>
+  <p class="lead">具体的な呼び出し形を押さえます。ここを外すと、そもそもランナーから呼ばれません。</p>
+
+  <p>ランナーはモデルを、トークン列、位置、attention のメタデータ、サンプリング用の位置情報、サンプリングのパラメータ、といった引数で呼びます。メタデータの中に、prefill で「どこに書くか」を示す情報と、decode で「どこから読むか」を示すブロック表が入っています。</p>
+
+  <pre><code># 呼び出しの形 (2026-09-01 時点。名前と順序はバージョンで変わるのでソースを正とする)
+logits = model(
+    input_ids,           # このステップで処理するトークン
+    positions,           # 各トークンの位置
+    attn_metadata,       # スロット指示 (prefill) とブロック表 (decode) を含む
+    sampling_positions,  # logits を取り出す位置
+    sampling_params,     # 温度 / top-k / top-p など。常にテンソルで渡す
+    ...
+)
+
+# モデル側が実装するもの
+model.get_kv_spec(...)     # 層ごとの KV の形を申告する
+model.bind_kv_cache(...)   # 確保済みの KV テンソルを受け取って層に配る
+model.load_weights(...)    # チェックポイントを並列分割して載せる
+Model.from_configs(...)    # 設定オブジェクトからモデルを組み立てる</code></pre>
+
+  <p>戻り値は logits です。デバイス上サンプリングを使う構成では、サンプリングまでグラフに含めてトークンを返します。</p>
+
+  <div class="key">
+    <b>正は必ずソースで確認する</b><br>
+    引数の名前と順序はバージョンで変わります。正を確認する場所は 2 つで、<b>参照実装の forward 定義</b> (<code>vllm_neuron/model/llama3/</code> や <code>vllm_neuron/model/qwen3/</code>) と、<b>ランナー側の呼び出し箇所</b> (<code>vllm_neuron/vllm/worker/neuron_model_runner.py</code>) です。この 2 つを突き合わせれば、その版で何を受け取り何を返すべきかが確定します。KV の申告と受け取りは <code>get_kv_spec</code> と <code>bind_kv_cache</code>、重み読み込みは <code>load_weights</code>、設定からの生成は <code>from_configs</code> という名前で参照実装に並んでいます。レジストリは <code>vllm_neuron/model/registry.py</code>、移植手順そのものはリポジトリの <code>docs/design/framework/model_bringup.md</code> と <code>docs/model-dev/onboarding-models.md</code> にあります。
+  </div>
+
+  <div class="warn">
+    <b>筆者が実際に踏んだ初手のミス</b>: 自分の手元で数値検証するために書いた forward の形と、ランナーが呼ぶ形が違う。手元では <code>(tokens, positions, state, is_decode)</code> のような素朴な形で組んで数値が合うところまで進み、実際に起動したら引数が合わずに落ちる。<b>先に参照実装の forward の引数列を写してから中身を書く</b>のが遠回りに見えて速いです。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>並列化つきレイヤを使う</h2>
+  <p class="lead">テンソル並列を自分で書くのではなく、用意されている部品を使います。どの部品がどの分割を担うかを覚えます。</p>
+
+  <p>プラグインは並列化を織り込んだ基本レイヤを提供します。出力側の次元で分割する線形層 (列並列)、入力側で分割して最後に足し合わせる線形層 (行並列)、語彙次元で分割する埋め込み、そしてサンプラです。</p>
+
+  <p>加えて、カーネル呼び出し層が attention や MLP や MoE を提供します。これらは<b>サービングのデータレイアウトを引数の契約に持っています</b>。たとえば attention のカーネルは、prefill 用と decode 用が分かれており、paged KV の形を前提にしています。</p>
+
+  <p>ここで移植の実感を書いておくと、<b>「Hugging Face の実装を読みながら、同じ数式をこの語彙で書き直す」</b>のが作業の姿です。行数の大半は数式ではなく、分割の面倒と形の整合です。</p>
+
+  <h3>シーケンス並列が入ると足し合わせの位置が変わる</h3>
+  <p>シーケンス並列を使う構成では、prefill の入口でトークン方向に分割し、出口で集め直します。ブロック単位で見ると、attention や MLP のブロックに<b>入るところで all-gather、出るところで reduce-scatter</b> が入り、行並列の all-reduce がこの対に置き換わります。<b>密な MLP と MoE で通信の入る位置が違う</b>ので、参照実装をそのまま真似ると、片方だけ通信が足りない、あるいは二重になる、という間違いが起きます。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>重み読み込みは静かに壊れる</h2>
+  <p class="lead">筆者が 2 つのモデルを移植した中で、最も発見に時間がかかったのがこの領域でした。ここのバグは「動くが精度が悪い」という形で出るので、切り分けのコストが構造的に高くなります。</p>
+
+  <p>チェックポイントの重みは、モデル定義が期待する並びとは違う形で保存されています。だから読み込み時に変換が入ります。変換の内容は、テンソル並列のランクごとに「自分の担当ぶんだけを切り出す」ことと、融合されたテンソルを境界で正しく分けることです。</p>
+
+  <h3>融合テンソルの分割は境界を意識する</h3>
+  <p>典型は 2 つです。1 つは QKV が 1 つのテンソルに融合されている場合。もう 1 つは MLP のゲートとアップが 1 つのテンソルに融合されている場合です。</p>
+
+  <p>後者が特に危ないので具体的に書きます。ゲートとアップが <code>[2I, H]</code> の形で縦に積まれているとき、これを単純に行方向で等分割してランクに配ると、<b>あるランクはゲートだけ、別のランクはアップだけを持つ</b>ことになります。正しくは、ゲートの領域とアップの領域をそれぞれ独立に切り出してから連結します。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="融合テンソルの誤った分割と正しい分割">
+      <text x="215" y="28" font-size="16" font-weight="700" fill="#b5401f" text-anchor="middle">誤り: そのまま等分割</text>
+      <rect x="90" y="42" width="250" height="80" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="215" y="88" font-size="15" fill="#12211a" text-anchor="middle">gate 領域 (I 行)</text>
+      <rect x="90" y="122" width="250" height="80" fill="#f7e3ea" stroke="#c0492f" stroke-width="2"/>
+      <text x="215" y="168" font-size="15" fill="#12211a" text-anchor="middle">up 領域 (I 行)</text>
+      <line x1="80" y1="122" x2="350" y2="122" stroke="#4a5d54" stroke-dasharray="5 4"/>
+      <text x="400" y="88" font-size="14" fill="#b5401f">rank 0 は gate だけ</text>
+      <text x="400" y="168" font-size="14" fill="#b5401f">rank 1 は up だけ</text>
+      <text x="215" y="232" font-size="14" fill="#b5401f" text-anchor="middle">→ 数値は出るが意味が壊れる</text>
+
+      <text x="660" y="28" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">正しい: 領域ごとに切って連結</text>
+      <rect x="560" y="42" width="100" height="80" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="610" y="88" font-size="13.5" fill="#12211a" text-anchor="middle">gate の自分ぶん</text>
+      <rect x="670" y="42" width="100" height="80" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="720" y="88" font-size="13.5" fill="#12211a" text-anchor="middle">up の自分ぶん</text>
+      <text x="665" y="150" font-size="20" fill="#4a5d54" text-anchor="middle">↓ 連結</text>
+      <rect x="560" y="162" width="210" height="52" rx="7" fill="#fff" stroke="#198754" stroke-width="2"/>
+      <text x="665" y="193" font-size="14" fill="#12211a" text-anchor="middle">このランクが持つべき重み</text>
+      <text x="665" y="240" font-size="14" fill="#0f5132" text-anchor="middle">→ どのランクも gate と up の両方を持つ</text>
+    </svg>
+    <p class="cap">融合テンソルの分割。左の誤りは例外を出さないので、精度の劣化としてだけ現れる</p>
+  </div>
+
+  <h3>そのほかの落とし穴</h3>
+  <table>
+    <tr><th>落とし穴</th><th>症状</th><th>対処</th></tr>
+    <tr><td>重みを共有する語彙埋め込みと出力層 (tied embeddings)</td><td>片方だけ読み込まれ、もう片方が初期値のまま</td><td>読み込み後に参照を貼り直す</td></tr>
+    <tr><td>チェックポイントの接頭辞がモデルによって違う</td><td>全パラメータが未初期化のまま残る</td><td>チェックポイント側のキーから接頭辞を自動判定する</td></tr>
+    <tr><td>meta デバイス上でモデルを作ってから読む</td><td>読み込み漏れが例外にならず、初期化されていないテンソルが残る</td><td>読み込み後に「未初期化が 0 件」を必ず検査する</td></tr>
+    <tr><td>正規化層の重みを 1 で初期化するか 0 で初期化するか</td><td>実装によって <code>(1 + w)</code> を掛ける流儀がある。取り違えると二重に効く</td><td>参照実装の数式を確認する。dtype も明示する</td></tr>
+    <tr><td>切り出し前のテンソルに対して転置や連続化を呼ぶ</td><td>遅延読み込みのオブジェクトにメソッドが無くて落ちる</td><td>先に実体化してから変換する</td></tr>
+    <tr><td>KV ヘッド数が並列度より少ない、または割り切れない</td><td>起動時エラー、あるいは KV ヘッドの複製漏れで decode だけ崩れる</td><td>参照実装の KV ヘッド複製の扱いを確認し、サポートする並列度を先に決める</td></tr>
+    <tr><td>語彙サイズが並列度で割り切れない</td><td>埋め込みの分割で形が合わない</td><td>語彙パディングの有無と、logits 側でのパディング除去を確認する</td></tr>
+    <tr><td>位置埋め込みの周波数を低精度で計算する、または回転の適用形式を取り違える</td><td>短い入力では合うのに、長い系列と実重みで劣化する</td><td>周波数テーブルは fp32 で作る。適用形式 (交互に並べるか半分に割るか) はテンソル操作の単位で照合する</td></tr>
+  </table>
+
+  <div class="key">
+    <b>ここで効く自衛策は 1 つだけ</b><br>
+    <b>読み込み直後に「パラメータ総数・読み込み済み件数・未初期化件数」を全ランクで出す。</b>未初期化が 1 件でもあれば止める。この検査があるだけで、上の落とし穴のほとんどが「精度劣化」ではなく「起動時エラー」に変わります。精度の問題として現れたものを後から切り分けるコストは、この検査を書くコストの数十倍です。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>デバイス上サンプリング</h2>
+  <p class="lead">最後の接続です。ここをグラフに含めるかどうかで、性能の性質が変わります。</p>
+
+  <p>サンプリング (温度、top-k、top-p) をデバイス上で行う構成が推奨されています。理由は単純で、logits をホストに戻さずに済むからです。語彙サイズが大きいと logits は巨大なので、これを毎ステップ往復させると帯域が効きます。</p>
+
+  <p>実装としては、モデルの最後にサンプラを繋ぎ、グラフの出力を token にします。投機デコードを使う場合は、採択判定もデバイス上の純粋なテンソル演算として書かれ、同じグラフに入ります。</p>
+
+  <p>移植時の注意は、<b>サンプリングのパラメータが常にテンソルとして渡される</b>ように書くことです。「指定が無ければ <code>None</code>」という分岐を作ると、最初のリクエストで別のグラフが必要になって再コンパイルが走ります。値の有無で分岐せず、無効を表す値を渡す設計にします。同じ考え方は構造化出力のマスクにも使われていて、全部 <code>True</code> のマスクを渡すことで分岐を消しています。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>実装チェックリスト</h2>
+  <p class="lead">この回の内容を、手を動かす順序に並べ替えます。</p>
+
+  <ol class="steps">
+    <li><b>既存の対応モデルを無改造で通す。</b>参照実装をそのままの構成で起動し、生成まで確認する。ここで詰まる問題は移植と無関係なので先に潰す。あわせてコンパイルキャッシュの置き場 (永続ボリューム) をこの時点で決める</li>
+    <li><b>設定</b>を読む。層数と主要な次元をログに出して目視確認する</li>
+    <li><b>正規化・位置埋め込み</b>を参照実装の数式どおりに書く。重みの初期化流儀と dtype を確認する</li>
+    <li><b>attention</b> を書く。prefill と decode を分ける。KV の書き込みと読み出しを契約どおりに行う</li>
+    <li><b>MLP または MoE</b> を書く。集団通信の入る位置が密と疎で違うことに注意する</li>
+    <li><b>デコーダ層とバックボーン</b>を組む。層の種類が混ざる場合は KV の申告を不均一にする</li>
+    <li><b>出力層と重み読み込み</b>。融合テンソルの境界、共有重み、接頭辞の自動判定。未初期化 0 件の検査を入れる</li>
+    <li><b>レジストリ登録</b>。ここまでで初めて起動できる</li>
+    <li><b>CPU で数値検証</b>。参照実装との層ごと比較。ここを実機の前にやる (第 5 回)</li>
+    <li><b>実機でコンパイルと生成</b>。まず<b>テンソル並列度 1</b> で通す。落ちた段を第 2 回の表で切り分ける</li>
+    <li><b>並列度を上げる</b>。並列度 1 で生成が正しいことを確認してから上げ、「並列度を変えても結果が一致する」で重み分割と集団通信を検証する (第 8 回 §7)</li>
+    <li><b>不変条件の検証</b>。prefill 一括と prefill + decode の結果が一致するか (第 8 回 §7)</li>
+  </ol>
+
+  <p>各工程には完了条件を対にしておくと、次に進んでよいかの判断が読者の勘に委ねられません。たとえば attention なら「prefill と decode をそれぞれ単体で参照実装と fp32 相対誤差 1e-5 以下で一致」、重み読み込みなら「未初期化 0 件、かつ数個のパラメータを名前指定でチェックポイント原本と直接比較して一致」。工程名だけをチェックリストにすると、通っていないものを通ったことにしてしまいます。</p>
+
+  <p>この順序の要点は、<b>CPU での数値検証を実機より前に置くこと</b>です。実機でのコンパイルは時間がかかり、しかもコンパイルの成否は数値の正しさを何も保証しません。数式の間違いを実機で探すのは、最も高い場所で最も安いバグを探す行為になります。</p>
+
+  <div class="fn">
+    <p>出典と確認方法: 契約の各要素 (KV の申告と受け取り、forward の引数、並列化レイヤ、重みローダ、デバイス上サンプリング) は <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ソースと、同リポジトリのモデル追加手順および設計ドキュメントに記述があります。落とし穴として挙げた項目は、公開ドキュメントに記載のあるものと、筆者が公開プラグイン上で 2 つのモデルを移植する過程で遭遇したものを含みます。頻度の主張はしていません (n=2 なので母集団の話はできません)。挙げているのは「例外を出さず精度劣化としてだけ現れるので発見コストが構造的に高い」という性質です。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-02-compile-path.html">← 02: コンパイル経路の解剖</a>
+    <a href="./trn-porting-04-three-layers.html">04: ポーティングの 3 層モデル →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

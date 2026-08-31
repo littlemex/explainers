@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 01: スタックの地図</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l1:#0f5132; --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 01</p>
+  <h1>スタックの地図 ― 誰が何を持っているのか</h1>
+  <p>vLLM 本体・プラグイン・ランタイム兼カーネル基盤・Neuron ランタイムと NEFF。4 層と 2 経路を先に押さえる</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>このシリーズの狙い</h2>
+  <p class="lead">AWS Trainium で LLM をサービングするとき、モデルを「移植する」という作業が発生します。その作業が何なのかを、スタックの構造から具体的に説明するのがこのシリーズです。</p>
+
+  <p>Trainium 上の推論には、GPU に慣れた人が最初につまずく段差があります。GPU なら Hugging Face のモデルクラスをそのまま vLLM に渡して動くことが多いのに、Trainium では対応モデルが明示的に列挙されていて、そこに無いモデルは自分で実装を足す必要があります。この「足す」作業の中身が見えないと、工数の見積もりも、どの経路に賭けるべきかの判断もできません。</p>
+
+  <p>このシリーズは、その中身を層ごとに分解します。第 1 回は地図です。誰がどの責務を持ち、コードのどこに住んでいるのかを先に決めておかないと、以降の議論が「どの層の話をしているのか分からない」状態になります。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    Trainium 推論スタックは <b>4 層</b>です。上から vLLM 本体、ハードウェアプラグイン、<b>ランタイム兼カーネル基盤のライブラリ</b>、そして Neuron ランタイムと <b>NEFF</b> という実行バイナリ。移植作業の大半は<b>スタック第 2 層 (プラグイン) にモデル実装を書く</b>ことで、その実装は<b>スタック第 3 層が提供するカーネルと契約</b>に対して書かれます。「Native PyTorch にすれば移植が要らなくなる」という期待がどこまで当たるかは、この地図のどの層が入れ替わるのかで決まります。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 4 層の地図</a>
+    <a href="#s2">2. 第 1 層 ― vLLM 本体は何を手放していないか</a>
+    <a href="#s3">3. 第 2 層 ― プラグインの中身</a>
+    <a href="#s4">4. 第 3 層 ― ランタイム兼カーネル基盤</a>
+    <a href="#s5">5. 第 4 層 ― NEFF とランタイム</a>
+    <a href="#s6">6. 2 つのコンパイル経路</a>
+    <a href="#s7">7. 対応モデルが列挙式であることの意味</a>
+    <a href="#s8">8. このシリーズの読み進め方</a>
+  </div>
+
+  <p style="font-size:14px;color:var(--sub)">扱う対象は、コミュニティ管理のハードウェアプラグイン <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> と、その公開コンテナイメージです。記述はプラグインの公開ソースおよび公開されているパッケージインデックスで確認できる範囲に限っています。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>4 層の地図</h2>
+  <p class="lead">最初に全体像を置きます。各層の名前と責務を覚えるだけで、以降の話の見通しが立ちます。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 470" role="img" aria-label="Trainium 推論スタックの 4 層構造">
+      <defs>
+        <marker id="ar" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <!-- layer 1 -->
+      <rect x="60" y="24" width="740" height="86" rx="12" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="80" y="52" font-size="19" font-weight="700" fill="#0f5132">第 1 層 ・ vLLM 本体</text>
+      <text x="80" y="78" font-size="15" fill="#12211a">スケジューラ / KV ブロック管理 / OpenAI 互換 API / 受付制御</text>
+      <text x="80" y="99" font-size="14" fill="#4a5d54">ハードウェアを知らない。プラグインが差し替えた部品を呼ぶだけ</text>
+
+      <!-- layer 2 -->
+      <rect x="60" y="126" width="740" height="112" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="80" y="154" font-size="19" font-weight="700" fill="#22548f">第 2 層 ・ ハードウェアプラグイン</text>
+      <text x="80" y="180" font-size="15" fill="#12211a">Platform / Worker / ModelRunner / AttentionBackend の差し替え</text>
+      <text x="80" y="202" font-size="15" fill="#12211a">モデル実装 (列挙式のレジストリ) ・ カーネル呼び出し層 ・ FX パス</text>
+      <text x="80" y="225" font-size="14" fill="#4a5d54">移植作業の大半はここに書く。ただし書き方は第 3 層が決める</text>
+
+      <!-- layer 3 -->
+      <rect x="60" y="254" width="740" height="112" rx="12" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="80" y="282" font-size="19" font-weight="700" fill="#6b3fa0">第 3 層 ・ ランタイム兼カーネル基盤</text>
+      <text x="80" y="308" font-size="15" fill="#12211a">torch.compile のバックエンド ・ NKI カーネルの取り込み口</text>
+      <text x="80" y="330" font-size="15" fill="#12211a">デバイス登録 ・ 集団通信 ・ コンパイルキャッシュ ・ 並列コンパイル</text>
+      <text x="80" y="353" font-size="14" fill="#4a5d54">差し替え可能な部品ではなく、上の層が立っている地面</text>
+
+      <!-- layer 4 -->
+      <rect x="60" y="382" width="740" height="76" rx="12" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="80" y="410" font-size="19" font-weight="700" fill="#b5401f">第 4 層 ・ Neuron ランタイムと NEFF</text>
+      <text x="80" y="436" font-size="15" fill="#12211a">NEFF (実行バイナリ) をデバイスにロードして走らせる。形状ごとに 1 個</text>
+
+      <line x1="430" y1="110" x2="430" y2="124" stroke="#4a5d54" stroke-width="2" marker-end="url(#ar)"/>
+      <line x1="430" y1="238" x2="430" y2="252" stroke="#4a5d54" stroke-width="2" marker-end="url(#ar)"/>
+      <line x1="430" y1="366" x2="430" y2="380" stroke="#4a5d54" stroke-width="2" marker-end="url(#ar)"/>
+    </svg>
+    <p class="cap">4 層。上ほど汎用、下ほどハードウェア固有。移植で手を動かすのは第 2 層だが、書き方の制約は第 3 層と第 4 層から降ってくる</p>
+  </div>
+
+  <p>この図で覚えてほしいのは、<b>スタック第 3 層が「差し替え可能な部品」ではなく「地面」である</b>という点です。名前だけ見るとこの層はコンパイラのバックエンドに見えるので、別のバックエンドに交換できそうに思えます。しかし後の章で見るように、スタック第 2 層のカーネル呼び出し層はほぼ全ファイルがこの層の関数を import しています。地面を入れ替えると、その上の建物も一緒に建て替えることになります。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>第 1 層 ― vLLM 本体は何を手放していないか</h2>
+  <p class="lead">プラグイン方式なので、vLLM 本体は「全部差し替わる」わけではありません。何が残るかを知っておくと、移植で自分が実装しなくてよいものが分かります。</p>
+
+  <p>ハードウェアプラグインは、vLLM の <code>vllm.platform_plugins</code> というエントリポイントで自分を登録します。プラグインが差し替えるのは Platform、Worker、ModelRunner、AttentionBackend、そしてデバイス間通信の担当です。逆に言えば、それ以外は vLLM 本体の実装がそのまま動きます。</p>
+
+  <table>
+    <tr><th>担当</th><th>誰が持つか</th><th>移植で書く必要があるか</th></tr>
+    <tr><td>受付制御・継続バッチング (continuous batching) のスケジューリング</td><td>vLLM 本体</td><td>書かない</td></tr>
+    <tr><td>KV ブロックの割当・解放 (論理的な管理)</td><td>vLLM 本体</td><td>書かない</td></tr>
+    <tr><td>KV キャッシュの実体テンソルの確保</td><td>プラグインのランナー</td><td>書かない</td></tr>
+    <tr><td>KV キャッシュの形の申告</td><td>モデル実装</td><td><b>書く</b></td></tr>
+    <tr><td>OpenAI 互換の API サーバ</td><td>vLLM 本体</td><td>書かない</td></tr>
+    <tr><td>モデルの forward</td><td>プラグイン内のモデル実装</td><td><b>書く</b></td></tr>
+    <tr><td>KV キャッシュの実体への読み書き</td><td>モデル実装の forward の中</td><td><b>書く</b></td></tr>
+    <tr><td>重みの読み込みとテンソル並列の分割</td><td>モデル実装の weight loader</td><td><b>書く</b></td></tr>
+    <tr><td>NEFF へのコンパイル</td><td>スタック第 3 層</td><td>書かない</td></tr>
+  </table>
+
+  <p>ここが「移植」という言葉の輪郭です。<b>スケジューリングやブロック管理という難しい部分は貰える。代わりに、モデルの計算と、KV キャッシュという共有資源への読み書き作法は自分で書く。</b>第 3 回でこの作法を「サービング契約」として細かく分解します。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>第 2 層 ― プラグインの中身</h2>
+  <p class="lead">移植で触るディレクトリを先に把握します。名前と役割が結びついていれば、他人のモデル実装を参照実装として読めるようになります。</p>
+
+  <pre><code>vllm_neuron/
+├── vllm/            第 1 層への差し込み (platform, worker, model_runner, attention, sample, ...)
+├── model/           モデル実装。registry.py に列挙されたものだけが動く
+│   ├── registry.py  対応モデルの一覧 (ここに登録しないと存在しない)
+│   ├── llama3/      参照実装。量子化バリアントも同居
+│   ├── qwen3/       参照実装 (小さめ)
+│   └── ...
+├── nn/              並列化つきの基本レイヤ (列並列 / 行並列 / 埋め込み / サンプラ)
+├── functional/      カーネル呼び出し層。attention, moe, collectives ほか
+├── fx_passes/       グラフ書き換え (デバイス / エイリアス / インプレース / NKI / 集団通信)
+├── parallel/        テンソル並列・エキスパート並列の配線
+└── utils/           重み読み込み、実行器、その他</code></pre>
+
+  <p>移植で新規に作るのは <code>model/&lt;新しいモデル&gt;/</code> だけです。ただしその中身は <code>nn/</code> と <code>functional/</code> を呼ぶ形で書きます。ここが重要で、<b>Hugging Face の実装をコピーしてくる作業ではありません</b>。同じ数式を、この 2 つのディレクトリが提供する語彙で書き直す作業です。</p>
+
+  <p>規模の感覚として、参照実装のひとつは設定 74 行・ファクトリ 80 行・モデル本体 1075 行の合計およそ 1,200 行です。別の参照実装はモデル本体が 2177 行あり、これに量子化バリアントと重みローダ群が加わります。<b>ただしこの行数を「定型作業の量」と読むと見積もりを外します</b>。理由は第 4 回で扱います。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>第 3 層 ― ランタイム兼カーネル基盤</h2>
+  <p class="lead">この層の役割が一番誤解されやすいので、ここで正確にしておきます。</p>
+
+  <p>この層のライブラリは、名前からはコンパイラのバックエンドに見えます。実際にそれも担当しています。<code>torch.compile</code> に渡すバックエンドの実装、コンパイルキャッシュ、並列コンパイル、プラットフォーム判定はここです。</p>
+
+  <p>しかし役割はそれだけではありません。この層は次の 3 つを同時に持っています。</p>
+
+  <ol class="steps">
+    <li><b>PyTorch のデバイスとしての自分の登録</b>。PyTorch には外部アクセラレータ用に予約されたディスパッチキーがあり、その筆頭が <code>PrivateUse1</code> です。デバイス名の改名やデバイスモジュールの登録といった周辺の支援 API が実質このキーを前提に整っているので、外部実装はここに集まります。この層もそこに自分を登録して「Neuron デバイス」になります。第 6 回の主題です。</li>
+    <li><b>低レベルカーネル (NKI で書かれたもの。以下、低レベルカーネル) をグラフに取り込む口</b>。スタック第 2 層の <code>functional/</code> にある約 30 のファイルが、この層の <code>wrap_nki</code> という関数を import しています。attention の全種類、MoE の全種類、集団通信、topk、cumsum、正規化つき量子化。<b>つまりスタック第 2 層のカーネルライブラリ全体がこの層の上に建っています。</b></li>
+    <li><b>集団通信の実装</b>。テンソル並列の all-reduce や reduce-scatter をデバイス上で行う部分。</li>
+  </ol>
+
+  <div class="warn">
+    <b>ここが後で効きます</b>。「コンパイル経路を別のものに差し替える」という発想は、この層のうち (1) だけを見ていると自然に思えます。しかし (2) を見ると、差し替えは<b>カーネルライブラリを失うこと</b>を意味します。第 6 回で、この層を別の実装に置き換えようとすると PyTorch のディスパッチャレベルで衝突が起きることを示します。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>第 4 層 ― NEFF とランタイム</h2>
+  <p class="lead">最下層には、コンパイル結果の実行バイナリと、それを走らせるランタイムがあります。この層の性質が、上の層の設計をかなり強く縛ります。</p>
+
+  <p>NEFF (Neuron Executable File Format) は、コンパイル済みの実行単位です。ファイルとしてディスクに存在し、名前つきの入力と出力を持ちます。実際に中身を問い合わせると、次のような情報が返ります。</p>
+
+  <pre><code>inputs : {'input0': (size=524288, dtype='float32', shape=[32, 4096]),
+          'input1': (size=8192,   dtype='float32', shape=[1, 2048]), ...}
+outputs: {'output0': (size=524288, dtype='float32', shape=[32, 4096]),
+          'output1': (size=2097152, dtype='float32', shape=[64, 8192])}
+alias  : {}</code></pre>
+
+  <p>ここから 3 つの性質が読み取れます。</p>
+
+  <p><b>形状が固定です。</b>NEFF は特定の形状に対してコンパイルされています。だから系列長やバッチサイズの組み合わせごとに別の NEFF が必要になります。これが「バケット化」と呼ばれる設計の理由で、第 2 回で扱います。</p>
+
+  <p><b>入力の名前が位置名です。</b><code>input0</code>、<code>input1</code> という並びしか持っていません。元の Python 関数の引数名は残りません。この一点が、NEFF を他所から持ち込んで再利用しようとしたときに実務的な壁になります。第 7 回で扱います。</p>
+
+  <p><b>エイリアス情報を持ちます。</b>上の例では空ですが、入力バッファを出力として使い回す (donated buffer) 指定がここに載ります。KV キャッシュや状態の持ち回りは、この仕組みの上に成り立ちます。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>2 つのコンパイル経路</h2>
+  <p class="lead">同じ <code>torch.compile</code> という入口から、性質の違う 2 つの経路が伸びています。この 2 本を混同すると議論が噛み合いません。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 340" role="img" aria-label="2 つのコンパイル経路">
+      <defs>
+        <marker id="ar2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <rect x="300" y="16" width="260" height="52" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="430" y="40" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">モデルの Python コード</text>
+      <text x="430" y="60" font-size="14" fill="#4a5d54" text-anchor="middle">torch.compile(model, backend=...)</text>
+
+      <line x1="430" y1="68" x2="430" y2="88" stroke="#4a5d54" stroke-width="2" marker-end="url(#ar2)"/>
+      <rect x="330" y="90" width="200" height="42" rx="10" fill="#fff" stroke="#43b581" stroke-width="2"/>
+      <text x="430" y="116" font-size="15" fill="#12211a" text-anchor="middle">FX グラフを捕まえる</text>
+
+      <line x1="380" y1="132" x2="250" y2="164" stroke="#4a5d54" stroke-width="2" marker-end="url(#ar2)"/>
+      <line x1="480" y1="132" x2="610" y2="164" stroke="#4a5d54" stroke-width="2" marker-end="url(#ar2)"/>
+
+      <!-- left: XLA route -->
+      <rect x="60" y="166" width="330" height="150" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="225" y="192" font-size="16" font-weight="700" fill="#22548f" text-anchor="middle">経路 A ・ 現行の既定</text>
+      <text x="225" y="218" font-size="14.5" fill="#12211a" text-anchor="middle">FX パス群でグラフを書き換え</text>
+      <text x="225" y="240" font-size="14.5" fill="#12211a" text-anchor="middle">XLA の HLO へ降ろす</text>
+      <text x="225" y="262" font-size="14.5" fill="#12211a" text-anchor="middle">neuronx-cc で NEFF にする</text>
+      <text x="225" y="290" font-size="13.5" fill="#22548f" text-anchor="middle">NKI カーネルを差し込める</text>
+      <text x="225" y="308" font-size="13.5" fill="#22548f" text-anchor="middle">サービングの契約が全部載る</text>
+
+      <!-- right: native route -->
+      <rect x="470" y="166" width="330" height="150" rx="12" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="635" y="192" font-size="16" font-weight="700" fill="#6b3fa0" text-anchor="middle">経路 B ・ Native PyTorch</text>
+      <text x="635" y="218" font-size="14.5" fill="#12211a" text-anchor="middle">ATen の広いカバレッジで降ろす</text>
+      <text x="635" y="240" font-size="14.5" fill="#12211a" text-anchor="middle">eager 実行もできる</text>
+      <text x="635" y="262" font-size="14.5" fill="#12211a" text-anchor="middle">出力はやはり NEFF</text>
+      <text x="635" y="290" font-size="13.5" fill="#6b3fa0" text-anchor="middle">素直な書き方が通りやすい</text>
+      <text x="635" y="308" font-size="13.5" fill="#6b3fa0" text-anchor="middle">サービングの仕組みは持たない</text>
+    </svg>
+    <p class="cap">入口は同じ torch.compile。出口はどちらも NEFF。違うのは途中の降ろし方と、周りに何が付いているか</p>
+  </div>
+
+  <p>経路 A (XLA) は現在のサービング用の既定です。第 2 回で分解します。経路 B (Native PyTorch) は、Hugging Face のモデルをデバイスに置いてそのまま実行でき、<code>torch.compile</code> も使えるものとして説明されています。ATen 演算のカバレッジが広く、素直に書いたコードが通りやすい、とされています。<b>この経路は執筆時点で公開配布されていないので、本シリーズは経路 B の実測を扱いません</b> (詳細は第 4 回 §8)。</p>
+
+  <p>ここで注意すべきなのは、<b>この 2 本は「新旧」ではなく「別の目的の道具」だという点</b>です。経路 B (Native PyTorch) は継続バッチングも paged KV キャッシュも持ちません。つまり経路 B 単体はサービングスタックではありません。逆に経路 A (XLA) はサービングの仕組みを全部持っていますが、そのぶん通る書き方が制限されます。</p>
+
+  <p>プラグインの公開 README の feature matrix には、この 2 本が別の行として並んでいます。<code>torch.compile (XLA backend)</code> が対応済み、<code>torch.compile (native PyTorch)</code> が未対応。つまり「経路 B (Native PyTorch) をサービングの下敷きにする」ことは、プラグイン側でも追跡されている項目であって、まだ出荷されていません。この状態が何を意味するかは第 6 回で詳しく見ます。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>対応モデルが列挙式であることの意味</h2>
+  <p class="lead">GPU との一番大きな体験差はここです。仕組みとして理解しておくと、驚かずに済みます。</p>
+
+  <p>プラグインのモデルレジストリは、対応モデルを Python のリストとして持っています。つまり<b>汎用の Hugging Face フォールバック経路がありません</b>。レジストリに載っていないアーキテクチャは、そのプラグインにとって存在しません。</p>
+
+  <p>なぜこうなっているのか。答えは第 3 回と第 4 回の内容ですが、先に一言でいうと、<b>モデルの forward が KV キャッシュという共有資源への読み書き作法を自分で担っているから</b>です。汎用の Hugging Face 実装はその作法を知りません。共通の受け皿を作るには KV アクセスを差し替えるアダプタ層が要り、現状のプラグインはそれを提供していません。</p>
+
+  <div class="key">
+    <b>この構造から出てくる素朴な疑問</b><br>
+    「では経路 B (Native PyTorch) なら Hugging Face のモデルがそのまま動くのだから、それをサービングに使えばよいのでは」。この疑問はまっとうで、シリーズの後半 (第 5 回から第 7 回) がその答えです。結論を先に言うと、<b>経路 B に替えても移植は要ります</b>。ただし移植のうち<b>ある一層のコストは確かに下がります</b>。どの層が下がってどの層が残るのかを、第 4 回で 3 層に分けて整理します。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>このシリーズの読み進め方</h2>
+  <p class="lead">全 8 回の構成と、それぞれで答えたい問いを並べます。</p>
+
+  <table>
+    <tr><th>回</th><th>主題</th><th>答えたい問い</th></tr>
+    <tr><td>01 (本稿)</td><td>スタックの地図</td><td>誰がどの責務を持つのか</td></tr>
+    <tr><td>02</td><td>コンパイル経路の解剖</td><td>Python から NEFF まで何が起きるのか。なぜ形状ごとに NEFF が要るのか</td></tr>
+    <tr><td>03</td><td>サービング契約</td><td>移植とは具体的に何を実装することか</td></tr>
+    <tr><td>04</td><td>ポーティングの 3 層モデル</td><td>移植コストはどこに宿るのか。アーキテクチャによって何が変わるのか</td></tr>
+    <tr><td>05</td><td>eager と compile</td><td>eager にすれば移植は要らないのか</td></tr>
+    <tr><td>06</td><td>2 つのランタイムは同居できない</td><td>経路を差し替えるとは何をすることなのか。なぜ待ちが発生するのか</td></tr>
+    <tr><td>07</td><td>NEFF を境界にする</td><td>プロセスを分けて橋を架けられるか。代償は何か</td></tr>
+    <tr><td>08</td><td>測り方</td><td>この上で測った数字を信じてよいのはどんなときか</td></tr>
+  </table>
+
+  <p>実装を書く立場なら第 3 回と第 4 回が本体です。経路の選択を判断する立場なら、まず<b>第 4 回</b> (コストがどこに宿るか、見積もりの 2 つの問い) を読んでください。判断の道具はこの回にあります。そのうえで第 5 回から第 7 回 (なぜ待ちが発生するのか、回避策の現在地) に進むのが早いです。第 8 回は、どちらの立場でも数字を出す前・受け取る前に読んでおく回です。</p>
+
+  <div class="fn">
+    <p>出典と確認方法: プラグインの構成・レジストリ・FX パス・feature matrix は <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ソースで確認できます。行数は同リポジトリの該当時点のソースを数えたものです。NEFF の入出力情報は、公開コンテナイメージに同梱されている Neuron ランタイムの Python バインディングで実際に問い合わせた結果です (第 7 回に手順)。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-index.html">← シリーズ目次</a>
+    <a href="./trn-porting-02-compile-path.html">02: コンパイル経路の解剖 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

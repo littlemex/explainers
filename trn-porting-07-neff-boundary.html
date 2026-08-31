@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 07: NEFF を境界にできるか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 07</p>
+  <h1>NEFF を境界にできるか ― 機構はある、運搬が高い</h1>
+  <p>プロセスを分ければ衝突しない。ロードと実行の部品は揃っている。残る課題はデータ移動</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">前回の結論は「プロセス内での差し替えは無理」でした。ではプロセスを分ければどうか。設計として成立するかを検討し、公開イメージで確認できる範囲を報告します。</p>
+
+  <p>アイデアは単純です。<code>PrivateUse1</code> の衝突はプロセス内の話なので、<b>片方のプロセスでコンパイルして成果物をファイルに出し、もう片方のプロセスでそれを実行すれば衝突しません</b>。第 1 回で見たように NEFF はファイルとして存在し、名前つきの入出力を持ちます。つまり交換フォーマットの資格があります。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>機構は公開イメージの中にあります。</b>Neuron ランタイムの Python バインディングが同梱されており、NEFF をファイルからロードして、入出力の契約を問い合わせて、テンソルを渡して実行できます。だから「片方でコンパイルして、もう片方で実行する」という分業は、部品としては揃っています。<br>
+    <b>ただし運搬が高い。</b>ホストのバッファを経由するデータ移動が、カーネル実行時間の<b>約 30 倍</b>かかりました (2.6 MB 級の部分グラフ 1 個での実測)。層ごとに呼ぶ設計では成立しません。解消の鍵はテンソルをデバイス上で共有することで、そこは未検証です。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. なぜ全体モデルの NEFF 注入は無理なのか</a>
+    <a href="#s2">2. 部分グラフなら署名を自分で決められる</a>
+    <a href="#s3">3. ランタイムの Python API</a>
+    <a href="#s4">4. 実際にやってみる</a>
+    <a href="#s5">5. 何が確認できて、何が未確認なのか</a>
+    <a href="#s6">6. 位置名しか無いという実務的な壁</a>
+    <a href="#s7">7. データ移動の代償を測る</a>
+    <a href="#s8">8. 橋を完成させるための残工程</a>
+    <a href="#s9">9. 判断 ― 作るべきか</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ全体モデルの NEFF 注入は無理なのか</h2>
+  <p class="lead">先に、似ているが成立しないアイデアを潰しておきます。ここを混同すると、成立する案まで否定してしまいます。</p>
+
+  <p>「モデル全体を別の経路でコンパイルして、その NEFF をサービング側に食わせる」。これは成立しません。理由は、<b>モデル全体の NEFF の入出力署名が、サービング側の契約で完全に決まっている</b>からです。</p>
+
+  <p>第 2 回と第 3 回で見た要素が、そのまま署名に焼き込まれています。KV キャッシュのエイリアス関係、バケットごとの固定形状、集団通信のグループ、サンプラとの切れ目。一方、Hugging Face のモデルをそのままコンパイルしたグラフは、自前のキャッシュを連結で伸ばす形で、ブロック表という概念を持ちません。<b>署名が違うというより、キャッシュの管理モデルそのものが別です。</b></p>
+
+  <p>署名を手で合わせるハックを考えても、それは「サービング側のランタイムが期待する契約を手で再実装する」作業になります。第 3 回のリストを外部から再現することになるので、素直に移植するより難しくなります。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>部分グラフなら署名を自分で決められる</h2>
+  <p class="lead">境界の所有権が逆になる、というのがこの回の勘所です。</p>
+
+  <p>モデル全体の署名はサービング側が握っています。しかし<b>モデルの内側にある 1 つの層、あるいは層の一部の署名は、自分が決められます</b>。たとえば SSM の混合部分について、状態を明示的に引数と戻り値に出した関数を定義すれば、その入出力は自分の設計物です。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="全体注入と部分委譲の違い">
+      <text x="215" y="26" font-size="16" font-weight="700" fill="#b5401f" text-anchor="middle">全体を注入する (成立しない)</text>
+      <rect x="70" y="44" width="290" height="180" rx="12" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="215" y="72" font-size="14" fill="#12211a" text-anchor="middle">署名の持ち主 = サービング側</text>
+      <text x="215" y="102" font-size="13" fill="#4a5d54" text-anchor="middle">KV エイリアス / バケット形状</text>
+      <text x="215" y="124" font-size="13" fill="#4a5d54" text-anchor="middle">集団通信グループ / サンプラ境界</text>
+      <rect x="110" y="142" width="210" height="60" rx="8" fill="#fff" stroke="#c0492f" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="215" y="168" font-size="13.5" fill="#b5401f" text-anchor="middle">外から持ってきた NEFF は</text>
+      <text x="215" y="188" font-size="13.5" fill="#b5401f" text-anchor="middle">この署名を満たせない</text>
+
+      <text x="645" y="26" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">部分を委譲する (成立し得る)</text>
+      <rect x="500" y="44" width="290" height="180" rx="12" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="645" y="72" font-size="14" fill="#12211a" text-anchor="middle">外側の署名はサービング側のまま</text>
+      <rect x="530" y="88" width="230" height="118" rx="8" fill="#fff" stroke="#198754" stroke-width="2"/>
+      <text x="645" y="112" font-size="13.5" font-weight="700" fill="#0f5132" text-anchor="middle">内側の 1 つの層</text>
+      <text x="645" y="136" font-size="13" fill="#4a5d54" text-anchor="middle">入力: 隠れ状態 + 状態</text>
+      <text x="645" y="158" font-size="13" fill="#4a5d54" text-anchor="middle">出力: 隠れ状態 + 新しい状態</text>
+      <text x="645" y="184" font-size="13.5" font-weight="700" fill="#0f5132" text-anchor="middle">この署名は自分の設計物</text>
+      <text x="645" y="256" font-size="13.5" fill="#0f5132" text-anchor="middle">境界の所有権が逆なので、結論も逆になる</text>
+    </svg>
+    <p class="cap">同じ「NEFF を持ち込む」でも、署名を誰が握っているかで成否が反転する</p>
+  </div>
+
+  <p>ただし制約が付きます。<b>ランタイムには、NEFF の実行中に別の NEFF を呼び出す仕組みが用意されていません。</b>外側のモデルはバケットごとに 1 個の NEFF になるので、その内側から別の NEFF を呼ぶ手段がありません。だから委譲はホストへの往復を挟む形、つまり<b>グラフの分断</b>を意味します。第 2 回で見たように既定は分断を許さない設定なので、ここは意図的に緩める必要があります。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>ランタイムの Python API</h2>
+  <p class="lead">橋の実行側に何が用意されているかを確認します。ここが空なら話は終わりです。</p>
+
+  <p>サービング用の公開イメージには、Neuron ランタイム (スタック第 4 層) の Python バインディングが同梱されています。以下この回で単に「ランタイム」と書くのはこの Neuron ランタイムを指します。低レベルカーネルの開発に使われるものですが、NEFF を扱う一般的な機能を持っています。</p>
+
+  <table>
+    <tr><th>できること</th><th>API の形</th></tr>
+    <tr><td>NEFF ファイルをロードする</td><td>パスと、コア番号や集団通信の設定を渡す</td></tr>
+    <tr><td>入出力の契約を問い合わせる</td><td>名前 → (要素数, データ型, 形状) の辞書が返る</td></tr>
+    <tr><td>エイリアス情報を見る</td><td>入力を出力として使い回す指定の一覧</td></tr>
+    <tr><td>デバイス上にテンソルを確保する</td><td>numpy 配列から作る、既存のものに書き込む、読み出す</td></tr>
+    <tr><td>実行する</td><td>入力名と出力名の対応でテンソルを渡す</td></tr>
+    <tr><td>カーネル実行時間を測る</td><td>ウォームアップ回数と計測回数を指定できるベンチマーク</td></tr>
+  </table>
+
+  <p>最後の項目は橋とは別に重要で、<b>ホスト側のストップウォッチでは測れない時間を測る唯一の手段</b>です。第 8 回で詳しく扱います。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>実際にやってみる</h2>
+  <p class="lead">手順を明示します。再現できる形にしておくと、この先の議論が意見ではなく事実の上で進みます。</p>
+
+
+  <div class="fig">
+    <svg viewBox="0 0 860 330" role="img" aria-label="プロセスを分けた橋の全体像">
+      <defs>
+        <marker id="e1" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <rect x="20" y="30" width="230" height="200" rx="12" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="135" y="58" font-size="15" font-weight="700" fill="#6b3fa0" text-anchor="middle">プロセス A</text>
+      <text x="135" y="80" font-size="13" fill="#4a5d54" text-anchor="middle">経路 B (Native PyTorch)</text>
+      <text x="135" y="112" font-size="13.5" fill="#12211a" text-anchor="middle">部分グラフを torch.compile</text>
+      <text x="135" y="134" font-size="13.5" fill="#12211a" text-anchor="middle">状態は引数と戻り値に出す</text>
+      <rect x="45" y="150" width="180" height="30" rx="6" fill="#fff" stroke="#a06cd5"/>
+      <text x="135" y="170" font-size="12.5" fill="#6b3fa0" text-anchor="middle">PrivateUse1 はこの中で 1 つ</text>
+      <text x="135" y="206" font-size="13" fill="#4a5d54" text-anchor="middle">実行はしない。焼くだけ</text>
+
+      <line x1="252" y1="130" x2="308" y2="130" stroke="#4a5d54" stroke-width="2" marker-end="url(#e1)"/>
+
+      <rect x="310" y="46" width="240" height="168" rx="12" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="430" y="74" font-size="15" font-weight="700" fill="#b5401f" text-anchor="middle">境界はファイル</text>
+      <rect x="330" y="88" width="200" height="30" rx="6" fill="#fff" stroke="#e07a5f"/>
+      <text x="430" y="108" font-size="13" fill="#12211a" text-anchor="middle">.neff (計算そのもの)</text>
+      <rect x="330" y="124" width="200" height="30" rx="6" fill="#fff" stroke="#e07a5f"/>
+      <text x="430" y="144" font-size="13" fill="#12211a" text-anchor="middle">引数と入力名の対応表</text>
+      <rect x="330" y="160" width="200" height="30" rx="6" fill="#fff" stroke="#e07a5f"/>
+      <text x="430" y="180" font-size="13" fill="#12211a" text-anchor="middle">参照値 (照合用)</text>
+      <text x="430" y="206" font-size="12.5" fill="#b5401f" text-anchor="middle">NEFF だけでは足りない</text>
+
+      <line x1="552" y1="130" x2="608" y2="130" stroke="#4a5d54" stroke-width="2" marker-end="url(#e1)"/>
+
+      <rect x="610" y="30" width="230" height="200" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="725" y="58" font-size="15" font-weight="700" fill="#22548f" text-anchor="middle">プロセス B</text>
+      <text x="725" y="80" font-size="13" fill="#4a5d54" text-anchor="middle">サービング用イメージ</text>
+      <text x="725" y="112" font-size="13.5" fill="#12211a" text-anchor="middle">ランタイム API でロード</text>
+      <text x="725" y="134" font-size="13.5" fill="#12211a" text-anchor="middle">入出力契約を問い合わせ</text>
+      <rect x="635" y="150" width="180" height="30" rx="6" fill="#fff" stroke="#3d7dca"/>
+      <text x="725" y="170" font-size="12.5" fill="#22548f" text-anchor="middle">PrivateUse1 はこの中で 1 つ</text>
+      <text x="725" y="206" font-size="13" fill="#4a5d54" text-anchor="middle">実行して参照値と照合</text>
+
+      <text x="430" y="256" font-size="13.5" fill="#4a5d54" text-anchor="middle">プロセスが別なので、第 6 回のディスパッチキーの衝突は起きない</text>
+      <text x="430" y="286" font-size="13.5" font-weight="700" fill="#b5401f" text-anchor="middle">ただし境界を越えるたびにテンソルをホスト経由で運ぶ (第 7 節)</text>
+      <text x="430" y="312" font-size="13" fill="#4a5d54" text-anchor="middle">ここが現状の代償</text>
+    </svg>
+    <p class="cap">境界はファイル。運ぶのは NEFF だけでは足りず、入力名の対応表と参照値が要る</p>
+  </div>
+
+  <ol class="steps">
+    <li><b>焼く側のプロセス</b>: 委譲したい部分グラフ (たとえば SSM の中核部分を、状態を明示的に引数と戻り値に出す形で書いたもの) を <code>torch.compile</code> で 1 回実行する。コンパイルの成果物として <code>.neff</code> ファイルが出る。キャッシュを空にしてから 1 回だけ実行すれば、生成されたファイルとグラフの対応が一意に決まる</li>
+    <li><b>成果物を持ち出す</b>: <code>.neff</code> に加えて、入力そのものと、そのプロセスがデバイス上で得た出力を保存する。これが後で照合するための参照値になる</li>
+    <li><b>実行する側のプロセス</b>: サービング用の公開イメージで、その NEFF をランタイムの API でロードする。入出力の契約を問い合わせて、形と型を確認する</li>
+    <li><b>入力を対応づける</b>: NEFF の入力名は位置名なので、どの引数がどの名前かを対応づける (この点は次節で詳述)</li>
+    <li><b>実行して照合する</b>: 出力を読み出し、保存した参照値と比べる</li>
+  </ol>
+
+  <p>手順 1 の「キャッシュを空にしてから 1 回だけ」は地味ですが重要です。複数のグラフが焼かれると、どのファイルがどのグラフなのか分からなくなります。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>何が確認できて、何が未確認なのか</h2>
+  <p class="lead">この設計の成否を分ける点を、確認済みと未確認に分けます。</p>
+
+  <p><b>確認できたこと。</b>公開イメージ上で、ある部分グラフの NEFF をランタイムの API でロードし、入出力の契約を問い合わせ、テンソルを渡して実行し、結果を読み出すところまでは動きます。NEFF は自己記述的で、名前・形状・データ型・エイリアス情報を問い合わせられます。つまり<b>「NEFF を交換フォーマットとして扱う」ことは、部品としては可能です</b>。</p>
+
+  <p><b>未確認のこと。</b>異なるコンパイラ世代・異なる環境で焼いた NEFF が相互運用できるかは、ここでは扱いません。NEFF はコンパイラ世代とランタイム世代に紐づくので、世代がずれれば話が変わります。橋を実装するなら、この相互運用性を自分の構成で先に確かめる必要があります。</p>
+
+  <p><b>設計として言えること。</b>それでも境界の設計については判断できます。次の 2 節で、この境界を実務で使うときに必ず問題になる 2 点 (呼び出し規約と運搬コスト) を扱います。どちらも公開イメージだけで確認できる性質です。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>位置名しか無いという実務的な壁</h2>
+  <p class="lead">小さいけれど、放置すると必ず事故になる問題です。</p>
+
+  <p>NEFF の入力は <code>input0</code>、<code>input1</code> という位置名しか持ちません。元の Python 関数の引数名は残りません。だから<b>「どの引数がどの名前に対応するか」を焼いた側が記録しないと、復元できません</b>。</p>
+
+  <p>形状から推測できる場合もありますが、それは形状が全部違うときだけです。SSM の部分グラフを例に取ると、同じ形状の引数が 2 組できます。1 組は状態遷移に関わる係数、もう 1 組は出力の射影に関わる係数です。<b>この 2 つを入れ替えても形状は合うので、エラーになりません。数値が静かに変わるだけです。</b></p>
+
+  <p>だから実運用の橋にするなら、<b>焼く側が引数と入力名の対応表を成果物として出す</b>必要があります。参照値との照合で総当たりに当てる方法は検証用には使えますが、運用には載せられません。</p>
+
+  <div class="warn">
+    <b>一般化すると</b>: NEFF は「計算」を運びますが「呼び出し規約」を運びません。だから NEFF を交換フォーマットとして使うなら、<b>署名のメタデータを別に定義して一緒に運ぶ</b>必要があります。形状と型は NEFF から読めるので、足りないのは<b>引数の順序と意味</b>だけです。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>データ移動の代償を測る</h2>
+  <p class="lead">この回の結論を決める数字です。機構が動くことと、実用になることは別でした。</p>
+
+  <p>公開イメージ上で、入力 2.63 MB、出力 2.62 MB の部分グラフ 1 個について、段階ごとに時間を測りました。カーネル実行時間はデバイスモード計測によるもので、ホスト側のストップウォッチでは測れない理由は第 8 回 §1 にあります。</p>
+
+  <p style="font-size:14.5px;color:var(--sub)">この節が測っているのは <b>API のデータ移動コスト</b>です。値はテンソルのサイズと転送の経路で決まり、その NEFF をどの経路でコンパイルしたかには依存しません。だから以下の内訳は、橋の設計を判断する材料としてそのまま使えます。</p>
+
+  <table>
+    <tr><th>段階</th><th>1 回あたり</th><th>カーネル比</th></tr>
+    <tr><td>カーネル実行だけ (ランタイムのデバイスモード計測)</td><td>0.0630 ms</td><td>1.0 倍</td></tr>
+    <tr><td>実行の呼び出しまで含む (入力はデバイス上に常駐)</td><td>0.1188 ms</td><td>1.9 倍</td></tr>
+    <tr><td>入力の書き込みを含む (ホスト → デバイス)</td><td>0.3647 ms</td><td>5.8 倍</td></tr>
+    <tr><td><b>出力の読み出しまで含む (実際の 1 回)</b></td><td><b>1.8819 ms</b></td><td><b>29.9 倍</b></td></tr>
+  </table>
+
+  <p>支配しているのは出力の読み出しです。2.62 MB に約 1.5 ms かかっており、実効で毎秒 1.7 GB 程度。<b>この数字はハードウェアの帯域限界ではなく、使った API がホスト側のバッファ経由でコピーする実装であることの帰結です。</b>だから「NEFF を境界にすると原理的に遅い」という話ではありません。転送手段を変えれば動く数字です。測定は 2.6 MB の部分グラフ 1 個・1 構成に限ります。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 230" role="img" aria-label="データ移動が支配する内訳">
+      <text x="30" y="34" font-size="14" fill="#4a5d54">カーネル</text>
+      <rect x="150" y="20" width="12" height="22" fill="#198754"/>
+      <text x="176" y="36" font-size="13.5" fill="#0f5132">0.063 ms</text>
+
+      <text x="30" y="80" font-size="14" fill="#4a5d54">+ 呼び出し</text>
+      <rect x="150" y="66" width="23" height="22" fill="#43b581"/>
+      <text x="188" y="82" font-size="13.5" fill="#0f5132">0.119 ms</text>
+
+      <text x="30" y="126" font-size="14" fill="#4a5d54">+ 入力書込</text>
+      <rect x="150" y="112" width="70" height="22" fill="#8fd6b4"/>
+      <text x="234" y="128" font-size="13.5" fill="#0f5132">0.365 ms</text>
+
+      <text x="30" y="172" font-size="14" fill="#4a5d54">+ 出力読出</text>
+      <rect x="150" y="158" width="362" height="22" fill="#e07a5f"/>
+      <text x="526" y="174" font-size="13.5" font-weight="700" fill="#b5401f">1.882 ms ← 実際の 1 回</text>
+
+      <text x="150" y="212" font-size="13.5" fill="#b5401f">計算は全体の 3.3%。残りはデータを運んでいる時間</text>
+    </svg>
+    <p class="cap">同じ 1 回の呼び出しを段階的に測ると、計算より運搬が支配していることが見える</p>
+  </div>
+
+  <p>この数字を層数で掛けると結論が出ます。<b>層ごとに委譲する設計では成立しません。</b>数十層のモデルで 1 トークンあたり数十 ms がデータ移動に消えます。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>橋を完成させるための残工程</h2>
+  <p class="lead">正直に残りを列挙します。どれも実在する作業で、規模の見積もりが可能です。</p>
+
+  <ol class="steps">
+    <li><b>データ移動をデバイス上で完結させる。</b>最大の項目。サービング側のテンソルとランタイム側のテンソルを、コピーせずに共有する必要があります。技術的に可能かどうかは未検証です。<b>ここが解けないなら橋は成立しません</b></li>
+    <li><b>カスタム演算として包む。</b>サービング側のモデルの forward から呼べるようにする。グラフの分断が必要なので、分断を許す設定と組み合わせる</li>
+    <li><b>署名のメタデータを運ぶ。</b>引数と入力名の対応表を、焼く側が出力する (第 6 節)</li>
+    <li><b>状態のエイリアスを扱う。</b>状態を入力バッファに書き戻す指定を使う場合、その情報を橋の両側で整合させる</li>
+    <li><b>バケットごとに焼く。</b>形状ごとに NEFF が要るので、サービング側のバケット設計と対応づける</li>
+    <li><b>並列度に対応する。</b>ランタイムの API はコア番号や集団通信の設定を受け取るので、テンソル並列に分割された部分グラフも射程に入ります</li>
+  </ol>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>判断 ― 作るべきか</h2>
+  <p class="lead">技術的に可能かという問いと、作るべきかという問いは別です。後者に答えます。</p>
+
+  <p>まず、<b>データ移動が解けるかどうかを確かめる前に、橋を作る判断はすべきではありません。</b>解けなければ 30 倍の代償が居座るので設計として死んでいます。解ければ一気に現実的になります。この 1 点だけを先に確かめるのが合理的です。</p>
+
+  <p>次に、解けたとして作る価値があるかを考えます。ここで重要なのは、<b>橋を作っても「どの演算を委譲するか決め、モデルを分割し、状態の受け渡しを設計する」作業は残る</b>ということです。1 モデルあたりの手間は、第 4 回の数式書き換えとそう変わらないかもしれません。</p>
+
+  <p>それでも価値があるとすれば、理由は 1 つです。<b>転送・ロード・照合の機構は一度作れば再利用できます。</b>ただし前節のとおり、分割の設計と状態の受け渡しの設計はモデルごとに残ります。<b>再利用が効くのは機構の部分だけ</b>で、そこを過大に見積もると判断を誤ります。対応アーキテクチャを継続的に増やす必要がある状況では、それでもこの差が意味を持ちます。</p>
+
+  <div class="warn">
+    <b>逆風も明確です</b>。第 6 回で見たとおり、プラグインの公開ソースはライブラリ側での対応を参照しています。<b>対応版が出れば、自前で架けた橋は使い捨てになります。</b>提供時期についての公開情報は執筆時点でありません。だから、時期の確認と並行して、時間を区切って組むのが正しい形になります。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: Neuron ランタイムの Python API は、サービング用の<b>公開</b>コンテナイメージに同梱されているものを実際に呼び出して機能を確認しました。第 7 節の内訳も同じ公開イメージ上、単一 Trainium2 チップでの測定で、デバイス上に常駐させたテンソルを使い回す形で段階を分けて計測しています。2.6 MB 級の入出力を持つ部分グラフ 1 個・1 構成の測定なので、比率は規模によって変わります。異なる環境で焼いた NEFF の相互運用については本稿では扱っていません。橋を実装するなら、自分の構成で先に確かめる必要があります。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-06-two-runtimes.html">← 06: なぜ経路は差し替えられないのか</a>
+    <a href="./trn-porting-08-measuring.html">08: 測り方 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

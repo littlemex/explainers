@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 08: 測り方</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 08</p>
+  <h1>測り方 ― この上で出した数字を信じてよい条件</h1>
+  <p>非同期実行がストップウォッチを壊す。cosine は一致の証拠にならない。不変条件で正しさを縛る</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">最終回は測定の話です。移植の成果を数字で語る段になって、測り方を間違えていたことに気付くと、それまでの議論が全部やり直しになります。</p>
+
+  <p>この回で扱うのは 2 種類の測定です。<b>性能</b>と<b>正しさ</b>。どちらにも、この環境固有の落とし穴があります。筆者は両方で実際に間違えたので、その形をそのまま残します。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    性能について: このスタックは<b>非同期実行が既定</b>なので、ホスト側のストップウォッチは<b>「積む時間」と「実行する時間」の遅い方</b>を測ります。カーネルが小さいと前者が律速し、数字はカーネル時間を反映しません。正しく測る手段はランタイムのデバイスモード計測です。<br>
+    正しさについて: <b>cosine 類似度を一致の証拠にしてはいけません</b> (fp32 では 1 を超える値が出ます)。相対誤差で語り、さらに<b>不変条件</b>で縛ります。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 非同期実行がストップウォッチを壊す</a>
+    <a href="#s2">2. 汚染を見抜く兆候</a>
+    <a href="#s3">3. 正しく測る手段</a>
+    <a href="#s4">4. 汚染された比は使えない</a>
+    <a href="#s5">5. cosine は一致の証拠にならない</a>
+    <a href="#s6">6. fp32 の一致は bf16 の一致ではない</a>
+    <a href="#s7">7. 不変条件で正しさを縛る</a>
+    <a href="#s8">8. GPU と比べるときに揃えるもの</a>
+    <a href="#s9">9. チェックリスト</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>非同期実行がストップウォッチを壊す</h2>
+  <p class="lead">最初の落とし穴です。素朴に書いた計測コードは、ほぼ確実にこれを踏みます。</p>
+
+  <p>この経路では非同期実行が既定で有効です。デバイスへの呼び出しはキューに積まれ、ホスト側はすぐ戻ります。結果が必要になった時点で待ち合わせが起きます。</p>
+
+  <p>ここで、次のような素朴な計測を書きます。</p>
+
+  <pre><code>for _ in range(3):
+    compiled(*args)              # ウォームアップ
+t0 = time.perf_counter()
+for _ in range(20):
+    out = compiled(*args)        # 20 回まわす
+_ = out.cpu()                    # 最後だけホストに取り出す
+per_call = (time.perf_counter() - t0) / 20</code></pre>
+
+  <p>これは<b>間違いです</b>。ただし機構は素朴な直感とは少し違います。キューが投入順に実行されるなら、最後の <code>out.cpu()</code> は<b>それまでに積んだ 20 回ぶん全部の完了を待ちます</b>。だからデバイスの実行時間が丸ごと計測から漏れるわけではありません。</p>
+
+  <p>本当の問題は、測っているのが<b>「積む時間」と「実行する時間」の遅い方</b>になることです。カーネルが数十マイクロ秒しかない場合、ホスト側で呼び出しを組み立てるコストが律速になり、得られる数字はカーネル実行時間ではなく<b>発行スループット</b>を反映します。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 240" role="img" aria-label="非同期実行で何を測っているか">
+      <text x="30" y="34" font-size="15" font-weight="700" fill="#0f5132">ホスト側</text>
+      <rect x="140" y="20" width="40" height="26" rx="4" fill="#8fd6b4" stroke="#198754"/>
+      <rect x="184" y="20" width="40" height="26" rx="4" fill="#8fd6b4" stroke="#198754"/>
+      <rect x="228" y="20" width="40" height="26" rx="4" fill="#8fd6b4" stroke="#198754"/>
+      <rect x="272" y="20" width="40" height="26" rx="4" fill="#8fd6b4" stroke="#198754"/>
+      <text x="330" y="38" font-size="13.5" fill="#4a5d54">… 積むだけなので速い</text>
+
+      <text x="30" y="110" font-size="15" font-weight="700" fill="#b5401f">デバイス側</text>
+      <rect x="140" y="90" width="150" height="30" rx="4" fill="#e07a5f" stroke="#b5401f"/>
+      <rect x="294" y="90" width="150" height="30" rx="4" fill="#e07a5f" stroke="#b5401f"/>
+      <rect x="448" y="90" width="150" height="30" rx="4" fill="#e07a5f" stroke="#b5401f"/>
+      <rect x="602" y="90" width="150" height="30" rx="4" fill="#e07a5f" stroke="#b5401f"/>
+      <text x="140" y="146" font-size="13.5" fill="#b5401f">実際の計算はこちらで進んでいる</text>
+
+      <line x1="140" y1="176" x2="312" y2="176" stroke="#0f5132" stroke-width="3"/>
+      <text x="150" y="200" font-size="13.5" fill="#0f5132">発行が律速するとこちらの長さが出る</text>
+      <line x1="140" y1="218" x2="752" y2="218" stroke="#b5401f" stroke-width="3" stroke-dasharray="7 4"/>
+      <text x="150" y="238" font-size="13.5" fill="#b5401f">本当に知りたかった区間</text>
+    </svg>
+    <p class="cap">得られるのは 2 つの帯の長い方。カーネルが小さいと上の帯 (発行) が律速する</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>汚染を見抜く兆候</h2>
+  <p class="lead">計測が汚染されているかどうかは、数字の形から分かります。この嗅覚が一番役に立ちます。</p>
+
+  <p>いちばん効く兆候はこれです。<b>仕事量を増やしたのに時間が動かないとき、それは計算を測っていません。</b></p>
+
+  <p>系列長を 4 倍にすれば、計算量は少なくとも 4 倍、2 乗の計算なら 16 倍になります。それで時間が数パーセントしか動かないなら、測っているのは計算ではありません。呼び出しの組み立てが律速していると考えるべきです。</p>
+
+  <p>具体的な桁感を出しておきます。公開イメージ上で、2.6 MB 級の入出力を持つ部分グラフ 1 個について、デバイスモードでのカーネル実行時間は <b>0.063 ms</b> でした。一方、同じ呼び出しをホスト側から見ると、入力の書き込みと出力の読み出しを含めて <b>1.88 ms</b> かかります (内訳は第 7 回 §7)。<b>つまりこの規模のグラフでは、ホスト側から見える時間の 96% 以上が計算以外です。</b>素朴なストップウォッチがカーネル時間を反映しないのは、こういう比率のときです。</p>
+
+  <p>他にも次のような兆候があります。</p>
+
+  <table>
+    <tr><th>兆候</th><th>疑うべきこと</th></tr>
+    <tr><td>仕事量を増やしても時間が横ばい</td><td>呼び出しの組み立てが律速している</td></tr>
+    <tr><td>1 回目だけ極端に遅い</td><td>コンパイルかキャッシュの読み込みが混ざっている</td></tr>
+    <tr><td>ばらつきが平均と同じ桁</td><td>ホスト側の別の要因 (GIL、割り込み) が支配している</td></tr>
+    <tr><td>演算の個数が多い実装だけ、素朴な計測と大きく違わない</td><td>発行コストが演算数に比例して積み上がるため、偶然近い値に見えている</td></tr>
+  </table>
+
+  <p>最後の行は罠です。演算が縦に並ぶ実装では、発行コスト自体が演算数に比例して増えます。だから素朴な計測でも「仕事量に応じて増えているように見える」数字が出ます。<b>増えているから正しい、とは言えません。</b></p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>正しく測る手段</h2>
+  <p class="lead">この環境で信頼できる方法を挙げます。</p>
+
+  <p>もっとも確実なのは、<b>ランタイムのデバイスモード計測</b>です。第 7 回で触れた Python API に、ウォームアップ回数と計測回数を指定できるベンチマークがあります。これはデバイス側のイベントを使うので、ホスト側の発行時間が混ざりません。</p>
+
+  <p>実際に使うと、標準偏差が平均の 1% 未満に収まることがあります。<b>ただしばらつきの小ささは正しさの証拠ではありません。</b>発行時間だけを測っていても安定した数字は出ます。ばらつきは必要条件にすぎず、この計測を信頼する根拠は、デバイス側のイベントを使う機構そのものと、<b>仕事量を変えたときに時間が計算量に整合して動くこと</b> (前節の兆候の裏返し) に置きます。</p>
+
+  <p>ホスト側で測る必要がある場合は、<b>毎回の反復で完了を待ち合わせます</b>。結果をホストに取り出すか、明示的な同期を入れます。ただしその場合、測っているのは「計算 + 待ち合わせ + データ移動」であって、カーネル実行時間ではありません。<b>何を測っているかを明示して報告する</b>ことが重要です。</p>
+
+  <p>第 7 回の内訳表がその実践例です。カーネルだけ、呼び出しまで、入力書き込みまで、出力読み出しまで、と段階を分けて出しました。こうすると読み手が自分の用途に合う数字を選べます。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>汚染された比は使えない</h2>
+  <p class="lead">「絶対値は捨てて比だけ使う」という妥協が成立しないことを説明します。ここが実務でいちばん誘惑の強い妥協です。</p>
+
+  <p>2 つの実装を比べたいとき、絶対値が信用できなくても比なら意味があるのではないか、と考えたくなります。しかし成立しません。理由は、<b>分子と分母が別々の理由で、別々の度合いに汚染される</b>からです。</p>
+
+  <p>前節の構図を思い出してください。カーネルが小さい実装では、ホスト側の発行コストが支配します。一方、演算が縦に長く並ぶ実装では、発行コストが演算数に比例して積み上がります。<b>この 2 つを素朴な計測で比べると、前者は実際より大きく、後者もまた別の理由で大きく出ます。</b>どちらがどれだけ歪むかは事前に分かりません。</p>
+
+  <div class="warn">
+    <b>ここから引く教訓</b>: 汚染された計測から得た比は、<b>大きさが信用できないだけでなく、向きが保たれる保証もありません</b>。歪みの度合いを事前に見積もれないので、「比だけ使う」は安全な妥協ではありません。正しく測るまで、性能については何も言わないのが確実です。<b>そして一度出した数字はアンカーになります。</b>あとで訂正しても、最初の数字を基準に議論が進んでしまいます。
+  </div>
+
+  <p>実務的な運用としては、<b>デバイスモードで測れないうちは性能の話を保留し、代わりに「動いた」「数値が合った」という正しさの結果だけを報告する</b>のが健全です。正しさの結果は測定方法に依存しないので、後から覆りません。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>cosine は一致の証拠にならない</h2>
+  <p class="lead">正しさの測定に移ります。ここは筆者が実際に間違えた箇所です。</p>
+
+  <p>移植の数値検証で、参照実装との一致を cosine 類似度で報告するのはよく見る形です。しかしこれには 2 つの問題があります。</p>
+
+  <p><b>問題 1: 1 を超えます。</b>大きなテンソルを平坦化して fp32 で cosine を計算すると、丸め誤差で 1.00002 のような値が出ます。cosine は定義上 1 を超えないので、これは計算の誤差です。<b>「1.00002 なので一致している」と書いた瞬間に、その報告は根拠を失います。</b></p>
+
+  <p><b>問題 2: 鈍感です。</b>cosine は方向だけを見るので、スケールが全体的にずれていても高い値が出ます。層ごとの比較で「cosine 0.999 だから大丈夫」と判断して、実は係数が 2 倍違っていた、ということが起こり得ます。</p>
+
+  <p>代わりに使うのは<b>相対誤差</b>です。ここでの定義は、最大絶対誤差を参照値の最大絶対値で正規化したものです (要素ごとの相対誤差ではありません。要素ごとに取ると、値が小さい要素で分母が小さくなり、はるかに厳しい指標になります)。これならスケールに依存せず、桁で議論できます。</p>
+
+  <pre><code>rel = (got - ref).abs().max() / ref.abs().max()</code></pre>
+
+  <p>そして<b>ゼロという値の意味を大事にします</b>。相対誤差が厳密に 0 なら、それは「近い」ではなく「同じ」なので、主張の強さがまったく違います。たとえば同じ NEFF を 2 回実行した結果は 0 になるべきで、0 でなければ実行環境か照合の側に問題があります。<b>期待値がゼロである検証を工程に置く</b>のは、非常に強い設計です。近い値を許す検証は閾値の議論になりますが、ゼロを期待する検証は議論の余地がありません。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>fp32 の一致は bf16 の一致ではない</h2>
+  <p class="lead">精度に関する切り分けの話です。ここを混ぜると、移植のバグと数値ノイズが区別できなくなります。</p>
+
+  <p>移植の正しさのゲートは fp32 で置くべきです。理由は、bf16 では数値ノイズによってトークンが反転するので、一致率が移植の正しさを反映しなくなるからです。</p>
+
+  <p>特にランダムな小さい重みで作ったテスト用モデルでは、logits の上位候補が近接します。構造を持たない乱数なので、ほぼ同点の候補が並ぶのです。この状態で bf16 の丸めが入ると、トークンは簡単に入れ替わります。<b>これは移植のバグではありません。</b></p>
+
+  <p>したがって工程はこうなります。<b>fp32 で層ごとの一致を取り、それをゲートにする。bf16 の評価は実重みで行う。</b>実重みなら logits に構造があるので、上位候補の差が意味のある大きさになります。</p>
+
+  <div class="warn">
+    <b>逆向きの罠もあります</b>。小さいランダム重みで通ったから安心、とはなりません。第 4 回で見た指数の溢れは、実重みのスケールでだけ起きました。<b>小さい重みは「反転しやすい」が「溢れにくい」</b>ので、両方向のテストが要ります。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>不変条件で正しさを縛る</h2>
+  <p class="lead">参照実装との比較だけでは足りません。サービング固有の正しさを縛る道具が要ります。</p>
+
+  <p>サービングでは、同じ入力に対して<b>処理の分割の仕方が変わっても結果が変わってはいけない</b>という性質が要求されます。これを不変条件として書けます。</p>
+
+  <p>もっとも効くのは次の形です。</p>
+
+  <pre><code>prefill(L)  の出力  ==  prefill(k) してから decode(L-k) した出力</code></pre>
+
+  <p>プロンプト全体を一度に処理した結果と、途中まで処理してから 1 トークンずつ進めた結果は一致すべきです。この検証は、<b>状態の持ち回りが正しいかを直接突きます</b>。第 3 回で見た「decode だけ壊れる」型のバグは、参照実装との比較では prefill で差が出ないので見逃されますが、この不変条件は捕まえます。</p>
+
+  <p>他にも次のような不変条件が使えます。</p>
+
+  <table>
+    <tr><th>不変条件</th><th>何を捕まえるか</th></tr>
+    <tr><td>パディングを変えても結果が変わらない</td><td>マスクの作り方の間違い</td></tr>
+    <tr><td>バッチに他の要求を混ぜても、自分の結果が変わらない</td><td>状態やキャッシュの取り違え (継続バッチングのバグ)</td></tr>
+    <tr><td>バケットが切り替わっても結果が連続する</td><td>形状ごとのグラフの不整合</td></tr>
+    <tr><td>並列度を変えても結果が一致する</td><td>重み分割と集団通信の間違い</td></tr>
+  </table>
+
+  <p>これらは参照実装を必要としません。<b>自分の実装の内部整合だけで検証できる</b>ので、参照実装が手元で動かない状況でも使えます。移植の初期に用意しておく価値が高い道具です。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>GPU と比べるときに揃えるもの</h2>
+  <p class="lead">最後に、比較の公平性について。ここを外すと、数字が政治的な意味を持ってしまいます。</p>
+
+  <p>Trainium と GPU を比べるとき、揃えるべきものが 4 つあります。</p>
+
+  <ol class="steps">
+    <li><b>計測方法。</b>片方をデバイスイベントで測り、もう片方をホストのストップウォッチで測ると比較になりません</li>
+    <li><b>比較の単位。</b>単発の演算と、融合された高性能カーネルを比べるのは構造的に不公平です。層単位、あるいはモデル単位で比べます</li>
+    <li><b>形状とデータ型。</b>実運用の形状 (prefill のチャンク長、decode の 1 トークン + 状態、実際のバッチ) と実運用の型 (多くの場合 bf16) で測ります</li>
+    <li><b>相手が最適化されている領域かどうか。</b>これが一番見落とされます。相手側に手で調整されたカーネルが存在する演算では、素直な実装のまま比較しても勝てません。逆に相手側も素直な実装なら、公平な勝負になります</li>
+  </ol>
+
+  <div class="key">
+    <b>4 番目の含意</b><br>
+    「この演算は相手側に専用カーネルがあるか」は、比較の前に調べるべき事実です。たとえば状態空間モデルの選択的スキャンは、GPU 側で専用カーネルが揃っている領域です。そこに素直な実装をぶつけて負けたとしても、それはハードウェアの結論ではなく<b>実装の成熟度の結論</b>です。両者を区別して報告しないと、読み手を誤らせます。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>チェックリスト</h2>
+  <p class="lead">シリーズの締めとして、数字を出す前に確認する項目を並べます。</p>
+
+  <h3>性能を報告する前に</h3>
+  <ol class="steps">
+    <li>デバイスモードで測ったか。ホスト計時なら、何を含む区間か明示したか</li>
+    <li>仕事量を変えたときに時間が妥当に動くか確認したか</li>
+    <li>ばらつき (標準偏差) を出したか</li>
+    <li>形状とデータ型は実運用に寄せたか</li>
+    <li>比較相手の実装成熟度に触れたか</li>
+    <li>サービング全体の数字が必要なら、ウォームアップ完了後に測ったか (ログで再コンパイルが走っていないことを確認する)。バケットの境界をまたぐ入力長の分布で測らないと、パディングの損失が数字に出ない</li>
+  </ol>
+
+  <h3>正しさを報告する前に</h3>
+  <ol class="steps">
+    <li>相対誤差で語っているか。cosine を根拠にしていないか</li>
+    <li>fp32 でゲートを置き、bf16 は実重みで見ているか</li>
+    <li>重み読み込みの未初期化が 0 件であることを確認したか</li>
+    <li>prefill と decode の不変条件を通したか</li>
+    <li>実重みのスケールで溢れが起きないことを確認したか</li>
+  </ol>
+
+  <div class="key">
+    <b>シリーズ全体のまとめ</b><br>
+    移植コストは 3 層 (計算の表現・サービング契約・状態の契約) に分かれ、<b>コンパイル経路を替えて下がると確認できたのはコスト層① (計算の表現) だけ</b>です。コスト層①を下げる経路はプラグインの公開ソース上で追跡されていますが未出荷で、<b>プロセス内で差し替える道はライブラリ側の対応待ち</b>、<b>プロセスを分ける橋は運搬コストが未解決</b>です。だから当面は、既存の経路で移植し、その中で<b>数式の構造を選ぶこと</b>が性能を作ります。そして何をするにしても、<b>測り方を先に固めること</b>が全部の前提になります。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: 非同期実行が既定であること、Neuron ランタイムのデバイスモード計測 API の存在は、公開されているコンテナイメージとドキュメントで確認できます。第 2 節の数字は公開イメージ上での測定です (第 7 回 §7 と同じ部分グラフ)。第 5 節の cosine の挙動、第 6 節の bf16 でのトークン反転、第 7 節の不変条件はいずれも筆者が公開プラグイン上で確認したものです。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-07-neff-boundary.html">← 07: NEFF を境界にできるか</a>
+    <a href="./trn-porting-index.html">シリーズ目次 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

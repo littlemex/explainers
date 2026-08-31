@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 06: なぜ経路は差し替えられないのか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 06</p>
+  <h1>なぜ経路は差し替えられないのか ― 3 つの理由</h1>
+  <p>土台を捨てられない。同じディスパッチキーに 2 つは登録できない。降ろし方が未出荷</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">「プラグインのコンパイル経路を、素直な書き方が通る方に差し替えればよい」という発想がどこで詰まるのかを、構造として説明します。</p>
+
+  <div class="warn">
+    <b>この回の結論は時点依存です</b>。ライブラリ側の 1 リリースで変わります。現在地を自分で確認する方法は 2 つあり、プラグインの feature matrix の <code>torch.compile (native PyTorch)</code> の行と、ランタイム兼カーネル基盤ライブラリの配布物に非 XLA の降ろし方のモジュールが含まれるかどうかです (§5 で具体的に扱います)。
+  </div>
+
+  <p>第 4 回で、コンパイル経路を替えると第 1 層 (計算の表現) のコストが下がることを確認しました。ならば差し替えたい。プラグインには実際にそのためのスイッチらしきものが用意されています。しかしこれは動きません。理由が 3 つ重なっていて、そのうち 1 つは PyTorch のディスパッチ機構に由来する<b>実装レベルの排他</b>です。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    3 つが同時に成立しています。<b>(1) スタック第 3 層のライブラリは捨てられない</b> ― プラグインのカーネルライブラリ全体がその上に建っている。<b>(2) 同じディスパッチキーを使う 2 つのランタイムは同一プロセスに入れられない</b> ― PyTorch は 1 つのキーに backend fallback を 1 つしか許さず、外部実装は支援 API の都合で <code>PrivateUse1</code> に集まる。<b>(3) 非 XLA の降ろし方はまだ出荷されていない</b> ― 公開インデックスの最新版にもそのモジュールが無い。<br>
+    つまり<b>プロセス内で経路を差し替える道は、ライブラリ側が対応版を出すまで存在しません</b>。なお (2) は PyTorch の設計上どうしようもない制約ではなく、<b>実装がどのキーを使うかの帰結</b>です。どちらかが別のキーを使うか fallback の登録を避ければ解消しうる種類の問題で、ただしそれはライブラリ側の変更でしか起きません。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. スイッチは存在する</a>
+    <a href="#s2">2. 理由 1 ― スタック第 3 層は土台である</a>
+    <a href="#s3">3. 理由 2 ― ディスパッチキーの衝突</a>
+    <a href="#s4">4. 名前を分けているのは親切ではない</a>
+    <a href="#s5">5. 理由 3 ― 非 XLA の降ろし方が未出荷</a>
+    <a href="#s6">6. 何を待っているのかを明確にする</a>
+    <a href="#s7">7. 計画への含意</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>スイッチは存在する</h2>
+  <p class="lead">まず事実確認です。プラグインには経路を選ぶ仕組みが入っています。だから「無い」わけではありません。</p>
+
+  <p>プラグインは環境変数でバックエンドを選べます。既定は現行の XLA 経路で、もう 1 つ native と名付けられた選択肢があります。この選択によって、<code>torch.compile</code> に渡すバックエンド名と、分散通信のバックエンド名が変わります。並列化レイヤの中にも、この選択で分岐する箇所があります。</p>
+
+  <p>公開されている feature matrix でも、コンパイルの項に 2 行が並んでいます。XLA バックエンドが対応済み、native PyTorch が未対応。<b>つまり「やろうとしている」ことは公開されています。</b>問題は、その配線の先がまだ繋がっていないことです。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>理由 1 ― スタック第 3 層は土台である</h2>
+  <p class="lead">第 1 回で「スタック第 3 層は差し替え可能な部品ではなく地面だ」と書きました。その根拠をここで出します。</p>
+
+  <p>プラグインのカーネル呼び出し層を調べると、<b>約 30 のファイルがスタック第 3 層の同じ関数 (<code>wrap_nki</code>) を import しています</b>。低レベルカーネルをグラフに取り込むためのラッパです。対象は attention の全種類 (prefill 用、decode 用、マスクつき、スライディングウィンドウ、投影)、MoE の全種類 (ルーティング、並べ替え、ブロック単位、階層的な全対全通信)、集団通信、topk、累積和、正規化つき量子化。</p>
+
+  <p>加えて、プラットフォーム判定、並列トレース、並列コンパイル、実行コンテキスト、環境変数の読み出し、集団通信のオーバーライドもスタック第 3 層から来ています。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 320" role="img" aria-label="カーネル層が第 3 層に依存している構造">
+      <rect x="40" y="20" width="780" height="120" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="430" y="46" font-size="16" font-weight="700" fill="#22548f" text-anchor="middle">プラグインのカーネル呼び出し層 (functional/)</text>
+      <g font-size="12.5" fill="#12211a">
+        <rect x="60" y="58" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="116" y="78" text-anchor="middle">attention (prefill)</text>
+        <rect x="180" y="58" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="236" y="78" text-anchor="middle">attention (decode)</text>
+        <rect x="300" y="58" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="356" y="78" text-anchor="middle">sliding window</text>
+        <rect x="420" y="58" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="476" y="78" text-anchor="middle">qkv / o_proj</text>
+        <rect x="540" y="58" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="596" y="78" text-anchor="middle">MoE (router)</text>
+        <rect x="660" y="58" width="140" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="730" y="78" text-anchor="middle">MoE (dispatch/combine)</text>
+        <rect x="60" y="96" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="116" y="116" text-anchor="middle">MLP</text>
+        <rect x="180" y="96" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="236" y="116" text-anchor="middle">collectives</text>
+        <rect x="300" y="96" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="356" y="116" text-anchor="middle">topk / cumsum</text>
+        <rect x="420" y="96" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="476" y="116" text-anchor="middle">cumsum</text>
+        <rect x="540" y="96" width="112" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="596" y="116" text-anchor="middle">rmsnorm + quant</text>
+        <rect x="660" y="96" width="140" height="30" rx="6" fill="#fff" stroke="#3d7dca"/><text x="730" y="116" text-anchor="middle">ほか (合計約 30 ファイル)</text>
+      </g>
+      <g stroke="#4a5d54" stroke-width="1.5">
+        <line x1="116" y1="140" x2="300" y2="196"/><line x1="236" y1="140" x2="340" y2="196"/>
+        <line x1="356" y1="140" x2="380" y2="196"/><line x1="476" y1="140" x2="430" y2="196"/>
+        <line x1="596" y1="140" x2="480" y2="196"/><line x1="730" y1="140" x2="530" y2="196"/>
+      </g>
+      <rect x="230" y="198" width="400" height="90" rx="12" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="430" y="226" font-size="16" font-weight="700" fill="#6b3fa0" text-anchor="middle">第 3 層 ・ カーネル取り込みラッパ</text>
+      <text x="430" y="252" font-size="14" fill="#12211a" text-anchor="middle">低レベルカーネルを 1 枚のグラフに差し込む関数</text>
+      <text x="430" y="274" font-size="13.5" fill="#4a5d54" text-anchor="middle">これを外すと上の箱が全部落ちる</text>
+    </svg>
+    <p class="cap">依存の向き。カーネル層は第 3 層に集中して依存している。だから第 3 層は交換部品ではない</p>
+  </div>
+
+  <p>したがって「スタック第 3 層を別の実装に置き換える」は、<b>カーネルライブラリを失う</b>ことと同義です。attention も MoE も自前で書き直すなら、そもそもプラグインを使う意味が薄れます。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>理由 2 ― ディスパッチキーの衝突</h2>
+  <p class="lead">ではスタック第 3 層を残したまま、もう 1 つのランタイムを足せばよいのでは。ここで PyTorch のディスパッチ機構に当たります。この節の結論は公開情報だけから導けます。</p>
+
+  <p>PyTorch には、CUDA や XPU のように標準で用意されていない外部アクセラレータのために予約されたディスパッチキーがあります。<code>PrivateUse1</code> から <code>PrivateUse3</code> までの 3 つです。だから枠自体は 1 つではありません。</p>
+
+  <p>それでも実際には衝突が起きます。公開されている事実を 3 つ並べると、結論が出ます。</p>
+
+  <ol class="steps">
+    <li><b>PyTorch は 1 つのディスパッチキーに対して backend fallback を 1 つしか許しません。</b>2 つ目を登録しようとすると例外になります。これは PyTorch 本体の仕様です</li>
+    <li><b>外部バックエンドの支援 API は、実質 <code>PrivateUse1</code> を前提に整備されています。</b>デバイス名の改名 (<code>rename_privateuse1_backend</code>) やデバイスモジュールの登録がその例です。だから外部実装はこのキーに集まります</li>
+    <li><b>公開されているスタック第 3 層のライブラリは、この <code>PrivateUse1</code> に登録します。</b>公開イメージの中身を見れば確認できます</li>
+  </ol>
+
+  <p>この 3 つから導かれるのは次の一点です。<b><code>PrivateUse1</code> を使う別のランタイムを、同じプロセスに同居させることはできません。</b>先に登録した方が勝ち、後から来た方は登録に失敗します。順序を入れ替えても対称に同じことが起きます。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 250" role="img" aria-label="同じキーに 2 つは登録できない">
+      <rect x="330" y="150" width="200" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="430" y="178" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">PyTorch</text>
+      <text x="430" y="202" font-size="14" fill="#12211a" text-anchor="middle">PrivateUse1 の fallback × 1</text>
+
+      <rect x="80" y="30" width="240" height="70" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="200" y="58" font-size="15" font-weight="700" fill="#22548f" text-anchor="middle">スタック第 3 層</text>
+      <text x="200" y="82" font-size="13.5" fill="#4a5d54" text-anchor="middle">このキーに登録する (公開配布物で確認)</text>
+
+      <rect x="540" y="30" width="240" height="70" rx="10" fill="#f2f5f7" stroke="#9aa8b0" stroke-width="2"/>
+      <text x="660" y="58" font-size="15" font-weight="700" fill="#4a5d54" text-anchor="middle">同じキーを使う別の実装</text>
+      <text x="660" y="82" font-size="13.5" fill="#4a5d54" text-anchor="middle">支援 API の都合でここに集まる</text>
+
+      <line x1="230" y1="100" x2="380" y2="146" stroke="#22548f" stroke-width="2.5"/>
+      <text x="240" y="132" font-size="13.5" fill="#22548f">登録できる</text>
+      <line x1="630" y1="100" x2="480" y2="146" stroke="#c0492f" stroke-width="2.5" stroke-dasharray="6 4"/>
+      <text x="540" y="132" font-size="13.5" fill="#c0492f">2 つ目は登録できない</text>
+    </svg>
+    <p class="cap">枠は 3 つあるが、支援 API の都合で外部実装は同じキーに集まる。1 キーに fallback は 1 つなので同居できない</p>
+  </div>
+
+  <p>この制約の所在をはっきりさせておきます。これは<b>PyTorch の設計上どうしようもない話ではありません</b>。どちらかの実装が別のキーを使うか、fallback の登録を避ければ解消しうる種類の問題です。ただしそれは<b>ライブラリ側の変更でしか起きません</b>。利用者の側で回避する手はありません。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>名前を分けているのは親切ではない</h2>
+  <p class="lead">この衝突を知ると、プラグインのソースにあるある一行の意味が変わります。</p>
+
+  <p>プラグインの新しめの版には、<code>torch.compile</code> のバックエンド名を返す関数があり、そこにコメントが付いています。要約すると<b>「この名前を意図的に <code>neuron</code> にしていない。<code>neuron</code> はもう一方のパッケージ用に予約しておき、それを別途インストールしても上流の意味論が保たれるようにする」</b>。</p>
+
+  <p>最初に読んだときは、丁寧な名前空間の配慮に見えます。しかし前節を踏まえると読み方が変わります。<b>この予約は、共存できないことを前提にした棲み分けと読むのが自然です。</b>断定はできません (後方互換や上流の命名規約という別の動機もありえます)。ただし、少し古い版ではこの名前が <code>neuron</code> そのものだったという事実は、この読みを支持します。曖昧さを取り除くために改名されたわけです。</p>
+
+  <div class="key">
+    <b>読み手にとっての教訓</b><br>
+    ソースのコメントは、書かれている内容だけでなく<b>「なぜそれを書く必要があったのか」</b>を読むと情報量が増えます。名前を予約する必要があるのは、予約しないと衝突する相手が実在するときだけです。設計意図はしばしば、こういう防御的な一行に残ります。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>理由 3 ― 非 XLA の降ろし方が未出荷</h2>
+  <p class="lead">では衝突しない形、つまりスタック第 3 層自身が非 XLA の経路を持てばよい。プラグインの公開ソースはまさにそれを参照しています。ただし、まだ手に入りません。</p>
+
+  <p>プラグインの新しい版は、native を選んだときスタック第 3 層の「native バックエンド」というモジュールを呼び出します。名前のとおり、スタック第 3 層が持つ非 XLA の降ろし方です。これなら衝突しません。同じランタイムの中で降ろし方が変わるだけですから。</p>
+
+  <p>問題は、<b>そのモジュールが、公開パッケージインデックスから取得できる最新版に含まれていないこと</b>です。最新版のアーカイブを展開して中を確認すると、コンパイル関連のモジュールは XLA 経由の lowering、グラフ捕捉、キャッシュ、並列コンパイル、並列トレース、プラットフォーム判定、成果物管理、実行コンテキスト、スキーマ。<b>native バックエンドはありません。</b></p>
+
+  <p>つまりプラグインのコードは、まだ出荷されていないモジュールを参照しています。feature matrix が未対応と表示しているのは、この状態を正確に反映しています。<b>スイッチは配線済みだが、繋ぐ先が届いていない。</b></p>
+
+  <table>
+    <tr><th>確認したこと</th><th>結果</th></tr>
+    <tr><td>プラグインに native 経路のスイッチがあるか</td><td>ある (環境変数で選べる)</td></tr>
+    <tr><td>プラグインはスタック第 3 層に直接依存しているか</td><td>している。ランタイムバインディングを直接呼ぶ箇所が公開ソースにある</td></tr>
+    <tr><td>同じディスパッチキーを使う 2 つのランタイムを同居させられるか</td><td>できない。1 キーに fallback は 1 つという仕様からの帰結 (§3)</td></tr>
+    <tr><td>スタック第 3 層の新しい版に非 XLA の降ろし方があるか</td><td>公開インデックスの最新版にも無い (確認は最新版のみ)</td></tr>
+  </table>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>何を待っているのかを明確にする</h2>
+  <p class="lead">「待ち」という結論は同じでも、何を待っているかを取り違えると計画が狂います。</p>
+
+  <p>ここまでの整理から、待っている対象がはっきりします。<b>待っているのは「Native PyTorch のパッケージが公開配布されること」ではありません。スタック第 3 層のライブラリが非 XLA の降ろし方を含む版になることです。</b>これはプラグインの公開ソースがそのモジュールを参照していることから導かれる読みで、提供時期についての公開情報は執筆時点でありません。</p>
+
+  <p>この区別が計画に効く理由は 2 つあります。</p>
+
+  <p>ひとつ。<b>Native PyTorch 側が公開配布されても、それだけではサービングの移植は楽になりません。</b>プラグインが呼ばないバックエンドは、サービングの利用者にとって存在しないのと同じです。逆に、スタック第 3 層が対応版を出せば、Native PyTorch 側の提供状況に関係なく、サービング経路のコスト層① (計算の表現) が下がります。</p>
+
+  <p>ふたつ。<b>その日が来ても、移植は消えません。</b>第 4 回の表のとおり、下がると確認できたのはコスト層① (計算の表現) だけです。コスト層② (サービング契約) はサービング設計に由来するので降ろし方とは無関係のはずで、コスト層③ (状態の契約) についても同様と見ていますが、こちらは経路 A (XLA) の機構に依存する解き方があるため推定にとどまります。だから「対応版が出れば Hugging Face のモデルがそのまま動く」という期待は、その日が来ても満たされません。</p>
+
+  <div class="warn">
+    <b>ここを曖昧にすると計画を誤ります</b>。期待が「移植不要」に置かれていると、対応版が出た日に落胆が来ます。<b>「独自の演算を低レベルカーネルで書かずに済むようになる見込みがある。ただしモデル実装は依然として必要」</b>という形で、下がる層と残る層を分けて理解しておくべきです。<br><br>さらに 1 つ。対応版が出て消えるのは<b>「通すための書き換え」だけ</b>です。実用的な性能に必要な数式の再構成は残ります (第 4 回 §8)。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>計画への含意</h2>
+  <p class="lead">構造が分かったので、今できることと待つべきことを分けます。</p>
+
+  <table>
+    <tr><th></th><th>今できる</th><th>待ちが要る</th></tr>
+    <tr><td>正しさの検証を CPU で行う</td><td><b>できる</b> (CPU 実行モード、第 5 回)</td><td>―</td></tr>
+    <tr><td>精度のベンチマークを取る</td><td><b>できる</b> (移植済みモデル)</td><td>―</td></tr>
+    <tr><td>本番のスループットとコストを出す</td><td><b>できる</b> (移植済みモデル)</td><td>―</td></tr>
+    <tr><td>コスト層① を下げてサービングする</td><td>できない</td><td>スタック第 3 層の対応版</td></tr>
+    <tr><td>プロセスを分けて部分グラフを持ち込む</td><td>機構は動く (第 7 回)</td><td>データ移動の解決</td></tr>
+  </table>
+
+  <p>表の最下行が次回の主題です。<b>プロセスを分ければディスパッチキーの衝突は起きません。</b>片方のプロセスでコンパイルし、もう片方で実行する。この道が本当に通るのか、通るとして代償は何かを第 7 回で測ります。</p>
+
+  <div class="fn">
+    <p>出典と確認方法: バックエンド選択のスイッチ、名前予約のコメント、カーネル層の依存関係は <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ソースで確認できます。スタック第 3 層のライブラリに非 XLA の降ろし方が含まれていないことは、公開パッケージインデックスから取得できる最新版のアーカイブ内容を列挙して確認しました (確認したのは最新版のみです)。1 つのディスパッチキーに backend fallback が 1 つしか登録できないこと、および <code>PrivateUse1</code> を前提とした支援 API の整備状況については <a href="https://docs.pytorch.org/tutorials/advanced/privateuseone.html" target="_blank" rel="noopener">PyTorch の拡張ガイド</a>を参照してください。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-05-eager-vs-compile.html">← 05: eager と compile</a>
+    <a href="./trn-porting-07-neff-boundary.html">07: NEFF を境界にできるか →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

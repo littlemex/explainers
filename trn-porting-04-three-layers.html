@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 04: ポーティングの 3 層モデル</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 04</p>
+  <h1>ポーティングの 3 層モデル ― コストはどこに宿るのか</h1>
+  <p>計算の表現・サービング契約・状態の契約。アーキテクチャによって効く層が変わる</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">前回で「何を実装するか」のリストは出ました。この回は「その実装がなぜ難しくなるのか」を分解します。難しさの出どころを 3 つに分けると、見積もりと経路選択の議論が噛み合うようになります。</p>
+
+  <p>移植の工数を「モデル実装は約 1,200 行くらい」と行数で語ると、必ず外します。同じ行数でも、参照実装から数式を写すだけで済む場合と、コンパイラが受け付ける形を探して数式そのものを書き換える場合があり、後者は前者の何倍もかかります。<b>行数はコストの代理変数になりません。</b></p>
+
+  <p style="font-size:14.5px;color:var(--sub)">用語について。この回では移植コストを 3 つに分けて<b>コスト層①②③</b>と呼びます。第 1 回で見たスタックの 4 層とは別の分類なので、スタック側を指すときは「スタック第 3 層」のように必ず「スタック」を付けます。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    移植コストは 3 層に分かれます。<b>コスト層① 計算の表現</b> ― その数式をこの経路がコンパイルできる形で書けるか。<b>コスト層② サービング契約</b> ― paged KV や並列分割の作法に合わせる (第 3 回)。<b>コスト層③ 状態の契約</b> ― attention の KV 以外の状態を、どこに置くか。<br>
+    既存のカーネル語彙に収まるアーキテクチャなら②だけで済みます。収まらないと①が、attention 以外の状態を持つと③が乗ります。そして<b>コンパイル経路を替えて下がる見込みがあるのは①だけ</b>です。<br>さらに①の中身も 2 つに分かれます。経路を替えて消える見込みがあるのは<b>「通すための書き換え」</b>だけで、<b>「速くするための書き換え」は残ります</b> (§8)。見積もりそのものは、重み不要でモデリングコードだけで答えられる<b>2 つの問い</b>に落とせます (§9)。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 3 層の分解</a>
+    <a href="#s2">2. 層ごとに誰が難しさを決めるのか</a>
+    <a href="#s3">3. 事例 A ― 既存語彙に収まるモデル</a>
+    <a href="#s4">4. 事例 B ― 語彙の外にあるモデル</a>
+    <a href="#s5">5. 数式を書き換えるという作業</a>
+    <a href="#s6">6. データ依存の分岐を消す</a>
+    <a href="#s7">7. 書き換えが数値を壊す典型</a>
+    <a href="#s8">8. 通ることと速いことは別</a>
+    <a href="#s9">9. 見積もりのための 2 つの問い</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>3 層の分解</h2>
+  <p class="lead">まず定義を置きます。境界がはっきりしていることが大事で、そうでないと「移植が楽になる」という主張の検証ができません。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="コスト 3 層の関係と、経路差し替えが効く範囲">
+      <defs>
+        <marker id="c1" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#b5401f"/>
+        </marker>
+        <marker id="c2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#198754"/>
+        </marker>
+      </defs>
+      <rect x="250" y="26" width="360" height="58" rx="12" fill="#eaf5ef" stroke="#198754" stroke-width="3"/>
+      <text x="430" y="52" font-size="17" font-weight="700" fill="#0f5132" text-anchor="middle">コスト層① 計算の表現</text>
+      <text x="430" y="73" font-size="13.5" fill="#0f5132" text-anchor="middle">経路の差し替えが効くのはここだけ</text>
+
+      <rect x="250" y="118" width="360" height="58" rx="12" fill="#f2f5f7" stroke="#9aa8b0" stroke-width="2"/>
+      <text x="430" y="144" font-size="17" font-weight="700" fill="#4a5d54" text-anchor="middle">コスト層② サービング契約</text>
+      <text x="430" y="165" font-size="13.5" fill="#4a5d54" text-anchor="middle">経路に関係なく必ず要る</text>
+
+      <rect x="250" y="210" width="360" height="58" rx="12" fill="#f2f5f7" stroke="#9aa8b0" stroke-width="2"/>
+      <text x="430" y="236" font-size="17" font-weight="700" fill="#4a5d54" text-anchor="middle">コスト層③ 状態の契約</text>
+      <text x="430" y="257" font-size="13.5" fill="#4a5d54" text-anchor="middle">attention の KV 以外の状態があるときだけ</text>
+
+      <path d="M245,239 C160,239 160,55 245,55" fill="none" stroke="#b5401f" stroke-width="2.5" marker-end="url(#c1)"/>
+      <text x="70" y="140" font-size="13.5" fill="#b5401f">③ の解き方が</text>
+      <text x="70" y="160" font-size="13.5" fill="#b5401f">① の書き方を縛る</text>
+
+      <line x1="700" y1="55" x2="625" y2="55" stroke="#198754" stroke-width="3" marker-end="url(#c2)"/>
+      <text x="710" y="48" font-size="13.5" font-weight="700" fill="#0f5132">経路を</text>
+      <text x="710" y="68" font-size="13.5" font-weight="700" fill="#0f5132">替える</text>
+    </svg>
+    <p class="cap">経路の差し替えが効くのは色付きの 1 層だけ。左の矢印は、状態の設計が数式の書き方を縛るという依存を示す</p>
+  </div>
+
+  <p>この 3 層は独立ではありません。コスト層③の解き方がコスト層①の書き方を縛る、という関係があります。しかし<b>コストの出どころとしては分けて数えられる</b>ので、見積もりの単位として有効です。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>層ごとに誰が難しさを決めるのか</h2>
+  <p class="lead">それぞれの層で、難しさを決めているのが誰なのかを明確にします。ここが経路選択の判断材料になります。</p>
+
+  <table>
+    <tr><th>層</th><th>難しさを決めるもの</th><th>コンパイル経路を替えると</th></tr>
+    <tr><td>コスト層① 計算の表現</td><td>コンパイラが受け付ける演算とグラフ構造の範囲</td><td><b>変わる</b>。カバレッジが広い経路なら素直な書き方が通る</td></tr>
+    <tr><td>コスト層② サービング契約</td><td>サービングの設計 (paged KV・バケット・並列)</td><td>変わらない見込み。サービング設計に由来するため</td></tr>
+    <tr><td>コスト層③ 状態の契約</td><td>ランナーが用意している状態の置き場</td><td>変わらない見込み。ただし後述の留保あり</td></tr>
+  </table>
+
+  <p>この表が、このシリーズを通じて一番使える道具です。「Native PyTorch にすれば移植が楽になるのでは」という問いは、この表を使うと<b>「下がると確認できたのはコスト層①だけ。②と③は残る見込み」</b>と精密に答えられます。第 5 回と第 6 回でこの答えを掘ります。</p>
+
+  <div class="warn">
+    <b>「変わらない」に留保を付ける理由</b>: 比較対象の経路は第 6 回で見るとおり未出荷なので、直交性を実測で確かめることはできません。しかもコスト層③ 状態の契約 には、経路 A の機構に依存する解き方があります。第 2 回で見たエイリアス抽出のパスに状態の書き換えを拾わせる方法です。経路が変われば状態の受け渡し手段も変わりうるので、ここは<b>「サービング設計に由来するので変わらないはず」という推定</b>であって、確認済みの事実ではありません。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>事例 A ― 既存語彙に収まるモデル</h2>
+  <p class="lead">まず楽なケースから見ます。楽と言っても「定型作業」ではないことが分かるはずです。</p>
+
+  <p>attention と、ゲート付きの MLP だけで構成されるモデルを考えます。これは既存のカーネル語彙にほぼそのまま乗ります。attention のカーネルがあり、MLP のカーネルがあり、並列化レイヤがある。コスト層①は低く、コスト層③は attention の KV しかないのでゼロです。コスト層②だけを丁寧にやれば動きます。</p>
+
+  <p>それでも、実際にやると次のようなことが起きます。</p>
+
+  <ol class="steps">
+    <li><b>プラグイン提供の attention カーネルが decode の形状で崩れる。</b>prefill では query と key が同じ長さなので因果マスクが正方の三角行列になるが、decode では query が 1 個で key が履歴全部。同じマスクの作り方では意味が変わる。結果として、prefill は正しいのに decode の出力が繰り返しに落ちる</li>
+    <li>対処として <b>decode だけを素の行列積と明示パディングマスクで書き直す</b>。累積誤差も避けたいので、その部分は fp32 で計算する。これでトークン一致率が大きく改善する</li>
+    <li>カーネルには適用条件があり、特定の入力サイズ帯では使えない。<b>条件を満たさないときにフォールバックする分岐</b>を入れる必要がある</li>
+    <li>KV キャッシュを集める処理が、グラフの入出力テンソルとして大きな領域を要求する。<b>ブロック数の上限を明示的に絞る</b>設定が必要になる</li>
+    <li>正規化層の重みの初期化流儀を取り違えると logits が崩れる (第 3 回の表)</li>
+  </ol>
+
+  <p>つまり<b>「語彙に収まる」ケースでも、プラグイン提供カーネルの適用範囲の縁を踏みます</b>。コスト層①がゼロにはならない、というのが実感です。ただし、ここでの書き換えは局所的で、数式そのものは変えていません。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>事例 B ― 語彙の外にあるモデル</h2>
+  <p class="lead">次に、既存のカーネル語彙に相当品が無いアーキテクチャを見ます。ここで 3 層すべてが立ち上がります。</p>
+
+  <p>状態空間モデル (SSM) の層と MoE の層と attention の層が混在するハイブリッドを考えます。公開されているこの系統のアーキテクチャを題材にした話です。プラグイン側には SSM 向けのカーネルがありません。選択的スキャンも状態空間も、そのための深さ方向の畳み込みも、実装が存在しません。</p>
+
+  <p>そして<b>ランナーの KV 契約は attention 専用</b>です。層ごとに申告できるのは KV ヘッド数やヘッド次元といった attention の語彙で、SSM が必要とする「再帰状態」と「畳み込みの直前入力」の置き場はありません。これがコスト層③の問題です。</p>
+
+  <table>
+    <tr><th>層</th><th>事例 A</th><th>事例 B</th></tr>
+    <tr><td>コスト層① 計算の表現</td><td>低い。カーネルの縁を踏む程度</td><td><b>高い</b>。素直な再帰が構造的に通らず、数式の書き換えが必要</td></tr>
+    <tr><td>コスト層② サービング契約</td><td>必要。丁寧にやる</td><td>必要。同じだけ要る</td></tr>
+    <tr><td>コスト層③ 状態の契約</td><td>不要 (KV だけ)</td><td><b>必要</b>。前例がない設計をする</td></tr>
+  </table>
+
+  <p>コスト層③の解き方は 2 つあります。1 つは、状態をモジュールのバッファに置いてインプレースで更新し、第 2 回で見たエイリアス抽出のパスに拾わせる方法。もう 1 つは、状態を引数と戻り値で明示的に受け渡し、ランナー側が step をまたいで持ち回る方法です。前者は既存の仕組みに乗るので実装が軽く、後者は継続バッチングで各要求が別の状態を持つ場合に必要になります。</p>
+
+  <div class="warn">
+    <b>継続バッチングとの相性が制約になる</b>。状態をモジュールのバッファに置く方式は、バッチの中の全要求が同じ状態を共有してしまうため、そのままでは 1 要求ずつしか扱えません。要求ごとの状態を持つには、attention のブロック表と同じ発想で「要求 ID から状態スロットへの索引」を持ち、集約と散布を行う仕組みが要ります。<b>ここは前例が無いので、自分で不変条件を決めて検証する必要があります</b> (第 8 回)。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>数式を書き換えるという作業</h2>
+  <p class="lead">コスト層① (計算の表現) の実体を、具体例で見ます。これがこの回の中心です。</p>
+
+  <p>SSM の中心にあるのは、時間方向の再帰です。素直に書けばこうなります。</p>
+
+  <pre><code>dA = exp(A * dt)                   # 標準的な離散化を仮定する
+h = 0
+for t in range(seq_len):
+    dBx = dt[t] * B[t] * x[t]      # この step の入力の寄与
+    h   = h * dA[t] + dBx          # 状態を 1 手進める
+    y[t] = (h * C[t]).sum(-1)      # 出力を取り出す</code></pre>
+
+  <p>数学的にはこれが定義です。しかし筆者が検証したバージョンの現行経路は、この形を<b>受け付けませんでした</b>。時間方向に依存が繋がったループを展開したグラフが、コンパイラの内部処理で扱えない形になり、内部エラーで停止します。</p>
+
+  <p>ここで診断上とても重要な観察があります。<b>系列長 8 でも 32 でも 128 でも、同じ失敗をします。</b>長さを変えても結果が変わらないということは、これは「大きすぎる」問題ではなく「形が苦手」な問題だという意味です。資源不足なら長さを縮めれば通るはずですから。</p>
+
+  <p>そこで数式を書き換えます。この再帰は閉じた形に展開できます。</p>
+
+  <pre><code>y[t] = Σ_{s ≤ t} exp(A · (csdt[t] - csdt[s])) · dt[s] · (C[t]·B[s]) · x[s]
+       ただし csdt = cumsum(dt)</code></pre>
+
+  <p>この形なら、必要な演算は<b>累積和と行列積と因果マスクと指数</b>だけです。時間方向の依存が消え、attention と同型の演算になります。そして実際に、この形に書き換えたものは系列長 32 と 128 でコンパイルと実行を確認できました。<b>同型だから通るはず、という演繹ではなく、実測です</b>。次節で見るように、同型に見えても規模と組み合わせで挙動が変わるので、ここは推論に頼れません。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="逐次形と閉形式の構造の違い">
+      <text x="215" y="28" font-size="16" font-weight="700" fill="#b5401f" text-anchor="middle">逐次形 ― 依存が鎖になる</text>
+      <circle cx="80" cy="90" r="20" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="80" y="96" font-size="13" fill="#12211a" text-anchor="middle">h0</text>
+      <circle cx="160" cy="90" r="20" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="160" y="96" font-size="13" fill="#12211a" text-anchor="middle">h1</text>
+      <circle cx="240" cy="90" r="20" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="240" y="96" font-size="13" fill="#12211a" text-anchor="middle">h2</text>
+      <circle cx="320" cy="90" r="20" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="320" y="96" font-size="13" fill="#12211a" text-anchor="middle">h3</text>
+      <line x1="100" y1="90" x2="138" y2="90" stroke="#b5401f" stroke-width="2"/>
+      <line x1="180" y1="90" x2="218" y2="90" stroke="#b5401f" stroke-width="2"/>
+      <line x1="260" y1="90" x2="298" y2="90" stroke="#b5401f" stroke-width="2"/>
+      <text x="215" y="150" font-size="14" fill="#b5401f" text-anchor="middle">前の値が決まらないと次に進めない</text>
+      <text x="215" y="176" font-size="14" fill="#b5401f" text-anchor="middle">展開すると長い鎖のグラフになる</text>
+      <text x="215" y="210" font-size="14" font-weight="700" fill="#b5401f" text-anchor="middle">検証したバージョンでは通らない</text>
+      <text x="215" y="244" font-size="13.5" fill="#4a5d54" text-anchor="middle">長さを変えても同じ失敗 = 資源不足ではない</text>
+
+      <text x="645" y="28" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">閉形式 ― 一枚の行列になる</text>
+      <rect x="530" y="56" width="230" height="120" rx="8" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <line x1="530" y1="56" x2="760" y2="176" stroke="#43b581" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="600" y="150" font-size="13.5" fill="#0f5132">下三角のみ</text>
+      <text x="700" y="86" font-size="13.5" fill="#4a5d54">0</text>
+      <text x="645" y="204" font-size="14" fill="#0f5132" text-anchor="middle">累積和 + 行列積 + 因果マスク + 指数</text>
+      <text x="645" y="230" font-size="14" fill="#0f5132" text-anchor="middle">attention と同じ形の演算</text>
+      <text x="645" y="264" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">これは通る</text>
+    </svg>
+    <p class="cap">同じ数式の 2 つの書き方。コンパイラが受け付けるかどうかは数学ではなくグラフの構造で決まる</p>
+  </div>
+
+  <p><b>これがコスト層①の正体です。</b>低レベルカーネルを書いたわけではありません。数式を、コンパイラが好む構造に書き換えたのです。そして書き換えには代償があります。閉形式は系列長の 2 乗の計算量なので、長いプロンプトではそのままでは使えず、チャンクに分割する実装が追加で必要になります。</p>
+
+  <p>分割の方針だけ書いておきます。<b>チャンクの内側は閉形式、チャンクの間は縮約した状態を逐次に受け渡す 2 段構成</b>にするのが定石で、attention の chunked prefill と同じ形です。このシリーズでは実装に踏み込みませんが、設計するときは第 8 回の「prefill 一括 = prefill + decode」という不変条件を<b>チャンクの境界にも適用してください</b>。境界で状態の受け渡しを間違えると、短い入力では合うのに長い入力だけ壊れます。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>データ依存の分岐を消す</h2>
+  <p class="lead">コスト層①のもう 1 つの典型がこれです。MoE のルータで起きます。</p>
+
+  <p>MoE のルータは「どのトークンをどのエキスパートに送るか」を計算し、その結果に従ってトークンを並べ替えます。この並べ替えは<b>値に依存した索引アクセス</b>です。中間表現としてはこれを表現できるので、単体では通ります。問題は規模と組み合わせで出ます。</p>
+
+  <p>実際に、単体では通るのに、他の層と組み合わさってグラフが大きくなると<b>コンパイラが範囲外アクセスを出す</b>という現象が起きました。つまりこれは表現可能性の問題ではなく、コンパイラの成熟度の問題です。層数を増やしても、SSM の層だけを増やしても、MoE の層だけを増やしても再現せず、複数種類が混ざって一定規模を超えたときに出ます。<b>合成依存のバグは切り分けが最も難しい種類です。</b></p>
+
+  <p>対処は、値依存の並べ替えを消すことです。上位 k 個の選択を、比較と <code>where</code> と最小値の組み合わせで<b>密に</b>構築します。同順位のときの決め方まで元の実装と厳密に一致させれば、数学的に同じ結果になります。</p>
+
+  <div class="key">
+    <b>書き換えに共通するパターン</b><br>
+    筆者が踏んだ 2 例はどちらも、<b>「疎で値依存な操作を、密で値非依存な操作に置き換える」</b>形になりました。静的グラフの制約から導かれる自然な方向でもあります。索引アクセスをマスクと算術に、ループを行列積に、分岐を選択に。<b>計算量は増えますが、コンパイルは通ります。</b>そしてこの「計算量が増える」部分が、第 8 回で扱う性能の話に直結します。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>書き換えが数値を壊す典型</h2>
+  <p class="lead">書き換えは通し方であって、正しさは別に保証しなければなりません。実際に踏む形を残しておきます。</p>
+
+  <p>前節の閉形式には落とし穴があります。減衰項 <code>exp(A·(csdt[t] - csdt[s]))</code> を、まず全部の <code>(t, s)</code> の組について計算し、あとで因果マスクを掛けてゼロにする、という素直な実装をすると壊れます。</p>
+
+  <p><code>s &gt; t</code> の側では指数の中身が正になります。小さな値なら問題ありませんが、実際の重みが作る値では <code>exp</code> が無限大に飛びます。そのあと因果マスクの 0 を掛けると、<b>無限大 × 0 で NaN になります</b>。NaN が logits に伝わると、出力は全部同じトークンになります。</p>
+
+  <p>正しくは、<b>指数を取る前に <code>s &gt; t</code> をマイナス無限大でマスクする</b>。そうすれば減衰項はちょうど 0 になります。</p>
+
+  <div class="warn">
+    <b>この種のバグの恐ろしさ</b>: 小さなランダム重みでテストすると <code>dt</code> が小さいので溢れず、通ってしまいます。実際の重みを載せたときだけ出ます。<b>「小さいモデルで数値一致を確認した」は実重みでの正しさを保証しません。</b>スケールが変わると壊れる書き方があることを前提に、実重みでの検証を工程に入れる必要があります。
+  </div>
+
+  <p>同じ種類の落とし穴を他にも挙げておきます。設定上は下限クランプが無いパラメータに、参照実装の別の版から持ってきたクランプを掛けてしまう。グループ化された正規化を、グループを無視して全次元で正規化してしまう。どちらも例外を出さず、生成品質の劣化としてだけ現れます。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>通ることと速いことは別</h2>
+  <p class="lead">この節は次回への橋渡しです。コスト層①を下げる別の経路が存在します。ただし下がるのは①だけで、しかも下がるのは「通すための書き換え」だけだ、という話をします。</p>
+
+  <p>第 1 回で触れた 2 本目の経路 (経路 B / Native PyTorch) は、ATen 演算のカバレッジが広く、素直な書き方が通りやすいという性質を持つと説明されています。もしそのとおりなら、前節で見たような数式の書き換えは<b>通すためには</b>不要になります。これがコスト層①が下がるという期待の中身です。</p>
+
+  <div class="warn">
+    <b>この節では経路 B の実測値を出しません</b>。<b>本シリーズの実測はすべて公開イメージと公開パッケージの構成で行っており</b>、経路 B は執筆時点で公開配布されていないため、そもそも読者が追試できる形の数字を出せません。以下は<b>公開経路 (経路 A) での事実と、アルゴリズムから導ける推論</b>だけで組み立てます。経路 B との比較は、公開配布された場合に測る対象です。
+  </div>
+
+  <p>そのうえで、期待に対して 1 つ留保を置く必要があります。<b>閉形式への書き換えが与えていたのは「通ること」だけではなかった</b>という点です。</p>
+
+  <p>逐次形と閉形式は、計算の形がまったく違います。逐次形は系列長の数だけ演算が縦に並び、1 つ 1 つが前の結果を待ちます。閉形式は行列積 1 枚に潰れています。<b>Trainium は行列積を食うために作られたハードウェアで、細かい演算を順番に流すのは苦手です</b> (この非対称は <a href="./nki-workshop-index.html">NKI Workshop シリーズ</a> の主題です)。だから同じ数式でも、この 2 つの形は実行時間が同じにはなりません。</p>
+
+  <div class="key">
+    <b>ここから出る結論が 2 つあります</b><br>
+    ひとつ。<b>コンパイル経路を替えれば、コスト層①のうち「通すための書き換え」は不要になる見込みがあります。</b>素直な数式が通るなら、通すための労力は要りません。<br>
+    ふたつ。<b>しかし「速くするための書き換え」は残ります。</b>閉形式が速いのは、コンパイラが賢いからではなく、その数式の形がハードウェアに合っているからです。<b>コンパイラは閉形式を発見してくれません。</b>そして速さを作ったのは低レベルカーネルではなく、数式の再構成でした。
+  </div>
+
+  <p>この 2 つを混ぜると議論が壊れます。「素直に書けば動く」と「素直に書けば実用速度が出る」は別の主張です。移植の見積もりでは、<b>まず動かして正しさを取り、それから速い形に持っていく</b>という 2 段構えを前提にすべきです。そして 2 段目は、経路を替えても消えません。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>見積もりのための 2 つの問い</h2>
+  <p class="lead">この回の実用的な結論です。新しいモデルの移植コストを見積もるとき、聞くべきことは 2 つに絞れます。</p>
+
+  <p>「そのアーキテクチャは独自か」という問いは曖昧すぎて答えが定まりません。代わりにこう聞きます。</p>
+
+  <ol class="steps">
+    <li><b>そのモデルの主要な演算は、既存のカーネル語彙に収まるか。</b>attention は既存のもので賄えるか。MLP は、MoE のルーティングは。収まらない演算があるなら、それはコスト層①のコストになる</li>
+    <li><b>attention の KV 以外に、step をまたいで持つ状態はあるか。</b>あるならコスト層③のコストが乗る。しかもこの層は、コンパイル経路をどう替えても軽くならない</li>
+  </ol>
+
+
+  <div class="fig">
+    <svg viewBox="0 0 860 320" role="img" aria-label="2 つの問いによる見積もりの決定木">
+      <defs>
+        <marker id="d1" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+      <rect x="290" y="16" width="280" height="52" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="430" y="40" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">問 1 主要な演算は</text>
+      <text x="430" y="59" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">既存のカーネル語彙に収まるか</text>
+
+      <line x1="360" y1="68" x2="230" y2="106" stroke="#4a5d54" stroke-width="2" marker-end="url(#d1)"/>
+      <text x="250" y="92" font-size="13" fill="#0f5132">収まる</text>
+      <line x1="500" y1="68" x2="630" y2="106" stroke="#4a5d54" stroke-width="2" marker-end="url(#d1)"/>
+      <text x="560" y="92" font-size="13" fill="#b5401f">収まらない</text>
+
+      <rect x="90" y="108" width="280" height="52" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="230" y="132" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">問 2 attention の KV 以外に</text>
+      <text x="230" y="151" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">step をまたぐ状態はあるか</text>
+
+      <rect x="500" y="108" width="280" height="52" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="640" y="132" font-size="14" font-weight="700" fill="#b5401f" text-anchor="middle">コスト層① が乗る</text>
+      <text x="640" y="151" font-size="13" fill="#b5401f" text-anchor="middle">数式の書き換え、または低レベルカーネル</text>
+
+      <line x1="640" y1="160" x2="640" y2="196" stroke="#4a5d54" stroke-width="2" marker-end="url(#d1)"/>
+      <line x1="170" y1="160" x2="170" y2="196" stroke="#4a5d54" stroke-width="2" marker-end="url(#d1)"/>
+      <text x="120" y="182" font-size="13" fill="#0f5132">無い</text>
+      <line x1="290" y1="160" x2="430" y2="196" stroke="#4a5d54" stroke-width="2" marker-end="url(#d1)"/>
+      <text x="330" y="182" font-size="13" fill="#b5401f">ある</text>
+
+      <rect x="40" y="198" width="260" height="70" rx="10" fill="#eaf5ef" stroke="#198754" stroke-width="2"/>
+      <text x="170" y="224" font-size="15" font-weight="700" fill="#0f5132" text-anchor="middle">事例 A</text>
+      <text x="170" y="246" font-size="13.5" fill="#0f5132" text-anchor="middle">コスト層② を丁寧にやる仕事</text>
+      <text x="170" y="264" font-size="12.5" fill="#4a5d54" text-anchor="middle">それでもカーネルの縁は踏む</text>
+
+      <rect x="330" y="198" width="500" height="70" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="580" y="224" font-size="15" font-weight="700" fill="#b5401f" text-anchor="middle">事例 B</text>
+      <text x="580" y="246" font-size="13.5" fill="#b5401f" text-anchor="middle">コスト層③ が乗る。前例のない設計が入る</text>
+      <text x="580" y="264" font-size="12.5" fill="#4a5d54" text-anchor="middle">この層は経路をどう替えても軽くならない</text>
+
+      <text x="430" y="300" font-size="13" fill="#4a5d54" text-anchor="middle">どちらの問いも重みは不要。モデリングコードだけで答えが出る</text>
+    </svg>
+    <p class="cap">2 問で見積もりの分岐が決まる。行数ではなく、この分岐がコストの差を作る</p>
+  </div>
+
+  <p>この 2 問の重要な性質は、<b>重みが不要で、モデリングコードだけで答えられる</b>ことです。実際に動かす必要も、精度を測る必要もありません。逆に言えば、モデリングコードを見ずに工数を答えるのは無理です。</p>
+
+  <p>そして 2 問の答えが「収まる・無い」なら、事例 A の世界です。コスト層②を丁寧にやる仕事になります。「収まらない・ある」なら事例 B で、前例のない設計が入ります。この差が、行数では見えないコストの差です。</p>
+
+  <div class="fn">
+    <p>出典と確認方法: 数式の書き換えとその必要性、データ依存の並べ替えの問題、数値が壊れる箇所は、筆者が<b>公開プラグイン (経路 A) 上で</b>2 つのモデルを移植する過程で実機で確認したものです。事例 B の題材は公開されているハイブリッド系のアーキテクチャです。第 8 節は経路 B の実測を含みません (理由は同節の注記)。カーネル語彙の一覧とランナーの KV 契約は <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ソースで確認できます。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-03-serving-contract.html">← 03: サービング契約</a>
+    <a href="./trn-porting-05-eager-vs-compile.html">05: eager と compile →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

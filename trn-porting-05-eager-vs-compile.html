@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 05: eager と compile ― 誤解と検証の最短経路</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 05</p>
+  <h1>eager と compile ― 誤解と、検証の最短経路</h1>
+  <p>eager なら移植は要らないのか。答えは「要る」。そこから検証の工程を組み立てる</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">前半でよくある誤解を 1 つ丁寧に潰します。後半では、その区別から導かれる検証の工程を組み立てます。実機に上がる前に何を済ませられるかが、移植の総時間を決めます。</p>
+
+  <p>「Native PyTorch は eager で Hugging Face のモデルをそのまま動かせる。だから eager なら移植が不要で、compile にすると移植が必要になるのだろう」。この理解は自然ですが、間違っています。<b>境界は eager と compile の間にはありません。</b></p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>compile が移植を要求するのではありません。</b>プラグインの中では eager でも移植が要り、プラグインの外なら compile でも移植は不要です。本当の分かれ目は <b>「KV キャッシュとバッチングを誰が持つか」</b>。持ち主が Hugging Face 側なら移植不要でサービングにならず、持ち主がサービング層なら移植が要ります。そのうえで eager には別の価値があり、それは<b>正しさの検証を安く速く回すこと</b>です。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 2 つの誤解を実物で潰す</a>
+    <a href="#s2">2. 本当の分かれ目</a>
+    <a href="#s3">3. eager の本当の価値</a>
+    <a href="#s4">4. CPU で回す 2 つのモード</a>
+    <a href="#s5">5. テストの 4 段ピラミッド</a>
+    <a href="#s6">6. 実機に上がる前にやること</a>
+    <a href="#s7">7. 低レベルカーネルを人が書かない時代の前提</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>2 つの誤解を実物で潰す</h2>
+  <p class="lead">両方向から確認します。片方だけ見ると誤解が残ります。</p>
+
+  <h3>誤解 1: compile だから移植が要る</h3>
+  <p>経路 B (Native PyTorch) は、Hugging Face のモデルをデバイスに置いてそのまま実行し、<code>torch.compile</code> もできる経路として説明されています。移植は要りません。<b>つまり compile であること自体が移植を要求するわけではありません。</b></p>
+
+  <p>ただしこれはモデル一般に無条件で成り立つ性質ではありません。生成を 1 枚のグラフに収めるにはキャッシュを静的な形に構成することが前提で、毎ステップ連結して伸びる実装のままだと、分断や系列長ごとの再コンパイルが問題になります。モデルの書き方によって結果が変わる部分です。</p>
+
+  <h3>誤解 2: eager なら移植が要らない</h3>
+  <p>逆にプラグインの中を見ると、eager 実行に落とす設定があります。デバッグ用の指定で <code>torch.compile</code> を飛ばせます。ところが<b>これで動くモデルは、レジストリに登録された移植済みのモデルだけです</b>。eager は「コンパイルを飛ばす」だけで、「モデル実装を代用する」ものではありません。</p>
+
+  <table>
+    <tr><th></th><th>eager</th><th>compile</th></tr>
+    <tr><td>Native PyTorch 単体</td><td>移植 <b>不要</b></td><td>移植 <b>不要</b></td></tr>
+    <tr><td>プラグインの中</td><td>移植 <b>必要</b></td><td>移植 <b>必要</b></td></tr>
+  </table>
+
+  <p>表が示すのは、<b>境界が縦に走っている</b>ということです。eager と compile の横の軸ではなく、プラグインの内と外という縦の軸が移植の有無を決めています。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>本当の分かれ目</h2>
+  <p class="lead">では縦の軸は何なのか。第 3 回で見た契約に戻ります。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 330" role="img" aria-label="KV キャッシュの持ち主による分岐">
+      <rect x="40" y="24" width="360" height="280" rx="12" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="220" y="54" font-size="17" font-weight="700" fill="#6b3fa0" text-anchor="middle">Native PyTorch 単体</text>
+      <text x="220" y="88" font-size="15" fill="#12211a" text-anchor="middle">モデル実装: Hugging Face のまま</text>
+      <text x="220" y="120" font-size="15" fill="#12211a" text-anchor="middle">KV キャッシュ: モデルが自分で持つ</text>
+      <text x="220" y="142" font-size="13.5" fill="#4a5d54" text-anchor="middle">毎ステップ連結して伸びる形</text>
+      <text x="220" y="174" font-size="15" fill="#12211a" text-anchor="middle">バッチング: 無い</text>
+      <text x="220" y="212" font-size="15" font-weight="700" fill="#6b3fa0" text-anchor="middle">移植は不要</text>
+      <text x="220" y="240" font-size="15" font-weight="700" fill="#b5401f" text-anchor="middle">サービングにはならない</text>
+      <text x="220" y="274" font-size="13.5" fill="#4a5d54" text-anchor="middle">用途: 正しさの確認、精度評価、</text>
+      <text x="220" y="292" font-size="13.5" fill="#4a5d54" text-anchor="middle">数値の参照値づくり</text>
+
+      <rect x="460" y="24" width="360" height="280" rx="12" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="640" y="54" font-size="17" font-weight="700" fill="#22548f" text-anchor="middle">プラグイン</text>
+      <text x="640" y="88" font-size="15" fill="#12211a" text-anchor="middle">モデル実装: 契約に沿って書き直す</text>
+      <text x="640" y="120" font-size="15" fill="#12211a" text-anchor="middle">KV キャッシュ: 外から渡される</text>
+      <text x="640" y="142" font-size="13.5" fill="#4a5d54" text-anchor="middle">ブロック表と slot で間接アクセス</text>
+      <text x="640" y="174" font-size="15" fill="#12211a" text-anchor="middle">バッチング: 継続バッチング</text>
+      <text x="640" y="212" font-size="15" font-weight="700" fill="#b5401f" text-anchor="middle">移植が必要</text>
+      <text x="640" y="240" font-size="15" font-weight="700" fill="#22548f" text-anchor="middle">これが本番の経路</text>
+      <text x="640" y="274" font-size="13.5" fill="#4a5d54" text-anchor="middle">用途: 実運用のスループットと</text>
+      <text x="640" y="292" font-size="13.5" fill="#4a5d54" text-anchor="middle">コストを出す</text>
+    </svg>
+    <p class="cap">左右で eager / compile の別はどちらも選べる。違うのはキャッシュの持ち主と、バッチングの有無</p>
+  </div>
+
+  <p>この図から、実務上の使い分けが自然に出ます。<b>2 つは競合しません。役割が違います。</b>左は正しさを安く確かめる場所、右は本番の数字を出す場所です。</p>
+
+  <p>そして第 4 回の 3 層モデルで言えば、左はコスト層② (サービング契約) と③ (状態の契約) を持たない代わりに、コスト層① (計算の表現) のコストが低い環境です。移植の初期段階で「数式が正しいか」だけを確かめたいとき、左は最短経路になります。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>eager の本当の価値</h2>
+  <p class="lead">誤解を潰したうえで、eager が移植作業で果たす役割を書きます。ここは実際に効きます。</p>
+
+  <p>eager 実行の価値は 3 つあります。</p>
+
+  <ol class="steps">
+    <li><b>「数式の誤り」と「コンパイルによる差」を分離できる。</b>同じモデルを eager とコンパイル済みの両方で走らせて比べれば、食い違いがどちらに由来するか切り分けられます。プラグインの中でも <code>enforce_eager</code> でこの比較ができます</li>
+    <li><b>コンパイル待ちが無い。</b>1 回のコンパイルが分単位かかる環境で、数式の間違いを探すのに毎回コンパイルするのは効率が悪すぎます。eager は演算ごとに実行するので、その場で結果が見られます</li>
+    <li><b>エラーが出た場所が分かる。</b>コンパイル済みのグラフが落ちると、どの演算で落ちたのかを追うのが大変です。eager なら Python のスタックトレースがそのまま使えます</li>
+  </ol>
+
+  <p>つまり eager は<b>デバッグの道具</b>として価値があります。プラグインの中の eager 設定も、まさにこの目的で用意されています。<code>print</code> を挟んで中を覗くための設定だと明記されています。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>CPU で回す 2 つのモード</h2>
+  <p class="lead">アクセラレータを取らずに進める手段が 2 つあります。混同しやすいので違いを明確にします。</p>
+
+  <table>
+    <tr><th></th><th>CPU 実行モード</th><th>CPU コンパイルモード</th></tr>
+    <tr><td>何をするか</td><td>CPU 上で実際に計算する</td><td>コンパイルパイプラインを通す。実行はしない</td></tr>
+    <tr><td>分かること</td><td><b>数値が正しいか</b></td><td><b>コンパイルが通るか</b></td></tr>
+    <tr><td>分からないこと</td><td>デバイス固有の丸め、カーネル固有の挙動</td><td>数値の正しさ (一切)</td></tr>
+    <tr><td>低レベルカーネルの扱い</td><td>CPU の代替実装に自動で落ちる。シミュレータで精度も検証できる</td><td>実行しないので関係しない</td></tr>
+    <tr><td>主な使いどき</td><td>移植の初期。数式と層の統合を固める</td><td>実機確保の前。形が通ることを確認する。並列に何台も回せる</td></tr>
+  </table>
+
+  <p>この 2 つは同時には使えません。目的が直交しているからです。移植の工程では、<b>まず CPU 実行モードで数値を固め、次に CPU コンパイルモードで形を通し、最後に実機に上げる</b>という順序が最も無駄が少なくなります。</p>
+
+  <p>低レベルカーネルについては、CPU 実行モードで自動的に代替実装に落ちます。加えてカーネル用のシミュレータがあり、小さい形状なら精度の検証までできます。<b>この検証基盤があることが、後述する「カーネルを人が手で書かない」という前提を成り立たせています。</b></p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>テストの 4 段ピラミッド</h2>
+  <p class="lead">何をどの段で検証するか。段を飛ばすと、あとで原因の切り分けができなくなります。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="テストの 4 段">
+      <polygon points="430,20 560,80 300,80" fill="#0f5132"/>
+      <text x="430" y="62" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">精度ベンチ</text>
+      <rect x="270" y="84" width="320" height="52" fill="#198754"/>
+      <text x="430" y="107" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">e2e の logits 検証</text>
+      <text x="430" y="126" font-size="12.5" fill="#dbefe4" text-anchor="middle">参照実装と同じ入力で最終出力を比べる</text>
+      <rect x="215" y="140" width="430" height="52" fill="#43b581"/>
+      <text x="430" y="163" font-size="14" font-weight="700" fill="#0b2e20" text-anchor="middle">モジュール単位</text>
+      <text x="430" y="182" font-size="12.5" fill="#0b2e20" text-anchor="middle">attention / MoE を単体で参照実装と比べる</text>
+      <rect x="160" y="196" width="540" height="52" fill="#8fd6b4"/>
+      <text x="430" y="219" font-size="14" font-weight="700" fill="#0b2e20" text-anchor="middle">ユニット</text>
+      <text x="430" y="238" font-size="12.5" fill="#0b2e20" text-anchor="middle">重みローダ、位置埋め込み、分割の算術</text>
+      <text x="430" y="278" font-size="13.5" fill="#4a5d54" text-anchor="middle">下の段が通っていないと、上の段の失敗の原因が特定できない</text>
+    </svg>
+    <p class="cap">下ほど安く速く、上ほど本番に近い。移植では下から順に埋めるのが最短</p>
+  </div>
+
+  <p>特に効くのは<b>下 2 段</b>です。重みローダのユニットテストは、第 3 回で挙げた「静かに壊れる」バグをそのまま捕まえます。モジュール単位の比較は、attention と MoE のどちらが原因かを 1 回で分けます。</p>
+
+  <p>e2e の logits 検証には注意点があります。<b>ランダムな小さい重みで bf16 の比較をすると、値が近接しているためトークンが簡単に反転します。</b>これは移植のバグではなく数値ノイズです。だから正しさのゲートは fp32 での一致に置き、bf16 の評価は実重みで行うのが筋です。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>実機に上がる前にやること</h2>
+  <p class="lead">この回の実用的な結論です。実機の時間は高いので、上がる前に済ませられることを列挙します。</p>
+
+  <ol class="steps">
+    <li><b>小さいモデルで反復する。</b>数 GB のモデルは読み込みだけで時間を取ります。作り方は単純で、設定の層数を 2 に書き換えてランダム初期化し、そのまま保存します。乱数のシードを固定して、参照実装と同じ重みを読ませるのを忘れないでください。この重みでは bf16 の比較をしない (後述の理由で意味がない) ことも決めておきます</li>
+    <li><b>参照実装を CPU で走らせられる状態にする。</b>比較対象が無いと、出た数字が正しいかどうか判定できません。参照側が特定の環境を前提にしていて CPU で動かない場合は、必要な部分だけ差し替える手間をかける価値があります</li>
+    <li><b>層ごとの比較を用意する。</b>e2e が合わないときに、どこから壊れたかを二分探索できるようにしておく</li>
+    <li><b>重み読み込みの検査を入れる。</b>未初期化が 0 件であることを確認する (第 3 回)</li>
+    <li><b>CPU コンパイルモードで形を通す。</b>実機の前に、コンパイルパイプラインが通ることを確認する</li>
+  </ol>
+
+  <div class="warn">
+    <b>逆順にやると何が起きるか</b>: 実機で起動して、コンパイルに数十分かけて、生成が繰り返しになる。原因の候補が「数式」「重み分割」「並列分割」「カーネル」「精度」と 5 つ以上あり、どれも実機でしか試せないと思い込んで、1 回数十分の試行を何十回も回すことになります。<b>実機は「他で確かめられないことだけ」を確かめる場所です。</b>
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>低レベルカーネルを人が書かない時代の前提</h2>
+  <p class="lead">最後に、移植の将来像に関わる論点を 1 つ置きます。</p>
+
+  <p>第 4 回で見たように、性能を作るのは低レベルカーネルか、数式の再構成です。どちらも専門性が要る作業で、これが Trainium 移植の心理的な障壁になっています。</p>
+
+  <p>ここで見落とされがちなのは、<b>そういう作業を機械に任せるには、まず検証基盤が要る</b>という点です。生成されたカーネルが正しいかを自動で判定できなければ、生成できても使えません。これは必要条件であって十分条件ではありません。生成の能力、探索の広さ、コストはいずれも別の問題です。</p>
+
+  <p>その観点で、このスタックには<b>その必要条件が揃っています</b>。カーネル用の CPU シミュレータがあり、eager 実行との比較ができ、テストが 4 段に整理されていて、CPU で数値を検証してから実機に上がる工程が推奨されています。<b>「生成する」側の話をする前に、「検算する」側がすでに用意されている</b>という順序は、この分野では珍しく健全です。</p>
+
+  <p>移植を人に依頼するか機械に任せるかという議論をするなら、まずこの検証基盤の上に工程を載せることが前提になります。第 8 回で、その検証をどう設計するかを扱います。</p>
+
+  <div class="fn">
+    <p>出典と確認方法: プラグインの eager 設定、CPU 実行モードと CPU コンパイルモード、カーネル用シミュレータ、テストの 4 段構成は <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ドキュメントに記述があります。経路 B (Native PyTorch) の性質は公開されている説明に基づく記述で、本稿では実測を伴いません。<b>本シリーズの実測はすべて公開イメージと公開パッケージの構成で行っています。</b></p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-01 時点のものです。対象はプラグイン <code>0.21.0.1.0.0</code> と <code>0.24.0.1.1.0</code> の公開ソースおよび公開コンテナイメージ、公開パッケージインデックスから取得できるランタイム兼カーネル基盤ライブラリ (<code>2.11.0.1.0.1284</code> / <code>2.12.0.1.0.1284</code>)、コンパイラ <code>2.26</code> / <code>2.27</code> 系、低レベルカーネル言語 <code>0.5.0</code> / <code>0.6.0</code>、PyTorch <code>2.11.0</code> です。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-04-three-layers.html">← 04: ポーティングの 3 層モデル</a>
+    <a href="./trn-porting-06-two-runtimes.html">06: なぜ経路は差し替えられないのか →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

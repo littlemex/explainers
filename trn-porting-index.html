@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング — スタックの内部構造とモデル移植シリーズ</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:64px 24px 52px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:34px;letter-spacing:.03em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:960px;margin:0 auto;padding:36px 20px 80px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 24px}
+  .summary{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 26px;margin:0 0 30px;
+    box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  .summary h2{margin:0 0 10px;font-size:19px;color:var(--g1);border-left:6px solid var(--g3);padding-left:12px}
+  .summary p{margin:10px 0;font-size:15.5px}
+  .summary b{color:var(--g1)}
+  table{width:100%;border-collapse:collapse;margin:14px 0 4px;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 24px 20px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;
+    box-shadow:0 2px 14px rgba(15,81,50,.05);transition:.18s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 26px rgba(15,81,50,.14);border-color:var(--g3)}
+  .card .cat{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;
+    padding:2px 10px;font-size:12.5px;font-weight:700;align-self:flex-start;margin-bottom:12px}
+  .card h2{margin:0 0 8px;font-size:20px;color:var(--g1);line-height:1.4}
+  .card p{margin:0 0 16px;font-size:14.5px;color:var(--sub);flex:1}
+  .card .meta{font-size:12.5px;color:#9aa;display:flex;justify-content:space-between;align-items:center}
+  .card .go{color:var(--g2);font-weight:700}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 22px;color:var(--g2);text-decoration:none;font-size:14px}
+  .note{font-size:14px;color:var(--sub);margin:22px 0 0;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング</p>
+  <h1>スタックの内部構造とモデル移植</h1>
+  <p>AWS Trainium で LLM をサービングするとき、モデルを移植するとは何をすることなのか</p>
+</header>
+<main>
+  <a class="back" href="./index.html">← explainers トップへ戻る</a>
+
+  <p class="intro">GPU では Hugging Face のモデルをそのまま推論エンジンに載せられることが多いのに、Trainium では対応モデルが明示的に列挙されていて、そこに無いモデルには自分で実装を足す必要があります。この「足す」作業の中身を、スタックの構造から具体的に分解するシリーズです。実装する人には工程表として、経路を選ぶ人には判断材料として書いています。</p>
+
+  <div class="summary">
+    <h2>このシリーズの結論を先に</h2>
+    <p>移植コストは <b>3 層</b>に分かれます。<b>計算の表現</b> (その数式を、選んだコンパイル経路が受け付ける形で書けるか)、<b>サービング契約</b> (paged KV への読み書きと並列分割の作法)、<b>状態の契約</b> (attention の KV 以外の状態をどこに置くか)。</p>
+    <table>
+      <tr><th>コスト層</th><th>難しさを決めるもの</th><th>コンパイル経路を替えると</th></tr>
+      <tr><td>① 計算の表現</td><td>コンパイラが受け付ける演算とグラフ構造の範囲</td><td><b>下がる</b></td></tr>
+      <tr><td>② サービング契約</td><td>サービングの設計 (paged KV・バケット・並列)</td><td>変わらない見込み</td></tr>
+      <tr><td>③ 状態の契約</td><td>ランナーが用意している状態の置き場</td><td>変わらない見込み</td></tr>
+    </table>
+    <p>だから「別のコンパイル経路にすれば移植が要らなくなる」は成り立ちません。<b>下がる見込みがあるのは①だけ</b>です。しかも①の中で下がるのは<b>「通すための書き換え」だけ</b>で、実用的な性能に必要な数式の再構成は残ります。そして現在地としては、<b>プロセス内で経路を差し替える道はライブラリ側の対応待ち</b>、<b>プロセスを分けて橋を架ける道は運搬コストが未解決</b> (2.6 MB 級の部分グラフ 1 個での実測でカーネルの約 30 倍) です。</p>
+  </div>
+
+
+  <div class="summary">
+    <h2>読み方</h2>
+    <p><b>経路や投資を判断する立場なら</b>、上の結論から <a href="./trn-porting-04-three-layers.html">04 (コストの 3 層と見積もりの 2 問)</a> へ。判断の道具はこの回にあります。そのうえで <a href="./trn-porting-06-two-runtimes.html#s6">06 §6 (何を待っているのか)</a> と <a href="./trn-porting-07-neff-boundary.html#s9">07 §9 (橋を作るべきか)</a>。数字を受け取る前に <a href="./trn-porting-08-measuring.html">08</a> を読んでおくと、渡された比較が妥当か判断できます。</p>
+    <p><b>実装する立場なら</b>、<a href="./trn-porting-01-stack-map.html">01</a> で地図を入れて、<a href="./trn-porting-03-serving-contract.html">03</a> が本体です (チェックリストは §9)。詰まったら <a href="./trn-porting-02-compile-path.html#s9">02 §9 のエラー切り分け表</a>。検証の工程は <a href="./trn-porting-05-eager-vs-compile.html#s4">05 §4-6</a> と <a href="./trn-porting-08-measuring.html">08</a>。</p>
+    <p><b>現在地の確認方法</b>は 2 つです。プラグインの feature matrix の <code>torch.compile (native PyTorch)</code> の行と、ランタイム兼カーネル基盤ライブラリの配布物に非 XLA の降ろし方のモジュールが含まれるかどうか (詳細は <a href="./trn-porting-06-two-runtimes.html#s5">06 §5</a>)。この 2 つを見れば、本シリーズの時点依存の結論が更新されたかどうかが分かります。</p>
+  </div>
+
+  <div class="summary">
+    <h2>症状から引く</h2>
+    <p>作業中に詰まったときの逆引きです。通読していなくても、症状からその節に飛べます。</p>
+    <table>
+      <tr><th>症状</th><th>見るところ</th></tr>
+      <tr><td>出力が全部同じトークンになる / NaN が出る</td><td><a href="./trn-porting-04-three-layers.html#s7">04 §7 (書き換えが数値を壊す典型)</a></td></tr>
+      <tr><td>prefill は正しいのに、生成が繰り返しに落ちる</td><td><a href="./trn-porting-03-serving-contract.html#s4">03 §4 (prefill と decode は別の作法)</a>、<a href="./trn-porting-08-measuring.html#s7">08 §7 (不変条件)</a></td></tr>
+      <tr><td>例外は出ないのに精度だけ悪い</td><td><a href="./trn-porting-03-serving-contract.html#s7">03 §7 (重み読み込み)</a></td></tr>
+      <tr><td>パラメータが未初期化のまま残る</td><td><a href="./trn-porting-03-serving-contract.html#s2">03 §2 (設定の変換)</a>、<a href="./trn-porting-03-serving-contract.html#s7">03 §7</a></td></tr>
+      <tr><td>コンパイルが落ちた</td><td><a href="./trn-porting-02-compile-path.html#s9">02 §9 (エラーが出た段の見分け方)</a></td></tr>
+      <tr><td>コンパイルは通るが実行時に落ちる / 固まる</td><td><a href="./trn-porting-02-compile-path.html#s9">02 §9 の段 ⑤</a></td></tr>
+      <tr><td>グラフが分断されたと言われる</td><td><a href="./trn-porting-02-compile-path.html#s5">02 §5 (fullgraph という制約)</a></td></tr>
+      <tr><td>状態が step をまたいで消える</td><td><a href="./trn-porting-02-compile-path.html#s4">02 §4 (パスの順序)</a>、<a href="./trn-porting-04-three-layers.html#s4">04 §4</a></td></tr>
+      <tr><td>並列度を上げたら結果が変わった</td><td><a href="./trn-porting-03-serving-contract.html#s7">03 §7</a>、<a href="./trn-porting-08-measuring.html#s7">08 §7</a></td></tr>
+      <tr><td>測った時間が怪しい (仕事量を増やしても動かない)</td><td><a href="./trn-porting-08-measuring.html#s2">08 §2 (汚染を見抜く兆候)</a></td></tr>
+      <tr><td>反復が遅すぎる (毎回コンパイルが走る)</td><td><a href="./trn-porting-02-compile-path.html#s7">02 §7 (キャッシュとバケット最小化)</a></td></tr>
+    </table>
+  </div>
+
+  <div class="grid">
+
+    <a class="card" href="./trn-porting-01-stack-map.html">
+      <span class="cat">01 ・ 全体像</span>
+      <h2>スタックの地図</h2>
+      <p>vLLM 本体・ハードウェアプラグイン・ランタイム兼カーネル基盤・NEFF の 4 層と、同じ torch.compile から伸びる 2 本のコンパイル経路。第 3 層が「交換部品ではなく地面」であることを最初に押さえる。対応モデルが列挙式である理由も。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-02-compile-path.html">
+      <span class="cat">02 ・ コンパイラ</span>
+      <h2>コンパイル経路の解剖</h2>
+      <p>グラフ捕捉 → 5 本の FX パス → HLO → NEFF。5 本のパスはどれも「PyTorch では自然だが静的グラフでは表現できないもの」を潰すために存在する。パスの順序が状態の持ち回りを決める理由、バケットと NEFF の 1 対 1 対応、そしてエラーが出た段の見分け方。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-03-serving-contract.html">
+      <span class="cat">03 ・ 実装の本体</span>
+      <h2>サービング契約</h2>
+      <p>移植とは具体的に何を実装することか。KV キャッシュの形の申告と受け取り、prefill と decode で違う作法、forward の引数、並列化レイヤ、そして最も静かに壊れる重み読み込み。融合テンソルの分割を間違えると例外を出さずに精度だけが落ちる。実装チェックリストつき。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-04-three-layers.html">
+      <span class="cat">04 ・ コストの構造</span>
+      <h2>ポーティングの 3 層モデル</h2>
+      <p>行数は移植コストの代理変数にならない。既存のカーネル語彙に収まるモデルと収まらないモデルを並べ、素直な再帰がコンパイラに通らないときに数式そのものを書き換える作業を具体的に示す。経路を替えて消えるのは「通すための書き換え」だけで「速くするための書き換え」は残る理由も。最後に、重み不要でモデリングコードだけで答えられる「見積もりの 2 つの問い」に落とす。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-05-eager-vs-compile.html">
+      <span class="cat">05 ・ 誤解を潰す</span>
+      <h2>eager と compile ― 誤解と検証の最短経路</h2>
+      <p>eager なら移植は要らないのか。答えは要る。境界は eager と compile の間ではなく、KV キャッシュとバッチングを誰が持つかにある。実装者にとっての本題は後半で、CPU の 2 モードから実機へという工程順序をここで固める。逆順は最も高くつく。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-06-two-runtimes.html">
+      <span class="cat">06 ・ 経路差し替えの壁</span>
+      <h2>なぜ経路は差し替えられないのか</h2>
+      <p>経路を差し替えるスイッチは実装されているのに動かない。理由が 3 つ重なっていて、うち 1 つは PyTorch のディスパッチ機構に由来する。1 つのキーに backend fallback は 1 つしか登録できず、外部実装は支援 API の都合で同じキーに集まるので、同居できない。何を待っているのかを正確にする。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-07-neff-boundary.html">
+      <span class="cat">07 ・ 橋を架ける</span>
+      <h2>NEFF を境界にできるか ― 機構はある、運搬が高い</h2>
+      <p>プロセスを分ければディスパッチキーは衝突しない。公開イメージには NEFF をロードして入出力契約を問い合わせ実行する API が同梱されており、部品は揃っている。全体モデルの注入が成立せず部分グラフなら成立する理由 (署名の所有権が逆になる) と、残る課題 ― 現状の API はホストのバッファ経由でコピーするため、データ移動がカーネルの約 30 倍 (2.6 MB 級の部分グラフ 1 個での実測)。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./trn-porting-08-measuring.html">
+      <span class="cat">08 ・ 測り方</span>
+      <h2>この上で出した数字を信じてよい条件</h2>
+      <p>実装でも判断でも、数字を出す前・受け取る前に読む回。非同期実行が既定なので、素朴なストップウォッチは「積む時間」と「実行する時間」の遅い方を測る。汚染を見抜く兆候は「仕事量を増やしても時間が動かない」。cosine を一致の証拠にしてはいけない理由 (fp32 で 1 を超える)。不変条件で正しさを縛る方法と、GPU と比べるときに揃えるもの。</p>
+      <div class="meta"><span>2026-09-01</span><span class="go">開く →</span></div>
+    </a>
+
+  </div>
+
+
+  <div class="summary">
+    <h2>作業中のリファレンス</h2>
+    <table>
+      <tr><th>したいこと</th><th>飛び先</th></tr>
+      <tr><td>コンパイルや実行が落ちた段を切り分ける</td><td><a href="./trn-porting-02-compile-path.html#s9">02 §9 エラーが出た段の見分け方</a></td></tr>
+      <tr><td>実装の順序と完了条件を確認する</td><td><a href="./trn-porting-03-serving-contract.html#s9">03 §9 実装チェックリスト</a></td></tr>
+      <tr><td>設定や環境変数の名前を引く</td><td><a href="./trn-porting-02-compile-path.html#s10">02 §10 設定リファレンス</a></td></tr>
+      <tr><td>数字を出す前に確認する</td><td><a href="./trn-porting-08-measuring.html#s9">08 §9 チェックリスト</a></td></tr>
+      <tr><td>不変条件で正しさを縛る</td><td><a href="./trn-porting-08-measuring.html#s7">08 §7 不変条件</a></td></tr>
+    </table>
+  </div>
+
+  <p class="note">記述の範囲について: プラグインの構造・レジストリ・FX パス・feature matrix・カーネル層の依存関係は <a href="https://github.com/vllm-project/vllm-neuron" target="_blank" rel="noopener">vllm-project/vllm-neuron</a> の公開ソースで確認できます。ランタイムのバージョンやモジュール構成は、公開コンテナイメージと公開パッケージインデックスから取得できる範囲で確認したものです。<b>本シリーズの実測はすべて公開イメージと公開パッケージの構成で行っています</b> (単一 Trainium2 チップ)。測定方法と適用限界は第 8 回に明記しています。ハードウェア側の基礎は <a href="./nki-workshop-index.html">NKI Workshop シリーズ</a>、コンパイル経路の中間表現については <a href="./mlir-index.html">MLIR シリーズ</a> が背景として役立ちます。</p>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
