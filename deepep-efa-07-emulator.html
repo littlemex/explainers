@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 07: EFA なしで検証する emulator は作れるのか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 07</p>
+  <h1>EFA なしで検証する emulator は作れるのか</h1>
+  <p>結論は作れる。ただし「EFA を再現する」ではなく「EFA が与える契約の下でプロトコルを詰める」と目標を書き換える必要がある</p>
+</header>
+<main>
+<a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>結論を先に</h2>
+
+  <div class="key">
+    <b>判定</b><br>
+    <b>作れます。</b> 決定的な理由は 2 つです。(1) NCCL の <b>RMA plugin (<code>ncclRmaPlugin_v14</code>) は完全にホスト側だけの API</b> で、CPU proxy 経路のデータ配置と signal 更新の<b>両方</b>がこの plugin を通ります。したがって <b>1 回の put をどの粒度でどの順に置くか、signal をいつ立てるかを、テスト側が完全に支配できます</b>。(2) DeepEP のカーネルが呼ぶのは <code>gin.put</code> / <code>readSignal</code> というバックエンド中立の device API なので、<b>proxy 経路でも unordered カーネルのソースはそのまま走ります</b>。<br><br>
+    <b>ただし目標は書き換えるべきです。</b> 「EFA を再現する」ではなく <b>「EFA-GDA が与える weak bundled-signal 契約の下で、DeepEP の unordered プロトコルを敵対的スケジュールで詰める」</b>。WQE の生成や MMIO の順序やハードウェアカウンタの周回は emulator の対象外と最初に宣言します。そこは実機に残す。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 3 案の判定</a>
+    <a href="#s2">2. 決定的な API 事実 (一次ソース)</a>
+    <a href="#s3">3. 推奨アーキテクチャ (3 層)</a>
+    <a href="#s4">4. 層 2 の設計 ― 敵対的 RMA plugin</a>
+    <a href="#s5">5. トポロジをどう偽装するか</a>
+    <a href="#s6">6. fidelity のギャップ表</a>
+    <a href="#s7">7. 既存物では代替できない理由</a>
+    <a href="#s8">8. 最初の PR とその次</a>
+    <a href="#s9">9. 着手前に潰す 3 点</a>
+  </div>
+
+  <p style="font-size:14px;color:var(--sub)">この回の判定は、公開ソース (NCCL / aws-ofi-nccl / DeepEP fork) の該当箇所を直接読んで確認したものと、独立に 2 つの大規模モデル (Claude Fable 5 と GPT-5.6) に同じ事実を渡して評価させた結果が収束した部分を書いています。<b>実機で動かして確認した結論ではありません</b>。実装前に §9 の 3 点を実験で潰す必要があります。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>3 案の判定</h2>
+  <p class="lead">思いつく方式を 3 つに整理して、それぞれの判定を先に置きます。</p>
+
+  <table>
+    <tr><th>案</th><th>やること</th><th>判定</th><th>理由</th></tr>
+    <tr><td><b>A</b></td><td><b>ソフトウェア SRD</b>: <code>ncclRmaPlugin_v14</code> を実装し、同一ホスト内のプロセス間を共有メモリまたは TCP で繋ぐ。progress ループで put を chunk 単位に分割・並べ替え・遅延させ、signal は「そのメッセージの全 chunk を置いた後」に立てる。実 GPU の実カーネルが走る</td><td class="ok">本命。実現可能</td><td>plugin がデータ配置と signal の<b>両方</b>を実行するので、順序を完全に支配できる。CUDA コードは 1 行も要らない</td></tr>
+    <tr><td><b>B</b></td><td><b>ソフトウェア EFA NIC</b>: <code>efa_cuda_qp</code> の doorbell を MMIO ではなく通常メモリにし、ホストのスレッドが送信キューの EFA WQE を解釈して転送する。NCCL の EFA-GDA device コードが実機同等に走る</td><td class="no">技術的には可能だが非推奨</td><td>検証対象が DeepEP fork ではなく <b>NCCL / AWS 側の device コード</b>になる。WQE パーサを自作すると「emulator の解釈」と「実機の解釈」の二重管理になり、両方が同じ誤解をすると静かに通る</td></tr>
+    <tr><td><b>C</b></td><td><b>ホストだけのハーネス</b>: <code>qp_mapping.cuh</code> / <code>gin_resource_alloc.cuh</code> / header の pack・unpack / part の幾何は既にホストでコンパイルできる。受理述語を純関数に括り出し、敵対的な interleaving を網羅探索する</td><td class="ok">最速。A と相補的</td><td>GPU も EFA も不要。しかも「存在すると書いてあるのに無いテスト」がある。<b>最初の PR はここ</b></td></tr>
+  </table>
+
+  <p>A と C は競合しません。<b>C はプロトコルの論理を、A は GPU 上の実装 (warp 分業・fence・shared memory のリング) を担当します</b>。B が拾える追加分 (WQE の詰め方、doorbell の集約、カウンタの 2^31 周回) は DeepEP の外側の責務なので、そこは実機テストに残すのが役割分担として正しい。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>決定的な API 事実 (一次ソース)</h2>
+  <p class="lead">この判定は次の 5 つの確認に立っています。どれも公開ソースで追えます。</p>
+
+  <table>
+    <tr><th>#</th><th>事実</th><th>場所</th><th>意味</th></tr>
+    <tr><td>1</td><td>proxy 経路のホスト側データパスは <b>RMA plugin</b> に分離されている。<code>iput</code> / <code>iputSignal(..., bool isStrongSignal, ...)</code> / <code>iget</code> / <code>iflush</code> / <code>test</code> / <code>rmaProgress</code> だけで、<b>CUDA を含まない</b></td><td><code>nccl/src/include/plugin/rma/rma_v14.h</code></td><td>ホストコードだけで transport を差し替えられる</td></tr>
+    <tr><td>2</td><td>GIN plugin が「自分は proxy 型」と名乗ると <b>NCCL はそれをスキップし</b>、内蔵 proxy を RMA バックエンド越しに使う</td><td><code>nccl/src/plugin/gin.cc</code> (該当する INFO ログつきの分岐)</td><td>proxy 経路を差し替える正しい入口は RMA plugin だけ、と確定する</td></tr>
+    <tr><td>3</td><td>proxy 経路では <b>indexed signal の実体が GPU メモリ上の <code>uint64</code> 配列</b>で、plugin の <code>regMrSym</code> で登録され、device が signal 付き put を出すと <code>signalOff = (signalId + contextId * nSignalsPerContext) * 8</code> を計算して <b>plugin の <code>iputSignal</code> が呼ばれる</b></td><td><code>nccl/src/gin/gin_host_proxy.cc</code></td><td><b>signal の到着タイミングも plugin が握る</b>。これが emulator の成立条件</td></tr>
+    <tr><td>4</td><td>proxy バックエンドは <code>supportsStrongSignals = true; supportsVASignals = true;</code> を<b>ハードコード</b>している</td><td><code>nccl/src/gin/gin_host_proxy.cc</code></td><td>RMA plugin では EFA の「非対応」を能力面で名乗れない。<b>能力交渉のテストは別手段が必要</b> (§4 の但し書き)</td></tr>
+    <tr><td>5</td><td>EFA-GDA の device コードと <code>efa-dp-direct</code> のヘッダは <b>NCCL のインストール対象に含まれる</b> (<code>${CMAKE_BINARY_DIR}/include/nccl_device/transport/net_efa_gda/...</code> にコピーされ <code>install(DIRECTORY)</code> で入る)</td><td><code>nccl/src/transport/net_efa_gda/efa-dp-direct/CMakeLists.txt</code></td><td>EFA を持たないマシンでも、DeepEP の JIT カーネルには EFA-GDA 経路がコンパイルされて入る。<b>案 B が原理的に可能な理由</b>でもある</td></tr>
+  </table>
+
+  <p>4 番目は、当初「plugin が false を返せば EFA と同じ能力面を見せられる」と考えたところの訂正です。<b>RMA plugin にはそもそも能力申告の関数がありません</b> (GIN plugin にはある <code>getGinProperties</code> が RMA の op-table には無い)。ただしこれは実用上の障害になりません。<b>DeepEP の unordered 経路は自分から <code>ginStrongSignalsRequired = false; ginVaSignalsRequired = false;</code> を設定する</b>ので、より強い能力を持つバックエンドの上で走るのは正当です。失われるのは「ordered カーネルが EFA で拒否されることの確認」だけで、それは能力交渉のテストとして別に書けます。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>推奨アーキテクチャ (3 層)</h2>
+  <p class="lead">1 つの emulator を作るのではなく、検証対象の性質に応じて 3 つに分けます。層が上がるほど忠実で、下がるほど速く網羅的です。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 340" role="img" aria-label="検証の 3 層とそれぞれが担当する不変条件">
+      <rect x="40" y="20" width="780" height="78" rx="11" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="60" y="46" font-size="16" font-weight="700" fill="#0f5132">層 0 ・ ホスト不変条件テスト (GPU 不要 ・ 秒で回る)</text>
+      <text x="60" y="68" font-size="13.5" fill="#12211a">qp_mapping / gin_resource_alloc / header の pack・unpack / part の幾何 / (qp, signal_id) の一意性と予算</text>
+      <text x="60" y="88" font-size="13" fill="#4a5d54">捕まえるもの: 予算の数え間違い (= 実機では「全部ゼロで timeout」)、bit 詰めの溢れ、幾何の退化</text>
+
+      <rect x="40" y="108" width="780" height="86" rx="11" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="60" y="134" font-size="16" font-weight="700" fill="#22548f">層 1 ・ プロトコルモデル (GPU 不要 ・ 網羅探索)</text>
+      <text x="60" y="156" font-size="13.5" fill="#12211a">受理述語 (landed &gt;= num_valid / prefix_alive / header 検査) を純関数として、到着イベントの順列を敵対的に列挙</text>
+      <text x="60" y="176" font-size="13" fill="#4a5d54">捕まえるもの: I2 (読み順)、I3 (基準値)、iteration の 31 bit 周回、空 part、送信元間の集約、終端 (more=false) の扱い</text>
+
+      <rect x="40" y="204" width="780" height="86" rx="11" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="60" y="230" font-size="16" font-weight="700" fill="#6b3fa0">層 2 ・ 敵対的 RMA plugin (実 GPU ・ EFA 不要)</text>
+      <text x="60" y="252" font-size="13.5" fill="#12211a">実カーネルを実 GPU で走らせ、put の chunk 順序 / 遅延 / signal のタイミングを plugin が指定どおりに実行</text>
+      <text x="60" y="272" font-size="13" fill="#4a5d54">捕まえるもの: fence / acquire の欠落、warp 分業の競合、shared memory リングの競合、実際の hang と timeout</text>
+
+      <rect x="40" y="300" width="780" height="30" rx="9" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="430" y="320" font-size="14.5" font-weight="700" fill="#b5401f" text-anchor="middle">層 3 ・ 実 EFA スモーク (2 ノード ・ nightly か merge 前に最小限)  ―  WQE / MMIO / カウンタ周回 / 性能</text>
+    </svg>
+    <p class="cap">図 1: 実機に残すのは最上段だけ。下 3 層で「順序に起因する誤り」を決定的に潰す</p>
+  </div>
+
+  <p>層の分け方の根拠は第 4 回の不変条件です。<b>I1 (weak signal 契約) は backend の責務なので層 2 の適合性テスト、I2 と I3 は DeepEP の責務なので層 1、予算の算術は層 0</b>。責務の境界を層の境界に合わせると、失敗したときにどのリポジトリの問題かが自動的に決まります。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>層 2 の設計 ― 敵対的 RMA plugin</h2>
+  <p class="lead">中心になる部品です。名前を仮に <code>libnccl-rma-srdsim.so</code> とします。</p>
+
+  <h3>実装するもの</h3>
+
+  <pre><code>// エクスポートする 1 つのシンボル
+ncclRma_v14_t ncclRmaPlugin_v14 = {
+  .name = "srdsim",
+  .init, .devices, .getProperties,
+  .listen, .connect,            // OOB は Unix domain socket
+  .createContext, .destroyContext,
+  .regMrSym, .regMrSymDmaBuf, .deregMrSym,
+  .iput, .iputSignal, .iget, .iflush,
+  .test, .rmaProgress, .queryLastError, .finalize
+};</code></pre>
+
+  <table>
+    <tr><th>関数</th><th>実装方針</th></tr>
+    <tr><td><code>listen</code> / <code>connect</code></td><td>同一ホスト前提なので Unix domain socket。ハンドルの交換にそのまま使う</td></tr>
+    <tr><td><code>regMrSym</code></td><td>NCCL の symmetric memory は cuMem VMM ベースなので、<code>cuMemExportToShareableHandle</code> で得た POSIX FD を <code>SCM_RIGHTS</code> で相手に渡し、<code>cuMemImportFromShareableHandle</code> + <code>cuMemMap</code> で相手のバッファを自プロセスに写す。以後 <b>相手の GPU メモリへ直接 <code>cudaMemcpy</code> できる</b></td></tr>
+    <tr><td><code>iput</code></td><td><b>1 回の memcpy にしないこと。</b> chunk (実機の SRD MTU に相当する粒度、たとえば 8 KiB) に割り、<b>スケジューラが決めた順序と遅延で</b>置く。これが「1 メッセージ内の順序の乱れ」の再現</td></tr>
+    <tr><td><code>iputSignal</code></td><td>ペイロードの全 chunk を置き終えた<b>後に</b>、signal の位置へ加算する。<b>ここを守るのが I1 の再現であり、破るモードを別に用意するのが I1 の反証テスト</b></td></tr>
+    <tr><td><code>rmaProgress</code></td><td>スケジューラの心臓。保留中の chunk と signal を、seed 付きの決定的な順序で 1 ステップ進める</td></tr>
+  </table>
+
+  <h3>スケジューラのモード</h3>
+
+  <table>
+    <tr><th>モード</th><th>挙動</th><th>期待</th></tr>
+    <tr><td><code>inorder</code></td><td>発行順にそのまま置く</td><td>すべて緑。ここが緑にならないなら emulator 自体が壊れている</td></tr>
+    <tr><td><code>srd</code></td><td>chunk とメッセージを乱すが、<b>I1 は守る</b> (signal は全 chunk の後)</td><td>DeepEP unordered は緑。ordered は<b>赤になるべき</b></td></tr>
+    <tr><td><code>replay</code></td><td>記録したトレースを再生する</td><td>反例の再現とデバッグ</td></tr>
+    <tr><td><code>violate-i1</code></td><td>signal をペイロードより先に置く</td><td><b>赤になるべき</b>。赤にならなければ「I1 に依存していない」ことの証明になるので、それも情報</td></tr>
+    <tr><td><code>strict-budget</code></td><td>signal id が確保範囲外なら即 abort</td><td>実機の「静かに何も届かない」を<b>決定的な即死</b>に変換する</td></tr>
+    <tr><td><code>oversize</code></td><td>1 put が 1 GiB を超えたら loudly fail</td><td>EFA-GDA が分割する条件を「検証」ではなく「検知」で代替する</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>敵対性は較正する</b><br>
+    「SRD が保証しないことは全部やる、保証することは守る」に揃えるのが重要です。<b>I1 を既定で破ると、実機では絶対に起きない偽陽性を量産します</b>。逆に chunk を割らずに 1 回の memcpy で置くと、実機で起きる窓を再現しません。<code>violate-i1</code> は「契約に依存していることの証明」のための別モードとして分離し、既定は <code>srd</code> にします。<b>そして <code>violate-i1</code> で見つかった不具合は「DeepEP の穴」ではなく「backend 適合性の負テスト」として分類する</b> ―― これを混同すると、上流に出したときに信用を落とします。</p>
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>トポロジをどう偽装するか</h2>
+  <p class="lead">1 台のマシンで scale-out 経路を踏ませる必要があります。ノード内だけだと NVLink 経路 (direct mode) になり、検証したいカーネルが走りません。</p>
+
+  <p>第 1 回で見たとおり、DeepEP は初期化時に <code>num_ranks == ncclTeamLsa(comm).nRanks * num_rdma_ranks</code> を検査します。したがって <b>LSA team を小さくして rail team を 2 以上にする</b>のが目標です。NCCL の公開ソースから、手段が 2 つ読み取れます。</p>
+
+  <table>
+    <tr><th>手段</th><th>根拠</th><th>効き方</th></tr>
+    <tr><td><code>NCCL_HOSTID</code> をプロセスごとに変える</td><td><code>src/misc/utils.cc</code> が hostHash の算出をこの環境変数で上書きする</td><td>同一マシンの GPU を「別ノード」に見せる。<code>rankToNode</code> が分かれ、LSA が縮む</td></tr>
+    <tr><td><code>NCCL_LSA_TEAM_SIZE</code></td><td><code>src/dev_runtime.cc</code> の <code>NCCL_PARAM(LsaTeamSize, "LSA_TEAM_SIZE", 0)</code>。<code>computeLsaSize</code> がこの値を <b>gcd の初期値</b>として使う</td><td>ノード内のサイズより<b>小さくする方向にだけ</b>効く。まさに欲しい向き</td></tr>
+  </table>
+
+  <p>ただし <code>computeLsaSize</code> には先に走る分岐があります。<code>comm-&gt;p2pCrossClique &amp;&amp; comm-&gt;nvlDomainSize == comm-&gt;nRanks</code> のとき「単一 NVLink 域なので LSA を域全体に広げる」として <b><code>lsaSize = nRanks</code> にしてしまい、パラメータを無視します</b>。つまり単一ノードの多 GPU 構成では、この分岐を先に潰さないと偽装が貫通しません。P2P / MNNVL 側の無効化 (あるいは <code>NCCL_HOSTID</code> による分割との併用) が必要になります。<b>ここは実験で確定させるべき項目</b>で、§9 に入れてあります。</p>
+
+  <p>必要な GPU 数も見積もっておきます。第 4 回の「送信元間の集約」を叩くには、<b>受信側から見た remote な送信元が 2 つ以上</b>必要です。rail team のサイズが 3 以上、つまり LSA = 1 なら 3 GPU、LSA = 2 なら 6 GPU。<b>2 GPU の開発機では退化した構成しか組めません</b>。裏を返すと、層 1 (プロトコルモデル) が GPU 無しで送信元数を自由に取れることの価値がここで効きます。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>fidelity のギャップ表</h2>
+  <p class="lead">emulator の価値と限界を、同じ表の中で並べます。ここを曖昧にしたまま上流に出すと信用されません。</p>
+
+  <h3>捕まえられるもの</h3>
+
+  <table>
+    <tr><th>バグの種類</th><th>担当する層</th><th>実機との比較</th></tr>
+    <tr><td>メッセージ間の並べ替えによる誤受理</td><td>層 1 / 層 2</td><td>実機では確率的。emulator では<b>決定的</b></td></tr>
+    <tr><td><b>1 メッセージ内で header だけ先に見える窓</b></td><td>層 2 (chunk 順序を指定)</td><td>実機では負荷依存で稀。emulator では<b>狙って作れる</b></td></tr>
+    <tr><td>I2 (signal を先に読む・acquire) の欠落</td><td>層 1 (第 4 回のデモがその縮小版)</td><td>実機では「たまに壊れる」。emulator では<b>網羅</b></td></tr>
+    <tr><td>I3 (基準値と drain) の欠落</td><td>層 1 / 層 2 (前 iteration の書き込みを遅延配送)</td><td>実機で狙うのは困難</td></tr>
+    <tr><td>iteration の 31 bit 周回</td><td>層 1 (初期値を境界に置く)</td><td>実機では 2^31 回まわす必要があり<b>事実上不可能</b></td></tr>
+    <tr><td>signal 予算の超過・範囲外 signal</td><td>層 0 + 層 2 の <code>strict-budget</code></td><td>実機では「全部ゼロで timeout」。emulator では<b>即死 + 原因表示</b></td></tr>
+    <tr><td>bit 詰めの溢れ (PR #12 の形)</td><td>層 0</td><td>実機では misroute か hang。ホストで<b>秒で</b>検出</td></tr>
+    <tr><td>幾何の退化 (空 part、1 トークン part。PR #2 の形)</td><td>層 0</td><td>同じ</td></tr>
+    <tr><td>ordered カーネルが順序なし網で壊れること</td><td>層 2 の <code>srd</code> モード</td><td><b>「なぜ別実装が必要か」を実証できる</b></td></tr>
+  </table>
+
+  <h3>捕まえられないもの (対象外と宣言する)</h3>
+
+  <table>
+    <tr><th>バグの種類</th><th>理由</th></tr>
+    <tr><td>WQE の詰め方、doorbell の集約、送信キュー満杯時の挙動、ハードウェアカウンタの 2^31 周回</td><td>EFA-GDA の device 経路を踏まない。案 B でのみ届くが、そこは NCCL / AWS の責務</td></tr>
+    <tr><td><code>PeerMappingOverride</code> 下の MMIO 書き込み順序、PCIe の relaxed ordering、GDRCopy の flush</td><td>ハードウェアのメモリモデルそのもの</td></tr>
+    <tr><td>NIC の DMA から GPU の L2 への可視化タイミングに依存する fence 抜け</td><td>層 2 でも別 GPU からの store なので<b>時々</b>出るが、実機の DMA のタイミング分布とは違う</td></tr>
+    <tr><td>実 SRD の multipath / 再送に起因する遅延分布依存の問題 (timeout 値の較正を含む)</td><td>emulator の遅延はモデルにすぎない</td></tr>
+    <tr><td>性能・帯域・レイテンシの一切</td><td><b>最初に宣言する</b>。PR #8 / #9 の根拠には決してならない</td></tr>
+  </table>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>既存物では代替できない理由</h2>
+  <p class="lead">「もう誰かが作っているのでは」という疑いは、先に潰しておく価値があります。候補を 5 つ検討しました。</p>
+
+  <table>
+    <tr><th>候補</th><th>判定</th><th>理由</th></tr>
+    <tr><td>libfabric の <code>tcp</code> / <code>shm</code> / <code>sockets</code> provider</td><td class="no">代替にならない</td><td>これらは libfabric の API 契約を素直に満たすので、<b>順序を守る</b>。SRD の乱れを再現するどころか隠蔽する。partial な可視性を指定して注入することもできない</td></tr>
+    <tr><td>SoftRoCE (rxe)</td><td class="no">代替にならない</td><td>RoCE の verbs 意味論のテストには有用だが、EFA の記述子でも SRD でもなく、EFA のハードウェアカウンタでも signal 端点でもない</td></tr>
+    <tr><td>aws-ofi-nccl の <code>tests/functional/gin_*</code></td><td class="mid">併用する (層 3 相当)</td><td>GDAKI / EFA の GPU 経路を直接動かす <b>backend 適合性テスト</b>。DeepEP の状態機械も敵対的順序も対象外。ただし plugin の疎通確認に流用できる</td></tr>
+    <tr><td>nccl-tests の GIN device kernel (<code>alltoall_perf -R 2 -D 3</code>)</td><td class="mid">併用する (層 2 のスモーク)</td><td>plugin が正しく載ったかの確認には最適。DeepEP 固有の in-band header / part の prefix / 送信元共有カウンタ / token map は知らない</td></tr>
+    <tr><td><code>FI_HMEM</code> の CPU fallback</td><td class="no">無関係</td><td>「GPU メモリにどうアクセスするか」の問題であり、順序や weak signal の問題ではない</td></tr>
+  </table>
+
+  <p>結論として、<b>「順序を保証しない・weak な indexed signal だけ・ただし signal は自分の put の配置後」という SRD 形の契約を持ち、かつ配置順序をテスト側が支配できる transport は存在しません</b>。新しく作る正当性はここにあります。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>最初の PR とその次</h2>
+  <p class="lead">emulator 本体から始めてはいけません。信用を積む順序があります。</p>
+
+  <div class="steps">
+    <li><b>PR 1: 約束されているのに無いテストを実体化する。</b> <code>tests/cpp/test_qp_mapping.cpp</code> を追加します。<code>qp_mapping.cuh</code> のコメントが「このファイルで検証する」と明言しているのに存在しないので、<b>レビューの論点がほとんど発生しません</b>。内容は context 2..17、SM 1..最大、channel/SM 1..最大、notify QP の有無、part 1..4 を全列挙して、(a) <code>(qp, signal_id)</code> の一意性、(b) <code>signal_id &lt; gin_indexed_signals_cnt</code>、(c) 最悪 occupancy が <code>channels_per_context()</code> と一致すること、(d) <code>channels_per_context * num_parts &lt;= budget</code>、(e) 割り切れる構成で従来と同一の割り当てになること (後方互換の主張の検証)。<b>GPU も EFA も不要で CI に載ります</b>。これが「EFA 無しの検証」の実績第一号になります。</li>
+    <li><b>PR 2: header と幾何をホスト呼び出し可能にして、その不変条件テストを足す。</b> <code>pack_scaleout_header</code> / <code>unpack_scaleout_header</code> / <code>part_size_at</code> / <code>part_offset_at</code> / <code>num_sub_parts_at</code> を <code>__host__ __device__</code> の純関数に揃え (<code>qp_mapping.cuh</code> と同じ流儀に揃える、という説明が既存の設計思想に乗ります)、roundtrip・境界値・31 bit 周回をテストします。同時に <b>受理述語も純関数に括り出します</b>。これが層 1 の遷移関数になります。</li>
+    <li><b>PR 3: 既知バグの再現テスト。</b> PR #12 が指摘した bit 詰めの溢れを、層 0 のテストで再現してから修正を当てて緑にします。<b>emulator の信用は「未知のバグを見つけた」より先に「既知のバグを再現できた」で立ちます</b>。同じ形で PR #2 の「3 トークンを 4 part」も幾何のテストとして固定できます。</li>
+    <li><b>PR 4 以降: 層 1 のモデル。</b> DeepEP のリポジトリに置きます。プロトコル固有なので NCCL や aws-ofi-nccl に置くものではありません。送信元 2〜3、part 2、sub-part 2、iteration 2 程度に境界を切れば、到着イベントの順列は網羅探索できます。観測点が「header の可視性 × signal の数 × iteration の値」に射影できるので、実効的な状態数は小さく収まります。</li>
+    <li><b>層 2 の plugin は独立リポジトリから始める。</b> 理由は 2 つ。(a) RMA plugin の ABI は流動的です ―― NCCL のツリーには既に <code>rma_v13.h</code> / <code>rma_v14.h</code> / <code>rma_v15.h</code> が並んでいます。fork 本体に入れると版追従の負債を fork に押し付けます。(b) plugin 自体は DeepEP に依存しない汎用の NCCL テスト道具なので、実績が付いた後に nccl-tests か aws-ofi-nccl のテスト基盤への提案として持ち込む方が筋が通ります。DeepEP fork 側には <b>CI 連携スクリプトと再現シナリオだけ</b>を置きます。</li>
+  </div>
+
+  <div class="key">
+    <b>説得の順序</b><br>
+    今の fork では <b>open PR 全ての根拠が実機測定</b>です。そこへ「実機なしの検証」を持ち込むには、<b>まず既知の問題を実機なしで捕まえてみせる</b>のが最短です。PR 1 から 3 までは emulator という言葉を出す必要さえありません。それでいて、3 つが揃った時点で層 1 の土台は完成しています。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>着手前に潰す 3 点</h2>
+  <p class="lead">この回の判定は公開ソースの読解に基づくもので、実機で動かして確認したものではありません。実装に入る前に、次の 3 つを実験で白黒つけてください。どれも 1〜2 日で決まります。</p>
+
+  <table>
+    <tr><th>#</th><th>確認すること</th><th>方法</th><th>駄目だった場合</th></tr>
+    <tr><td>1</td><td>単一ホストで <b>rail team を 2 以上にできるか</b>。<code>computeLsaSize</code> の <code>p2pCrossClique &amp;&amp; nvlDomainSize == nRanks</code> の分岐を回避できるか</td><td>2〜3 GPU のマシンで <code>NCCL_HOSTID</code> を分けて起動し、<code>NCCL_DEBUG=INFO</code> で LSA / rail のサイズを確認。<code>NCCL_LSA_TEAM_SIZE</code> の効きも見る</td><td>層 2 は多ノード (EFA でなくてよい ―― TCP の 2 台でよい) が必要になる。層 0 / 層 1 の価値は変わらない</td></tr>
+    <tr><td>2</td><td>proxy 経路で <b>plugin が実際に <code>iput</code> / <code>iputSignal</code> を受け取るか</b>。DeepEP の unordered カーネルが出す signal 付き put が plugin まで降りてくるか</td><td>何もしない (呼ばれたらログを出すだけの) パススルー RMA plugin を作り、<code>NCCL_RMA_PLUGIN</code> で読ませて <code>test_ep.py</code> を単一ノード + fake node で回し、ログを見る</td><td>順序の支配ができないので案 A は不成立。層 1 中心に切り替える</td></tr>
+    <tr><td>3</td><td><b><code>regMrSym</code> を RDMA NIC 無しで実装できるか</b>。NCCL が渡してくるバッファが cuMem VMM 由来か、共有可能なハンドルを取り出せるか</td><td>パススルー plugin の <code>regMrSym</code> で <code>cuMemRetainAllocationHandle</code> / <code>cuMemExportToShareableHandle</code> を試し、成功するか確認</td><td>ホストのステージングバッファ経由 (device → host → 相手 device) に落とす。忠実度は下がるが順序の支配は保てる</td></tr>
+  </table>
+
+  <p>3 つのうち 1 つでも駄目でも、<b>層 0 と層 1 の価値は変わりません</b>。そして層 0 と層 1 だけで、第 4 回で取り出した I2・I3・31 bit 周回・予算の算術・bit 詰めという <b>「実機で最も診断しづらい区画」はカバーできます</b>。だからこの計画は、最悪の分岐でも無駄になりません。</p>
+
+  <h3>やめるべき唯一のシナリオ</h3>
+
+  <p>「WQE から MMIO からドライバまで含めて EFA なしで保証したい」という目標なら、<b>案 B でも不十分</b>です。その領域は実 EFA のテストを残すべきで、そこを emulator で埋めようとすると <b>偽の安心を製造します</b>。逆に目標を「weak bundled-signal 契約の下でのプロトコル検証」に限定すれば、この計画には十分な価値があります。<b>目標の書き換えを受け入れられるかが、着手の判断基準です</b>。</p>
+
+  <div class="nav">
+    <a href="./deepep-efa-06-status.html">← 06 現在地</a>
+    <a href="./deepep-efa-index.html">シリーズ目次へ →</a>
+  </div>
+</section>
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

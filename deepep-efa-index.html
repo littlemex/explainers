@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と AWS EFA — 順序を仮定しない all-to-all シリーズ</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:64px 24px 52px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:34px;letter-spacing:.03em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:960px;margin:0 auto;padding:36px 20px 80px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 24px}
+  .summary{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 26px;margin:0 0 30px;
+    box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  .summary h2{margin:0 0 10px;font-size:19px;color:var(--g1);border-left:6px solid var(--g3);padding-left:12px}
+  .summary p{margin:10px 0;font-size:15.5px}
+  .summary b{color:var(--g1)}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:#0d2b20}
+  table{width:100%;border-collapse:collapse;margin:14px 0 4px;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 24px 20px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;
+    box-shadow:0 2px 14px rgba(15,81,50,.05);transition:.18s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 26px rgba(15,81,50,.14);border-color:var(--g3)}
+  .card .cat{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;
+    padding:2px 10px;font-size:12.5px;font-weight:700;align-self:flex-start;margin-bottom:12px}
+  .card h2{margin:0 0 8px;font-size:20px;color:var(--g1);line-height:1.4}
+  .card p{margin:0 0 16px;font-size:14.5px;color:var(--sub);flex:1}
+  .card .meta{font-size:12.5px;color:#9aa;display:flex;justify-content:space-between;align-items:center}
+  .card .go{color:var(--g2);font-weight:700}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 22px;color:var(--g2);text-decoration:none;font-size:14px}
+  .note{font-size:14px;color:var(--sub);margin:22px 0 0;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DEEPEP と AWS EFA</p>
+  <h1>順序を仮定しない all-to-all</h1>
+  <p>MoE の通信ライブラリを、順序保証のないネットワークの上で正しく動かすとはどういうことか</p>
+</header>
+<main>
+  <a class="back" href="./index.html">← explainers トップへ戻る</a>
+
+  <p class="intro">DeepEP は MoE の dispatch と combine を GPU カーネルから直接 NIC を叩いて実行する通信ライブラリです。そのやり方は速い代わりに、NIC の性質がアルゴリズムの前提条件になります。AWS の EFA は順序を保証しない配送 (SRD) を使うので、既存のカーネルが立っている仮定が折れます。このシリーズは <a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a> が何をどう書き替えたのかを一次ソースから読み解き、最後に「EFA インスタンスなしでその正しさを検証できるか」を判定します。</p>
+
+  <div class="summary">
+    <h2>このシリーズの結論を先に</h2>
+    <p>EFA 対応の中身は <b>1 つの問いへの回答</b>です。「順序が保証されないなら、受信側はどうやって到着を知るのか」。upstream は<b>末尾ポインタ 1 つで n 個のスロットの到着を代表させる</b>圧縮を使っていて、その圧縮は順序保証に立っています。EFA では成立しません。</p>
+    <p>AWS fork の答えは <b>「位置は固定し、回数だけを送る」</b>です。受信スロット列をコンパイル時に <code>part</code> へ分割し、データの中に <b>in-band header</b> (書き込み済みフラグ・iteration・トークン数・後続あり) を埋め、part 全体を 1 回の put で送って <b>番号つき weak signal</b> を束ねます。受信側は <b>signal の到着数 ≥ header が見えている送信元の数</b> で「完全に着地した」と判定します。</p>
+    <table>
+      <tr><th>問い</th><th>upstream の答え</th><th>EFA での答え</th></tr>
+      <tr><td>どこまで有効か</td><td>末尾ポインタという<b>値</b>を遠隔アトミック加算で送る</td><td>位置を固定し、in-band header の <b>count</b> で運ぶ</td></tr>
+      <tr><td>もう届いたか</td><td>末尾より手前は届いていると<b>仮定する</b></td><td>weak signal の<b>到着数を数える</b></td></tr>
+      <tr><td>必要な signal</td><td>VA signal + strong 順序</td><td><b>番号つき weak signal だけ</b></td></tr>
+    </table>
+    <p>この判定が正しいのは <b>C ⊆ H</b> (signal が届いたものは header も見えている) という包含関係のおかげで、包含関係は <b>3 つの不変条件</b>に依存します。I1 = weak signal 契約、I2 = signal を先に acquire で読む、I3 = iteration の基準値が正確。<b>fork のコードは 3 つを満たしていますが、どこにも明記されていません</b>。</p>
+    <p>そして emulator は <b>作れます</b>。NCCL の <b>RMA plugin は完全にホスト側だけの API</b> で、CPU proxy 経路のデータ配置と signal 更新の両方がそこを通るからです。ただし目標は「EFA を再現する」ではなく <b>「EFA が与える契約の下でプロトコルを詰める」</b>に書き換える必要があります。WQE や MMIO やハードウェアカウンタは実機に残します。</p>
+  </div>
+
+  <div class="summary">
+    <h2>読み方</h2>
+    <p><b>ネットワークの実装に興味があるなら</b>、<a href="./deepep-efa-02-who-writes-the-wqe.html">02</a> (ibverbs / libfabric / NVSHMEM / NCCL GIN / EFA-GDA の地図) から <a href="./deepep-efa-03-srd-ordering.html">03</a> (SRD が保証しないこと) へ。03 と <a href="./deepep-efa-04-unordered-protocol.html">04</a> にはブラウザで動くデモがあります。</p>
+    <p><b>貢献したいなら</b>、<a href="./deepep-efa-06-status.html">06</a> (現在地と open PR 6 本) と <a href="./deepep-efa-07-emulator.html">07</a> (emulator の設計と最初の PR)。07 §8 が具体的な着手順で、§9 が着手前に潰すべき 3 点です。</p>
+    <p><b>設計の要点だけ知りたいなら</b>、<a href="./deepep-efa-04-unordered-protocol.html#s5">04 §5 (なぜ正しいのか)</a> と <a href="./deepep-efa-04-unordered-protocol.html#s6">04 §6 (3 つの不変条件)</a> の 2 節です。</p>
+  </div>
+
+  <div class="summary">
+    <h2>症状から引く</h2>
+    <table>
+      <tr><th>症状 / 疑問</th><th>見るところ</th></tr>
+      <tr><td>ノード間 dispatch が「受信カウントが全部ゼロ」でタイムアウトする</td><td><a href="./deepep-efa-05-budget.html#s5">05 §5 (予算の数え間違いは静かに hang する)</a></td></tr>
+      <tr><td>combine が来ない相手を待って固まる / 出力が別 rank へ行く</td><td><a href="./deepep-efa-04-unordered-protocol.html#s8">04 §8 (token map の bit 詰め)</a></td></tr>
+      <tr><td>単一ノードでは動くのにノード間で壊れる</td><td><a href="./deepep-efa-03-srd-ordering.html#s5">03 §5 (どこで折れるか)</a></td></tr>
+      <tr><td>rank 数を増やしたら初期化が assert で止まる</td><td><a href="./deepep-efa-05-budget.html#s7">05 §7 (176 rank の壁)</a></td></tr>
+      <tr><td><code>EP_HYBRID_KERNEL</code> は何を切り替えるのか</td><td><a href="./deepep-efa-06-status.html#s1">06 §1 (fork の差分の内訳)</a></td></tr>
+      <tr><td>なぜ V1 は EFA で動かないのか</td><td><a href="./deepep-efa-02-who-writes-the-wqe.html#s3">02 §3 (mlx5 の構造体を直接書いていた)</a></td></tr>
+      <tr><td>libfabric はどこで使われているのか</td><td><a href="./deepep-efa-02-who-writes-the-wqe.html#s7">02 §7 (制御経路だけ)</a></td></tr>
+      <tr><td>実機なしで何を検証できて何ができないのか</td><td><a href="./deepep-efa-07-emulator.html#s6">07 §6 (fidelity のギャップ表)</a></td></tr>
+    </table>
+  </div>
+
+  <div class="grid">
+
+    <a class="card" href="./deepep-efa-01-what-is-deepep.html">
+      <span class="cat">01 ・ 全体像</span>
+      <h2>DeepEP とは何をするライブラリか</h2>
+      <p>MoE の dispatch と combine がなぜ普通の all-to-all では書けないのか。そして「通信ライブラリなのに GPU カーネルが NIC を直接叩く」という設計が、NIC の性質をアルゴリズムの前提条件に変えてしまう構図。scale-up / scale-out / rail / hybrid の語もここで固める。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-02-who-writes-the-wqe.html">
+      <span class="cat">02 ・ 層の地図</span>
+      <h2>誰が WQE を書いているのか</h2>
+      <p>ibverbs と libfabric は上下関係ではなく並列する 2 つの入口で、GPU 起動通信ではどちらもデータ経路にいない。V1 が mlx5 の WQE 構造体をカーネルから直接書いていた事実を見て、V2 の NCCL GIN が何を外に出したのかを確定させる。plugin ABI が 2 系統ある話も。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-03-srd-ordering.html">
+      <span class="cat">03 ・ 制約 ・ デモ</span>
+      <h2>SRD は何を保証しないのか</h2>
+      <p>順序が乱れる粒度は 2 つ (メッセージ間と、1 メッセージの中) で、守られる約束は 1 つだけ。EFA-GDA の制約表と、upstream の末尾ポインタ方式が折れる 3 か所。<b>3 種類の受信判定を同じ網の上で走らせるデモ</b>つきで、「header だけでは足りない」ことを確かめる。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-04-unordered-protocol.html">
+      <span class="cat">04 ・ 設計の本体 ・ デモ</span>
+      <h2>順序を仮定しないプロトコル</h2>
+      <p>part への固定分割、in-band header の 64 bit 配置、送信元をまたいで共有される数え上げ signal。判定式が正しい理由を集合の包含関係で示し、それが立っている <b>3 つの不変条件</b>を取り出す。<b>読む順序を入れ替えると壊れることを確かめるデモ</b>つき。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-05-budget.html">
+      <span class="cat">05 ・ 予算 ・ 計算機</span>
+      <h2>signal という予算が設計を決める</h2>
+      <p>signal 1 本が queue pair 1 つを食う理由。context 数と signal 本数の反比例が、part 数・channel 数・そして 176 rank というスケール上限まで決めてしまう。予算の数え間違いが「静かに hang する」と<b>コード自身が書いている</b>箇所も読む。<b>予算計算機</b>つき。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-06-status.html">
+      <span class="cat">06 ・ 現在地</span>
+      <h2>いま何がどこまで進んでいるのか</h2>
+      <p>fork の 11 commit ・ +3332 行の内訳、マージ済みの修正が語る「実際に踏んだ地雷」、open PR 6 本の論点 (安全性・スケール上限・submission rate)。そして<b>全ての PR の根拠が 2 ノード実機測定である</b>という現状と、そこに空いている 3 つの穴。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-07-emulator.html">
+      <span class="cat">07 ・ 判定と設計</span>
+      <h2>EFA なしで検証する emulator は作れるのか</h2>
+      <p>3 案の判定と、それを決めた 5 つの API 事実。推奨は 3 層構成 (ホスト不変条件 / プロトコルモデル / 敵対的 RMA plugin) で、実機に残すのは WQE と MMIO と性能だけ。捕まえられるものと捕まえられないものの表、最初の PR の順序、着手前に潰す 3 点まで。</p>
+      <div class="meta"><span>2026-09-04</span><span class="go">開く →</span></div>
+    </a>
+
+  </div>
+
+  <p class="note">記述の範囲について: 本シリーズの技術的記述はすべて公開ソースで確認できる範囲に限っています ―― <a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">deepseek-ai/DeepEP</a>、<a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a>、<a href="https://github.com/NVIDIA/nccl" target="_blank" rel="noopener">NVIDIA/nccl</a>、<a href="https://github.com/aws/aws-ofi-nccl" target="_blank" rel="noopener">aws/aws-ofi-nccl</a>、<a href="https://github.com/awslabs/awsome-distributed-ai" target="_blank" rel="noopener">awslabs/awsome-distributed-ai</a>。<b>本シリーズには筆者の実機測定は含まれません</b>。引用した性能数値はすべて公開されている PR 本文の記述で、出典を本文に明記しています。第 7 回の emulator の判定は公開 API の読解と、同じ事実を独立に 2 つのモデルへ渡して評価させた結果が収束した部分であり、<b>実装して動かした結論ではありません</b> (§9 に実験で潰すべき項目を挙げています)。時点は 2026-09-04 です。背景として <a href="./ffn-moe-explainer.html">FFN から MoE へ</a> が MoE 側の、<a href="./09-collectives.html">集団通信の回</a> が通信側の入口になります。</p>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

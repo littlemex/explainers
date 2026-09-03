@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 02: 誰が WQE を書いているのか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l1:#0f5132; --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 02</p>
+  <h1>誰が WQE を書いているのか</h1>
+  <p>ibverbs、libfabric、NVSHMEM、NCCL GIN、EFA-GDA。層の名前ではなく「記述子を書く主体」で整理する</p>
+</header>
+<main>
+<a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回で解く混乱</h2>
+  <p class="lead">RDMA 周辺の用語は層が入り組んでいて、「ibverbs と libfabric はどちらが下か」「NVSHMEM と NCCL は競合か」といった問いに素直な答えがありません。しかし DeepEP の EFA 対応を理解するには、1 つの問いだけ立てれば足ります。</p>
+
+  <p><b>NIC に渡す記述子 (Work Queue Entry, WQE) を、最終的に誰がどの形式で書いているのか。</b> この問いで串刺しにすると、層の関係が一列に並びます。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    ibverbs と libfabric はどちらも <b>NIC を操作するためのユーザ空間 API</b> で、上下関係ではなく「同じ NIC を違う抽象で触る 2 つの入口」です。ただし GPU 起動通信では<b>データ経路でどちらも使われません</b>。GPU が WQE を直接書くからです。だから「どちらの API か」より「<b>WQE の形式を誰が知っているか</b>」が本質になります。DeepEP V1 は <b>カーネルが Mellanox の WQE 構造体を直接書いていました</b>。V2 はそれを NCCL GIN のバックエンドという層に押し出し、EFA では <b>EFA-GDA バックエンドが EFA の WQE 形式を担当する</b>。libfabric はその<b>制御経路 (接続・メモリ登録) だけ</b>に残ります。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 制御経路とデータ経路を分ける</a>
+    <a href="#s2">2. ibverbs と libfabric の関係</a>
+    <a href="#s3">3. DeepEP V1 は mlx5 の構造体を直接書いていた</a>
+    <a href="#s4">4. NCCL GIN という層</a>
+    <a href="#s5">5. GIN の 4 つのバックエンド</a>
+    <a href="#s6">6. plugin の ABI は 2 系統ある</a>
+    <a href="#s7">7. EFA-GDA が libfabric をどう使うか</a>
+    <a href="#s8">8. 一枚の地図</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>制御経路とデータ経路を分ける</h2>
+  <p class="lead">RDMA の話が混乱するのは、接続を作る話と 1 バイト送る話を同じ language で語るからです。この 2 つは実装上まったく別の場所にあります。</p>
+
+  <table>
+    <tr><th></th><th>制御経路 (control plane)</th><th>データ経路 (data plane)</th></tr>
+    <tr><td>やること</td><td>デバイスを開く、queue pair を作る、メモリを登録する (鍵をもらう)、相手のアドレスを交換する</td><td>WQE を送信キューに書き、doorbell を叩き、完了を観測する</td></tr>
+    <tr><td>頻度</td><td>初期化時に数回</td><td>1 通信ごと、毎マイクロ秒</td></tr>
+    <tr><td>実行主体</td><td>常に CPU</td><td>CPU (proxy) または <b>GPU (GIN)</b></td></tr>
+    <tr><td>使う API</td><td>ibverbs / libfabric / ドライバ拡張</td><td>キューのメモリを直接書く (API を通らない)</td></tr>
+  </table>
+
+  <p>データ経路が「API を通らない」というのがポイントです。RDMA の高速性はまさに、送信のたびにカーネルもライブラリ呼び出しも経由せず、ユーザ空間からマップされたキューに直接記述子を書くことで得られています (OS bypass)。ライブラリ (ibverbs の <code>ibv_post_send</code> など) は、その「キューに書く」処理をインライン関数として提供しているにすぎません。</p>
+
+  <p>したがって GPU にその処理をさせたければ、<b>キューのメモリと doorbell レジスタを GPU の番地空間から見えるようにして、GPU 側のコードに同じバイト列を書かせればよい</b>。これが GPU-Initiated Networking の全てです。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>ibverbs と libfabric の関係</h2>
+  <p class="lead">よくある誤解は「libfabric は ibverbs のラッパー」です。実際は並列する 2 つの抽象で、EFA では両方が同じドライバに向かって別の顔を提供しています。</p>
+
+  <table>
+    <tr><th></th><th>ibverbs (rdma-core / verbs)</th><th>libfabric (OFI)</th></tr>
+    <tr><td>抽象の単位</td><td>Queue Pair、Memory Region、Completion Queue。InfiniBand のハードウェアモデルをほぼそのまま写した API</td><td>Endpoint、Domain、Address Vector。「能力 (capability) を要求して、満たす provider を選ぶ」という形</td></tr>
+    <tr><td>EFA での立ち位置</td><td><code>efa</code> provider がユーザ空間ドライバとして存在し、<code>efadv_*</code> という EFA 固有拡張がある</td><td><code>fi_efa</code> provider。NCCL 用プラグイン (aws-ofi-nccl) が使うのはこちら</td></tr>
+    <tr><td>QP の種類</td><td>EFA は <b>SRD と UD</b> のみ。<b>RC (Reliable Connected) が無い</b></td><td>能力の要求として表現される (<code>FI_RMA</code>、<code>FI_HMEM</code> など)</td></tr>
+  </table>
+
+  <p>ここに DeepEP V1 が EFA で動かない理由の半分があります。<b>EFA には RC queue pair がありません。</b> InfiniBand で当たり前に使う「順序保証つき信頼配送のコネクション」という部品が無く、代わりに <b>SRD (Scalable Reliable Datagram)</b> があります。SRD は再送してくれる (信頼配送) が、<b>順序は保証しません</b>。この 1 点が第 3 回のテーマです。</p>
+
+  <p>また EFA は Subnet Management のための umad インタフェースを持たないため、<code>ibstat</code> のような InfiniBand 前提のツールから見えません。DeepEP fork がリンク速度の検出を <code>ibstat</code> から <code>/sys/class/infiniband/&lt;dev&gt;/ports/*/rate</code> の sysfs 読みに変えたのはこの理由で、コメントにも「<code>ibstat</code> は umad を持たない provider (EFA など) を見られない」と明記されています (<code>deep_ep/utils/envs.py</code>)。この種の「InfiniBand を前提にした周辺コードの洗い出し」も EFA 対応の実務の一部です。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>DeepEP V1 は mlx5 の構造体を直接書いていた</h2>
+  <p class="lead">「EFA では動かない」を抽象論で語る必要はありません。V1 のソースを見ればそのまま書いてあります。</p>
+
+  <p>V1 のノード間通信は NVSHMEM の IBGDA (InfiniBand GPU Direct Async) 経路を使います。DeepEP はその device 側コードを自分のカーネルに取り込んでいて、ファイル冒頭に NVSHMEM のどのヘッダから写したかまで書かれています (<code>csrc/kernels/legacy/ibgda_device.cuh</code>)。中身を見ると、こうなっています。</p>
+
+  <pre><code>typedef struct mlx5_wqe_ctrl_seg  __attribute__((__aligned__(8))) ibgda_ctrl_seg_t;
+...
+nvshmemi_ibgda_device_qp_t* ibgda_get_rc(int pe, int id);
+...
+struct mlx5_wqe_raddr_seg   raddr_seg;
+struct mlx5_wqe_inl_data_seg inl_seg;
+...
+__be32* dbrec_ptr = qp-&gt;tx_wq.dbrec;   // doorbell record を GPU から書く</code></pre>
+
+  <p><code>mlx5_wqe_ctrl_seg</code>、<code>mlx5_wqe_raddr_seg</code> は <b>Mellanox / NVIDIA ConnectX のハードウェア記述子のレイアウト</b>です。<code>ibgda_get_rc</code> は RC queue pair を取ってくる関数です。つまり V1 の GPU カーネルは、<b>ConnectX の WQE 形式を知っており、RC QP の存在を前提にしている</b>。EFA には RC が無く、WQE 形式も違うので、<b>これは API の互換性の問題ではなく、カーネルのソースコードがハードウェアに直結しているという問題</b>です。移植ではなく書き換えになります。</p>
+
+  <div class="warn">
+    <b>ここが分岐点</b><br>
+    V1 を EFA に対応させるには、NVSHMEM に EFA transport を足し、さらに IBGDA 相当の GPU 起動経路を EFA 向けに用意し、そのうえで DeepEP のカーネルが書く WQE 形式を切り替えられるようにする必要があります。V2 が NCCL GIN に移ったことで、この <b>「WQE 形式を知っている場所」がカーネルの外に出た</b>。だから EFA 対応が現実的な作業量になりました。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>NCCL GIN という層</h2>
+  <p class="lead">NCCL 2.31 以降には、集団通信 API とは別に「device 側から片側通信を発行する API」があります。これが GIN です。</p>
+
+  <p>DeepEP V2 のカーネルが書くのはこういうコードです (実際の <code>hybrid_dispatch_unordered.cuh</code> より、引数を簡略化)。</p>
+
+  <pre><code>gin.put&lt;ncclTeamTagRail&gt;(dst_ptr, src_ptr, num_bytes, dst_rank,
+                        ncclGin_SignalAdd{signal_id, 1ull});
+...
+const uint64_t landed = gin.readSignal(signal_id);   // 既定で acquire ロード</code></pre>
+
+  <p>ここには mlx5 も EFA も出てきません。出てくるのは <b>put</b> (相手のメモリに置く) と <b>signal</b> (相手側のカウンタを増やす) という 2 つの抽象だけです。そして signal には強さの区別があります。NCCL の device ヘッダ (<code>src/include/nccl_device/gin.h</code>) に定義されている型名がそのまま意味を語っています。</p>
+
+  <table>
+    <tr><th>型</th><th>保証</th></tr>
+    <tr><td><code>ncclGin_StrongSignalInc</code> / <code>StrongSignalAdd</code></td><td>この signal が見えたなら、<b>先行する全ての put が完了している</b></td></tr>
+    <tr><td><code>ncclGin_WeakSignalInc</code> / <code>WeakSignalAdd</code></td><td><b>束ねられた その put だけ</b>が完了している</td></tr>
+    <tr><td><code>ncclGin_StrongVASignalInc</code> など (VA 系)</td><td>signal の置き場が「登録済みメモリ上の任意アドレス」。番号ではなくアドレスで指定する</td></tr>
+    <tr><td><code>ncclGin_SignalInc</code> (無印)</td><td>非推奨。Strong / Weak を明示せよ、とヘッダのコメントにある</td></tr>
+  </table>
+
+  <p>この <b>strong / weak</b> と <b>indexed / VA</b> という 2 軸が、以降の全ての議論の座標になります。アプリケーションは初期化時に「自分は strong signal を要求する」「VA signal を要求する」と宣言し (<code>ncclDevCommRequirements</code> の <code>ginStrongSignalsRequired</code> / <code>ginVaSignalsRequired</code>)、バックエンドがそれを満たせなければ初期化が失敗します。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>GIN の 4 つのバックエンド</h2>
+  <p class="lead">put と signal という抽象を、実際のハードウェアに落とす実装が複数あります。NCCL の enum にそのまま列挙されています。</p>
+
+  <p><code>src/include/nccl_device/net_device.h</code> の <code>ncclNetDeviceType</code>:</p>
+
+  <table>
+    <tr><th>値</th><th>名前</th><th>誰が WQE を書くか</th><th>備考</th></tr>
+    <tr><td>2</td><td><code>GIN_PROXY</code></td><td><b>CPU</b>。GPU は記述子を ring に積むだけ</td><td>NCCL 内蔵の汎用実装。IB でも EFA でも使える</td></tr>
+    <tr><td>3</td><td><code>GIN_GDAKI</code></td><td><b>GPU</b>。Mellanox の WQE 形式</td><td>IBGDA 系。ConnectX 前提</td></tr>
+    <tr><td>4</td><td><code>GIN_GPI</code></td><td>GPU</td><td>別系統の GPU 起動実装</td></tr>
+    <tr><td>5</td><td><code>GIN_EFA_GDA</code></td><td><b>GPU</b>。<b>EFA の WQE 形式</b></td><td>EFA 専用。実装は NCCL のツリー内にある</td></tr>
+  </table>
+
+  <p>ここで注意すべきなのは、<b>EFA-GDA の device 側実装は aws-ofi-nccl ではなく NCCL 本体に入っている</b>ことです。<code>src/include/nccl_device/gin/efa_gda/gin_efa_gda.h</code> がその本体 (966 行) で、EFA のハードウェア記述子を組む部分は <code>src/transport/net_efa_gda/efa-dp-direct/</code> にある薄い層 (<code>efa_cuda_dp_impl.cuh</code>、<code>efa_io_defs.h</code>) が担います。ファイル冒頭の著作権表示は Amazon で、SPDX は Apache-2.0 です。</p>
+
+  <p>この配置は後で重要になります。<b>これらは device ヘッダとしてインストール対象に含まれる</b>ので (<code>efa-dp-direct/CMakeLists.txt</code> がヘッダを <code>${CMAKE_BINARY_DIR}/include/nccl_device/transport/net_efa_gda/efa-dp-direct/include/</code> にコピーし、それが <code>install(DIRECTORY ...)</code> で入る)、<b>EFA を持たないマシンでも、DeepEP の JIT カーネルには EFA-GDA の経路がコンパイルされて入っています</b>。第 7 回の emulator 設計でこの事実を使います。</p>
+
+  <p>では aws-ofi-nccl は何をしているのか。<b>制御経路とホスト側の管理</b>です。libfabric で EFA のドメインとエンドポイントを開き、メモリを登録し、GPU が使うキューを作って、その番地を device handle に詰めて NCCL に返します。<code>src/rdma/gin/nccl_ofi_gin_gdaki.cpp</code> がその実装で、<code>dev_handle_out-&gt;netDeviceType = NCCL_NET_DEVICE_GIN_EFA_GDA</code> と <code>needsProxyProgress = 0</code> (CPU の進行処理は不要) を設定しています。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>plugin の ABI は 2 系統ある</h2>
+  <p class="lead">「NCCL のプラグインを書けばよい」と言うとき、どの ABI を指すかで作業量が桁違いに変わります。ここが後の emulator 設計の分岐点です。</p>
+
+  <table>
+    <tr><th></th><th>GIN plugin (<code>ncclGinPlugin_v14</code>)</th><th>RMA plugin (<code>ncclRmaPlugin_v14</code>)</th></tr>
+    <tr><td>ヘッダ</td><td><code>src/include/plugin/gin/gin_v14.h</code></td><td><code>src/include/plugin/rma/rma_v14.h</code></td></tr>
+    <tr><td>選択する環境変数</td><td><code>NCCL_GIN_PLUGIN</code></td><td><code>NCCL_RMA_PLUGIN</code></td></tr>
+    <tr><td>device 側コード</td><td><b>plugin が持ち込む</b> (<code>createContext</code> が GPU メモリに device handle を作る)</td><td><b>不要</b>。NCCL 内蔵の proxy device context を使う</td></tr>
+    <tr><td>データ経路の関数</td><td>無し (device 側で完結)</td><td><code>iput</code> / <code>iputSignal(..., bool isStrongSignal, ...)</code> / <code>iget</code> / <code>iflush</code> / <code>test</code> / <code>rmaProgress</code></td></tr>
+    <tr><td>能力の申告</td><td><code>getGinProperties</code> で <code>supportsStrongSignals</code> / <code>supportsVASignals</code> を返せる</td><td><b>その関数が無い</b></td></tr>
+  </table>
+
+  <p>この表の最後の行は、公開ソースを読んで確認できる重要な非対称です。さらに 2 つ、実装を決める事実があります。</p>
+
+  <div class="steps">
+    <li><b>GIN plugin が「自分は proxy 型だ」と名乗ると無視されます。</b> <code>src/plugin/gin.cc</code> に「external proxy plugin をスキップし、NCCL の GIN proxy を RMA バックエンド越しに使う」という分岐が実際に入っています。つまり proxy 経路を差し替えたいなら RMA plugin を書く以外にありません。</li>
+    <li><b>proxy バックエンドの能力申告は固定です。</b> <code>src/gin/gin_host_proxy.cc</code> が <code>supportsStrongSignals = true; supportsVASignals = true;</code> をそのまま書いています。RMA plugin を差し替えても、この 2 つを false に見せることはできません。</li>
+  </div>
+
+  <p>逆に、proxy 経路で <b>signal がどう実現されているか</b>も同じファイルから読み取れます。NCCL は indexed signal の実体を GPU メモリ上の <code>uint64</code> 配列として確保し (<code>nSignals * nContexts</code> 個)、それを plugin の <code>regMrSym</code> で登録し、device が signal 付き put を出したときに <code>signalOff = (signalId + contextId * nSignalsPerContext) * sizeof(uint64_t)</code> を計算して plugin の <code>iputSignal</code> を呼びます。つまり <b>proxy 経路では signal は「登録済みバッファへの通常の RMA 加算」であり、それを実行するのは plugin</b>です。第 7 回でこの事実が emulator の設計を決めます。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>EFA-GDA が libfabric をどう使うか</h2>
+  <p class="lead">「GPU が直接 NIC を叩くなら libfabric は不要ではないか」という疑問への答えです。制御経路にだけ残ります。</p>
+
+  <p>aws-ofi-nccl の EFA-GDA 実装は、libfabric で <b>efa-direct</b> provider のドメインを開き、そのドメインに対して <code>fi_open_ops(&amp;dom-&gt;fid, FI_EFA_GDA_OPS, ...)</code> を呼んで <b>GDA 専用の操作テーブルを取得</b>します (<code>src/rdma/gin/nccl_ofi_gin_gdaki.cpp</code>)。コード内のコメントは「libfabric 2.4 以降で proxy plugin は efa-direct fabric を選ぶ。各 rail のドメインが <code>FI_EFA_GDA_OPS</code> を公開する」と説明していて、<code>fi_open_ops</code> が失敗したときのエラーメッセージは「libfabric が古い、または proxy が efa-direct 以外の fabric を選んだ」となっています。</p>
+
+  <p>メモリ登録も libfabric 側です。GPU メモリは <code>FI_HMEM_CUDA</code> + <code>FI_MR_DMABUF</code> で登録され、EFA のドメインは <code>FI_MR_VIRT_ADDR</code> を要求するので、<b>WQE には絶対仮想アドレスが入ります</b>。だから device handle には各 peer の base VA と rkey の表が載っていて、カーネルは「オフセットを渡し、base VA を足して絶対アドレスを作る」という形になります (NCCL 側のミラー定義 <code>gin_efa_gda_dev.h</code> のコメントにその通り書かれています)。</p>
+
+  <div class="key">
+    <b>まとめ方</b><br>
+    EFA-GDA において libfabric は「<b>接続・登録・アドレス解決を行い、GPU に渡すキューの座標を教えてくれる存在</b>」です。1 回の put のためには呼ばれません。したがって「libfabric provider を差し替えれば順序の性質を変えられる」という発想は、GPU 起動経路には効きません。逆に <b>proxy 経路なら libfabric (あるいはそれを差し替えたもの) がデータ経路にいる</b>、という非対称も覚えておいてください。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>一枚の地図</h2>
+  <p class="lead">ここまでを 1 枚にします。太い線がデータ経路、細い線が制御経路です。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 880 470" role="img" aria-label="DeepEP V2 から NIC までの経路の地図">
+      <defs><marker id="a3" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+      <marker id="a3b" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 z" fill="#a06cd5"/></marker></defs>
+
+      <rect x="30" y="16" width="820" height="58" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="50" y="42" font-size="17" font-weight="700" fill="#0f5132">DeepEP V2 のカーネル (JIT)</text>
+      <text x="50" y="64" font-size="14" fill="#12211a">gin.put&lt;Rail&gt;(...) / ncclGin_SignalAdd{id,1} / gin.readSignal(id) ― バックエンド中立</text>
+
+      <path d="M440,78 L440,100" stroke="#4a5d54" stroke-width="3" marker-end="url(#a3)"/>
+
+      <rect x="30" y="104" width="820" height="50" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="50" y="128" font-size="16" font-weight="700" fill="#22548f">NCCL GIN device API (nccl_device/gin.h)</text>
+      <text x="50" y="147" font-size="13.5" fill="#12211a">strong / weak × indexed / VA の 4 種の signal を定義。バックエンドごとに実装が分岐</text>
+
+      <path d="M200,158 L200,186" stroke="#4a5d54" stroke-width="3" marker-end="url(#a3)"/>
+      <path d="M660,158 L660,186" stroke="#4a5d54" stroke-width="3" marker-end="url(#a3)"/>
+
+      <rect x="30" y="190" width="330" height="150" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="48" y="214" font-size="15.5" font-weight="700" fill="#b5401f">GIN_PROXY (type 2)</text>
+      <text x="48" y="236" font-size="13" fill="#12211a">device: 記述子を ring に積む (NCCL 内蔵)</text>
+      <text x="48" y="256" font-size="13" fill="#12211a">host: RMA plugin の iput / iputSignal</text>
+      <text x="48" y="276" font-size="13" fill="#12211a">signal = 登録バッファへの通常の加算</text>
+      <text x="48" y="300" font-size="13" fill="#b5401f">strong / VA は true 固定 (内蔵実装が申告)</text>
+      <text x="48" y="322" font-size="13" fill="#4a5d54">IB でも EFA でも動く汎用経路</text>
+
+      <rect x="500" y="190" width="350" height="150" rx="10" fill="#f2ecfb" stroke="#a06cd5" stroke-width="2"/>
+      <text x="518" y="214" font-size="15.5" font-weight="700" fill="#6b3fa0">GIN_EFA_GDA (type 5)</text>
+      <text x="518" y="236" font-size="13" fill="#12211a">device: EFA の WQE を書き doorbell を叩く</text>
+      <text x="518" y="256" font-size="13" fill="#12211a">実装は NCCL 内 (gin_efa_gda.h + efa-dp-direct)</text>
+      <text x="518" y="276" font-size="13" fill="#12211a">host: aws-ofi-nccl が queue を作り handle を渡す</text>
+      <text x="518" y="300" font-size="13" fill="#b5401f">strong = false / VA = false と申告</text>
+      <text x="518" y="322" font-size="13" fill="#4a5d54">signal は indexed のみ・端点あたり 512 本</text>
+
+      <path d="M675,344 L675,372" stroke="#a06cd5" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#a3b)"/>
+      <rect x="500" y="376" width="350" height="44" rx="9" fill="#fff" stroke="#a06cd5"/>
+      <text x="518" y="394" font-size="13.5" fill="#6b3fa0">制御経路のみ: libfabric efa-direct + fi_open_ops(FI_EFA_GDA_OPS)</text>
+      <text x="518" y="412" font-size="13" fill="#4a5d54">ドメイン / EP / MR (FI_HMEM_CUDA, FI_MR_VIRT_ADDR) / AV</text>
+
+      <path d="M195,344 L195,372" stroke="#4a5d54" stroke-width="3" marker-end="url(#a3)"/>
+      <rect x="30" y="376" width="330" height="44" rx="9" fill="#fff" stroke="#e07a5f"/>
+      <text x="48" y="402" font-size="13.5" fill="#b5401f">データ経路も libfabric を通る (差し替え可能な位置)</text>
+
+      <rect x="30" y="432" width="820" height="30" rx="8" fill="#e7f0fb" stroke="#3d7dca"/>
+      <text x="440" y="452" font-size="14.5" font-weight="700" fill="#22548f" text-anchor="middle">EFA デバイス (SRD: 信頼配送・順序保証なし)</text>
+    </svg>
+    <p class="cap">図 1: 同じカーネルソースが 2 つの経路に落ちる。左は CPU がデータ経路にいるので差し替えやすく、右は GPU が NIC 形式を知っているので高速だが差し替えにくい</p>
+  </div>
+
+  <p>この地図で押さえるべきは、<b>カーネルのソースは 1 つで、バックエンドが 2 つある</b>ことです。DeepEP のプロトコルは put と signal だけで書かれているので、どちらのバックエンドでも同じソースが走ります。したがって「プロトコルの正しさ」を検証するのに、必ずしも GPU 起動経路のバックエンドが必要とは限りません。この観察が第 7 回の出発点です。</p>
+
+  <p>そして次の回では、右下の括弧の中身 ―― <b>SRD が順序を保証しないとは具体的に何が起きることなのか</b> ―― に入ります。</p>
+
+  <div class="nav">
+    <a href="./deepep-efa-01-what-is-deepep.html">← 01 DeepEP とは何をするライブラリか</a>
+    <a href="./deepep-efa-03-srd-ordering.html">次: 03 SRD と順序 →</a>
+  </div>
+</section>
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

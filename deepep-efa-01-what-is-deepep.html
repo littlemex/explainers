@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 01: DeepEP とは何をするライブラリか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l1:#0f5132; --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 01</p>
+  <h1>DeepEP とは何をするライブラリか</h1>
+  <p>MoE の dispatch と combine、そして「通信ライブラリなのにカーネルが NIC を直接叩く」という構図</p>
+</header>
+<main>
+<a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の位置づけ</h2>
+  <p class="lead">シリーズ全体の目的は「AWS EFA 上で DeepEP を動かすために何を実装しているのか」を理解することです。ただしその前に、DeepEP がそもそも何をしていて、なぜ普通の集団通信ライブラリでは足りないのかを押さえる必要があります。</p>
+
+  <p>EFA 対応の中身は、結局のところ<b>「ネットワークが順序を保証しないなら、どうやって受信側は到着を知るのか」</b>という 1 点に収束します。その問いが立つ理由は DeepEP の設計そのものにあります。DeepEP は通信を CPU に委ねず、GPU のカーネルが自分で NIC に仕事を積みます。だから「NIC の性質」がカーネルのアルゴリズムに直接漏れてきます。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    DeepEP は MoE (Mixture-of-Experts) の <b>all-to-all を専用実装したライブラリ</b>です。扱うデータの形が「送信先ごとに量が違い、量が実行時に決まる」ので、既存の <code>AllToAll</code> API では表現できません。そして最大の特徴は、<b>通信を GPU カーネルの中から発行する</b>ことです。この設計が性能を出す代わりに、<b>NIC の順序保証や signal の種類といった低レベルの性質がアルゴリズムの前提条件になる</b>という代償を払っています。EFA 対応の全ての苦労はここから来ます。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. MoE の通信はなぜ特殊なのか</a>
+    <a href="#s2">2. dispatch と combine</a>
+    <a href="#s3">3. なぜ NCCL の AllToAll では足りないのか</a>
+    <a href="#s4">4. GPU が NIC を叩くという選択</a>
+    <a href="#s5">5. scale-up と scale-out、そして hybrid</a>
+    <a href="#s6">6. V1 と V2 ― 何が入れ替わったのか</a>
+    <a href="#s7">7. この先の読み方</a>
+  </div>
+
+  <p style="font-size:14px;color:var(--sub)">出典は <a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">deepseek-ai/DeepEP</a> と <a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a> の公開ソース、<a href="https://github.com/NVIDIA/nccl" target="_blank" rel="noopener">NVIDIA/nccl</a> の公開ソース、<a href="https://github.com/aws/aws-ofi-nccl" target="_blank" rel="noopener">aws/aws-ofi-nccl</a> の公開ソースとドキュメントです。数値や仕様に触れるときは、どのファイルの記述かを本文中に示します。</p>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>MoE の通信はなぜ特殊なのか</h2>
+  <p class="lead">MoE では、各トークンが「自分に必要な専門家 (expert)」を実行時に選びます。専門家は GPU 群に分散して置かれているので、トークンは自分が選んだ専門家がいる GPU まで移動しなければなりません。</p>
+
+  <p>密な Transformer の FFN なら、全トークンが同じ重みを通ります。通信は要りません。MoE では 1 トークンが top-k 個の専門家を選び、専門家は rank をまたいで分散しています。したがって「トークンを、選ばれた専門家のいる rank へ送る」通信が層ごとに 2 回発生します。行きが <b>dispatch</b>、帰りが <b>combine</b> です。</p>
+
+  <p>この通信が厄介なのは、<b>送信量が実行時にしか決まらない</b>ことです。ルーティングはゲートの出力なので、「rank 3 へ 812 トークン、rank 5 へ 47 トークン」といった偏りが毎ステップ変わります。しかも top-k なので 1 トークンが複数の宛先に複製されます。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 320" role="img" aria-label="MoE のルーティングによって送信量が宛先ごとに変わる様子">
+      <rect x="20" y="20" width="200" height="280" rx="12" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="120" y="46" font-size="16" font-weight="700" fill="#0f5132" text-anchor="middle">rank 0 のトークン</text>
+      <g font-size="13" fill="#12211a">
+        <rect x="40" y="60" width="160" height="26" rx="5" fill="#fff" stroke="#43b581"/>
+        <text x="50" y="78">t0 → expert 5, 19</text>
+        <rect x="40" y="92" width="160" height="26" rx="5" fill="#fff" stroke="#43b581"/>
+        <text x="50" y="110">t1 → expert 5, 6</text>
+        <rect x="40" y="124" width="160" height="26" rx="5" fill="#fff" stroke="#43b581"/>
+        <text x="50" y="142">t2 → expert 31, 5</text>
+        <rect x="40" y="156" width="160" height="26" rx="5" fill="#fff" stroke="#43b581"/>
+        <text x="50" y="174">t3 → expert 19, 20</text>
+        <text x="50" y="206" fill="#4a5d54">...</text>
+      </g>
+      <text x="120" y="252" font-size="13.5" fill="#4a5d54" text-anchor="middle">選び方は毎ステップ変わる</text>
+      <text x="120" y="274" font-size="13.5" fill="#4a5d54" text-anchor="middle">= 送信量は実行時に決まる</text>
+
+      <path d="M228,150 L300,150" stroke="#4a5d54" stroke-width="2" marker-end="url(#a1)"/>
+      <defs><marker id="a1" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <rect x="310" y="20" width="530" height="280" rx="12" fill="#fff" stroke="#d9e5df" stroke-width="2"/>
+      <text x="575" y="46" font-size="16" font-weight="700" fill="#22548f" text-anchor="middle">宛先 rank ごとの送信量 (この step の例)</text>
+      <g font-size="13">
+        <text x="330" y="80" fill="#12211a">rank 0</text><rect x="400" y="66" width="60" height="18" fill="#8fd6b4"/><text x="470" y="80" fill="#4a5d54">120</text>
+        <text x="330" y="112" fill="#12211a">rank 1</text><rect x="400" y="98" width="290" height="18" fill="#43b581"/><text x="700" y="112" fill="#4a5d54">812</text>
+        <text x="330" y="144" fill="#12211a">rank 2</text><rect x="400" y="130" width="20" height="18" fill="#8fd6b4"/><text x="430" y="144" fill="#4a5d54">47</text>
+        <text x="330" y="176" fill="#12211a">rank 3</text><rect x="400" y="162" width="150" height="18" fill="#43b581"/><text x="560" y="176" fill="#4a5d54">402</text>
+        <text x="330" y="208" fill="#12211a">rank 4</text><rect x="400" y="194" width="5" height="18" fill="#8fd6b4"/><text x="415" y="208" fill="#4a5d54">9</text>
+        <text x="330" y="240" fill="#12211a">rank 5</text><rect x="400" y="226" width="210" height="18" fill="#43b581"/><text x="620" y="240" fill="#4a5d54">577</text>
+      </g>
+      <text x="575" y="278" font-size="13.5" fill="#b5401f" text-anchor="middle">この形を「送る前に全員に知らせる」ところから通信が始まる</text>
+    </svg>
+    <p class="cap">図 1: MoE の all-to-all は「宛先ごとの量が実行時に決まる不均衡な all-to-all」。量そのものを先に交換しないと受信バッファも決まらない</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>dispatch と combine</h2>
+  <p class="lead">MoE 層 1 つにつき、通信は 2 回です。行きと帰りで求められる性質が違います。</p>
+
+  <table>
+    <tr><th></th><th>dispatch (行き)</th><th>combine (帰り)</th></tr>
+    <tr><td>やること</td><td>トークンを選ばれた専門家の rank へ送る</td><td>専門家の出力を元の rank へ返し、top-k 個を重み付き加算する</td></tr>
+    <tr><td>データ量</td><td>top-k 複製で増える</td><td>減る (k 個を 1 個に畳む)</td></tr>
+    <tr><td>精度</td><td>FP8 に落とせる (入力は量子化耐性がある)</td><td>BF16 が要る (総和なので誤差が乗る)</td></tr>
+    <tr><td>受信側の仕事</td><td>専門家ごとに連続並びへ整列 (GEMM がそれを要求する)</td><td>宛先トークンごとに加算 (reduce)</td></tr>
+    <tr><td>学習時の裏側</td><td>backward は combine になる</td><td>backward は dispatch になる</td></tr>
+  </table>
+
+  <p>combine が単なる「逆向きの送信」ではなく <b>reduce を伴う</b>ことは重要です。同じトークンに対する k 個の専門家出力が別々の rank から届き、受信側でそれを足し合わせます。つまり combine の受信側は「どのバイト列がどのトークンの何番目の寄与か」を知っていなければなりません。この対応表をどう持つかが、後の回で EFA 対応の設計を左右します。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>なぜ NCCL の AllToAll では足りないのか</h2>
+  <p class="lead">「不均衡な all-to-all」自体は <code>AllToAllv</code> 相当で表現できます。それでも専用ライブラリが要る理由は 3 つあります。</p>
+
+  <div class="steps">
+    <li><b>量を知るための往復が 1 段増える。</b> 受信側は「自分に何トークン来るか」を知らないと受信バッファを決められません。素直に書くと「量の all-to-all」→「データの all-to-all」の 2 段になり、間に CPU 同期が入ります。1 層あたり 2 回、層数分だけこれを繰り返すので、この往復のレイテンシがそのまま推論の遅延になります。</li>
+    <li><b>計算と重ねられない。</b> 集団通信の API 呼び出しは「開始して終了を待つ」形なので、専門家の GEMM と通信を細かく重ねるのが難しい。DeepEP はトークンをチャンクに割って流し、届いた分から順に GEMM に流す構造を採ります。</li>
+    <li><b>SM を食う。</b> 通信カーネルが GPU の SM を占有すると、その分だけ計算に使える SM が減ります。DeepEP V2 の売りは「同じ性能をより少ない SM で」です (公開 README の実測では SM90 + CX7 の EP 8×2 構成で 12 SM、EP 8×4 で 6 SM)。</li>
+  </div>
+
+  <p>この 3 つを同時に満たすために、DeepEP は集団通信の抽象を捨てて、<b>片側通信 (put) と signal</b> の組み合わせでプロトコルを自分で書きます。「送信側が受信側のメモリに直接置き、置いたことを別の手段で知らせる」という形です。そしてこの「知らせる手段」が、EFA では手薄になっている、というのがシリーズ全体の主題になります。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>GPU が NIC を叩くという選択</h2>
+  <p class="lead">DeepEP の通信は CPU が仲介しません。GPU のカーネルが直接 NIC の送信キューに仕事を積みます。この方式を GPU-Initiated Networking (GIN) と呼びます。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 300" role="img" aria-label="CPU 仲介型と GPU 起動型の通信経路の比較">
+      <text x="215" y="26" font-size="16" font-weight="700" fill="#4a5d54" text-anchor="middle">CPU 仲介 (proxy)</text>
+      <rect x="60" y="40" width="310" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="215" y="76" font-size="15" fill="#0f5132" text-anchor="middle">GPU カーネル: 記述子を ring に積む</text>
+      <path d="M215,104 L215,128" stroke="#4a5d54" stroke-width="2" marker-end="url(#a2)"/>
+      <rect x="60" y="132" width="310" height="60" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="215" y="158" font-size="15" fill="#b5401f" text-anchor="middle">CPU の progress スレッド</text>
+      <text x="215" y="180" font-size="13.5" fill="#b5401f" text-anchor="middle">ring を読んで RDMA を post</text>
+      <path d="M215,196 L215,220" stroke="#4a5d54" stroke-width="2" marker-end="url(#a2)"/>
+      <rect x="60" y="224" width="310" height="52" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="215" y="255" font-size="15" fill="#22548f" text-anchor="middle">NIC</text>
+
+      <text x="645" y="26" font-size="16" font-weight="700" fill="#4a5d54" text-anchor="middle">GPU 起動 (GIN / GDA)</text>
+      <rect x="490" y="40" width="310" height="152" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="645" y="72" font-size="15" fill="#0f5132" text-anchor="middle">GPU カーネル</text>
+      <text x="645" y="96" font-size="13.5" fill="#12211a" text-anchor="middle">送信キューに NIC の記述子 (WQE) を書き</text>
+      <text x="645" y="118" font-size="13.5" fill="#12211a" text-anchor="middle">doorbell レジスタを叩く</text>
+      <text x="645" y="146" font-size="13.5" fill="#b5401f" text-anchor="middle">= NIC のキューが GPU の番地空間に見えている</text>
+      <text x="645" y="170" font-size="13.5" fill="#4a5d54" text-anchor="middle">CPU は経路上にいない</text>
+      <path d="M645,196 L645,220" stroke="#4a5d54" stroke-width="2" marker-end="url(#a2)"/>
+      <rect x="490" y="224" width="310" height="52" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="645" y="255" font-size="15" fill="#22548f" text-anchor="middle">NIC</text>
+      <defs><marker id="a2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+    </svg>
+    <p class="cap">図 2: 同じ「片側 put」でも、記述子を誰が書くかで検証しやすさが変わる。左は CPU 側にソフトウェアの層があり、右は GPU が NIC の記述子形式を直接知っている</p>
+  </div>
+
+  <p>右の方式の代償は明確です。<b>NIC の記述子形式と完了通知の作法が、カーネルのソースコードに入り込みます。</b> ベンダが違えば記述子が違い、順序保証が違い、使える signal の種類が違う。DeepEP V1 はこの代償を素直に払っていて、実際に Mellanox 固有の構造体をカーネルから書いていました (第 2 回で具体的に見ます)。EFA 対応の本質は、この結合をどこで切るかという設計問題です。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>scale-up と scale-out、そして hybrid</h2>
+  <p class="lead">DeepEP は 2 種類の「近さ」を区別します。ノード内 (NVLink) と ノード間 (RDMA) です。この区別は API 名にもコードにも一貫して現れます。</p>
+
+  <table>
+    <tr><th>語</th><th>意味</th><th>DeepEP / NCCL 内の呼び名</th></tr>
+    <tr><td>scale-up</td><td>ノード内。GPU 同士が load/store で直接相手のメモリを読める範囲</td><td><code>ncclTeamLsa</code> (LSA = load/store accessible)、<code>scaleup_rank_idx</code></td></tr>
+    <tr><td>scale-out</td><td>ノード間。RDMA が必要な範囲</td><td><code>ncclTeamRail</code>、<code>scaleout_rank_idx</code></td></tr>
+    <tr><td>rail</td><td>各ノードの同じ位置の GPU を束ねた集合。ノード間通信はこの中で行い、ノード内で横に配る</td><td><code>NCCL_GIN_CONNECTION_RAIL</code></td></tr>
+  </table>
+
+  <p>rank 番号は <code>rank = scaleout_rank_idx * num_scaleup_ranks + scaleup_rank_idx</code> の形で分解されます。総 rank 数が LSA サイズと rail サイズの積になっていることは、初期化時に実際に検査されています (<code>csrc/kernels/backend/nccl.cu</code> の <code>EP_HOST_ASSERT(num_ranks == ncclTeamLsa(comm).nRanks * num_rdma_ranks)</code>)。</p>
+
+  <p>ここから <b>hybrid mode</b> という言葉が出てきます。トークンをノード間に送るとき、宛先ノードの全 GPU に個別に RDMA するのではなく、<b>rail 内の相手 1 つに送り、そこからノード内で NVLink 経由で横に配る</b>方式です。ノード間のトラフィックが GPU 数分の 1 に減ります。この「ノード間 1 hop + ノード内 1 hop」の 2 段構えを担うのが hybrid kernel で、<b>EFA 対応の作業対象はまさにこの hybrid kernel です</b>。ノード内だけの経路 (direct mode) は NVLink しか使わないので、NIC の性質と無関係です。</p>
+
+  <div class="key">
+    <b>ここを押さえる</b><br>
+    以降「hybrid」「scale-out」と書いてあるところが、<b>RDMA が絡む = EFA の性質が効いてくる</b>箇所です。<code>EP_HYBRID_KERNEL</code> という環境変数が後で出てきますが、それが選ぶのはこの scale-out カーネルの実装です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>V1 と V2 ― 何が入れ替わったのか</h2>
+  <p class="lead">DeepEP には世代があり、EFA が視野に入ったのは V2 で通信バックエンドが入れ替わったからです。</p>
+
+  <table>
+    <tr><th></th><th>V1 (legacy)</th><th>V2 (現行)</th></tr>
+    <tr><td>ノード間バックエンド</td><td>NVSHMEM (IBGDA)</td><td><b>NCCL Gin backend</b></td></tr>
+    <tr><td>API</td><td>高スループット用と低レイテンシ用で別</td><td><code>ElasticBuffer</code> に統合</td></tr>
+    <tr><td>SM 数</td><td>多い (V3 相当の学習で 24)</td><td>少ない (同 4-6)</td></tr>
+    <tr><td>チューニング</td><td>auto-tuning</td><td>SM 数と QP 数を解析的に決める</td></tr>
+    <tr><td>コンパイル</td><td>一部インストール時</td><td>全て JIT (実行時)</td></tr>
+    <tr><td>EFA</td><td>実質不可能 (第 2 回で理由を示す)</td><td><b>バックエンド差し替えで可能</b></td></tr>
+  </table>
+
+  <p>V1 のコードは <code>csrc/kernels/legacy/</code> 以下に残っています。V2 は <code>csrc/kernels/elastic/</code> と <code>deep_ep/include/deep_ep/impls/</code> です。ディレクトリ名の <code>elastic</code> が V2 を指すので、EFA 関連の変更を追うときはこちらだけ見ればよい、と覚えておくと迷いません。</p>
+
+  <p>V2 が「NVSHMEM から NCCL Gin へ」乗り換えたのは、EFA のためではありません。公開 README が挙げる理由はヘッダオンリーで軽いこと、既存の NCCL communicator を再利用できることです。しかし結果として、<b>NIC 依存部分がバックエンドという交換可能な層に押し込まれた</b>。それが EFA 対応の扉を開けました。次の回はその扉の構造を見ます。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>この先の読み方</h2>
+  <p class="lead">この回で置いた語だけで、以降の回は読めます。</p>
+
+  <table>
+    <tr><th>回</th><th>答える問い</th></tr>
+    <tr><td><a href="./deepep-efa-02-who-writes-the-wqe.html">02</a></td><td>ibverbs、libfabric、NVSHMEM、NCCL GIN、EFA-GDA はどういう関係にあるのか。誰が NIC の記述子を書いているのか</td></tr>
+    <tr><td><a href="./deepep-efa-03-srd-ordering.html">03</a></td><td>EFA の SRD は何を保証しないのか。upstream のカーネルはなぜそこで壊れるのか</td></tr>
+    <tr><td><a href="./deepep-efa-04-unordered-protocol.html">04</a></td><td>順序を仮定しないプロトコルはどう組まれているのか。正しさは何に依存しているのか</td></tr>
+    <tr><td><a href="./deepep-efa-05-budget.html">05</a></td><td>signal の本数という予算が、なぜ設計とスケール上限を決めてしまうのか</td></tr>
+    <tr><td><a href="./deepep-efa-06-status.html">06</a></td><td>いま何がどこまで実装されていて、何が議論中なのか</td></tr>
+    <tr><td><a href="./deepep-efa-07-emulator.html">07</a></td><td>EFA インスタンスなしで検証する emulator は作れるのか</td></tr>
+  </table>
+
+  <div class="nav">
+    <span></span>
+    <a href="./deepep-efa-02-who-writes-the-wqe.html">次: 02 誰が WQE を書いているのか →</a>
+  </div>
+</section>
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
