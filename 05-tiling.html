@@ -134,6 +134,20 @@
     moving (流れる側)  : <span class="b">最大 128 × 512</span>&nbsp;&nbsp;<span class="c"># PSUM の 1 バンク幅ぶん流せる</span>
   </div>
   <p>この 2 つを組み合わせたのが基本タイル <b>128×512</b> です。partition 軸 128 で全レーンを使い切り、free 軸 512 で PSUM の 1 バンクぶんきっちり出力する ― どちらも「ハードウェアの物理的な形」から来ていて、恣意的な数字ではありません。ただし free 軸 512 という上限は <b>matmul の出力が PSUM を経由する</b>ことに固有の制約です。DMA での転送や elementwise 演算では、free 方向は partition あたり 224 KiB (SBUF の容量、4 章参照) に収まる範囲で自由に取れます。128×512 は「matmul の基本タイル」であって、タイル全般の唯一形ではありません。</p>
+
+  <div class="warn">
+    <b>この 2 つの数字は資料から写さず、動いている環境に聞けます。</b>NKI が定数として持っているので、世代やインスタンスが変わっても取り違えません。
+    <pre><code>import neuronxcc.nki.language as nl
+nl.tile_size.pmax                  # 128   partition 数
+nl.tile_size.psum_fmax             # 512   PSUM の free 方向の最大
+nl.tile_size.gemm_stationary_fmax  # 128   Tensor Engine の stationary 側 free 最大
+nl.tile_size.gemm_moving_fmax      # 512   Tensor Engine の moving 側 free 最大</code></pre>
+    trn2.3xlarge で実際に読んだ値が上のコメントです。<b>128×512 は <code>pmax</code> と <code>gemm_moving_fmax</code> の 2 行で説明が閉じます。</b><br>
+    一方 <code>nl.tile_size.total_available_sbuf_size</code> は<b>カーネルの外からは読めません</b> (<code>calling NKI API outside of NKI kernels is not supported</code>)。SBUF の容量制約は、超えたときのエラーメッセージが教えてくれます。
+    <pre><code>SyntaxError: Size of free dimensions (128, 8192) of dtype uint16 exceeds
+architecture limitation of 224KB per partition</code></pre>
+    <b>SBUF の制約は「partition あたり 224 KB」という形で当たります。</b>128 partition ぶんで 28 MiB になり、よく引用される「SBUF 28 MiB」と一致しますが、<b>カーネルを書くときに数えるのは per-partition の側</b>です。タイル 1 枚が partition あたり何バイト占めるかで考えると、載る/載らないが即座に分かります。
+  </div>
   <div class="tex">
     <p class="cap">大きな行列 (M×N) を基本タイルで分割すると、必要なタイル数は次の式で決まります。M・N がタイルサイズの倍数でなければ切り上げ (端数タイル) が生じます。</p>
     $$ \text{タイル数} = \left\lceil \frac{M}{128} \right\rceil \times \left\lceil \frac{N}{512} \right\rceil $$

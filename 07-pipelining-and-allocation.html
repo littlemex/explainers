@@ -147,7 +147,7 @@
   <div class="math">
     <span class="c"># PSUM のバンクを明示的に割り当てる例(擬似コード。本ワークショップ独自ラッパ/要SDK確認)</span><br>
     <span class="c"># 実 API は nki.compiler.psum.mod_alloc / nki.compiler.sbuf.mod_alloc 系。PSUM は bank 単位で指定する</span><br>
-    psum_bank = nki.compiler.psum.mod_alloc(<span class="y">bank=b</span>)&nbsp;&nbsp;<span class="c"># b 番目のバンクに固定</span><br>
+    psum_bank = nki.compiler.psum.mod_alloc(<span class="y">base_bank=b</span>)&nbsp;&nbsp;<span class="c"># b 番目のバンクから確保</span><br>
     tile = nl.ndarray((TILE_M, TILE_N), dtype=nl.float32, buffer=psum_bank)
   </div>
   <p>なぜアドレスを明示すると先読みが可能になるのか。<b>コンパイラは「2 つの処理が重なっても安全か」を、メモリ上の場所(アドレス)が被っていないかで判断します。</b>アドレスがコンパイラの自動割り当てのままだと、同じ論理バッファを次のイテレーションで再利用したとき、前のイテレーションの読み出しが終わる前に次の書き込みが同じ場所に入ってしまうかもしれない ― これは実データの依存ではなく<b>同一バッファの再利用が生む偽の依存(WAR: write-after-read)</b>です。コンパイラはこれを安全側に倒して<b>重ねずに逐次実行</b>させます。人間が「タイル A は物理スロット X、タイル B は物理スロット Y」と<b>物理的に別の場所を明示的に割り当てれば</b>、そもそも WAR が発生し得ないと<b>コンパイラが証明できる</b>ようになり、自動でパイプライン化してくれるのです。</p>
@@ -163,7 +163,22 @@
     <li><b>リングバッファ(モジュラーアドレッシング)。</b>先読みをするには、同じ論理バッファに対して<b>物理的な実体を複数(N 個)持ち</b>、イテレーションごとに順番に使い回す必要があります(N=2 なら二重バッファ、N=3 なら三重バッファ)。アロケータはスコープを開くときに <b>多重度 N (interleave 度)</b> を指定し、イテレーションを進めるたびに使う物理スロットを 1 つ進める ― N 個を使い切ったら先頭に戻る、という<b>リング状の割り当て</b>で実現します。「タイル i を計算しながらタイル i+1 を書き込む」が、書き込み先の物理スロットが別だからこそ衝突せず成立するわけです。</li>
   </ol>
   <div class="key">
-    <b>「効果」と「仕組み」をつなぐ。</b>前半で見た「二重バッファリングで並行性を確保する」という<b>効果</b>は、この <b>stack/heap の二層</b>と <b>多重度 N のリング割り当て</b>という<b>仕組み</b>で実装されます(N 重化は <code>mod_alloc(num_free_tiles=N)</code> のような指定に対応します)。allocation が「同一バッファ再利用による偽の依存(WAR)を断ち切る」とは、具体的には「N 個の物理スロットのどれを今使うかを一意に決める」こと ― だからコンパイラはオーバーラップしても壊れないと証明でき、パイプライン化が許可されるのです。
+    <div class="warn">
+      <b>実 SDK (neuronxcc 2.26) で確認した API の形。</b>名前と引数は資料と少しずれることがあるので、確認した形を残します。多重バッファには<b>高位と低位の 2 通り</b>があり、ふつうは高位で足ります。
+      <br><br>
+      <b>高位 ― ループに多重度を指示する。</b>これが既定の選択です。
+      <br>
+      <code>for i in nl.affine_range(count, directives=[ncc.multi_buffer(2)]):</code>
+      <br><br>
+      <b>低位 ― アドレスまで明示する。</b>
+      <br>
+      <code>tile = nl.ndarray(shape, dtype, buffer=ncc.sbuf.mod_alloc(base_addr=0, num_free_tiles=(2,)))</code><br>
+      <code>acc&nbsp; = nl.ndarray(shape, nl.float32, buffer=ncc.psum.mod_alloc(base_bank=0, num_bank_tiles=(2,)))</code>
+      <br><br>
+      <code>ncc</code> は <code>neuronxcc.nki.compiler</code> です。ここには他に <code>allocation_scope</code> / <code>no_reorder</code> / <code>force_auto_alloc</code> / <code>enable_stack_allocator</code> があります。<b>使い方を知りたいときは SDK 同梱のカーネル群を grep するのが最短</b>で、たとえば <code>_pre_prod_kernels/</code> は <code>nl.affine_range(n, directives=[ncc.multi_buffer(k)])</code> の形で使っています。<br>
+      <span style="font-size:14px;color:var(--sub)">やってはいけない形もひとつ確認しました。スロットを自分で回す ― SBUF に <code>(128, slots, width)</code> を取って <code>slot = i % slots</code> で添字を進める ― という書き方は<b>コンパイルが通りません</b> (free 次元をループ変数でインデックスできない)。さらに <code>(slots, 128, width)</code> のように<b>先頭にスロット軸</b>を置くと、第 1 次元は partition 次元でなければならないという別のエラーになります。多重バッファは「手で添字を回す」のではなく、上の API で<b>宣言する</b>ものです。</span>
+    </div>
+    <b>「効果」と「仕組み」をつなぐ。</b>前半で見た「二重バッファリングで並行性を確保する」という<b>効果</b>は、この <b>stack/heap の二層</b>と <b>多重度 N のリング割り当て</b>という<b>仕組み</b>で実装されます(N 重化は <code>mod_alloc(num_free_tiles=(N,))</code> のような指定に対応します。引数は<b>タプル</b>です)。allocation が「同一バッファ再利用による偽の依存(WAR)を断ち切る」とは、具体的には「N 個の物理スロットのどれを今使うかを一意に決める」こと ― だからコンパイラはオーバーラップしても壊れないと証明でき、パイプライン化が許可されるのです。
   </div>
 </section>
 

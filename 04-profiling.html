@@ -149,6 +149,19 @@
     <b>格言的な整理。</b><b>システムプロファイラ</b>は「時間がどこへ行ったか」を教えます (host 側、CPU から見た視点)。<b>デバイスプロファイラ</b>は「ハードウェアが何をしているか」を教えます (NeuronCore の内部、エンジンごとの視点)。前者を「空港の出発ロビー」(手続きと待ち時間)、後者を「実際に飛んでいる飛行機の中」(内部の稼働率) に例えられます。
   </div>
   <p>システムプロファイラは PyTorch の <code>torch.profiler.profile(...)</code> で取得します。CPU と NeuronCore 両方のアクティビティを記録し、<code>key_averages()</code> で alloc / copy / kernel launch などに分類して集計できます。第 1 段の「Eager vs Compile」の違いは、主にこのシステムプロファイラで見えます。ただし <code>torch.profiler</code> が直接見ているのは主に host 側の op dispatch であり、エンジン内部の挙動までは取れません。エンジン内部を見るのはこの後のデバイスプロファイラの役割です。</p>
+  <div class="warn">
+    <b>プロファイルを採る前に、まず「計測できているか」を確かめてください。</b>trn2.3xlarge で NKI のマイクロベンチを書いたときに実際に踏んだ 3 点です。
+    <br><br>
+    <b>1. ホスト側で計ってはいけない。</b>Neuron の実行は非同期なので、Python の <code>time.perf_counter()</code> で挟むと dispatch を測ることになります。<code>nki.benchmark(warmup=..., iters=...)</code> でデバイス側の値を取ります。
+    <br><br>
+    <b>2. 結果の読み出し口は版差がある。</b>この構成では <code>benchmark_result.nc_latency</code> が <code>None</code> で、値は <code>full_results</code> 側に入っていました。<code>nc_latency.get_latency_percentile(50)</code> を呼ぶ例が資料にありますが、<code>None</code> に対して呼ぶと <code>AttributeError</code> になります。
+    <br>
+    <code>latency_us = benched.benchmark_result.full_results["latency"]["50"]</code>
+    <br><br>
+    <b>3. 「時間が仕事量に追随して増えているか」を最初に見る。</b>これがいちばん強い検算です。オペランドを SBUF に置いたまま同じ積和を繰り返すベンチを書いたところ、repeats を 4 倍にしても時間が 60〜61 &micro;s のまま動きませんでした ― 仕事が畳み込まれて消えていたのです。そこから計算した「2147 TFLOPS」が異常値として出たので気づけましたが、<b>もっともらしい範囲の数字が出ていたら気づけません</b>。<br>
+    <span style="font-size:14px;color:var(--sub)">帯域や FLOPS を出すときは、複数のサイズで測って<b>バイト数 (または FLOP) と時間の傾き</b>から求めます。1 回の呼び出しに 60〜95 &micro;s の固定費が乗るので、単一サイズの「量 ÷ 時間」は選んだサイズに依存して過小になります。さらに<b>切片も捨てずに見る</b>: 切片から逆算した固定費が負なら、まだ大きくするほど効率が上がっている = 定常状態でないという意味で、得られた傾きは帯域ではなく<b>下限</b>です。ただしこの検算は上の 3 を代替しません ― 畳み込まれたベンチは切片が偶然正になって通り抜けました。</span>
+  </div>
+
   <p>デバイスプロファイラは、NKI カーネル単体、あるいはモデル全体を実行したときにデバイス上で生成されるトレース (<code>profile.ntff</code> 等) を読みます。<code>neuron-profile capture</code> で採取し <code>neuron-profile view</code> で可視化するだけでなく、ディスク上の parquet ファイルを直接 pandas 等で読み込む方法もあり、これによりエージェントがプロファイルの数値を読み取って反復的に最適化するワークフローが可能になります。</p>
   <div class="math">
     <span class="c"># システムプロファイラの主な API</span><br>

@@ -311,6 +311,20 @@
     ・128&times;16384 &rarr; 約 427 GB/s (約 98%、この構成の実質上限)<br>
     <b>タイルの形を変えるだけで帯域が大きく変わる</b>。DMA エンジンはどちらの形でもほぼ動いているのに、小さい転送は「忙しいのに遅い」。これが「geometry (形) が性能を決める」という Trainium の本質です (数値は特定条件での実測例)。
   </div>
+  <div class="warn">
+    <b>この表を再現するときの 2 つの前提 (trn2.3xlarge / LNC=2 で測り直した結果)。</b>上の数字は <b>read + write の合計</b>を数えていて、かつ <b>HBM 上でタイルが連続している</b>ことを前提にしています。どちらも書いていないと再現できないので、測り直した値を並べます。<br>
+    <table style="margin:10px 0">
+      <tr><th>タイル</th><th>HBM 上のレイアウト</th><th>1 回の連続バイト</th><th>片方向</th><th>read+write</th></tr>
+      <tr><td>128&times;512</td><td>strided (テンソルが [128, TOTAL] で列スライス)</td><td>1 KB</td><td>44.6 GB/s</td><td>89.2 GB/s</td></tr>
+      <tr><td>128&times;512</td><td>contiguous (テンソルが [TILES, 128, 512])</td><td>128 KB</td><td><b>100.7 GB/s</b></td><td>201.4 GB/s</td></tr>
+      <tr><td>128&times;2048</td><td>contiguous</td><td>512 KB</td><td>205.9 GB/s</td><td>411.8 GB/s</td></tr>
+      <tr><td>128&times;8192</td><td>contiguous</td><td>2 MB</td><td>214.0 GB/s</td><td>427.9 GB/s</td></tr>
+      <tr><td>128&times;32768</td><td>contiguous</td><td>8 MB</td><td>214.5 GB/s</td><td>429.1 GB/s</td></tr>
+    </table>
+    <b>同じ [128, 512] タイルでも、レイアウトだけで 2.26 倍違います</b> (44.6 対 100.7)。strided ではタイル 1 枚が「partition ごとに 1 KB の断片 128 個」になり、contiguous では「128 KB がひと続き」になる。<b>タイルの形を合わせるより先に、そのタイルが HBM 上で連続かを見る</b>のが順序です。<br>
+    そして contiguous 側は片方向 214.5 GB/s = <b>read+write 換算で 429 GB/s</b> で頭打ちになり、上で挙げた「1 コアあたり約 435 GB/s」とほぼ一致します。つまり<b>ピーク値は read+write を数えた値</b>で、片方向で 435 GB/s 出ると読むと 2 倍間違えます。<br>
+    <span style="font-size:14px;color:var(--sub)">測り方: 総量 256 / 512 / 1024 MiB で測り、バイト数と時間の<b>傾き</b>から帯域を出す (1 回の呼び出しに 60〜95 &micro;s の固定費が乗るため、バイト数 ÷ 実測時間では過小になる)。切片から逆算した固定費が負になった点は定常状態に達していないので下限として扱う ― strided 側は全点がこれに該当し、真の値はもう少し上にあります。計時は <code>nki.benchmark</code> のデバイス側計測で、ホスト側のストップウォッチは非同期実行のため使えません。</span>
+  </div>
 </section>
 
 <section id="s9">
