@@ -76,9 +76,9 @@
     <b>ただし目標は書き換えるべきです。</b> 「EFA を再現する」ではなく <b>「EFA-GDA が与える weak bundled-signal 契約の下で、DeepEP の unordered プロトコルを敵対的スケジュールで詰める」</b>。WQE の生成や MMIO の順序やハードウェアカウンタの周回は emulator の対象外と最初に宣言します。そこは実機に残す。
   </div>
 
-  <div class="key" style="border-left-color:#b5401f">
-    <b>実機で 1 か所訂正されました (2026-09-04)</b><br>
-    上の理由 (1) は RMA plugin が継ぎ目であることを言っていますが、<b>それだけでは足りません</b>。DeepEP はカーネルに入る前に <code>railedGinType != NONE</code> を assert し、その assert を無効化しても次に <code>ncclGinDevCommSetup</code> が型 0 の backend を拒みます。ゲートは 2 つあり、emulator は <b>GIN plugin (<code>libnccl-gin.so</code> / <code>ncclGinPlugin_v14</code>) を提供する必要があります</b>。RMA plugin が読み込まれ comm に割り当てられること自体は実機で確認済みで、NCCL 自身も「外部 plugin が PROXY を名乗れば自前の GIN proxy をその RMA backend の上に載せる」と言っています。足りないのは<b>型を名乗る一手</b>で、その一手は host 側なのでローカルで書けます。詳細は <a href="#s9">§9</a>。
+  <div class="key" style="border-left-color:#0f5132">
+    <b>実機で確認済み、ただし 1 行足りませんでした (2026-09-04)</b><br>
+    上の理由 (1) は正しいのですが、<b>RMA plugin は「自分が GIN proxy デバイスである」と名乗らなければなりません</b>。名乗らないと DeepEP はカーネルに入る前に <code>railedGinType != NONE</code> の assert で落ち、その assert を無効化しても次の <code>ncclGinDevCommSetup</code> が型 0 を拒みます。名乗る場所は <code>getProperties</code> の <code>netDeviceType</code> 1 か所だけで、<code>NCCL_NET_DEVICE_GIN_PROXY</code> を入れると <b><code>railedGinType: proxy(2)</code> になり、DeepEP は buffer を作り始めます</b>。新しい plugin を書く必要はありません ― NCCL の内蔵 GIN proxy がそれを担い、データ経路はこちらの RMA plugin を通ります。この 1 行は<b>実機で走らせるまで分からない類のもの</b>でした。詳細は <a href="#s9">§9</a>。
   </div>
 
   <div class="toc">
@@ -159,7 +159,7 @@
 
 <section id="s4">
   <h2><span class="num">4</span>層 2 の設計 ― 敵対的 RMA plugin</h2>
-  <p class="lead" style="color:#b5401f">この節の設計は実機で 1 か所足りないことが分かりました。RMA plugin の op table は正しい継ぎ目ですが、DeepEP を走らせるには <b>GIN 型を名乗る plugin</b> が別に要ります。以下の op table と敵対的スケジューラの議論はそのまま有効で、足すべきものが 1 つ増えたという読み方をしてください (<a href="#s9">§9</a>)。</p>
+  <p class="lead" style="color:#0f5132">この節の設計は実機で成立しました。1 点だけ、<code>getProperties</code> が <code>netDeviceType</code> に <code>NCCL_NET_DEVICE_GIN_PROXY</code> を入れる必要があります (<a href="#s9">§9</a>)。以下の op table と敵対的スケジューラの議論はそのまま有効です。</p>
   <p class="lead">中心になる部品です。名前を仮に <code>libnccl-rma-srdsim.so</code> とします。</p>
 
   <h3>実装するもの</h3>
@@ -355,25 +355,44 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
   <p>つまり <b>金を払って Hopper と実 EFA を並べても、今日の時点では GIN EFA-GDA の経路を踏めません</b>。ベンダの plugin が GIN backend を出荷していないからです。これは着手前に予想していた話の逆です。emulator は「EFA インスタンスを毎回起動できない人のための代用品」ではなく、<b>backend が出荷されるまでの間、このプロトコルを検証できる唯一の手段</b>ということになります。第 0 節で「目標の書き換えを受け入れられるかが判断基準」と書きましたが、その書き換えの必要性まで実測が裏付けた形です。</p>
 
   <div class="key">
-    <b>そして設計そのものが 1 か所訂正されました。RMA plugin だけでは足りません</b>
+    <b>そして 1 行の欠落が見つかりました。これは走らせるまで分からない類のものです</b>
     <p>DeepEP を実際にビルドして走らせたところ、カーネルに入る前に落ちます。</p>
     <pre><code>RuntimeError: Assertion exception (csrc/kernels/backend/nccl.cu:101):
   (allow_hybrid_mode ? props.railedGinType : props.ginType) != NCCL_GIN_TYPE_NONE</code></pre>
-    <p>fork には <code>EP_DISABLE_GIN=1</code> という逃げ道があります。使うと assert は越えますが、その先で落ちます。</p>
+    <p>fork には <code>EP_DISABLE_GIN=1</code> という逃げ道があります (assert 周辺のソースを読んで見つかります)。使うと assert は越えますが、11 行先で落ちます。</p>
     <pre><code>NCCL WARN Cannot get backend version for unsupported GIN type 0
 NCCL WARN GIN: DevComm setup failed on all available backends
 RuntimeError: NCCL exception (csrc/kernels/backend/nccl.cu:220): 3</code></pre>
-    <p>ゲートは 2 つあり、逃げ道は<b>失敗の場所を動かすだけ</b>です。emulator は <b>GIN plugin を提供しなければなりません</b>。</p>
+    <p>ゲートは 2 つあり、逃げ道は<b>失敗の場所を動かすだけ</b>でした。「型 0」が両方に共通しています。</p>
   </div>
 
-  <p>そこで NCCL が探しているものを直接読みました。ファイル名は <code>libnccl-gin.so</code>、記号は <code>ncclGinPlugin_v13</code> と <code>ncclGinPlugin_v14</code>、環境変数は <code>NCCL_GIN_PLUGIN</code>。RMA 側は <code>ncclRmaPlugin_v13</code>・<code>v14</code>・<b><code>v15</code></b> を受け付けるので、この emulator が名乗る v14 は最新ではありません。</p>
-
-  <p>そして NCCL 自身が、やるべきことを 1 行で書いています。</p>
+  <p>NCCL 自身の文字列が答えを持っていました。</p>
 
   <pre><code>GIN/Plugin: Skipping external proxy plugin %s index %d; using NCCL GIN proxy over RMA backend %s
 GIN/Plugin: Skipping plugin %s index %d type %d: NCCL_GIN_TYPE=%ld requested</code></pre>
 
-  <p>2 行目は実際に出ました ― <code>Skipping plugin srdsim index 3 type 0</code>。つまり <b>NCCL は RMA plugin を GIN の候補としても列挙していて</b>、それが型 0 (=NONE) を名乗るから落としているだけです。1 行目は、外部 plugin が PROXY を名乗ったときに NCCL が<b>自前の GIN proxy を その RMA backend の上に載せる</b>と言っています。§4 の設計が想定していた経路は NCCL の中に実在します。足りなかったのは <b>「GIN 型を名乗る」という一手</b>でした。</p>
+  <p>2 行目は実際に出ました ― <code>Skipping plugin srdsim index 3 type 0</code>。ここで <code>srdsim</code> は<b>こちらの RMA plugin ではなく、NCCL の内蔵 GIN proxy</b> です。内蔵 proxy は名前を RMA backend から借りるので、こちらの plugin 名で現れます (<code>ncclGinProxy.name = rmaBackend->name</code>)。そしてその op table は <code>getProperties</code> のスロットを <b>NULL のまま</b>にしています。「plugin に直結する」というコメント付きで。つまり <b>NCCL が GIN 型を読む先は、こちらの RMA plugin の <code>getProperties</code> です</b>。</p>
+
+  <p>NCCL のソースはそれを要求として明記していました。</p>
+
+  <pre><code>// RMA plugin must report GIN proxy type
+if (props.netDeviceType != NCCL_NET_DEVICE_GIN_PROXY) {
+  WARN("RMA v13 (%s) requires GIN PROXY type, got netDeviceType %d", ...)</code></pre>
+
+  <p>こちらの plugin は <code>NCCL_NET_DEVICE_HOST</code> を返していました。ホスト側だけの API なのだから素直な選択に見えますが、<b>これが 3 層先の assert として現れます</b>。<code>NCCL_NET_DEVICE_GIN_PROXY</code> に変えた 1 行だけで、同じ実機が次を報告します。</p>
+
+  <pre><code>  deviceApiSupport    : yes
+  ginType             : proxy(2)
+  railedGinType       : proxy(2)
+  ginConnectionType   : full
+  hostRmaSupport      : yes
+  gin backends usable : proxy(2)</code></pre>
+
+  <p>そして DeepEP は buffer を作り始めます。<b>新しい plugin を書く必要はありませんでした</b>。GIN の device 側 ― いちばん難しい部分 ― は NCCL の内蔵 proxy が担い、データ経路はこちらの RMA plugin を通ります。§4 の設計が想定していた経路は最初から NCCL の中にあり、足りなかったのは <b>そこに入るための申告 1 行</b>でした。</p>
+
+  <p>この一連は emulator を作る側にとって教訓が 2 つあります。1 つ目、<b>症状は原因から 3 層離れて現れます</b>。DeepEP の assert は NCCL の GIN 選択の結果で、その選択はこちらの plugin が返した 1 フィールドの結果です。2 つ目、<b>ソースを読むだけでは出ませんでした</b>。plugin は正しくビルドされ、正しく読み込まれ、comm に割り当てられ、ログはすべて成功に見えていました。実際に DeepEP を走らせて初めて、名乗っていないことが分かりました。</p>
+
+  <p>ついでに ABI も測れました。NCCL が探すファイル名は <code>libnccl-gin.so</code> と <code>libnccl-rma.so</code>、記号は <code>ncclGinPlugin_v13</code>・<code>v14</code> と <code>ncclRmaPlugin_v13</code>・<code>v14</code>・<b><code>v15</code></b>。この emulator が名乗る RMA v14 は最新ではありません。</p>
 
   <p>1 台では見えなかった区別も 1 つ拾えました。device API の有無は <b>マシン単位ではなく communicator 単位</b>の答えです。同じホスト上の 1 ランクの communicator は <code>deviceApiSupport: yes</code> を返しますが、ホストを跨ぐ 3 ランクの communicator は <code>no</code> を返します。<b>device API のノード間の半分が GIN backend そのもの</b>なので、その不在が答えを no に引っ張ります。</p>
 
