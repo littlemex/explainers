@@ -158,7 +158,9 @@ static constexpr int kMaxGinContextCnt     = 17;
 static constexpr int kDefaultGinContextCnt = 11;   // → 21 signals/context
 static constexpr int kMaxParts             = 4;</code></pre>
 
-  <p>読み方は次のとおりです。<b>context 1 つが QP 1 つ</b>を供給します。context を c 個作ると、残りの QP 予算を signal に配れます。式の分子から <code>2c</code> を引いている理由は<b>コードに書かれていません</b>。ヘッダのコメントは「provider の現在の制限に対する回避策」とだけ述べています。context ごとに固定で 2 つの端点が要ると読むのが自然で、NCCL の device handle にも <code>data</code> と <code>pvdata</code> という 2 つの端点が並んでいるので辻褄は合いますが、<b>これは私の推測です</b>。予算式を動かすときは、この 2 が何を指しているのかを先に確かめるべきです。</p>
+  <p>まず 512 と 256 の関係を片づけます。<b>512 は EFA が signal と counter に課すデバイスあたりの上限</b>で、<b>256 は DeepEP が自分の設計定数として置いた端点予算</b>です。両者の対応はコードのコメントに書かれておらず、<b>私は確認できていません</b> (半分を安全余裕として取ったのか、signal と counter が対で消費されると見たのか、別の理由か)。以後 256 を「端点 (QP) 予算」と呼び、それを消費する単位を「context」と呼びます。コード上の <code>num_allocated_qps</code> は context の数を指します。</p>
+
+  <p>読み方は次のとおりです。<b>context を 1 つ作るごとに端点を固定で 2 つ消費し</b>、残った <code>256 - 2c</code> 本を signal 用の端点として c 個の context に配ります。式の分子から <code>2c</code> を引いている理由は<b>コードに書かれていません</b>。ヘッダのコメントは「provider の現在の制限に対する回避策」とだけ述べています。context ごとに固定で 2 つの端点が要ると読むのが自然で、NCCL の device handle にも <code>data</code> と <code>pvdata</code> という 2 つの端点が並んでいるので辻褄は合いますが、<b>これは私の推測です</b>。予算式を動かすときは、この 2 が何を指しているのかを先に確かめるべきです。</p>
 
   <p>そして「全ての合法な context 数で、ScaleOut warp 1 本ごとに専用 signal を割り当てられるか」を <b>コンパイル時に検査</b>しています。</p>
 
@@ -252,6 +254,8 @@ static_assert(all_gin_context_counts_cover_warps(), "...");</code></pre>
   <h2><span class="num">7</span>176 rank の壁</h2>
   <p class="lead">同じ予算式が、スケールの上限も決めています。open PR #5 がその指摘です。</p>
 
+  <p>ここで先に断っておきます。第 4 回では「signal の本数は channel 数に比例し、ノード数には比例しない」と書きました。矛盾ではありません。あれは dispatch の part signal の話で、ここで壁になるのは<b>同じ予算を食う別の消費者</b>、つまり rail barrier が要求する「相手ごとの専用 signal」です。消費者が 2 種類いて、片方だけがノード数に比例します。</p>
+
   <p>初期化時に次の検査があります (<code>csrc/kernels/backend/nccl.cu</code>)。</p>
 
   <pre><code>EP_HOST_ASSERT(gin_config.gin_indexed_signals_cnt &gt;= (num_rdma_ranks - 1) and
@@ -271,7 +275,7 @@ static_assert(all_gin_context_counts_cover_warps(), "...");</code></pre>
 
   <p>ただし QP を犠牲にします。PR #5 はそこを測っていて、8 × p6-b300 (64 rank、256 expert、4096 token、24 SM、GDAKI GIN) で <code>num_allocated_qps</code> を 11 → 5 に落とすと <b>dispatch +1.9 %、combine +30.5 %</b> (3241 → 4228 µs、combine 帯域 96.3 → 74.6 GB/s) と報告しています。「dispatch は 11 本のうち 6 本を失ってもほとんど気づかないが、同時並行のトラフィックが重い combine は効く」という非対称です。だから PR #5 の提案は QP を削るのではなく <b>rail barrier を counting barrier に書き換えて、域ごとの専用 signal という要求そのものを外す</b>方向です。</p>
 
-  <p>この PR の形は覚えておく価値があります。<b>予算が足りないなら予算配分を変えるのではなく、要求の形を変える</b>。第 4 回の <code>gin_barrier</code> の書き換え (rank ごとに 1 本ではなく (rank − 1) 本の compact indexing にする) も同じ発想です。<b>signal は希少資源なので、プロトコル側が「本数に比例しない形」に自分を作り替える</b>のが、この実装群を通じた一貫した設計方針です。</p>
+  <p>この PR の形は覚えておく価値があります。<b>予算が足りないなら予算配分を変えるのではなく、要求の形を変える</b>。fork は barrier の signal 割り当ても同じ発想で書き換えていて、rank ごとに固定で 1 本を予約する方式から、実際に通信する (rank − 1) 個の相手にだけ詰めて割り当てる形にしています。<b>signal は希少資源なので、プロトコル側が「本数に比例しない形」に自分を作り替える</b>のが、この実装群を通じた一貫した設計方針です。</p>
 
   <div class="nav">
     <a href="./deepep-efa-04-unordered-protocol.html">← 04 順序を仮定しないプロトコル</a>

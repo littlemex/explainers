@@ -91,7 +91,7 @@
 
   <div class="key">
     <b>一言でいうと</b><br>
-    EFA の SRD は「<b>届くが、順番は約束しない</b>」配送です。加えて GPU 起動経路 (EFA-GDA) では signal が <b>番号指定のカウンタだけ</b>で、<b>strong signal が無く</b>、<b>端点あたり 512 本</b>という上限があります。upstream の scale-out カーネルは「<b>末尾ポインタを 1 つ進めれば、その手前は全部届いている</b>」という強い仮定で書かれていて、この仮定は上の 3 つのどれとも噛み合いません。だから <b>カーネルを別実装で置き換える</b>という選択になります。
+    EFA の SRD は「<b>届くが、順番は約束しない</b>」配送です。加えて GPU 起動経路 (EFA-GDA) では signal が <b>番号指定のカウンタだけ</b>で、<b>strong signal が無く</b>、<b>デバイスあたり signal と counter の合計で 512 本</b>という上限があります。upstream の scale-out カーネルは「<b>末尾ポインタを 1 つ進めれば、その手前は全部届いている</b>」という強い仮定で書かれていて、この仮定は上の 3 つのどれとも噛み合いません。だから <b>カーネルを別実装で置き換える</b>という選択になります。
   </div>
 
   <div class="toc">
@@ -148,6 +148,7 @@
     <tr><th>制約</th><th>内容</th><th>出典</th></tr>
     <tr><td>順序</td><td>メッセージ間・メッセージ内ともに順序保証なし</td><td>SRD の性質</td></tr>
     <tr><td>strong signal</td><td><b>非対応</b>。「signal が見えたなら先行 put も完了」は成立しない</td><td>getting-started の Limitations、実装の <code>supportsStrongSignals = false</code></td></tr>
+    <tr><td>weak signal</td><td>使えるのはこちらだけ。以後、<b>そのメッセージ自身の完了だけを通知し、先行する put との順序を何も約束しない signal</b> を weak signal と呼びます</td><td>NCCL の <code>gin.h</code> の型定義 (<code>ncclGin_WeakSignalInc</code> ほか)</td></tr>
     <tr><td>VA signal</td><td><b>非対応</b>。signal は<b>番号 (indexed) 指定のみ</b>で、任意の登録アドレスを signal にはできない</td><td>同上 (<code>supportsVASignals = false</code>)。実装にも「INDEXED signals only」の assert がある</td></tr>
     <tr><td>signal 本数</td><td>デバイスあたり <b>signal + counter で 512</b> まで</td><td>getting-started の Limitations</td></tr>
     <tr><td>signal の加算</td><td>API は Add-by-N を受け付けるが、<b>ハードウェアのカウンタは inbound write ごとに +1</b> しか進まないので、+N は <b>N 回の write に展開</b>される。DeepEP が使うのは +1 だけ</td><td>NCCL 実装のコメント</td></tr>
@@ -158,7 +159,7 @@
 
   <p><code>PeerMappingOverride=1</code> が必要な理由は端的で、<b>EFA の MMIO 領域を GPU の番地空間にマップする</b>操作を、NVIDIA ドライバが既定で拒否するからです。GPU が doorbell を叩くというのは物理的にそういう操作だ、ということがこの要件から逆算できます。</p>
 
-  <p>そして「signal 512 本」という数字は、この後ずっと効いてきます。<b>signal が有限資源だからこそ、DeepEP fork には予算計算のためのヘッダが 1 つ新設されている</b> (第 5 回)。理由は EFA-GDA の実装を見ると分かります。<b>signal 1 本ごとに専用の端点 (queue pair) が作られている</b>のです。NCCL の device handle 定義 (<code>gin_efa_gda_dev.h</code>) には、宛先の選び方がこう書かれています。</p>
+  <p>そして「signal 512 本」という数字は、この後ずっと効いてきます。<b>signal が有限資源だからこそ、DeepEP fork には予算計算のためのヘッダファイルが新設されている</b> (<code>gin_resource_alloc.cuh</code>。第 5 回では <code>qp_mapping.cuh</code> と合わせて 2 本を読みます)。以後、C++ のファイルは「ヘッダファイル」、プロトコルの 64 bit 語は「in-band header」と呼び分けます。理由は EFA-GDA の実装を見ると分かります。<b>signal 1 本ごとに専用の端点 (queue pair) が作られている</b>のです。NCCL の device handle 定義 (<code>gin_efa_gda_dev.h</code>) には、宛先の選び方がこう書かれています。</p>
 
   <pre><code>targetSlot 0     -&gt; peer の DATA 端点     (FI_REMOTE_WRITE を bind しない = 相手に観測されない)
 targetSlot 1+s   -&gt; peer の signal 端点 s (その端点の FI_REMOTE_WRITE が tick する)</code></pre>
@@ -223,11 +224,11 @@ unpack2(signaled_tail, finish_flag, tail_idx);
 
   <p>層を分けて言い直します。<b>データが並べ替わること自体は SRD の性質</b>で、これは EFA を使う限り避けられません。一方で <b>末尾ポインタ方式が使えない直接の理由は EFA-GDA の能力集合</b>です。VA signal が無いので末尾という値を運べず、strong signal が無いので順序を代表させられず、遠隔アトミック加算が無いので値を足せません。SRD の一般的な性質だけからカーネルの書き換えが必要だと結論すると、根拠を一段広げすぎることになります。CPU proxy 経路のように能力集合が違えば、同じ SRD の上でも別の設計が成り立ちます。</p>
 
-  <p>3 番目が実は最も設計に効きます。値を運ぶ手段が無いわけではありませんが、<b>安く運ぶ手段が無い</b>のです。位置を差分として送るには Add-by-N を使うことになり、backend がそれを N 回の write に展開するので、位置の大きさに比例したコストになります。しかも weak なので、届いたことが先行 put の完了を意味しません。だから AWS fork はこの機能を位置通知には使わず、<b>各 put の完了を +1 ずつ数える</b>設計を採りました。受信側は「何個届いたか」から「どこまで有効か」を再構成することになり、その再構成に必要な情報が次の回の in-band header です。</p>
+  <p>3 番目が実は最も設計に効きます。表のとおり +N は N 回の write に展開できるので、値を運ぶ手段が原理的に無いわけではありません。しかし <b>upstream が送る差分は <code>pack2(finish_flag, tail)</code> という 64 bit のパック値で、上位ビットに終了フラグが入ります</b>。これを N 回の write に展開するのは天文学的な回数になり、事実上不可能です。つまり <b>安く運ぶ手段が無い</b>のです。位置を差分として送るには Add-by-N を使うことになり、backend がそれを N 回の write に展開するので、位置の大きさに比例したコストになります。しかも weak なので、届いたことが先行 put の完了を意味しません。だから AWS fork はこの機能を位置通知には使わず、<b>各 put の完了を +1 ずつ数える</b>設計を採りました。受信側は「何個届いたか」から「どこまで有効か」を再構成することになり、その再構成に必要な情報が次の回の in-band header です。</p>
 
   <div class="warn">
     <b>2 番目が最も危険</b><br>
-    1 と 3 は初期化や assert で目に見えて失敗します。2 は<b>失敗しません</b>。確率的に、負荷が高いときだけ、間違ったデータを読みます。順序に依存したプロトコルを順序保証のない網に載せたときの典型的な壊れ方です。だから「動いた」は根拠になりません。<b>順序が乱れたときにどうなるかを能動的に試す仕組み</b>が必要になります ― これが第 7 回の emulator の動機です。
+    1 と 3 は初期化や assert で目に見えて失敗するので、EFA-GDA の上では<b>実行が 2 まで到達しません</b>。危険なのは、VA signal を別の手段でエミュレートするなどして <b>1 と 3 だけを回避した素朴な移植</b>をしたときです。そのとき 2 は失敗として現れません。確率的に、負荷が高いときだけ、間違ったデータを読みます。順序に依存したプロトコルを順序保証のない網に載せたときの典型的な壊れ方で、だから「動いた」は根拠になりません。<b>順序が乱れたときにどうなるかを能動的に試す仕組み</b>が必要になります ― これが第 7 回の emulator の動機です。
   </div>
 </section>
 
