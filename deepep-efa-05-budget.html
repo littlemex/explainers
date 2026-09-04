@@ -107,6 +107,11 @@
 
   <p>これで「デバイスあたり signal + counter で 512」という制限の意味が分かります。<b>ハードウェアが作れる端点の数の制限</b>です。8 バイトのカウンタをいくつ置けるかという話ではありません。</p>
 
+  <div class="key">
+    <b>3 つの語を区別する</b><br>
+    ここから先は <b>GIN context</b>、<b>端点 (endpoint)</b>、<b>QP</b> を使い分けます。DeepEP が <code>num_allocated_qps</code> と呼ぶのは <b>GIN context の数</b>です。1 つの GIN context の下に、EFA-GDA の plugin が <b>data 端点</b>、<b>PutValue 端点</b>、そして <b>signal 番号ごとの端点</b>を作ります。indexed signal の番号は、その context の中で端点を選ぶ番号です。予算式の 256 と 512 が別の数である理由もここにあります。256 は DeepEP が自分の設計定数として持つ QP 予算で、512 は EFA が signal と counter に対して課すデバイスあたりの上限です。
+  </div>
+
   <div class="fig">
     <svg viewBox="0 0 860 210" role="img" aria-label="signal 番号が受信側の端点に対応する">
       <rect x="30" y="40" width="240" height="130" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
@@ -173,7 +178,7 @@ static_assert(all_gin_context_counts_cover_warps(), "...");</code></pre>
 
   <p>「11 context → 21 signals/context。context と signal/context は <code>gin_indexed_signals_for</code> を通して反比例するので、QP を増やせば 1 本あたりの signal 予算は減る。等価な代替は {5, 6, 7, 8, 9, 14}。それ以外はどこかで part を失う。特に 12, 15, 16, 17 は 12 SM で part が 3 に落ちる。17 (provider の最大) は signal が 13 本しか残らず、SM ごとの QP 分割で最も混む QP に channel が 4 本乗る」。</p>
 
-  <p>ここに DeepEP fork の設計の性格が出ています。<b>数字はチューニングの結果ではなく、離散的な制約の交差から選ばれています</b>。「11 にした方が速かった」ではなく「11 なら part を 4 に保てる」。だから性能 PR で context 数を動かすときは、必ず part 数への影響も同時に見る必要があります (open PR #9 が既定を 11 → 13 に上げる提案をしているので、そこは論点になります)。</p>
+  <p>ただしこの整数制約が絞るのは<b>候補集合</b>までです。part を 4 に保てる context 数は 11 だけではなく、コメント自身が {5, 6, 7, 8, 9, 14} を挙げています。その中から 11 を選ぶには、QP の並列度と context あたりの signal 数のどちらを取るかという<b>性能上の判断が別に必要</b>です。つまり「11 は制約だけから決まった」とは言えません。言えるのは、<b>制約が候補を離散的な集合に絞り、その中から選ぶ話になっている</b>ということです。だから性能 PR で context 数を動かすときは、必ず part 数への影響も同時に見る必要があります (open PR #9 が既定を 11 → 13 に上げる提案をしているので、そこは論点になります)。</p>
 
   <p>なお §6 の計算機に出荷されている式をそのまま写して 12 SM ・ channel/SM 4 で走らせると、part 4 を保てるのは {5, 6, 7, 8, 9, 11, 13, 14} になり、コメントの列挙 (13 を含まない) とわずかにずれます。<b>コメントが別の channel/SM を前提にしている可能性が高い</b>ものの、この種の「文書化された主張と出荷された式のずれ」は<b>ホスト側テストで固定すべき対象そのもの</b>です。実際 open PR #9 は既定を 13 にする提案をしているので、この行がどちらの前提で書かれているかは論点になります。</p>
 

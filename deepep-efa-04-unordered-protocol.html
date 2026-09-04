@@ -91,7 +91,7 @@
 
   <div class="key">
     <b>一言でいうと</b><br>
-    受信スロット列を <b>コンパイル時に固定した part に分割</b>し、各 part の先頭に <b>in-band header</b> (書き込み済みフラグ・iteration 番号・トークン数・後続あり) を埋め、part 全体を 1 回の put で送って <b>番号つき weak signal を 1 つ束ねる</b>。受信側は <b>signal の到着数</b>と <b>header が見えている送信元の数</b>を比べて「この part は完全に着地した」と判定します。この判定が正しいのは <b>C ⊆ H という包含関係</b>のおかげで、その包含関係は <b>3 つの不変条件</b>に依存しています。fork のコードはその 3 つを全部満たしていますが、<b>コード上に明記はされていません</b>。
+    受信スロット列を <b>コンパイル時に固定した part に分割</b>し、さらに part を <b>sub-part</b> に割ります。<b>送信の単位は sub-part</b> で、各 sub-part の先頭に <b>in-band header</b> (書き込み済みフラグ・iteration 番号・トークン数・後続あり) を埋め、その sub-part を 1 回の put で送って <b>番号つき weak signal を 1 つ束ねる</b>。signal 番号は part 単位なので、同じ part の sub-part は同じ番号を共有します。受信側は <b>signal の到着数</b>と <b>header が見えている送信元の数</b>を比べて「この part は完全に着地した」と判定します。この判定が正しいのは <b>C ⊆ H という包含関係</b>のおかげで、その包含関係は <b>3 つの不変条件</b>に依存しています。fork のコードはその 3 つを全部満たしていますが、<b>コード上に明記はされていません</b>。
   </div>
 
   <div class="toc">
@@ -147,7 +147,7 @@
 
   <p><code>kNumParts</code> は <code>gin_alloc::constexpr_num_parts(...)</code> というコンパイル時計算で決まります。入力は「この launch に割り当てられた 1 context あたりの indexed signal 本数」「SM 数」「QP 数」「channel/SM」です。要するに <b>signal 予算が足りる範囲で part を増やす</b>。予算が厳しければ part は 1 に落ちます。上限は <code>kMaxParts = 4</code>。</p>
 
-  <p>sub-part はさらに細かい分割で、既定 2 (<code>EP_NUM_SUB_PARTS</code>)。sub-part は<b>同じ part の signal 番号を共有</b>します。したがって「part k の signal が 3 回来た」は「part k に属する put が 3 つ完了した」という意味になり、sub-part 単位でも同じ数え上げが成り立ちます。Blackwell (SM100) では小さすぎる sub-part を作らないよう <code>EP_SM100_MIN_SUB_TOKENS = 15</code> という下限が入っています。</p>
+  <p>sub-part はさらに細かい分割で、既定 2 (<code>EP_NUM_SUB_PARTS</code>)。<b>1 回の put が運ぶのはこの sub-part です</b> (<code>flush_part</code> が sub-part ごとに header を書いて put を出します)。sub-part は<b>同じ part の signal 番号を共有</b>します。したがって「part k の signal が 3 回来た」は「part k に属する put が 3 つ完了した」という意味になり、sub-part 単位でも同じ数え上げが成り立ちます。Blackwell (SM100) では小さすぎる sub-part を作らないよう <code>EP_SM100_MIN_SUB_TOKENS = 15</code> という下限が入っています。</p>
 
   <p>この「予算からコンパイル時に幾何を決める」構造の弱点は、<b>幾何が悪い方に張り付くケースがある</b>ことです。open PR #2 が指摘しているのはまさにそれで、「予算が最も緩いのは channel が最も少ないトークンしか持たないとき」なので、decode 形状 (小さいバッチ・少ない SM) では 3 トークンを 4 part に割って「1 トークンの put が 3 回 + 空の part 1 つ」になる、と書かれています。sub-part 側には既に下限があるのに part 側には無い、という非対称の指摘です。</p>
 </section>
@@ -360,11 +360,15 @@ if (landed &gt;= expected_k) return true;   // 期待した増分が全部届く
 
 <section id="s9">
   <h2><span class="num">9</span>残る疑問 (31 bit の iteration)</h2>
-  <p class="lead">§5 の証明には 1 つ穴が残ります。H の定義が「今回の iteration の header」であることに依存している点です。</p>
+  <p class="lead">§5 の証明には穴が残ります。H の定義が「今回の iteration の header」であることに依存している点と、signal の値が単調であることに依存している点です。前者は当初「実機では踏めない」と評価していましたが、<b>その評価は誤りでした</b>。</p>
 
   <p><code>unpack_scaleout_header</code> の iteration 比較は 31 bit マスク後の一致判定です。したがって <b>iteration が 2^31 離れた値は区別できません</b>。<code>dispatch_iteration</code> はバッファのホスト側で毎回 <code>++</code> されるカウンタなので、原理的には周回します。周回すると「前回の残骸」を「今回のもの」と誤認しうるので、H が「今回の put 集合」でなくなり、§5 の前提が崩れます。</p>
 
-  <p>実用上どうか、を分けて考えるべきです。2^31 回の dispatch は現実的な回数ではありません (毎秒 1 万回でも 2 日以上)。しかしこの種の「実機では踏めないが論理的には存在する」欠陥は、<b>まさに emulator が iteration の初期値を境界値に置くだけで決定的に検査できる</b>領域です。実機テストが最も苦手で、モデル検査が最も得意な区画がここにあります。</p>
+  <p>ここは当初「実機では踏めない」と書いていましたが、<b>訂正します</b>。まず、周回する前に別の問題があります。<code>dispatch_iteration</code> は <code>csrc/elastic/buffer.hpp</code> で <b><code>mutable int</code></b>、つまり符号つき整数として持たれており、<code>++ dispatch_iteration</code> が <code>INT_MAX</code> を超えるのは C++ の規格上 wrap ではなく <b>未定義動作</b>です。そして到達時間も無視できません。decode の 1 step で層ごとに dispatch が走るので、60 層で毎秒 100 step なら毎秒 6000 回です。毎秒 1 万回として 2^31 回は <b>約 2.5 日</b>。常駐する推論サービスなら普通に超えます。</p>
+
+  <p>つまりこれは「論理的には存在するが踏めない欠陥」ではなく、<b>長時間動かす前提なら実際に到達する欠陥</b>です。直し方も難しくありません。host 側のカウンタを符号なし型にして wrap の意味を定義し、そのうえで stale header との衝突を検査すればよい。そして<b>検査はモデル検査が最も得意な区画</b>で、iteration の初期値を境界に置くだけで決定的に確かめられます。実機で 2.5 日回して待つ必要はありません。</p>
+
+  <p>もう 1 つ、同じ性質の疑問があります。受理判定は <code>landed = readSignal(...) - rx_part_base[k]</code> という<b>絶対値の引き算</b>ですが、EFA-GDA で kernel が読む signal は <b>NIC のハードウェアカウンタそのもの</b>です (<code>GetSignalPtr</code> が <code>cntr_value</code> と <code>cntr_offset</code> を返す)。そして同じファイルは「この完了カウンタは 2^31 で wrap するので、<b>絶対値を比較してはならない</b>。必ず差を取って 31 bit に丸めよ」と明記しています。DeepEP 側にその丸めはありません。ただし 1 つの signal 番号が 2^31 回増えるには (channel, part) ごとに 2^31 回の dispatch が必要なので、iteration の 31 bit と同じく実行では到達しません。<b>境界値を直接置けるモデル検査でしか触れない区画</b>という点も同じです。</p>
 
   <p>加えて、I3 の drain があるので「前回の残骸が signal を水増しする」経路は塞がれています。周回で起きるのは <b>header の誤認</b>の方で、それは <code>num_valid</code> を増やす向きに働くため、多くの場合は「早期受理」ではなく「待ち」に倒れます。つまり症状はデータ破壊より hang になりやすい。とはいえ「多くの場合」で片付けるべきではないので、検査項目として残します。</p>
 
