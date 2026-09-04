@@ -158,7 +158,13 @@ static constexpr int kMaxGinContextCnt     = 17;
 static constexpr int kDefaultGinContextCnt = 11;   // → 21 signals/context
 static constexpr int kMaxParts             = 4;</code></pre>
 
-  <p>まず 512 と 256 の関係を片づけます。<b>512 は EFA が signal と counter に課すデバイスあたりの上限</b>で、<b>256 は DeepEP が自分の設計定数として置いた端点予算</b>です。両者の対応はコードのコメントに書かれておらず、<b>私は確認できていません</b> (半分を安全余裕として取ったのか、signal と counter が対で消費されると見たのか、別の理由か)。以後 256 を「端点 (QP) 予算」と呼び、それを消費する単位を「context」と呼びます。コード上の <code>num_allocated_qps</code> は context の数を指します。</p>
+  <p>まず 512 と 256 の関係を片づけます。<b>512 は EFA が signal と counter に課すデバイスあたりの上限</b>で、<b>256 は DeepEP が自分の設計定数として置いた端点予算</b>です。</p>
+
+  <p>この 2 つの数は、実機の EFA デバイスがそのまま報告する数でもありました。p5.4xlarge の EFA インターフェースに対する <code>ibv_devinfo</code> は <code>max_qp: 256</code> と <code>max_cq: 512</code> を返します。つまり 256 は DeepEP が勝手に選んだ安全余裕ではなく、<b>デバイスが作れる queue pair の実数</b>です。512 は completion queue の上限で、signal と counter がそれを消費します。ここまでは実測で確定しました。</p>
+
+  <p>残る「なぜ QP 側の 256 を signal の本数に使い、512 側を使わないのか」という選択の理由は、コードのコメントに書かれておらず <b>私は確認できていません</b>。以後 256 を「端点 (QP) 予算」と呼び、それを消費する単位を「context」と呼びます。コード上の <code>num_allocated_qps</code> は context の数を指します。</p>
+
+  <p>同じデバイスの報告には、この章の外側で効いてくる数が 2 つ混ざっています。<code>max_sge: 2</code> は 1 回の write に付けられる scatter-gather 要素が 2 つしかないという意味で、複数の断片を 1 回の write でまとめて送る逃げ道が無いことを表します。<code>atomic_cap: ATOMIC_NONE</code> は <b>ファブリックが atomic 操作を一切提供しない</b>という宣言で、signal が「受信側が足し込むカウンタ」という形でしか実装できない理由そのものです。</p>
 
   <p>読み方は次のとおりです。<b>context を 1 つ作るごとに端点を固定で 2 つ消費し</b>、残った <code>256 - 2c</code> 本を signal 用の端点として c 個の context に配ります。式の分子から <code>2c</code> を引いている理由は<b>コードに書かれていません</b>。ヘッダのコメントは「provider の現在の制限に対する回避策」とだけ述べています。context ごとに固定で 2 つの端点が要ると読むのが自然で、NCCL の device handle にも <code>data</code> と <code>pvdata</code> という 2 つの端点が並んでいるので辻褄は合いますが、<b>これは私の推測です</b>。予算式を動かすときは、この 2 が何を指しているのかを先に確かめるべきです。</p>
 

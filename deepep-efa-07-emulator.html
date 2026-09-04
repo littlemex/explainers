@@ -303,7 +303,7 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
 
 <section id="s9">
   <h2><span class="num">9</span>着手前に潰す 3 点</h2>
-  <p class="lead">この回の設計判断は公開ソースの読解から出したものです。そのうち 3 点は実験でしか白黒がつかないので分けて挙げてありました。2026-09-04 に GPU 4 枚の箱を 17.7 分だけ借りて 2 点を確定させたので、結果を先に置きます。</p>
+  <p class="lead">この回の設計判断は公開ソースの読解から出したものです。そのうち 3 点は実験でしか白黒がつかないので分けて挙げてありました。<b>3 点すべてが実機で確定しました</b>。まず GPU 4 枚の箱で 1 と 3 を、次に H100 を 1 枚ずつ載せた 3 台のクラスタで 1 と 2 を確定させています。</p>
 
   <div class="key">
     <b>実測の結論 (2026-09-04、g4dn.12xlarge = Tesla T4 4 枚、費用 1.15 ドル)</b>
@@ -321,12 +321,43 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
 
   <p>付随して確定した事実が 2 つあります。<b>EFA-GDA の device ヘッダは pip の wheel に入っています</b> (<code>nvidia-nccl-cu13</code> 2.31.2 に <code>gin/efa_gda/</code> と <code>transport/net_efa_gda/efa-dp-direct/</code> の一式、backend の dispatch にも <code>EFA_GDA</code> の腕)。§2 の事実 5 が実物で裏付けられました。逆に <b>plugin の ABI ヘッダは wheel に入っていません</b> (<code>nccl_rma.h</code> ほかすべて欠落) ので、plugin のビルドには NCCL の<b>ソース</b>チェックアウトが別に必要です。</p>
 
+  <div class="key">
+    <b>2 番目も確定しました (2026-09-04、p5.4xlarge = H100 80GB 1 枚 x 3 台、Capacity Block)</b>
+    <p>H100 を 1 枚ずつ載せたホストを 3 台並べ、<b>1 と 2 の両方を実クラスタで確定させました</b>。</p>
+    <table>
+      <tr><th>#</th><th>問い</th><th>結果</th></tr>
+      <tr><td>1</td><td>rail team を 2 以上にできるか</td><td><b>1 GPU x 3 ホストなら knob 不要で成立</b>。<code>nRanks 3 / nLsaTeams 3 / LSA 1</code>。DeepEP の <code>num_ranks == lsa * rail</code> は成立し、送信元 2 つの条件も満たす。<code>NCCL_LSA_TEAM_SIZE</code> や <code>NCCL_HOSTID</code> は結果を変えない ― 1 GPU / ホストが既に最小形だから</td></tr>
+      <tr><td>2</td><td>plugin が実際に呼ばれるか</td><td><b>plugin は読み込まれ comm に割り当てられる</b>。<code>RMA/Plugin: Loaded rma plugin srdsim (v14)</code> → <code>Assigned plugin srdsim to comm</code> → <code>hostRmaSupport: yes</code>。しかも 2 通りの経路で成立した</td></tr>
+    </table>
+  </div>
+
+  <p>2 番目の「2 通りの経路」は出荷の形を決めるので分けて書きます。<code>NCCL_RMA_PLUGIN</code> に絶対パスを渡す経路と、<b><code>libnccl-rma.so</code> という名前のファイルをライブラリ検索パスに置く</b>経路の両方で読み込まれました。NCCL はこの名前をそのまま探しているので (探して見つからないときは <code>RMA/Plugin: Could not find: libnccl-rma.so</code> と言います)、emulator は <b>root 権限も環境変数も要らず、自分のディレクトリを 1 つ足すだけ</b>で差し込めます。</p>
+
+  <div class="key">
+    <b>そして emulator の動機そのものが書き換わりました</b>
+    <p>実 EFA ハードウェアを持つ H100 クラスタで <b>fork が狙う backend が存在しないことが実測で確定しました</b>。</p>
+    <table>
+      <tr><th>調べたこと</th><th>結果</th></tr>
+      <tr><td>aws-ofi-nccl の版</td><td>1.18.0 / Libfabric 2.4 / provider <code>efa</code> / nic 1 枚 (初期化は成功する)</td></tr>
+      <tr><td>その plugin が export する記号</td><td><code>ncclNetPlugin_v2</code>〜<code>ncclNetPlugin_v11</code> <b>だけ</b>。GIN も RMA の plugin 記号も 1 つも無い</td></tr>
+      <tr><td>GIN plugin</td><td>NCCL は <code>libnccl-gin.so</code> という名前で探すが、マシン上のどこにも存在しない</td></tr>
+      <tr><td>NCCL 自身の要約</td><td><code>globalGinSupport 0</code></td></tr>
+      <tr><td>GPUDirect RDMA</td><td>無効。理由は <i>"Could not disable CUDA API usage for HMEM"</i>。<code>FI_EFA_USE_DEVICE_RDMA=1</code>、<code>FI_HMEM_CUDA_ENABLE_XFER=1</code>、<code>NCCL_NET_GDR_LEVEL=SYS</code> のいずれでも変わらない</td></tr>
+    </table>
+  </div>
+
+  <p>つまり <b>金を払って Hopper と実 EFA を並べても、今日の時点では GIN EFA-GDA の経路を踏めません</b>。ベンダの plugin が GIN backend を出荷していないからです。これは着手前に予想していた話の逆です。emulator は「EFA インスタンスを毎回起動できない人のための代用品」ではなく、<b>backend が出荷されるまでの間、このプロトコルを検証できる唯一の手段</b>ということになります。第 0 節で「目標の書き換えを受け入れられるかが判断基準」と書きましたが、その書き換えの必要性まで実測が裏付けた形です。</p>
+
+  <p>1 台では見えなかった区別も 1 つ拾えました。device API の有無は <b>マシン単位ではなく communicator 単位</b>の答えです。同じホスト上の 1 ランクの communicator は <code>deviceApiSupport: yes</code> を返しますが、ホストを跨ぐ 3 ランクの communicator は <code>no</code> を返します。<b>device API のノード間の半分が GIN backend そのもの</b>なので、その不在が答えを no に引っ張ります。</p>
+
+  <p>実クラスタを借りて初めて分かった落とし穴も 2 つ記録しておきます。Capacity Block への起動には <code>--instance-market-options MarketType=capacity-block</code> が必要で、無いと <i>"The market type (purchasing) option is not valid"</i> という spot の話に見えるエラーで蹴られます。そして <b><code>--subnet-id</code> で起動すると EFA インターフェースが付かず、<code>/dev/infiniband</code> ごと存在しません</b>。このとき aws-ofi-nccl は初期化に失敗し、NCCL は黙って socket に落ちて動き続けます。何も落ちないので、<b>起動パラメータの不足がハードウェア非対応に見えます</b>。<code>InterfaceType=efa</code> は起動時に要求するしかなく、後から device index 0 に足すことはできません。</p>
+
   <p>以下は元の 3 点です。実験の方法と、駄目だったときの逃げ道を残してあります。</p>
 
   <table>
     <tr><th>#</th><th>確認すること</th><th>方法</th><th>駄目だった場合</th></tr>
     <tr><td>1<br><span style="color:#0f5132;font-weight:700">解決</span></td><td>単一ホストで <b>rail team を 2 以上にできるか</b>。<code>computeLsaSize</code> の <code>p2pCrossClique &amp;&amp; nvlDomainSize == nRanks</code> の分岐を回避できるか</td><td>2〜3 GPU のマシンで <code>NCCL_HOSTID</code> を分けて起動し、<code>NCCL_DEBUG=INFO</code> で LSA / rail のサイズを確認。<code>NCCL_LSA_TEAM_SIZE</code> の効きも見る</td><td>層 2 は多ノード (EFA でなくてよい ―― TCP の 2 台でよい) が必要になる。層 0 / 層 1 の価値は変わらない</td></tr>
-    <tr><td>2<br><span style="color:#b5401f;font-weight:700">未解決</span></td><td>proxy 経路で <b>plugin が実際に <code>iput</code> / <code>iputSignal</code> を受け取るか</b>。DeepEP の unordered カーネルが出す signal 付き put が plugin まで降りてくるか</td><td>何もしない (呼ばれたらログを出すだけの) パススルー RMA plugin を作り、<code>NCCL_RMA_PLUGIN</code> で読ませて <code>test_ep.py</code> を単一ノード + fake node で回し、ログを見る</td><td>順序の支配ができないので案 A は不成立。層 1 中心に切り替える</td></tr>
+    <tr><td>2<br><span style="color:#0f5132;font-weight:700">解決</span></td><td>proxy 経路で <b>plugin が実際に <code>iput</code> / <code>iputSignal</code> を受け取るか</b>。DeepEP の unordered カーネルが出す signal 付き put が plugin まで降りてくるか</td><td>何もしない (呼ばれたらログを出すだけの) パススルー RMA plugin を作り、<code>NCCL_RMA_PLUGIN</code> で読ませて <code>test_ep.py</code> を単一ノード + fake node で回し、ログを見る</td><td>順序の支配ができないので案 A は不成立。層 1 中心に切り替える</td></tr>
     <tr><td>3<br><span style="color:#0f5132;font-weight:700">解決</span></td><td><b><code>regMrSym</code> を RDMA NIC 無しで実装できるか</b>。NCCL が渡してくるバッファが cuMem VMM 由来か、共有可能なハンドルを取り出せるか</td><td>パススルー plugin の <code>regMrSym</code> で <code>cuMemRetainAllocationHandle</code> / <code>cuMemExportToShareableHandle</code> を試し、成功するか確認</td><td>ホストのステージングバッファ経由 (device → host → 相手 device) に落とす。忠実度は下がるが順序の支配は保てる</td></tr>
   </table>
 
