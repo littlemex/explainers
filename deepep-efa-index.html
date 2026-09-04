@@ -70,6 +70,7 @@
     </table>
     <p>この判定が正しいのは <b>C ⊆ H</b> (signal が届いたものは header も見えている) という包含関係のおかげで、包含関係は <b>3 つの不変条件</b>に依存します。I1 = weak signal 契約、I2 = signal を先に acquire で読む、I3 = iteration の基準値が正確。<b>fork のコードは 3 つを満たしていますが、どこにも明記されていません</b>。</p>
     <p>そして emulator は <b>作れます</b>。NCCL の <b>RMA plugin は完全にホスト側だけの API</b> で、CPU proxy 経路のデータ配置と signal 更新の両方がそこを通るからです。ただし目標は「EFA を再現する」ではなく <b>「EFA が与える契約の下でプロトコルを詰める」</b>に書き換える必要があります。WQE や MMIO やハードウェアカウンタは実機に残します。</p>
+    <p>この判定のうち実験でしか決まらない部分は、実機で 2 点まで確定しました。<b>単一ホストでも rail team は縮められる</b> (何もしないと到達不可なので懸念自体は実在した)、<b>別プロセスの GPU window へ書く仕組みは成立する</b> (落ちるのは別 GPU 向けの権限設定だけで、ホストを分ければそこも要らない)。残る 1 点は NCCL の device API を持つ GPU が必要で、そこは開いています。</p>
   </div>
 
   <div class="summary">
@@ -77,6 +78,30 @@
     <p><b>ネットワークの実装に興味があるなら</b>、<a href="./deepep-efa-02-who-writes-the-wqe.html">02</a> (ibverbs / libfabric / NVSHMEM / NCCL GIN / EFA-GDA の地図) から <a href="./deepep-efa-03-srd-ordering.html">03</a> (SRD が保証しないこと) へ。03 と <a href="./deepep-efa-04-unordered-protocol.html">04</a> にはブラウザで動くデモがあります。</p>
     <p><b>貢献したいなら</b>、<a href="./deepep-efa-06-status.html">06</a> (現在地と open PR 6 本) と <a href="./deepep-efa-07-emulator.html">07</a> (emulator の設計と最初の PR)。07 §8 が具体的な着手順で、§9 が着手前に潰すべき 3 点です。</p>
     <p><b>設計の要点だけ知りたいなら</b>、<a href="./deepep-efa-04-unordered-protocol.html#s5">04 §5 (なぜ正しいのか)</a> と <a href="./deepep-efa-04-unordered-protocol.html#s6">04 §6 (3 つの不変条件)</a> の 2 節です。</p>
+  </div>
+
+  <div class="summary">
+    <h2>用語表</h2>
+    <p>このシリーズは層が多く、同じものを違う視点から呼ぶ場面があります。読んでいて迷ったらここに戻ってください。</p>
+    <table>
+      <tr><th>語</th><th>意味</th><th>どの回で出るか</th></tr>
+      <tr><td>dispatch / combine</td><td>MoE でトークンを専門家のいる rank へ送る行きと、専門家の出力を元の rank へ返して重み付き加算する帰り</td><td>01</td></tr>
+      <tr><td>scale-up / LSA</td><td>ノード内。GPU が load / store で相手のメモリを直接読める範囲。LSA は load-store accessible の略</td><td>01, 07</td></tr>
+      <tr><td>scale-out / rail</td><td>ノード間。RDMA が必要な範囲。rail は各ノードの同じ位置の GPU を束ねた集合</td><td>01, 07</td></tr>
+      <tr><td>hybrid / direct</td><td>ノード間を 1 hop 送ってからノード内で横に配るのが hybrid。ノード内だけで済むのが direct。EFA の話は全部 hybrid 側</td><td>01</td></tr>
+      <tr><td>SRD</td><td>EFA の転送方式。再送するので届くが、順序は保証しない</td><td>03</td></tr>
+      <tr><td>GIN</td><td>GPU-Initiated Networking。GPU のカーネルが自分で NIC に仕事を積む仕組み</td><td>02</td></tr>
+      <tr><td>EFA-GDA</td><td>EFA 向けの GIN バックエンド。GPU が EFA の記述子を直接書く。p5en と p6 系だけで使える</td><td>02, 03</td></tr>
+      <tr><td>put</td><td>相手のメモリに直接置く片側通信。返事を待たない</td><td>01, 02</td></tr>
+      <tr><td>signal</td><td>相手側のカウンタを 1 つ進める通知。EFA では「番号で指定するカウンタ」しか使えない</td><td>02, 03</td></tr>
+      <tr><td>strong / weak signal</td><td>strong は「先行する全ての put が完了した」ことを含意する。weak は「束ねたその put だけ」。EFA は weak のみ</td><td>02, 03, 04</td></tr>
+      <tr><td>indexed / VA signal</td><td>indexed は番号で指す signal、VA は登録済みメモリの任意アドレスを指す signal。EFA は indexed のみ</td><td>02, 03</td></tr>
+      <tr><td>channel</td><td>並列に流す通信の単位。実装上は 1 つの warp が 1 つの channel を担当する</td><td>05</td></tr>
+      <tr><td>context / QP</td><td>GIN の context は 1 つの送信キュー (queue pair) を供給する。DeepEP は既定で 11 個作る</td><td>05</td></tr>
+      <tr><td>part / sub-part</td><td>受信スロット列をコンパイル時に固定分割した区画。part ごとに signal 1 本を割り当てる</td><td>04, 05</td></tr>
+      <tr><td>in-band header</td><td>データと同じ put で運ぶ 64 bit 1 語。書き込み済みフラグ、iteration、トークン数、後続ありを詰める</td><td>04</td></tr>
+      <tr><td>I1 / I2 / I3</td><td>受理判定の正しさが依存する 3 つの不変条件。順に weak signal 契約、signal を先に読むこと、基準値が正確なこと</td><td>04, 07</td></tr>
+    </table>
   </div>
 
   <div class="summary">
@@ -147,7 +172,7 @@
 
   </div>
 
-  <p class="note">記述の範囲について: 本シリーズの技術的記述はすべて公開ソースで確認できる範囲に限っています ―― <a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">deepseek-ai/DeepEP</a>、<a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a>、<a href="https://github.com/NVIDIA/nccl" target="_blank" rel="noopener">NVIDIA/nccl</a>、<a href="https://github.com/aws/aws-ofi-nccl" target="_blank" rel="noopener">aws/aws-ofi-nccl</a>、<a href="https://github.com/awslabs/awsome-distributed-ai" target="_blank" rel="noopener">awslabs/awsome-distributed-ai</a>。<b>本シリーズには筆者の実機測定は含まれません</b>。引用した性能数値はすべて公開されている PR 本文の記述で、出典を本文に明記しています。第 7 回の emulator の判定は公開 API の読解と、同じ事実を独立に 2 つのモデルへ渡して評価させた結果が収束した部分であり、<b>実装して動かした結論ではありません</b> (§9 に実験で潰すべき項目を挙げています)。時点は 2026-09-04 です。背景として <a href="./ffn-moe-explainer.html">FFN から MoE へ</a> が MoE 側の、<a href="./09-collectives.html">集団通信の回</a> が通信側の入口になります。</p>
+  <p class="note">記述の範囲について: 本シリーズの技術的記述はすべて公開ソースで確認できる範囲に限っています ―― <a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">deepseek-ai/DeepEP</a>、<a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a>、<a href="https://github.com/NVIDIA/nccl" target="_blank" rel="noopener">NVIDIA/nccl</a>、<a href="https://github.com/aws/aws-ofi-nccl" target="_blank" rel="noopener">aws/aws-ofi-nccl</a>、<a href="https://github.com/awslabs/awsome-distributed-ai" target="_blank" rel="noopener">awslabs/awsome-distributed-ai</a>。<b>引用した性能数値はすべて公開されている PR 本文の記述で、筆者の測定ではありません</b>。出典は本文に明記しています。第 7 回の emulator の判定は公開 API の読解と、同じ事実を独立に 2 つのモデルへ渡して評価させた結果が収束した部分です。<b>そのうち実験でしか決まらない 3 点については、2 点を GPU の実機で確定させました</b> (第 7 回 §9。GPU 4 枚の箱を 17.7 分、費用 1.15 ドル)。実機で確かめた事実にはその旨を明記し、残る 1 点は開いたままだと書いています。性能に関する測定は一切していません。時点は 2026-09-04 です。背景として <a href="./ffn-moe-explainer.html">FFN から MoE へ</a> が MoE 側の、<a href="./09-collectives.html">集団通信の回</a> が通信側の入口になります。</p>
 </main>
 <footer>
   <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>

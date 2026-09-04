@@ -88,7 +88,7 @@
     <a href="#s9">9. 着手前に潰す 3 点</a>
   </div>
 
-  <p style="font-size:14px;color:var(--sub)">この回の判定は、公開ソース (NCCL / aws-ofi-nccl / DeepEP fork) の該当箇所を直接読んで確認したものと、独立に 2 つの大規模モデル (Claude Fable 5 と GPT-5.6) に同じ事実を渡して評価させた結果が収束した部分を書いています。<b>実機で動かして確認した結論ではありません</b>。実装前に §9 の 3 点を実験で潰す必要があります。</p>
+  <p style="font-size:14px;color:var(--sub)">この回の判定は、公開ソース (NCCL / aws-ofi-nccl / DeepEP fork) の該当箇所を直接読んで確認したものと、独立に 2 つの大規模モデル (Claude Fable 5 と GPT-5.6) に同じ事実を渡して評価させた結果が収束した部分を書いています。設計判断そのものは実機で動かして出したものではありません。ただし実験でしか決まらない 3 点のうち <b>2 点は 2026-09-04 に GPU の実機で確定させました</b> (結果は <a href="#s9">§9</a>)。残る 1 点は NCCL の device API を持つ GPU が必要で、まだ開いています。</p>
 </section>
 
 <section id="s1">
@@ -107,7 +107,7 @@
 
 <section id="s2">
   <h2><span class="num">2</span>決定的な API 事実 (一次ソース)</h2>
-  <p class="lead">この判定は次の 5 つの確認に立っています。どれも公開ソースで追えます。</p>
+  <p class="lead">この判定は次の 6 つの確認に立っています。どれも公開ソースで追え、5 と 6 は実機のインストール物でも確かめました。</p>
 
   <table>
     <tr><th>#</th><th>事実</th><th>場所</th><th>意味</th></tr>
@@ -115,7 +115,8 @@
     <tr><td>2</td><td>GIN plugin が「自分は proxy 型」と名乗ると <b>NCCL はそれをスキップし</b>、内蔵 proxy を RMA バックエンド越しに使う</td><td><code>nccl/src/plugin/gin.cc</code> (該当する INFO ログつきの分岐)</td><td>proxy 経路を差し替える正しい入口は RMA plugin だけ、と確定する</td></tr>
     <tr><td>3</td><td>proxy 経路では <b>indexed signal の実体が GPU メモリ上の <code>uint64</code> 配列</b>で、plugin の <code>regMrSym</code> で登録され、device が signal 付き put を出すと <code>signalOff = (signalId + contextId * nSignalsPerContext) * 8</code> を計算して <b>plugin の <code>iputSignal</code> が呼ばれる</b></td><td><code>nccl/src/gin/gin_host_proxy.cc</code></td><td><b>signal の到着タイミングも plugin が握る</b>。これが emulator の成立条件</td></tr>
     <tr><td>4</td><td>proxy バックエンドは <code>supportsStrongSignals = true; supportsVASignals = true;</code> を<b>ハードコード</b>している</td><td><code>nccl/src/gin/gin_host_proxy.cc</code></td><td>RMA plugin では EFA の「非対応」を能力面で名乗れない。<b>能力交渉のテストは別手段が必要</b> (§4 の但し書き)</td></tr>
-    <tr><td>5</td><td>EFA-GDA の device コードと <code>efa-dp-direct</code> のヘッダは <b>NCCL のインストール対象に含まれる</b> (<code>${CMAKE_BINARY_DIR}/include/nccl_device/transport/net_efa_gda/...</code> にコピーされ <code>install(DIRECTORY)</code> で入る)</td><td><code>nccl/src/transport/net_efa_gda/efa-dp-direct/CMakeLists.txt</code></td><td>EFA を持たないマシンでも、DeepEP の JIT カーネルには EFA-GDA 経路がコンパイルされて入る。<b>案 B が原理的に可能な理由</b>でもある</td></tr>
+    <tr><td>5</td><td>EFA-GDA の device コードと <code>efa-dp-direct</code> のヘッダは <b>NCCL のインストール対象に含まれる</b> (<code>${CMAKE_BINARY_DIR}/include/nccl_device/transport/net_efa_gda/...</code> にコピーされ <code>install(DIRECTORY)</code> で入る)。<b>2026-09-04 に実機で確認済み</b>: <code>nvidia-nccl-cu13</code> 2.31.2 の wheel に <code>gin/efa_gda/gin_efa_gda.h</code> と <code>transport/net_efa_gda/efa-dp-direct/include/</code> 一式が入っていた</td><td><code>nccl/src/transport/net_efa_gda/efa-dp-direct/CMakeLists.txt</code> と wheel の実物</td><td>EFA を持たないマシンでも、DeepEP の JIT カーネルには EFA-GDA 経路がコンパイルされて入る。<b>案 B が原理的に可能な理由</b>でもある</td></tr>
+    <tr><td>6</td><td>一方で <b>plugin の ABI ヘッダは wheel に入っていない</b>。<code>nccl_rma.h</code> / <code>nccl_gin.h</code> / <code>nccl_net.h</code> / <code>nccl_common.h</code> がすべて欠落し、あるのは <code>nccl.h</code> と <code>nccl_device</code> の木だけ</td><td>wheel の実物 (2026-09-04 実測)</td><td>plugin をビルドするには NCCL の<b>ソース</b>チェックアウトが別に必要。設計は変わらないがビルド手順が変わる</td></tr>
   </table>
 
   <p>4 番目は、当初「plugin が false を返せば EFA と同じ能力面を見せられる」と考えたところの訂正です。<b>RMA plugin にはそもそも能力申告の関数がありません</b> (GIN plugin にはある <code>getGinProperties</code> が RMA の op-table には無い)。ただしこれは実用上の障害になりません。<b>DeepEP の unordered 経路は自分から <code>ginStrongSignalsRequired = false; ginVaSignalsRequired = false;</code> を設定する</b>ので、より強い能力を持つバックエンドの上で走るのは正当です。失われるのは「ordered カーネルが EFA で拒否されることの確認」だけで、それは能力交渉のテストとして別に書けます。</p>
@@ -191,7 +192,7 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
 
   <div class="warn">
     <b>敵対性は較正する</b><br>
-    「SRD が保証しないことは全部やる、保証することは守る」に揃えるのが重要です。<b>I1 を既定で破ると、実機では絶対に起きない偽陽性を量産します</b>。逆に chunk を割らずに 1 回の memcpy で置くと、実機で起きる窓を再現しません。<code>violate-i1</code> は「契約に依存していることの証明」のための別モードとして分離し、既定は <code>srd</code> にします。<b>そして <code>violate-i1</code> で見つかった不具合は「DeepEP の穴」ではなく「backend 適合性の負テスト」として分類する</b> ―― これを混同すると、上流に出したときに信用を落とします。</p>
+    「SRD が保証しないことは全部やる、保証することは守る」に揃えるのが重要です。<b>I1 を既定で破ると、実機では絶対に起きない偽陽性を量産します</b>。逆に chunk を割らずに 1 回の memcpy で置くと、実機で起きる窓を再現しません。<code>violate-i1</code> は「契約に依存していることの証明」のための別モードとして分離し、既定は <code>srd</code> にします。<b>そして <code>violate-i1</code> で見つかった不具合は「DeepEP の穴」ではなく「backend 適合性の負テスト」として分類する</b> ―― これを混同すると、上流に出したときに信用を落とします。
   </div>
 </section>
 
@@ -207,9 +208,16 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
     <tr><td><code>NCCL_LSA_TEAM_SIZE</code></td><td><code>src/dev_runtime.cc</code> の <code>NCCL_PARAM(LsaTeamSize, "LSA_TEAM_SIZE", 0)</code>。<code>computeLsaSize</code> がこの値を <b>gcd の初期値</b>として使う</td><td>ノード内のサイズより<b>小さくする方向にだけ</b>効く。まさに欲しい向き</td></tr>
   </table>
 
-  <p>ただし <code>computeLsaSize</code> には先に走る分岐があります。<code>comm-&gt;p2pCrossClique &amp;&amp; comm-&gt;nvlDomainSize == comm-&gt;nRanks</code> のとき「単一 NVLink 域なので LSA を域全体に広げる」として <b><code>lsaSize = nRanks</code> にしてしまい、パラメータを無視します</b>。つまり単一ノードの多 GPU 構成では、この分岐を先に潰さないと偽装が貫通しません。P2P / MNNVL 側の無効化 (あるいは <code>NCCL_HOSTID</code> による分割との併用) が必要になります。<b>ここは実験で確定させるべき項目</b>で、§9 に入れてあります。</p>
+  <p><code>computeLsaSize</code> には先に走る分岐があり、<code>comm-&gt;p2pCrossClique &amp;&amp; comm-&gt;nvlDomainSize == comm-&gt;nRanks</code> のとき「単一 NVLink 域なので LSA を域全体に広げる」として <code>lsaSize = nRanks</code> にしてパラメータを無視します。ただしこの分岐は<b>ほぼ発火しません</b>。条件の <code>p2pCrossClique</code> は <code>comm-&gt;MNNVL &amp;&amp; ncclParamMNNVLCrossClique() &amp;&amp; nvlDomainSize &gt; clique.size</code> という積で、<code>NCCL_MNNVL_CROSS_CLIQUE</code> の<b>既定値が 0</b> です (<code>src/init.cc</code>)。したがって明示的に有効化しない限り false で、しかも <code>MNNVL</code> はマルチノード NVLink の構成でしか true になりません。単一ノードの NVSwitch 機 (p5 や p6 の 1 ノード) では原理的に発火しないので、<code>NCCL_LSA_TEAM_SIZE</code> はそのまま効きます。</p>
+
+  <div class="key">
+    <b>実測で確定 (2026-09-04)</b><br>
+    4 GPU の箱で実際に測りました。何もしなければ <b>LSA 4 / rail 1</b> で scale-out に到達できず、懸念は実在しました。<code>NCCL_LSA_TEAM_SIZE=1</code> を入れると <b>LSA 1 / rail 4</b> になり、送信元が 3 つ取れます。<code>NCCL_LSA_TEAM_SIZE=2</code> でも <code>NCCL_HOSTID</code> の分割でも同様に到達できました。詳細は <a href="#s9">§9</a> の表にあります。
+  </div>
 
   <p>必要な GPU 数も見積もっておきます。第 4 回の「送信元間の集約」を叩くには、<b>受信側から見た remote な送信元が 2 つ以上</b>必要です。rail team のサイズが 3 以上、つまり LSA = 1 なら 3 GPU、LSA = 2 なら 6 GPU。<b>2 GPU の開発機では退化した構成しか組めません</b>。裏を返すと、層 1 (プロトコルモデル) が GPU 無しで送信元数を自由に取れることの価値がここで効きます。</p>
+
+  <p>GPU の<b>種類</b>にも条件があります。実測で分かったのは、NCCL の device API が無い GPU では GIN をそもそも踏めないことです。Tesla T4 (SM 7.5) は <code>deviceApiSupport: no</code> を返します。さらに DeepEP のカーネル自体が TMA を使うので <b>SM 90 以上</b>が別に必要で、L4 や L40S (SM 89) や A100 (SM 80) では JIT が通りません。つまり層 2 を実カーネルで回すには <b>Hopper 以降が 3 枚</b>という条件になります。層 0 と層 1 にはこの条件が一切かからない、というのがこの分割の実利です。</p>
 </section>
 
 <section id="s6">
@@ -275,17 +283,51 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
     <b>説得の順序</b><br>
     今の fork では <b>open PR 全ての根拠が実機測定</b>です。そこへ「実機なしの検証」を持ち込むには、<b>まず既知の問題を実機なしで捕まえてみせる</b>のが最短です。PR 1 から 3 までは emulator という言葉を出す必要さえありません。それでいて、3 つが揃った時点で層 1 の土台は完成しています。
   </div>
+
+  <h3>ここまで実際に作ったもの (2026-09-04)</h3>
+
+  <p>この順序どおりに層 0 と層 1 を書いて動かしました。数字は再現できるものだけ挙げます。</p>
+
+  <table>
+    <tr><th>層</th><th>作ったもの</th><th>結果</th></tr>
+    <tr><td>0</td><td>QP マッピングと予算の検査</td><td>1,887,915 個の assertion が通る。ヘッダが自分について主張していること (<code>channels_per_context</code> が上界でなく<b>ちょうど</b>最悪値であること、却下されている式が実際に過小に数えること、context 13 と 17 で signal 1 本しか余らないこと) はすべて成立</td></tr>
+    <tr><td>0</td><td>そのテストのミューテーション試験</td><td>出荷ヘッダへの 1 か所改変 4 種すべてを検出。却下されている式に差し替えると「予算がちょうどである」性質が発火する。実機ならこれは診断不能な hang になる箇所</td></tr>
+    <tr><td>0</td><td>part 幾何と header codec の検査</td><td>6,402 個の assertion。degenerate 分岐の超過が slot の予備枠より小さいという、2 ファイルにまたがって暗黙だった不変条件も固定した</td></tr>
+    <tr><td>0</td><td>combine の受信アドレス詰めの検査</td><td>248,848 個の assertion。<b>open PR が挙げていない第 2 の壊れ方</b>を発見 (後述)</td></tr>
+    <tr><td>1</td><td>受理規則のモデル検査</td><td>到達可能な観測状態を<b>全数列挙</b>。出荷されている読み順は 5 構成すべてで反例ゼロ (各構成最大 38,416 の順序つき状態対)。読み順を入れ替えた場合、I1 を破った場合、基準値が 1 足りない場合はどの構成でも反例が出る</td></tr>
+    <tr><td>2</td><td>SRD の配送スケジューラ</td><td>60,000 seed で 2 操作のケースの<b>合法な順序 2520 通りを 2520/2520 網羅</b>し、違法な順序は 1 つも出さない。敵対者が「乱雑」ではなく「網羅的」であることの担保</td></tr>
+  </table>
+
+  <p>層 0 で見つかった第 2 の壊れ方は書き留めておく価値があります。<code>token_map_at_dispatch</code> の bit 詰めについて open PR は「slot が溢れると rank フィールドに漏れて misroute か hang になる」と指摘していますが、<b>rank が 5 bit を超えると bit 31 が立って値が負になり、combine の epilogue が負のエントリを「未使用」として飛ばすので、寄与が黙って落ちます</b>。misroute でも hang でもなく、reduce の項が 1 つ足りないだけです。さらにフィールドの合成が加算ではなく OR なので、slot の溢れは rank の最下位ビットが既に立っているとき<b>合法なエントリと 1 ビットも違わなくなります</b>。だから packed 値への実行時チェックでは意図を復元できず、instantiation 時に境界を検査するしかありません。</p>
 </section>
 
 <section id="s9">
   <h2><span class="num">9</span>着手前に潰す 3 点</h2>
-  <p class="lead">この回の判定は公開ソースの読解に基づくもので、実機で動かして確認したものではありません。実装に入る前に、次の 3 つを実験で白黒つけてください。どれも 1〜2 日で決まります。</p>
+  <p class="lead">この回の設計判断は公開ソースの読解から出したものです。そのうち 3 点は実験でしか白黒がつかないので分けて挙げてありました。2026-09-04 に GPU 4 枚の箱を 17.7 分だけ借りて 2 点を確定させたので、結果を先に置きます。</p>
+
+  <div class="key">
+    <b>実測の結論 (2026-09-04、g4dn.12xlarge = Tesla T4 4 枚、費用 1.15 ドル)</b>
+    <table>
+      <tr><th>#</th><th>問い</th><th>結果</th></tr>
+      <tr><td>1</td><td>単一ホストで rail team を 2 以上にできるか</td><td><b>できる</b>。何もしないと LSA 4 / rail 1 で到達不可 (懸念は実在した)。<code>NCCL_LSA_TEAM_SIZE=1</code> で LSA 1 / rail 4</td></tr>
+      <tr><td>2</td><td><code>iputSignal</code> が plugin に降りるか</td><td><b>この箱では判定不能</b>。T4 は <code>deviceApiSupport: no</code> / <code>ginType: none</code> で、NCCL の device API がそもそも無い。SM 7.5 では GIN を踏めない</td></tr>
+      <tr><td>3</td><td>peer の window を別プロセスから書けるか</td><td><b>プロセス境界は成立、peer access は不成立</b>。export から map、書き込み、2 MiB 全バイト照合まで通り、落ちたのは別 GPU 向けの <code>cuMemSetAccess</code> だけ (この箱は P2P access が全ペア 0)</td></tr>
+    </table>
+  </div>
+
+  <p>3 番目の結果は設計を 2 つに割ります。<b>1 ホストに複数 GPU を置く形</b>では送信側が相手の window を map して書くので P2P と cuMem export の両方が必要ですが、<b>1 GPU のホストを複数並べる形</b>では受信側の agent が自分の window に書くので、どちらも要りません。しかも後者は各ホストが本物のノードなので rail team がホスト数になり、1 番目の問いも消えます。実機で失敗した 2 つをどちらも避けられるので、<b>作るべきはこちらの形</b>だと分かりました。</p>
+
+  <p>2 番目が残ったことで、必要な GPU の条件も具体的になりました。NCCL の <b>device API</b> がある GPU が要ります。T4 (SM 7.5) には無く、DeepEP のカーネル自体は TMA を使うので <b>SM 90 以上</b>が別に必要です。そして送信元を 2 つ作るには rail が 3 以上要ります。この 3 条件を同時に満たす最も安い形が H100 1 枚のノードを 3 台並べる構成でした。</p>
+
+  <p>付随して確定した事実が 2 つあります。<b>EFA-GDA の device ヘッダは pip の wheel に入っています</b> (<code>nvidia-nccl-cu13</code> 2.31.2 に <code>gin/efa_gda/</code> と <code>transport/net_efa_gda/efa-dp-direct/</code> の一式、backend の dispatch にも <code>EFA_GDA</code> の腕)。§2 の事実 5 が実物で裏付けられました。逆に <b>plugin の ABI ヘッダは wheel に入っていません</b> (<code>nccl_rma.h</code> ほかすべて欠落) ので、plugin のビルドには NCCL の<b>ソース</b>チェックアウトが別に必要です。</p>
+
+  <p>以下は元の 3 点です。実験の方法と、駄目だったときの逃げ道を残してあります。</p>
 
   <table>
     <tr><th>#</th><th>確認すること</th><th>方法</th><th>駄目だった場合</th></tr>
-    <tr><td>1</td><td>単一ホストで <b>rail team を 2 以上にできるか</b>。<code>computeLsaSize</code> の <code>p2pCrossClique &amp;&amp; nvlDomainSize == nRanks</code> の分岐を回避できるか</td><td>2〜3 GPU のマシンで <code>NCCL_HOSTID</code> を分けて起動し、<code>NCCL_DEBUG=INFO</code> で LSA / rail のサイズを確認。<code>NCCL_LSA_TEAM_SIZE</code> の効きも見る</td><td>層 2 は多ノード (EFA でなくてよい ―― TCP の 2 台でよい) が必要になる。層 0 / 層 1 の価値は変わらない</td></tr>
-    <tr><td>2</td><td>proxy 経路で <b>plugin が実際に <code>iput</code> / <code>iputSignal</code> を受け取るか</b>。DeepEP の unordered カーネルが出す signal 付き put が plugin まで降りてくるか</td><td>何もしない (呼ばれたらログを出すだけの) パススルー RMA plugin を作り、<code>NCCL_RMA_PLUGIN</code> で読ませて <code>test_ep.py</code> を単一ノード + fake node で回し、ログを見る</td><td>順序の支配ができないので案 A は不成立。層 1 中心に切り替える</td></tr>
-    <tr><td>3</td><td><b><code>regMrSym</code> を RDMA NIC 無しで実装できるか</b>。NCCL が渡してくるバッファが cuMem VMM 由来か、共有可能なハンドルを取り出せるか</td><td>パススルー plugin の <code>regMrSym</code> で <code>cuMemRetainAllocationHandle</code> / <code>cuMemExportToShareableHandle</code> を試し、成功するか確認</td><td>ホストのステージングバッファ経由 (device → host → 相手 device) に落とす。忠実度は下がるが順序の支配は保てる</td></tr>
+    <tr><td>1<br><span style="color:#0f5132;font-weight:700">解決</span></td><td>単一ホストで <b>rail team を 2 以上にできるか</b>。<code>computeLsaSize</code> の <code>p2pCrossClique &amp;&amp; nvlDomainSize == nRanks</code> の分岐を回避できるか</td><td>2〜3 GPU のマシンで <code>NCCL_HOSTID</code> を分けて起動し、<code>NCCL_DEBUG=INFO</code> で LSA / rail のサイズを確認。<code>NCCL_LSA_TEAM_SIZE</code> の効きも見る</td><td>層 2 は多ノード (EFA でなくてよい ―― TCP の 2 台でよい) が必要になる。層 0 / 層 1 の価値は変わらない</td></tr>
+    <tr><td>2<br><span style="color:#b5401f;font-weight:700">未解決</span></td><td>proxy 経路で <b>plugin が実際に <code>iput</code> / <code>iputSignal</code> を受け取るか</b>。DeepEP の unordered カーネルが出す signal 付き put が plugin まで降りてくるか</td><td>何もしない (呼ばれたらログを出すだけの) パススルー RMA plugin を作り、<code>NCCL_RMA_PLUGIN</code> で読ませて <code>test_ep.py</code> を単一ノード + fake node で回し、ログを見る</td><td>順序の支配ができないので案 A は不成立。層 1 中心に切り替える</td></tr>
+    <tr><td>3<br><span style="color:#0f5132;font-weight:700">解決</span></td><td><b><code>regMrSym</code> を RDMA NIC 無しで実装できるか</b>。NCCL が渡してくるバッファが cuMem VMM 由来か、共有可能なハンドルを取り出せるか</td><td>パススルー plugin の <code>regMrSym</code> で <code>cuMemRetainAllocationHandle</code> / <code>cuMemExportToShareableHandle</code> を試し、成功するか確認</td><td>ホストのステージングバッファ経由 (device → host → 相手 device) に落とす。忠実度は下がるが順序の支配は保てる</td></tr>
   </table>
 
   <p>3 つのうち 1 つでも駄目でも、<b>層 0 と層 1 の価値は変わりません</b>。そして層 0 と層 1 だけで、第 4 回で取り出した I2・I3・31 bit 周回・予算の算術・bit 詰めという <b>「実機で最も診断しづらい区画」はカバーできます</b>。だからこの計画は、最悪の分岐でも無駄になりません。</p>
