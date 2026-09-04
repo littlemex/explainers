@@ -44,6 +44,35 @@
   footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
   footer a{color:var(--g2)}
   .back{display:inline-block;margin:0 0 22px;color:var(--g2);text-decoration:none;font-size:14px}
+  .ramp{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px 26px;margin:0 0 30px;
+    box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  .ramp h2{margin:0 0 6px;font-size:21px;color:var(--g1)}
+  .ramp .why{color:var(--sub);font-size:14.5px;margin:0 0 18px}
+  .ramp h3{margin:22px 0 8px;font-size:17px;color:var(--g1)}
+  .ramp p{font-size:15.5px;margin:10px 0}
+  .analogy{background:#f3f9f6;border-left:5px solid var(--g3);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:14px 0;font-size:15px}
+  .analogy b{color:var(--g1)}
+  figure{margin:18px 0;text-align:center}
+  figure svg{max-width:100%;height:auto}
+  figcaption{font-size:13.5px;color:var(--sub);margin-top:8px}
+  .demo{background:#f7fbf9;border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0}
+  .demo h4{margin:0 0 4px;font-size:16px;color:var(--g1)}
+  .demo .hint{font-size:13.5px;color:var(--sub);margin:0 0 12px}
+  .demo button{background:var(--g2);color:#fff;border:0;border-radius:8px;padding:8px 16px;
+    font-size:14px;cursor:pointer;margin-right:8px}
+  .demo button:hover{background:var(--g1)}
+  .parcels{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+  .parcel{width:34px;height:34px;border-radius:7px;display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:700;background:#e6efe9;color:var(--sub);border:1px solid var(--line)}
+  .parcel.landed{background:var(--g3);color:#08281c;border-color:var(--g2)}
+  .verdicts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+  @media(max-width:620px){.verdicts{grid-template-columns:1fr}}
+  .verdict{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:14px}
+  .verdict .label{font-weight:700;color:var(--g1);font-size:14px}
+  .verdict .said{margin:6px 0 0}
+  .verdict.right{border-color:var(--g2);background:#f2fbf6}
+  .verdict.wrong{border-color:#d98b6a;background:#fdf4f0}
   .note{font-size:14px;color:var(--sub);margin:22px 0 0;border-top:1px solid var(--line);padding-top:14px}
 </style>
 </head>
@@ -57,6 +86,104 @@
   <a class="back" href="./index.html">← explainers トップへ戻る</a>
 
   <p class="intro">DeepEP は MoE の dispatch と combine を GPU カーネルから直接 NIC を叩いて実行する通信ライブラリです。そのやり方は速い代わりに、NIC の性質がアルゴリズムの前提条件になります。AWS の EFA は順序を保証しない配送 (SRD) を使うので、既存のカーネルが立っている仮定が折れます。このシリーズは <a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a> が何をどう書き替えたのかを一次ソースから読み解き、最後に「EFA インスタンスなしでその正しさを検証できるか」を判定します。</p>
+
+
+  <div class="ramp">
+    <h2>はじめての人へ: 3 分で全体像</h2>
+    <p class="why">この分野は用語が多いので、先に<b>言葉を使わずに</b>全体像を置きます。ここを読んでから各回に入ると、専門用語が「すでに知っている話の名前」として入ってきます。</p>
+
+    <h3>1. そもそも何を速くしたいのか</h3>
+    <p>大きな言語モデルの一種に、<b>質問ごとに担当を決める</b>作り方があります。すべての計算を全員でやる代わりに、入ってきた語ごとに「この語はあの担当へ」と振り分けます。担当のことを expert (エキスパート) と呼び、この作り方を MoE と呼びます。</p>
+
+    <div class="analogy">
+      <b>たとえ</b>: 大きな相談窓口を想像してください。来た相談を受付が読んで、税務の相談は税務担当へ、法務の相談は法務担当へ回します。全員が全部の相談を読むより速い。ただし<b>相談を配る作業</b>と<b>返ってきた回答を集める作業</b>が新しく必要になります。
+    </div>
+
+    <p>この「配る」が <b>dispatch</b>、「集める」が <b>combine</b> です。担当は別の GPU にいるので、配ると集めるは<b>機械と機械の間の通信</b>になります。DeepEP はこの 2 つだけを専門に速くするライブラリです。</p>
+
+    <figure>
+      <svg viewBox="0 0 720 250" role="img" aria-label="dispatch と combine の流れ">
+        <defs>
+          <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#198754"/>
+          </marker>
+          <marker id="ar2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#8a6d3b"/>
+          </marker>
+        </defs>
+        <text x="60" y="24" font-size="14" font-weight="700" fill="#0f5132">手元の GPU</text>
+        <text x="470" y="24" font-size="14" font-weight="700" fill="#0f5132">担当がいる GPU</text>
+
+        <rect x="30" y="40" width="150" height="170" rx="12" fill="#fff" stroke="#d9e5df"/>
+        <text x="46" y="64" font-size="13" fill="#4a5d54">入ってきた語</text>
+        <rect x="46" y="76" width="26" height="26" rx="5" fill="#8fd6b4"/><text x="55" y="94" font-size="12" fill="#08281c">A</text>
+        <rect x="80" y="76" width="26" height="26" rx="5" fill="#8fd6b4"/><text x="89" y="94" font-size="12" fill="#08281c">B</text>
+        <rect x="114" y="76" width="26" height="26" rx="5" fill="#8fd6b4"/><text x="123" y="94" font-size="12" fill="#08281c">C</text>
+        <rect x="46" y="112" width="26" height="26" rx="5" fill="#8fd6b4"/><text x="55" y="130" font-size="12" fill="#08281c">D</text>
+        <rect x="80" y="112" width="26" height="26" rx="5" fill="#8fd6b4"/><text x="89" y="130" font-size="12" fill="#08281c">E</text>
+        <text x="46" y="170" font-size="12.5" fill="#4a5d54">どの語をどの担当へ</text>
+        <text x="46" y="188" font-size="12.5" fill="#4a5d54">送るかは語ごとに違う</text>
+
+        <rect x="450" y="40" width="240" height="80" rx="12" fill="#fff" stroke="#d9e5df"/>
+        <text x="466" y="64" font-size="13" fill="#4a5d54">担当 1 の受信箱</text>
+        <rect x="466" y="76" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+        <rect x="500" y="76" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+        <rect x="534" y="76" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+        <rect x="568" y="76" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+
+        <rect x="450" y="130" width="240" height="80" rx="12" fill="#fff" stroke="#d9e5df"/>
+        <text x="466" y="154" font-size="13" fill="#4a5d54">担当 2 の受信箱</text>
+        <rect x="466" y="166" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+        <rect x="500" y="166" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+        <rect x="534" y="166" width="26" height="26" rx="5" fill="#e6efe9" stroke="#d9e5df"/>
+
+        <path d="M185,95 C280,95 340,70 445,88" fill="none" stroke="#198754" stroke-width="2.5" marker-end="url(#ar)"/>
+        <text x="270" y="72" font-size="14" font-weight="700" fill="#198754">dispatch (配る)</text>
+        <path d="M445,180 C340,200 280,175 185,160" fill="none" stroke="#8a6d3b" stroke-width="2.5" marker-end="url(#ar2)" stroke-dasharray="6 4"/>
+        <text x="262" y="228" font-size="14" font-weight="700" fill="#8a6d3b">combine (答えを集める)</text>
+      </svg>
+      <figcaption>図 1: 語ごとに宛先が違うので、全員が全員へ少しずつ送る形になる。これを all-to-all と呼ぶ</figcaption>
+    </figure>
+
+    <h3>2. なぜネットワークの性質が問題になるのか</h3>
+    <p>速くするために、DeepEP は<b>GPU から直接ネットワーク機器へ書き込みます</b>。CPU を通しません。速い代わりに、ネットワーク機器の性質がそのままアルゴリズムの前提になります。</p>
+
+    <div class="analogy">
+      <b>たとえ</b>: 荷物を 10 個送るとします。多くの宅配は<b>送った順に届く</b>とは約束しません。AWS のネットワーク (EFA) もそうで、<b>必ず届くが、順番は約束しない</b>という配り方をします。10 個目が 3 番目に着くことがあります。
+    </div>
+
+    <p>ここで受信側の困りごとが出ます。<b>「もう届いたか」をどう知るか</b>です。荷物そのものを見ても、まだ届いていない箱と、届いたけれど中身が空の箱を区別できません。</p>
+
+    <h3>3. 元のやり方と、なぜ折れるのか</h3>
+    <p>DeepEP のもとの作り方は「<b>ここまで届きました</b>」という数字を 1 つ送ります。10 と書いてあれば 1 から 10 まで全部届いた、という約束です。1 つの数字で 10 個分の到着を代表させる、うまい圧縮です。</p>
+    <p>ただしこの圧縮は<b>順番が守られること</b>に立っています。順番が乱れると、10 が先に着いて 4 がまだ来ていない状態が起こり、受信側は<b>来ていない 4 番を読んでしまいます</b>。エラーにはなりません。静かに間違った答えが出ます。</p>
+
+    <div class="demo" id="rampDemo">
+      <h4>デモ: 順番が乱れると、2 つの判定はどう違うか</h4>
+      <p class="hint">送る側は荷物 10 個を出し、<b>最後に「10 個送りました」という知らせ</b>を 1 通出します。届く順番は約束されないので、この知らせが荷物を追い越すことがあります。<b>左</b>は知らせを信じる元のやり方、<b>右</b>は届いた荷物を数える fork のやり方。何回か押してみてください。</p>
+      <div class="parcels" id="rampParcels"></div>
+      <button id="rampStep">1 個届く</button>
+      <button id="rampAll">最後まで一気に</button>
+      <button id="rampReset">やり直す</button>
+      <div class="verdicts">
+        <div class="verdict" id="rampV1">
+          <div class="label">元のやり方: 知らせが来たら全部そろったとみなす</div>
+          <p class="said" id="rampV1Text">まだ何も届いていません</p>
+        </div>
+        <div class="verdict" id="rampV2">
+          <div class="label">fork のやり方: 届いた個数を数える</div>
+          <p class="said" id="rampV2Text">まだ何も届いていません</p>
+        </div>
+      </div>
+    </div>
+
+    <p>何度か押すと、左が赤くなる回のほうが多いことに気づくと思います。<b>11 通の届き方をランダムに 20 万通り試すと、91.0 パーセントの順番で元のやり方は穴を読みます</b>。数える方式は 20 万通りすべてで一度も早く読みませんでした。つまりこれは珍しい不運ではなく、<b>順番の約束がないネットワークでは普通に起こること</b>です。</p>
+
+    <p>右のやり方が地味に見えるのが大事な点です。<b>順番に依存しない情報は「何個来たか」という数だけ</b>で、位置の情報は使えません。だから fork は「<b>置き場所は先に決めておいて、個数だけを送る</b>」という形に書き替えました。シリーズの中身はほぼこの一手の帰結です。</p>
+
+    <h3>4. このシリーズの読み方</h3>
+    <p>用語がわからなくなったら <a href="#glossary">用語集</a> に 17 語まとめてあります。まず第 1 回で「配る・集める」の中身を見て、第 3 回で「順番が約束されない」の正確な意味、第 4 回で書き替えた後の仕組み、という順に読むと素直につながります。</p>
+  </div>
 
   <div class="summary">
     <h2>このシリーズの結論を先に</h2>
@@ -85,7 +212,7 @@
   </div>
 
   <div class="summary">
-    <h2>用語表</h2>
+    <h2 id="glossary">用語表</h2>
     <p>このシリーズは層が多く、同じものを違う視点から呼ぶ場面があります。読んでいて迷ったらここに戻ってください。</p>
     <table>
       <tr><th>語</th><th>意味</th><th>どの回で出るか</th></tr>
@@ -181,5 +308,75 @@
 <footer>
   <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
 </footer>
+
+<script>
+(function(){
+  var N = 10, order = [], landed = [], noteAt = -1, idx = 0;
+  var pv = document.getElementById('rampParcels');
+  if (!pv) return;
+  function shuffle(a){ for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+  function reset(){
+    // Eleven things travel: ten parcels and one note saying "ten sent". The note is emitted last but
+    // may arrive at any point, which is the whole property being shown.
+    order = shuffle(Array.from({length:N+1}, function(_,i){return i;}));  // 0 is the note
+    landed = new Array(N).fill(false);
+    noteAt = -1; idx = 0; render();
+  }
+  function render(){
+    pv.innerHTML = '';
+    for (var i=0;i<N;i++){
+      var d = document.createElement('div');
+      d.className = 'parcel' + (landed[i] ? ' landed' : '');
+      d.textContent = (i+1);
+      d.title = landed[i] ? '届いた' : 'まだ';
+      pv.appendChild(d);
+    }
+    var note = document.createElement('div');
+    note.className = 'parcel' + (noteAt >= 0 ? ' landed' : '');
+    note.style.width = '108px';
+    note.textContent = noteAt >= 0 ? '知らせ 着' : '知らせ 未';
+    note.style.fontSize = '12px';
+    pv.appendChild(note);
+
+    var count = 0, firstHole = 0;
+    for (var k=0;k<N;k++) if (landed[k]) count++;
+    for (var k=0;k<N;k++){ if (!landed[k]) { firstHole = k+1; break; } }
+
+    var v1 = document.getElementById('rampV1'), v2 = document.getElementById('rampV2');
+    var t1 = document.getElementById('rampV1Text'), t2 = document.getElementById('rampV2Text');
+
+    if (noteAt < 0){
+      t1.textContent = '知らせがまだ来ていないので待つ。荷物が ' + count + ' 個届いていても動かない';
+      v1.className = 'verdict';
+    } else if (count === N){
+      t1.textContent = '知らせが来た → 10 個ぜんぶ読む。今回は実際にそろっているので正しい';
+      v1.className = 'verdict right';
+    } else {
+      t1.textContent = '知らせが来た → 10 個ぜんぶ読む。でも ' + firstHole + ' 番はまだ届いていない。'
+        + '空の箱を読んで、間違った答えを出す。エラーは出ない';
+      v1.className = 'verdict wrong';
+    }
+
+    if (count === N){
+      t2.textContent = '届いた個数 = 10 個。数がそろったので読む。正しい';
+      v2.className = 'verdict right';
+    } else {
+      t2.textContent = '届いた個数 = ' + count + ' 個。10 個に足りないので待つ。'
+        + '知らせが先に来ていても動かないので間違えない';
+      v2.className = 'verdict';
+    }
+  }
+  function deliverNext(){
+    if (idx > N) return;
+    var item = order[idx];
+    if (item === 0) noteAt = idx; else landed[item-1] = true;
+    idx++;
+  }
+  document.getElementById('rampStep').onclick = function(){ deliverNext(); render(); };
+  document.getElementById('rampAll').onclick = function(){ while (idx <= N) deliverNext(); render(); };
+  document.getElementById('rampReset').onclick = reset;
+  reset();
+})();
+</script>
 </body>
 </html>
