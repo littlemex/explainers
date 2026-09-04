@@ -76,6 +76,11 @@
     <b>ただし目標は書き換えるべきです。</b> 「EFA を再現する」ではなく <b>「EFA-GDA が与える weak bundled-signal 契約の下で、DeepEP の unordered プロトコルを敵対的スケジュールで詰める」</b>。WQE の生成や MMIO の順序やハードウェアカウンタの周回は emulator の対象外と最初に宣言します。そこは実機に残す。
   </div>
 
+  <div class="key" style="border-left-color:#b5401f">
+    <b>実機で 1 か所訂正されました (2026-09-04)</b><br>
+    上の理由 (1) は RMA plugin が継ぎ目であることを言っていますが、<b>それだけでは足りません</b>。DeepEP はカーネルに入る前に <code>railedGinType != NONE</code> を assert し、その assert を無効化しても次に <code>ncclGinDevCommSetup</code> が型 0 の backend を拒みます。ゲートは 2 つあり、emulator は <b>GIN plugin (<code>libnccl-gin.so</code> / <code>ncclGinPlugin_v14</code>) を提供する必要があります</b>。RMA plugin が読み込まれ comm に割り当てられること自体は実機で確認済みで、NCCL 自身も「外部 plugin が PROXY を名乗れば自前の GIN proxy をその RMA backend の上に載せる」と言っています。足りないのは<b>型を名乗る一手</b>で、その一手は host 側なのでローカルで書けます。詳細は <a href="#s9">§9</a>。
+  </div>
+
   <div class="toc">
     <a href="#s1">1. 3 案の判定</a>
     <a href="#s2">2. 決定的な API 事実 (一次ソース)</a>
@@ -88,7 +93,7 @@
     <a href="#s9">9. 着手前に潰す 3 点</a>
   </div>
 
-  <p style="font-size:14px;color:var(--sub)">この回の判定は、公開ソース (NCCL / aws-ofi-nccl / DeepEP fork) の該当箇所を直接読んで確認したものと、独立に 2 つの大規模モデル (Claude Fable 5 と GPT-5.6) に同じ事実を渡して評価させた結果が収束した部分を書いています。設計判断そのものは実機で動かして出したものではありません。ただし実験でしか決まらない 3 点のうち <b>2 点は 2026-09-04 に GPU の実機で確定させました</b> (結果は <a href="#s9">§9</a>)。残る 1 点は NCCL の device API を持つ GPU が必要で、まだ開いています。</p>
+  <p style="font-size:14px;color:var(--sub)">この回の判定は、公開ソース (NCCL / aws-ofi-nccl / DeepEP fork) の該当箇所を直接読んで確認したものと、独立に 2 つの大規模モデル (Claude Fable 5 と GPT-5.6) に同じ事実を渡して評価させた結果が収束した部分を書いています。設計判断そのものは実機で動かして出したものではありません。ただし実験でしか決まらない 3 点は <b>2026-09-04 に GPU の実機ですべて確定させ、その過程で上の判定を 1 か所訂正しました</b> (結果は <a href="#s9">§9</a>)。実機の測定値は機械可読な形で残し、ローカルの検査がそれに対して落ちるようにしてあります。</p>
 </section>
 
 <section id="s1">
@@ -154,6 +159,7 @@
 
 <section id="s4">
   <h2><span class="num">4</span>層 2 の設計 ― 敵対的 RMA plugin</h2>
+  <p class="lead" style="color:#b5401f">この節の設計は実機で 1 か所足りないことが分かりました。RMA plugin の op table は正しい継ぎ目ですが、DeepEP を走らせるには <b>GIN 型を名乗る plugin</b> が別に要ります。以下の op table と敵対的スケジューラの議論はそのまま有効で、足すべきものが 1 つ増えたという読み方をしてください (<a href="#s9">§9</a>)。</p>
   <p class="lead">中心になる部品です。名前を仮に <code>libnccl-rma-srdsim.so</code> とします。</p>
 
   <h3>実装するもの</h3>
@@ -348,7 +354,30 @@ ncclRma_v14_t ncclRmaPlugin_v14 = {
 
   <p>つまり <b>金を払って Hopper と実 EFA を並べても、今日の時点では GIN EFA-GDA の経路を踏めません</b>。ベンダの plugin が GIN backend を出荷していないからです。これは着手前に予想していた話の逆です。emulator は「EFA インスタンスを毎回起動できない人のための代用品」ではなく、<b>backend が出荷されるまでの間、このプロトコルを検証できる唯一の手段</b>ということになります。第 0 節で「目標の書き換えを受け入れられるかが判断基準」と書きましたが、その書き換えの必要性まで実測が裏付けた形です。</p>
 
+  <div class="key">
+    <b>そして設計そのものが 1 か所訂正されました。RMA plugin だけでは足りません</b>
+    <p>DeepEP を実際にビルドして走らせたところ、カーネルに入る前に落ちます。</p>
+    <pre><code>RuntimeError: Assertion exception (csrc/kernels/backend/nccl.cu:101):
+  (allow_hybrid_mode ? props.railedGinType : props.ginType) != NCCL_GIN_TYPE_NONE</code></pre>
+    <p>fork には <code>EP_DISABLE_GIN=1</code> という逃げ道があります。使うと assert は越えますが、その先で落ちます。</p>
+    <pre><code>NCCL WARN Cannot get backend version for unsupported GIN type 0
+NCCL WARN GIN: DevComm setup failed on all available backends
+RuntimeError: NCCL exception (csrc/kernels/backend/nccl.cu:220): 3</code></pre>
+    <p>ゲートは 2 つあり、逃げ道は<b>失敗の場所を動かすだけ</b>です。emulator は <b>GIN plugin を提供しなければなりません</b>。</p>
+  </div>
+
+  <p>そこで NCCL が探しているものを直接読みました。ファイル名は <code>libnccl-gin.so</code>、記号は <code>ncclGinPlugin_v13</code> と <code>ncclGinPlugin_v14</code>、環境変数は <code>NCCL_GIN_PLUGIN</code>。RMA 側は <code>ncclRmaPlugin_v13</code>・<code>v14</code>・<b><code>v15</code></b> を受け付けるので、この emulator が名乗る v14 は最新ではありません。</p>
+
+  <p>そして NCCL 自身が、やるべきことを 1 行で書いています。</p>
+
+  <pre><code>GIN/Plugin: Skipping external proxy plugin %s index %d; using NCCL GIN proxy over RMA backend %s
+GIN/Plugin: Skipping plugin %s index %d type %d: NCCL_GIN_TYPE=%ld requested</code></pre>
+
+  <p>2 行目は実際に出ました ― <code>Skipping plugin srdsim index 3 type 0</code>。つまり <b>NCCL は RMA plugin を GIN の候補としても列挙していて</b>、それが型 0 (=NONE) を名乗るから落としているだけです。1 行目は、外部 plugin が PROXY を名乗ったときに NCCL が<b>自前の GIN proxy を その RMA backend の上に載せる</b>と言っています。§4 の設計が想定していた経路は NCCL の中に実在します。足りなかったのは <b>「GIN 型を名乗る」という一手</b>でした。</p>
+
   <p>1 台では見えなかった区別も 1 つ拾えました。device API の有無は <b>マシン単位ではなく communicator 単位</b>の答えです。同じホスト上の 1 ランクの communicator は <code>deviceApiSupport: yes</code> を返しますが、ホストを跨ぐ 3 ランクの communicator は <code>no</code> を返します。<b>device API のノード間の半分が GIN backend そのもの</b>なので、その不在が答えを no に引っ張ります。</p>
+
+  <p>この訂正は emulator を止める理由にはなりません。むしろ<b>ローカルで進められる仕事に変わります</b>。GIN plugin が名乗る型と ABI は host 側の話で、NCCL のヘッダがあればノート PC で型検査までできます。実機が必要になるのは「NCCL が本当にその plugin を選ぶか」を確かめる 1 回だけです。そのため実測は <code>pseudo/fixtures/</code> に機械可読な形で残し、<b>ローカルの検査が実機の観測に対して落ちる</b>ようにしました。ABI 版数を手で 14 と書けばそれは NCCL についての主張ですが、捕獲した記号一覧から読めばそれは測定した NCCL についての事実になり、将来の捕獲がそれを覆せます。</p>
 
   <p>実クラスタを借りて初めて分かった落とし穴も 2 つ記録しておきます。Capacity Block への起動には <code>--instance-market-options MarketType=capacity-block</code> が必要で、無いと <i>"The market type (purchasing) option is not valid"</i> という spot の話に見えるエラーで蹴られます。そして <b><code>--subnet-id</code> で起動すると EFA インターフェースが付かず、<code>/dev/infiniband</code> ごと存在しません</b>。このとき aws-ofi-nccl は初期化に失敗し、NCCL は黙って socket に落ちて動き続けます。何も落ちないので、<b>起動パラメータの不足がハードウェア非対応に見えます</b>。<code>InterfaceType=efa</code> は起動時に要求するしかなく、後から device index 0 に足すことはできません。</p>
 
