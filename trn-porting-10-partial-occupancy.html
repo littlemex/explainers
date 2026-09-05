@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 10: 満席は何も証明しない</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 10</p>
+  <h1>満席は何も証明しない ― 1 つの静かな故障が 4 つの結論に化けた話</h1>
+  <p>埋め草のセンチネル添字、部分占有、そして故障しても応答を返し続けるアクセラレータ</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section id="s0">
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">第 9 回は計測器が自分で間違える形でした。この回は<b>測っている対象が静かに壊れていて、それを 4 つの別々の原因に帰属させた</b>記録です。</p>
+
+  <p>扱うのは 1 つの問いです。<b>「動いた」と「壊れていない」の差を、思い出す努力ではなく仕組みで埋めるにはどうするか</b>。出てくるのは、バケットの部分占有、負のセンチネル添字、そして「故障してもサービスを止めないハードウェア」という測定の前提です。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>満席はコードが想定した唯一のケースなので、満席だけ通しても何も反証できません。</b>バッチ軸が埋め草で埋まる部分占有こそが未検証の領域で、そこには負のセンチネル添字という具体的な地雷があります。<br>
+    そして<b>境界外アクセスは例外にならないことがあります</b>。ランタイムは自分のログに書き、API は 200 を返し続け、数字だけが間違っている。この形は「遅い構成」と区別がつかないので、<b>ログを読む仕組みと、同じ問いを 2 回する仕組み</b>を先に入れておきます。
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>runner は足りない分を負の値で埋めます</h2>
+  <p class="lead">これは実装の癖ではなく、コンパイル済みグラフを使う推論エンジンの構造的な帰結です</p>
+
+  <p>加速器向けの推論エンジンは、形ごとにグラフをコンパイルします。1 ステップのバッチ幅を任意にすると、幅ごとにグラフが必要になるので、実際には<b>いくつかのバケット幅に丸めて、足りない分を埋め草で埋める</b>という作りになります。トークン軸だけでなく<b>リクエスト軸も同じように埋まります</b>。</p>
+
+  <p>埋め草の行には「本物のリクエストではない」という印が必要です。<code>vllm</code> の系列ではこれが <code>PAD_SLOT_ID = -1</code> という<b>負のセンチネル</b>で、公開ソースで確認できます。つまりモデル側が runner から受け取る「このリクエストはどの行を使うか」というテンソルには、<b>負の値が混ざり得ます</b>。</p>
+
+  <div class="key">
+    <b>ここが本質です。</b>センチネルが混ざるのは<b>走行中のリクエストがバケット幅より少ないとき</b>です。そしてポアソン到着で負荷をかけると、その状態は<b>例外ではなく常態</b>です。バケットが 4 で、走っているのが 3 という瞬間が延々と続きます。
+  </div>
+
+  <h3>なぜ「満席のテスト」で見つからないのか</h3>
+
+  <p>再帰状態を持つモデル (状態空間モデル、線形注意、Gated DeltaNet 系) は、リクエストごとに 1 行の状態をプールに持ちます。その書き込みは自然にこう書けます。</p>
+
+  <pre><code>state.index_copy_(0, slots, updated)   # slots は runner 由来</code></pre>
+
+  <p>これを検証するとき、まず思いつくのは「N 本のプロンプトを同時に流し、同じ N 本を 1 本ずつ流したものと一致するか」です。健全なテストです。そして<b>N を席数と同じにしてしまいます</b>。全席が本物のリクエストで埋まるので、<b>センチネルが 1 つも現れません</b>。</p>
+
+  <div class="warn">
+    <b>満席はコードが想定した唯一のケースです。</b>だから満席のテストは、そのコードを<b>反証できません</b>。反証しうるのは 1 席、2 席、3 席 ― バケット幅 4 に対する<b>部分占有</b>です。占有率 1..N を全部掃く以外に、この領域を踏む方法はありません。
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 250" role="img" aria-label="バケット幅 4 に対する占有率 1 から 4 の図">
+      <text x="360" y="22" text-anchor="middle" font-size="15" fill="#0f5132" font-weight="700">バケット幅 4 ・ 占有率ごとに slots に入る値</text>
+      <g font-size="13" fill="#12211a">
+        <g transform="translate(30,45)">
+          <text x="0" y="14" font-weight="700">占有 1/4</text>
+          <rect x="90" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="125" y="18" text-anchor="middle">4</text>
+          <rect x="165" y="0" width="70" height="26" fill="#fdf1ec" stroke="#e07a5f"/><text x="200" y="18" text-anchor="middle" fill="#b5401f">-1</text>
+          <rect x="240" y="0" width="70" height="26" fill="#fdf1ec" stroke="#e07a5f"/><text x="275" y="18" text-anchor="middle" fill="#b5401f">-1</text>
+          <rect x="315" y="0" width="70" height="26" fill="#fdf1ec" stroke="#e07a5f"/><text x="350" y="18" text-anchor="middle" fill="#b5401f">-1</text>
+          <text x="405" y="18" fill="#b5401f" font-weight="700">埋め草 3 行</text>
+        </g>
+        <g transform="translate(30,95)">
+          <text x="0" y="14" font-weight="700">占有 3/4</text>
+          <rect x="90" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="125" y="18" text-anchor="middle">4</text>
+          <rect x="165" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="200" y="18" text-anchor="middle">1</text>
+          <rect x="240" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="275" y="18" text-anchor="middle">5</text>
+          <rect x="315" y="0" width="70" height="26" fill="#fdf1ec" stroke="#e07a5f"/><text x="350" y="18" text-anchor="middle" fill="#b5401f">-1</text>
+          <text x="405" y="18" fill="#b5401f" font-weight="700">ここが未検証だった</text>
+        </g>
+        <g transform="translate(30,145)">
+          <text x="0" y="14" font-weight="700">占有 4/4</text>
+          <rect x="90" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="125" y="18" text-anchor="middle">4</text>
+          <rect x="165" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="200" y="18" text-anchor="middle">1</text>
+          <rect x="240" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="275" y="18" text-anchor="middle">5</text>
+          <rect x="315" y="0" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="350" y="18" text-anchor="middle">2</text>
+          <text x="405" y="18" fill="#198754" font-weight="700">唯一テストしていた行</text>
+        </g>
+        <g transform="translate(30,195)">
+          <text x="0" y="14" fill="#4a5d54">負の添字を <tspan font-family="monospace">index_copy_</tspan> に渡すと境界外アクセス ― CPU では例外、加速器では静かな破壊</text>
+        </g>
+      </g>
+    </svg>
+    <p class="cap">同じコードが占有 4 では正しく、占有 3 では壊れる。開ループ到着では占有 3 のほうが普通に起きる</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>one-hot は「遅い形」ではなく「別の意味で安全な形」です</h2>
+  <p class="lead">高速化のつもりで安全性の議論を書き換えていることがあります</p>
+
+  <p>runtime の添字によるギャザーがトレースできるか分からない、という事情で、この種のプール操作は最初 one-hot の行列積で書かれることがあります。</p>
+
+  <pre><code>onehot = (slots.unsqueeze(1) == torch.arange(num_slots)).to(dtype)
+written = onehot.t() @ updated
+state.copy_(state * (1 - onehot.sum(0)) + written)</code></pre>
+
+  <p>この形は<b>プール全体を毎回読み書きする</b>のでコストがスロット数に比例します。だから <code>index_copy_</code> に置き換えたくなります。ところが one-hot 形式には、コストと引き換えの<b>偶然ではない性質</b>があります。</p>
+
+  <div class="key">
+    <b><code>-1</code> は <code>arange(num_slots)</code> のどの行とも一致しません。</b>だから one-hot 形式では、埋め草の行は<b>本物の何もしない操作</b>になります。センチネルが安全なのは、誰かがそう書いたからではなく、<b>比較で表現されているから</b>です。<br>
+    <code>index_copy_</code> に替えると、この「不可能」が「対処が必要」に移ります。<b>これはコストの変更ではなく、安全性の論証の変更です。</b>
+  </div>
+
+  <h3>clamp では足りない場合があります</h3>
+
+  <p>ではセンチネルを <code>clamp(min=0)</code> で潰せばよいか。<b>読み出しなら足ります</b> (埋め草の行の読み結果は呼び出し側が捨てるので、どの本物の行を読んでも構わない)。<b>書き込みでは足りません。</b>埋め草の行のゴミをスロット 0 に書き込むことになり、スロット 0 は別の待機中リクエストが所有しているかもしれません。</p>
+
+  <p>書き込みで正しいのは<b>本物の行へのリダイレクト</b>です。埋め草の行を、本物の行のうち 1 つ (たとえばスロット番号が最大の行 ― 埋め草は負なので必ず本物) に向け、<b>その行自身の値を持たせます</b>。すると同じスロットへの重複書き込みが全部同一の値になるので、<b>どれが最後に着地するかが問題になりません</b>。加速器の scatter で重複添字の順序が保証されない、という別の落とし穴も同時に消えます。</p>
+
+  <table>
+    <tr><th>形</th><th>センチネルへの耐性</th><th>コスト</th><th>使いどころ</th></tr>
+    <tr><td>one-hot 行列積</td><td><b>構造的に安全</b> (一致する行が無い)</td><td>プールサイズに比例</td><td>既定。プールが小さいなら十分</td></tr>
+    <tr><td><code>index_select</code> (読み)</td><td>clamp で足りる</td><td>席数に比例</td><td>プールが大きいとき</td></tr>
+    <tr><td><code>index_copy_</code> (書き)</td><td><b>リダイレクトが必要</b></td><td>席数に比例</td><td>同上。ただし論証を書き直す覚悟で</td></tr>
+  </table>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>境界外アクセスは例外にならないことがあります</h2>
+  <p class="lead">ここが、この回で一番共有したいことです</p>
+
+  <p>CPU で負の添字を <code>index_copy_</code> に渡すと <code>IndexError</code> になります。分かりやすい失敗です。<b>加速器では違いました。</b></p>
+
+  <ul class="steps">
+    <li>ランタイムが自分のログに「間接メモリコピーの境界外アクセス」を意味する通知を出す</li>
+    <li>推論エンジンは<b>例外を上げない</b></li>
+    <li>ヘルスチェックのエンドポイントは <b>200 を返し続ける</b></li>
+    <li>completion も返り続ける。ただし<b>数十分の 1 の速度で</b></li>
+    <li>やがてワーカーの RPC が返らなくなり、<b>タイムアウトという別の名前の失敗</b>として現れる</li>
+  </ul>
+
+  <div class="warn">
+    <b>この形は「遅い構成」と区別がつきません。</b>だから筆者は、席数、ブロック数、状態読み出しの形、そして「デバイスが固まった」という 4 つの別々の原因に、<b>1 つのバグを 4 回帰属させました</b>。手がかりは最初のエラーの 1 行上に最初からありました ― 「走行中のリクエストが 3 本で同時実行の上限に達した」というログです。バケットは 4 でした。
+  </div>
+
+  <h3>一般化すると</h3>
+
+  <p>これは特定のアクセラレータの話ではありません。<b>ホストと別のメモリ空間で非同期に実行される計算では、境界外アクセスの検出はホストの例外機構の外側で起きます</b>。CUDA でも同様の非同期エラーは、次の同期点まで報告されなかったり、デバイス側のログにだけ現れたりします。</p>
+
+  <div class="key">
+    <b>測定の前提として書いておくべきこと。</b>ハードウェアの故障は、サービスを止めることで知らせてはくれません。<b>API が正常に見えることは、デバイスが正常であることの証拠になりません。</b>したがってベンチマークは、<b>デバイス自身のログを読む</b>か、<b>機械が変わっていないことを別の手段で確かめる</b>必要があります。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>仕組みにする ― 4 つの層に置く</h2>
+  <p class="lead">どの検査も、必要になった瞬間には既に存在していて、実行されませんでした。実行が「思い出すこと」だったからです</p>
+
+  <p>今回の失敗は「思い出す」では防げません。<b>気をつけようと思っていた人間が、気をつけると書いた当日に踏んだ</b>ためです。層ごとに、機械が拒否する形にします。</p>
+
+  <table>
+    <tr><th>層</th><th>何を機械にさせるか</th><th>なぜその層か</th></tr>
+    <tr><td><b>コミット時</b> (静的検査)</td><td>runner 由来のスロット名で <code>index_copy_</code> / <code>index_select</code> / <code>scatter_</code> を叩いていて、clamp もリダイレクトも mask も無ければ<b>拒否</b></td><td>この欠陥は<b>構文から一意に分かる形</b>を持つ。レビュアーは調子の良い日に見つけ、検査は毎日見つける</td></tr>
+    <tr><td><b>等価性検証時</b> (CPU 実行)</td><td>バケット幅に対して<b>占有率 1..N を全部</b>掃く。選択可能な実装形と掛け合わせる</td><td>部分占有は<b>実機を待たずに踏める</b>。ここで踏まなければ、次に踏むのは課金されている実機</td></tr>
+    <tr><td><b>測定時</b> (ベンチ)</td><td>サーバのログを点ごとに読んで故障通知を拾う。ラダーの<b>最初の到着率を最後にもう 1 点繰り返す</b></td><td>API は故障を隠す。<b>同じ問いに 2 回同じ答えが返ることだけ</b>が、実行ごとの健全性の証拠</td></tr>
+    <tr><td><b>運用時</b> (起動スクリプト)</td><td>故障を検知したら「デバイスを作り直してから、最後に動いた構成の再現を確認せよ」と<b>手順を出力する</b></td><td>故障したデバイス上の新しいプロセスは<b>故障したまま</b>。人間はここで必ず先を急ぐ</td></tr>
+  </table>
+
+  <div class="key">
+    <b>効果はすぐ出ました。</b>静的検査を入れた直後、<b>筆者が直していなかった同じバグが同じファイルに 2 件残っている</b>ことを検査が指摘しました。手で 2 箇所直して「直した」と思っていた側の話です。<br>
+    等価性検証のゲートは、バグのあるコードに対して <code>1/4 ok, 2/4 ok, 3/4 CRASH, 4/4 ok</code> と出ます。<b>まさに 3 だけが落ちる。</b>
+  </div>
+
+  <h3>スキップは合格ではありません</h3>
+
+  <p>もう 1 つ、これらを 1 コマンドにまとめるときの設計です。検査には<b>依存の階層</b>があります ― 何も要らないもの、チェックポイントが要るもの、プラグインとフィクスチャが要るもの。まとめるツールは、<b>到達できなかった層を失敗と同じ大きさで表示する</b>べきです。</p>
+
+  <div class="warn">
+    <b>「全検査に合格」という出力が、同時実行を見られる検査を 1 つも実行していないときに出る</b> ― これが埋め草の scatter を加速器まで通した文章です。CI では<b>スキップも失敗として扱う</b>オプションを既定にします。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>ついでに直った 2 つの運用の罠</h2>
+  <p class="lead">どちらも「構成の問題」に見えて、構成の問題ではありませんでした</p>
+
+  <h3>拒否は理由ごと古くなります</h3>
+
+  <p>ブロック数 (KV キャッシュのページ数) を小さい値に固定していました。理由は「大きくすると載らない」という以前のメモです。ところが起動ログには、<b>エンジン自身が計算した「載る」ブロック数</b>が、私の上書き値と並べて出力されていました。桁が 2 つ違いました。</p>
+
+  <div class="key">
+    <b>移植の途中で書いた「できない」「載らない」は、実装が進めば古くなります。</b>設計の前提にする前に測り直す。そして<b>エンジンが自分で計算した値をログに出しているなら、それが最初に読むべき値</b>です。
+  </div>
+
+  <h3>席数とブロック数がぴったりだと、スケジューラは decode をやめます</h3>
+
+  <p>席数 × 1 リクエストあたりのページ数 = ブロック数、という「ぴったり」の構成にすると、<b>シーケンスを伸ばす先が無くなります</b>。スケジューラは preemption と再計算を繰り返し、スループットは 2 桁落ちます。これは<b>モデル側の性能劣化と区別がつきません</b>。</p>
+
+  <p>だから起動スクリプトで、<b>2 倍の余裕が無い構成は測定せずに拒否</b>します。測ってしまうと、その数字は「ブロック数についての測定」であって、モデルについての測定ではありません。</p>
+
+  <h3>タイムアウトの既定値は、席数を上げた瞬間に足りなくなります</h3>
+
+  <p>席数を上げると、スケジューラが到達する占有率ごとに decode グラフが必要になり、<b>初回実行時のコンパイルが積み上がります</b>。その合計が実行 RPC のタイムアウト既定値を越えると、エンジンは「サンプリング呼び出しのタイムアウト」で死にます。<b>遅いステップのように読めて、実際はコンパイルです。</b>席数を振る実験の前にタイムアウトを上げておきます。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>この回の要点</h2>
+
+  <ul class="steps">
+    <li><b>満席は反証力を持ちません。</b>コードが想定した唯一のケースだからです。バケット幅に対する占有率 1..N を全部掃く</li>
+    <li><b>runner はリクエスト軸を負のセンチネルで埋めます。</b>開ループ到着では、それは例外ではなく常態です</li>
+    <li><b>one-hot 形式は「遅い形」ではなく「構造的に安全な形」です。</b>添字形式への置き換えは、コストの変更ではなく安全性の論証の変更です</li>
+    <li><b>読みは clamp で足り、書きはリダイレクトが必要です。</b>clamp した書き込みは他のリクエストの状態を壊します</li>
+    <li><b>境界外アクセスは例外にならないことがあります。</b>API が正常に見えることは、デバイスが正常である証拠ではありません</li>
+    <li><b>同じ問いを 2 回してください。</b>ラダーの最初の点を最後にもう一度測り、食い違えば<b>両端とも</b>引用不可にします。どちらが健全だったか決める方法が無いからです</li>
+    <li><b>スキップは合格ではありません。</b>実行されなかった検査は、結果の一部として名指しで表示します</li>
+  </ul>
+
+  <div class="key">
+    <b>この回だけ持ち帰るなら。</b>移植の検証で「あとは実機だけ」と思ったとき、<b>自分のテストが全部満席で走っていないか</b>を見てください。そして実機で数字が急に悪くなったら、<b>次の構成を試す前にデバイスのログを読んでください</b>。悪くなった原因が、あなたが変えたものである保証はありません。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: 埋め草のセンチネルが <code>PAD_SLOT_ID = -1</code> であること、および実行 RPC のタイムアウトに既定値があることは、公開されている推論エンジン (<code>vllm</code>) のソースで確認できます。<code>index_copy_</code> が負の添字で <code>IndexError</code> を上げることは公開されている PyTorch の挙動です。占有率 3 だけが落ちるという検証結果は、<b>公開されているソフトウェアの CPU 実行モードで再現したもの</b>です。第 3 節の「加速器では例外にならない」という記述は<b>挙動の形のみ</b>を述べており、<b>制限公開の環境で得た測定値は本稿には含めていません</b>。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-06 時点のものです。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-09-cost-and-instrument.html">← 09: コストの比べ方</a>
+    <a href="./trn-porting-index.html">シリーズ目次 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
