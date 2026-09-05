@@ -398,6 +398,27 @@ if (props.netDeviceType != NCCL_NET_DEVICE_GIN_PROXY) {
 
   <p>この訂正は emulator を止める理由にはなりません。むしろ<b>ローカルで進められる仕事に変わります</b>。GIN plugin が名乗る型と ABI は host 側の話で、NCCL のヘッダがあればノート PC で型検査までできます。実機が必要になるのは「NCCL が本当にその plugin を選ぶか」を確かめる 1 回だけです。そのため実測は <code>pseudo/fixtures/</code> に機械可読な形で残し、<b>ローカルの検査が実機の観測に対して落ちる</b>ようにしました。ABI 版数を手で 14 と書けばそれは NCCL についての主張ですが、捕獲した記号一覧から読めばそれは測定した NCCL についての事実になり、将来の捕獲がそれを覆せます。</p>
 
+  <div class="key">
+    <b>そして emulator は実カーネルのトラフィックを運びました</b>
+    <p>GIN 型を名乗ったあとは dispatch カーネルまで入り、そこから 5 つの欠陥が 1 つずつ出ました。<b>4 つはソースを読むだけでは見えないもの</b>でした。</p>
+    <table>
+      <tr><th>症状</th><th>本当の原因</th></tr>
+      <tr><td><code>pthread_mutex_lock</code> の中で SIGSEGV。バックトレースにコンテナは出ない</td><td>request を <code>reserve()</code> で伸ばす vector に置いていた。NCCL は request のポインタを保持するので、再確保が既存の全ポインタを無効にする</td></tr>
+      <tr><td>観測モードを有効にしても何も出ない</td><td>plugin が NCCL の logger 経由で INFO に出していた。既定の <code>NCCL_DEBUG=WARN</code> が捨てる</td></tr>
+      <tr><td>signal が 1 件届いて適用に失敗</td><td>受信スレッドに CUDA コンテキストが無い。plugin が作ったスレッドには最初から無いので、driver 呼び出しが全部 <code>INVALID_CONTEXT</code></td></tr>
+      <tr><td>ありえない window 番号が 49 個 (<code>84326656</code> など)</td><td>送信側が <code>send()</code> にデバイスポインタを渡していた。ヘッダは出てペイロードが EFAULT で失敗し、<b>ストリームがペイロード長ぶんずれた</b></td></tr>
+      <tr><td>退避コピーが 333 回失敗 (CUDA 201)</td><td>送信側の proxy スレッドにも同じコンテキスト束縛が必要だった</td></tr>
+    </table>
+    <p>直したあとの 1 ランクの報告です。</p>
+    <pre><code>receive side (comm 0x3eba47d0, 2 peer connection(s)):
+  1929 placement(s), 750 signal(s) applied, 0 refused, 0 failed write(s)</code></pre>
+    <p><b>実 H100 の上で、DeepEP の実 dispatch カーネルが、3 ホスト間で、EFA のデータ経路を一切使わずに動いています。</b>これが emulator を作った目的でした。</p>
+  </div>
+
+  <p>計測器そのものが 2 回嘘をついたことも書いておく価値があります。agent が失敗した書き込みを「適用済み」に数えていたので、全部の書き込みが失敗した実行が健全な実行と同じ数字に見えました。そして最後に報告した値を <b>全 communicator で共有する static</b> に置いていたので、独立した 2 つの agent が「意見を変え続ける 1 つの agent」に見えました。<b>自分の数字について嘘をつく検証ツールは、無いより悪いです。</b></p>
+
+  <p>残っているのは 1 点です。dispatch が完走しません。DeepEP の CPU 側の待ちが、ホスト側の作業領域にある scale-up 1 個と expert ごとの 64 個のカウントを見ていて、0 のままです。トラフィックは流れてエラーは 0 なので転送の問題ではなく、しかも <b>1 台でも 3 台でも、H100 でも Blackwell でも同一に再現します</b> (第 8 回)。安い箱で追えます。</p>
+
   <p>実クラスタを借りて初めて分かった落とし穴も 2 つ記録しておきます。Capacity Block への起動には <code>--instance-market-options MarketType=capacity-block</code> が必要で、無いと <i>"The market type (purchasing) option is not valid"</i> という spot の話に見えるエラーで蹴られます。そして <b><code>--subnet-id</code> で起動すると EFA インターフェースが付かず、<code>/dev/infiniband</code> ごと存在しません</b>。このとき aws-ofi-nccl は初期化に失敗し、NCCL は黙って socket に落ちて動き続けます。何も落ちないので、<b>起動パラメータの不足がハードウェア非対応に見えます</b>。<code>InterfaceType=efa</code> は起動時に要求するしかなく、後から device index 0 に足すことはできません。</p>
 
   <p>以下は元の 3 点です。実験の方法と、駄目だったときの逃げ道を残してあります。</p>
@@ -417,7 +438,7 @@ if (props.netDeviceType != NCCL_NET_DEVICE_GIN_PROXY) {
 
   <div class="nav">
     <a href="./deepep-efa-06-status.html">← 06 現在地</a>
-    <a href="./deepep-efa-index.html">シリーズ目次へ →</a>
+    <a href="./deepep-efa-08-cheap-hardware.html">次: 08 いちばん安いハードウェア →</a>
   </div>
 </section>
 </main>
