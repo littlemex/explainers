@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 09: コストの比べ方と、計測器の欠陥</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 09</p>
+  <h1>コストの比べ方 ― 計測器が自分で 9 回間違えた記録</h1>
+  <p>名前が正しく中身が違うフィールド。有限回の実行の排水。最安の行が常に最も過負荷である理由</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section id="s0">
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">第 8 回はカーネルの測り方でした。この回は<b>サービングのコストの測り方</b>です。移植が動いたあとに必ず聞かれる「元の GPU と比べてどうか」に数字で答えようとして、筆者は<b>計測器のほうで 9 回間違えました</b>。その形をそのまま残します。</p>
+
+  <p>扱うのは 1 つの問いです。<b>2 つのアクセラレータのコストを、後から誰かに引用されても壊れない形で比べるにはどうするか</b>。カーネルの話は出てきません。出てくるのは、負荷生成器・ガード・ラダーの組み方です。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    比較可能なのは<b>1M 出力トークンあたりの金額</b>だけです。ただしそれも<b>入出力長 1 組に固有</b>です。<br>
+    そして計測器は、対象の欠陥と<b>同じ顔をして</b>壊れます。フィールドの名前が中身と違う、有限回の実行が排水する、ラダーの 1 点目が暖機である、といった具合に。<b>どれも「測れた」と「測りたいものが測れた」の差</b>で、先に仕組みを作るほうが安く済みます。
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>比べるなら金額にする。ただし形に固有です</h2>
+  <p class="lead">スループットは割り算で消えますが、支払いは消えません</p>
+
+  <p>チップ数の違う 2 つの箱を「トークン/秒」で比べても、どちらに何個入っているかで意味が変わってしまいます。<b>チップ数の違いを吸収できるのは 1M 出力トークンあたりの金額だけ</b>です。時間単価は入力として要求し、無ければコストを表示しない実装にしておきます。無い値を 0 として扱うと、無料のアクセラレータが最強になってしまいます。</p>
+
+  <div class="warn">
+    <b>「$/1M だけが生き残る」と書くのは言い過ぎです。</b>prefill の計算コストを出力トークンに割り付けて割っているので、prefill と decode のバランスが違う 2 つの箱は、<b>入出力長の比を変えると順位が入れ替わり得ます</b>。正確には「チップ数に対しては生き残るが、形に対しては生き残らない」で、だから形を必ず記録に残します。
+  </div>
+
+  <h3>3 行そろえて初めて答えになります</h3>
+
+  <p>片方が 1 リクエストしか同時処理できず、相手が数百処理できるとき、表を 1 行で作ると必ず誘導になります。</p>
+
+  <table>
+    <tr><th>行</th><th>何を答えるか</th><th>作り方</th></tr>
+    <tr><td><b>席を揃えた行</b></td><td>1 リクエストあたりの速さ。TTFT と TPOT が比較できるのはこの行だけ</td><td><b>両側</b>のクライアントを同じ同時数に絞る</td></tr>
+    <tr><td><b>揃えない行</b></td><td>本番のコスト。バッチングする側が大きく有利になり、その倍率は実装の質と無関係</td><td>それぞれ自分の天井で回す</td></tr>
+    <tr><td><b>SLO 内の容量の行</b></td><td>容量計画。実際に発注の判断に使うのはこれ</td><td>SLO を守れる最大の到着率と、そこでのコスト</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>絞るのを速い側だけにしてはいけません。</b>速い側だけ絞ると、速い側の待ち行列はクライアント内に、遅い側の待ち行列はサーバ内に溜まります。end-to-end レイテンシはサーバ内の待ちを含むので、「比較可能」と称する 2 つのレイテンシ列は、<b>片方だけ待ち時間を含む</b>ことになります。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>フィールドの名前は仕様書であって、証拠ではありません</h2>
+  <p class="lead">いちばん高くついた 1 行です</p>
+
+  <p>同時数 (何本が同時に処理されているか) は、席数が律速かどうかを判断する量です。負荷生成器の結果 JSON に <code>max_concurrent_requests</code> という、まさにそれを指しているように見えるフィールドがあったので、採用しました。</p>
+
+  <div class="fig" style="text-align:left">
+    <p style="margin:0"><code>6 プロンプトを「同時 1 本」に絞って流す</code></p>
+    <p style="margin:6px 0 0">→ <code>max_concurrency: 1</code> ← 絞りは効いています<br>
+    → <code>max_concurrent_requests: 6</code> ← <b>観測された同時数ではなく、プロンプト数です</b></p>
+  </div>
+
+  <p>つまりこのフィールドは<b>プロンプト数を追っています</b>。これを同時数として使っていたので、席数ガードは実際には <code>num_prompts</code> を見ており、<b>席にまったく届いていない実行を「scheduler が律速」と報告していました</b>。</p>
+
+  <div class="key">
+    <b>ガードが無いより、自信を持って誤答するガードのほうが悪い</b>です。派生指標が上流のフィールドに依存する前に、<b>答えの分かっている実行を 1 本作って、そのフィールドがその答えを言うか確かめます</b>。6 プロンプトを 1 本ずつ、で足ります。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>有限回の実行は、投入が終わったあとに排水します</h2>
+  <p class="lead">健全な実行に「サーバが追いつかなかった」旗が立ちました</p>
+
+  <p>「要求した到着率を達成したか」は当然確認すべき項目に見えます。素朴には <code>completed / duration</code> を到着率と比べればよさそうです。<b>これが誤りでした。</b></p>
+
+  <div class="fig" style="text-align:left">
+    <p style="margin:0"><code>N 本を到着率 r で投入 → 投入が終わるのは (N-1)/r</code></p>
+    <p style="margin:6px 0 0"><code>その後、最後のリクエストが終わるまで「裾のレイテンシ」ぶん排水する</code></p>
+    <p style="margin:6px 0 0"><code>duration = (N-1)/r + 裾</code> なので <code>completed/duration &lt; r</code> ← <b>追いついていても</b></p>
+  </div>
+
+  <p>既定 (64 本・4 req/s) で 15% 低く出ます。実際にラダー 6 点のうち 3 点に誤った旗が立ちました。比べる相手は<b>その実行がかかるはずだった時間</b>です。そして<b>排水の時間は平均レイテンシではなく裾</b>です。レイテンシが 0.1 秒と 2 秒の 2 本なら、平均 1.05 秒に対し実際の裾は 2 秒で、平均を使うと 1 本も待たされていない実行に旗が立ちます。</p>
+
+  <div class="warn">
+    <b>修正版でも飽和は検出できません。</b>過負荷では基準にしているレイテンシ自体が待ち行列で膨らむので、比は 1 に近いままになります。飽和は<b>他の到着率と比べて初めて分かる</b>性質 (スループットが伸びなくなり、レイテンシだけ伸びる) なので、点ごとの旗では原理的に届きません。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>表の中で最も安い行は、常に最も過負荷な行です</h2>
+  <p class="lead">だから引用してよい行を、機械に名指しさせます</p>
+
+  <p>到着率を上げていくと、総スループットは飽和したあとも少し伸び続け、コストは下がり続けます。同時にレイテンシは崩壊します。公開されている GPU インスタンス上で実測したラダーがこれです。</p>
+
+  <table>
+    <tr><th>到着 req/s</th><th>出力 tok/s</th><th>goodput (SLO 内)</th><th>TTFT p95</th><th>$/1M</th></tr>
+    <tr><td>8</td><td>865</td><td><b>6.76 / 6.76</b></td><td>511 ms</td><td><b>4.89</b></td></tr>
+    <tr><td>16</td><td>1074</td><td>1.01 / 8.39</td><td>2551 ms</td><td>3.94</td></tr>
+    <tr><td>32</td><td>1104</td><td><b>0.00</b></td><td>7845 ms</td><td>3.83</td></tr>
+  </table>
+
+  <p>到着 8 → 16 で総スループットは 24% 増え、<b>SLO を満たしたリクエストだけを数えた goodput は 6.76 → 1.01 に崩落します</b>。平均で見れば改善、SLO 内で数えれば 6.7 倍の劣化です。</p>
+
+  <div class="key">
+    放っておくと最安値が引用されます。実測では、最安の行を引用すると<b>コストを 22% 過小に、TTFT を 15 倍過大に</b>見せました。だから「SLO を満たし、かつ膝の手前で最大スループット」の行を<b>ハーネス自身に名指しさせます</b>。そして<b>旗が立った行は 1 つでも候補から外します</b> — 最初の版は 7 つある旗のうち 4 つしか除外しておらず、<b>2 段落前に「これは下限であって測定ではない」と書いた行を推奨していました</b>。
+  </div>
+
+  <p>SLO は<b>測る前に宣言</b>して結果ファイルに書き込みます。後から決めれば goodput は好きな値になります。出所は製品要件か、相手の低負荷での実測です。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>ラダーの 1 点目は、測定値ではなく暖機です</h2>
+  <p class="lead">これで設定の効果を 1 回誤読しました</p>
+
+  <p>ある設定を評価するため、到着 4 / 8 / 16 の 3 点で測りました。到着 4 の TTFT p95 が 1645 ms で、以前の 6 点ラダー (到着 1 → 2 → 4 …) の到着 4 は 243 ms でした。<b>6.8 倍の悪化</b>と読んで、その設定のせいだと書きました。</p>
+
+  <p><b>誤りでした。</b>設定を戻した対照を同じ 3 点ラダーで測ると、到着 4 は <b>1682 ms</b> で、ほぼ同じでした。違いは設定ではなく<b>その点がラダーの何番目か</b>です。6 点ラダーでは到着 4 に着くまでにサーバが温まっており、3 点ラダーでは到着 4 が cold start の代金を全部払っていました。</p>
+
+  <div class="key">
+    <b>最初の測定点の前に、捨てるための実行を流します。</b>そして<b>点数が違う 2 つのラダーを横に比べません</b>。この 2 つを守っていなかったので、存在しない 6.8 倍を報告しました。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>バッチ実行と逐次実行に、トークン一致を要求してはいけません</h2>
+  <p class="lead">汚染と同点は別で、見分け方は 2 つあります</p>
+
+  <p>同時実行が正しいことを確かめる自然な条件は「各リクエストの出力が、そのリクエストを単独で流したときと一致する」です。<b>これは満たせない条件です。</b>上位 2 候補のロジットが最後のビットまで同値になった位置では、argmax がどちらを返すかは<b>reduction の形</b>で決まり、reduction の形はバッチに従います。</p>
+
+  <p>実際に 4 リクエストのうち 1 本が、生成 1 トークン目から分岐しました。汚染かどうかを 2 つの測定で切り分けました。</p>
+
+  <table>
+    <tr><th>測定</th><th>結果</th><th>意味</th></tr>
+    <tr><td><b>隣人の中身を変える</b> (3 通り)</td><td>被験リクエストの出力が<b>完全に同一</b></td><td>隣から読んでいない = 汚染ではない</td></tr>
+    <tr><td><b>分岐位置の top-2 margin</b></td><td>両方の実行で <b>0.000e+00</b>、上位 2 候補も同じ</td><td>ロジットは一致し、同値の 2 つのどちらを返すかだけが違う</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>最初の fixture が完全一致したのを「検証済み」と書きました。</b>プロンプトを変えたら崩れ、1 時間で撤回しました。ランダム重みの fixture は同値が起きやすいので、<b>一致したことは運の報告であって検証ではありません</b>。正しい条件は「一致、ただし top-2 margin が dtype の分解能以下の位置を除く」です。
+  </div>
+
+  <h3>許容差を緩めるときは、負の対照を同じ主張に入れます</h3>
+
+  <p>同じ問題はテストの層にもあります。バッチ内の 1 行と単独実行を<b>ビット一致</b>で比べていたテストが、ある CPU 命令セットでは通り、別の命令セットでは <code>1.0e-06</code> 違って落ちました。バッチは行を増やすだけで reduction の長さは変えませんが、<b>ライブラリは形を見て kernel と blocking を選ぶ</b>ので、同じ積の足し方が変わります。</p>
+
+  <p>ここで許容差を入れると、テストが守るはずの「リクエスト間の独立性」ごと緩みます。だから<b>同じ主張の中に負の対照を置きます</b>。同じリクエストとは丸め床以内で一致し、<b>違うリクエストとは桁違いに離れている</b>こと。実測では丸めが 1e-6、別リクエストが 1e0 で、6 桁離れていました。</p>
+
+  <div class="key">
+    それでも<b>丸め床より小さい汚染は両方のテストを通ります</b>。閉じるには許容差を使わないテストが要ります。<b>バッチの形を固定して、他リクエストのデータだけ変え、対象行のビット一致を要求する</b>ことです。形が同じならライブラリの選択も同じなので、ビット一致が可搬な主張に戻ります。1e-7 の漏洩を注入すると、このテストだけが落ちます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>相手側も振ってみたら、既定が最良でした</h2>
+  <p class="lead">「既定が最良だった」と「既定しか試していない」は別の主張です</p>
+
+  <p>最初の比較は、片方が調律済みで、GPU 側は既定設定 1 本でした。不公平なので GPU 側で 3 つ振りました。同じハーネス・同じ形・同じ SLO で、公開されているモデルと公開されている推論エンジンの上での測定です。</p>
+
+  <table>
+    <tr><th>つまみ</th><th>引用してよい $/1M</th><th>何が起きたか</th></tr>
+    <tr><td>既定 (別ノードで再現)</td><td><b>4.8975</b></td><td>前の測定と 0.3% 以内。基準は動いていません</td></tr>
+    <tr><td>fp8 KV キャッシュ</td><td>4.8875</td><td><b>無効</b>。同時数は最大 136 で席 256 に届かず、律速は計算でした。fp8 が買うのは容量で、容量は余っていました</td></tr>
+    <tr><td>expert parallel</td><td>8.631</td><td><b>悪化</b>。レイテンシ 7〜10% 増でスループット -1.4%、それが 1 点を SLO の外へ押します。256 expert の top-8 を 4 GPU に分けると層ごとに all-to-all が必要で、この箱は NVLink ではなく PCIe です</td></tr>
+    <tr><td>MTP 投機デコード</td><td>引用可の行なし</td><td><b>悪化</b>。全点 SLO 違反、<b>1 本ずつ流しても 12.6% 遅い</b></td></tr>
+  </table>
+
+  <h3>投機デコードが負ける理由は、受理率ではありません</h3>
+
+  <p>サーバのログは <code>Mean acceptance length 1.58〜1.75</code> を報告しています (投機 1 トークンなので上限 2.0)。つまり draft の<b>約 2/3 が受理されています</b>。それでも負けます。</p>
+
+  <div class="key">
+    理由は<b>疎な MoE の形</b>です。この模型は全体 35B のうち活性が 3B しかないのに、投機ヘッドは<b>256 expert の MoE ブロックを含む 1 層</b>です。つまり draft の 1 ステップが target の 1 ステップに対して相対的に高い。<b>受理率 2/3 でも、払う側が大きすぎます。</b><br>
+    投機デコードは「受理率が上がれば得」という直感で語られがちですが、<b>分母は活性パラメータ数</b>です。疎なモデルでは投機ヘッドの相対コストが上がるので、同じ受理率でも損得が逆転します。
+  </div>
+
+  <p>3 つ振って改善は無く、2 つは悪化しました。したがって最初の比較は<b>結果として</b>不公平ではありませんでした。ただしそれは測って初めて言えることです。</p>
+
+  <div class="warn">
+    <b>「対応していない」で片付けると、宿題の大きさを間違えます。</b>この 3 つのうち 2 つは、実は<b>フレームワーク側に器があり、断っているのは移植側</b>でした。しかも一方には同じツリーの中に実装例までありました。「フレームワークに機能を足す」と「自分のモデルをその器に載せる」は、作業量も作業場所も違います。<b>読んで確かめるまでは、どちらなのか分かりません。</b>
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>チェックリスト ― 計測器を疑う順番</h2>
+
+  <div class="steps">
+    <p><b>1. 答えの分かる 1 本で較正する。</b>上流のフィールドが名前の通りかを、6 プロンプトを 1 本ずつ流して確かめます。付属の生成器でも自作でも同じです。</p>
+    <p><b>2. SLO を測る前に宣言する。</b>後から決めれば goodput は好きな値になります。出所は製品要件か、相手の低負荷実測です。</p>
+    <p><b>3. 最初の点の前に、捨てる実行を流す。</b>1 点目は cold start の代金を払っています。</p>
+    <p><b>4. 引用してよい行を機械に決めさせる。</b>旗が 1 つでも立った行は候補から外します。</p>
+    <p><b>5. 形・バージョン・命令セット・価格の種別を、記録の必須項目にする。</b>数字だけ引用されたときに、どの条件の数字か復元できるのはこれだけです。</p>
+  </div>
+
+  <div class="key">
+    <b>シリーズを通しての注意</b><br>
+    計測器の欠陥は、<b>測定対象の欠陥と同じ顔をして</b>現れます。33 件の CRASH が全部ハーネスの環境復元のせいだったこともありました (フレームワークが自分用に設定した環境変数を、ハーネスが「漏洩防止」のために消していました)。だから「測れた」と「測りたいものが測れた」を分ける仕組みを、測定より先に作るほうが安く済みます。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: 第 1〜6 節の失敗はいずれも筆者が公開されている推論エンジン (<code>vllm 0.21.0</code>) と公開モデルの上で踏んだもので、フィールド名・引数名は公開ソースで確認できます。第 4 節と第 7 節の数値は、<b>公開されている GPU インスタンス (L40S x4) 上での実測</b>です。第 6 節の命令セット差 (<code>1.0e-06</code>) は公開されている PyTorch <code>2.11.0</code> の CPU 実行での実測です。<b>制限公開の環境で得た数値は本稿には含めていません</b>。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-06 時点のものです。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-08-measuring.html">← 08: 測り方</a>
+    <a href="./trn-porting-index.html">シリーズ目次 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
