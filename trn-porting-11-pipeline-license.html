@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 11: 36% の帯域と、行列積を消してみて分かったこと</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 11</p>
+  <h1>36% の帯域 ― 行列積を消してみて分かったこと</h1>
+  <p>3 つのもっともらしい仮説を測って殺し、ループの構文がコンパイラに何を許可するかという答えに着地するまで</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section id="s0">
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">第 10 回は開ループ到着が炙り出す静かな故障でした。この回は<b>性能の帰属</b>の話です。1 つの decode 用 MoE カーネルが出すべき帯域の 36% しか出ておらず、もっともらしい仮説を 3 つ測って殺したあとに、ようやく本当の原因に着きました。</p>
+
+  <p>扱うのは 1 つの問いです。<b>4 つの構造的な書き換えが同じ数字を返すとき、それでも同じ仮説を疑い続けてよいのか</b>。出てくるのは、行列積の融合・stationary と moving の入れ替え・indirect DMA という 3 つの死んだ仮説と、<code>static_range</code> と <code>affine_range</code> という 2 つのループ構文が DMA のソフトウェアパイプライン化に対して持つ、まったく違う契約です。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>4 つの書き換えが同じ数字を返したなら、動かしている変数はボトルネックではありません。</b>そして疑わしい仕事があるとき、それを最適化するより先に、<b>丸ごと消してみる</b>ほうが安く答えが出ます。行列積を消すのに 10 分かかり、それが 3 つの書き換えでも分からなかったことを決めました。<br>
+    最終的な原因は、<code>static_range</code> で書かれたループは命令が並んでいるだけで、コンパイラに DMA を先読みしてよいという<b>許可</b>を与えていなかったことでした。
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>36% という数字はどこから来たか</h2>
+  <p class="lead">帯域はスロープで測ります。1 点だけの数字は固定費に汚染されています</p>
+
+  <p>対象は decode フェーズで動く MoE カーネルです。トークン 1 個が、256 expert のうち router が選んだ top_k 8 個に配られます。1 expert・1 層・1 rank あたりの重みは gate <code>[2048,128]</code> と up <code>[2048,128]</code> と down <code>[128,2048]</code> を bf16 で持ち、合計 1.573 MB です。行列積 1 回あたりの演算強度は約 0.5 MAC/byte しかありません。この形はほぼ全区間が重みの読み込みで決まり、計算では待たされないはずのワークロードです。つまり<b>帯域が出ればそのまま実行時間が決まる</b>形をしています。</p>
+
+  <p>帯域は 1 点だけの計測では信用できません。1 回の呼び出しには固定費が乗るので、サイズを複数点振って、バイト数と時間の<b>傾き</b>から帯域を取り、固定費は切片に落とします。今回のすべての数値はこの方法で <code>nki.benchmark</code> の p50 をデバイス側で計測したものです。切片はどの構成でも正の値になりました。切片が負に出た計測は定常状態に達していないので下限として扱うべきですが、今回はその心配がありません。</p>
+
+  <p>元の実装 (<code>static_range</code> の完全アンロール、反復をまたいでアキュムレータを持ち越す形) の帯域は <b>51.4 GB/s</b> でした。この回の終わりに測る、書き換えたあとのカーネルは 140.2 GB/s です。51.4 を 140.2 で割ると 36.7%、つまりこの回の見出しの数字になります。まず先にこの終着点を宣言してから、そこに着くまでに殺した仮説を順番に見ていきます。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>仮説 1 ― 行列積が細すぎる</h2>
+  <p class="lead">Tensor Engine を持て余しているという、いちばん自然な疑い</p>
+
+  <p>元の実装は 1 expert につき 16 (gate) + 16 (up) + 4 (down) = 36 回の行列積を issue していました。gate と up はどちらも同じ <code>[2048,128]</code> の重みを、同じトークン 1 個に対して別々に掛けています。1 回ごとの行列積は幅が狭く、<b>Tensor Engine の 128&times;128 systolic array を持て余している</b>という疑いは自然です。命令数が多いこと自体も、命令 1 個あたりに乗る固定費を積み重ねます。</p>
+
+  <p>gate と up は同じ入力トークンに対する別々の射影なので、重みを並べて 1 つの連続した <code>[128,256]</code> タイルにし、<b>1 回の行列積</b>で両方を出す形に融合しました。これで行列積の総数は 16 (融合した gate+up) + 4 (down) = 20 まで減ります。</p>
+
+  <table>
+    <tr><th>版</th><th>行列積の数</th><th>帯域のスロープ</th><th>呼び出し 1 回の固定費</th></tr>
+    <tr><td>融合前</td><td>36</td><td>基準</td><td>106 &micro;s</td></tr>
+    <tr><td>gate+up 融合後</td><td>20</td><td>約 1% しか動かない</td><td>93 &micro;s</td></tr>
+  </table>
+
+  <p>スロープはほぼ動きませんでした。<b>これは行列積の細さが主犯ではないという証拠です。</b>ただし融合そのものは捨てませんでした。演算内容は変わらないのに命令数が減り、固定費が 106 &micro;s から 93 &micro;s まで下がったからです。細さの仮説を殺したことと、融合を残す判断は別の話です。</p>
+
+  <p>融合の途中で、レイアウトについて 1 つ誤解していたことにも気づきました。ベンダー提供の融合レイアウト <code>[E, hidden, 2, I]</code> は、gate と up のどちらか<b>片方だけを select する</b>と、その 1 回の read が stride 付きになります。ところが gate と up を<b>両方いっしょに読む</b>なら、この軸はただの連続領域です。レイアウトそのものが悪かったのではなく、<b>その半分だけを使う書き方</b>が悪かったということです。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>仮説 2 ― 動く側がトークン 1 個しかない</h2>
+  <p class="lead">今度は理論そのものが誤っていました</p>
+
+  <p>Tensor Engine は片方の行列を格子に固定 (stationary) し、もう片方を流し込み (moving) ます。decode の 1 ステップはトークン 1 個なので、moving 側の行が 1 行しかありません。<b>128&times;128 の格子に対して 1/128 しか使っていない</b>という疑いです。stationary 側と moving 側をどちらにするかは選べるので、入れ替えて測りました。</p>
+
+  <p>結果は <b>4% 遅くなりました</b>。速くもならず、期待した通りにも動きません。2 人の独立したレビュアーが、それぞれ別に同じ指摘をしました。<b>どちらの割り当てでも、次元の 1 つは 1 のままです。</b>トークン数が 1 という事実自体は入れ替えでは変わらないので、格子のどちらの軸にその「1」を置いても、動いていない次元があることに変わりはありません。理論の立て方自体が、入れ替えで何かが変わるという前提を置いていた点で誤っていました。</p>
+
+  <div class="warn">
+    <b>4% の悪化は「反証」以上の情報を持っています。</b>もし理論が正しく PE 利用率が主犯なら、入れ替えは中立のはずで、悪化する理由がありません。悪化したこと自体が、この軸の入れ替えが性能に無関係な操作であることを示しています。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>仮説 3 ― indirect な expert 添字が動的な DMA 記述子を要求する</h2>
+  <p class="lead">レビュアーの最有力候補が、別の実測で先に反証されていました</p>
+
+  <p>どの expert の重みを読むかはトークンごとに違うので、読み込みは<b>indirect index</b> によるギャザーです。静的な添字と違い、実行時に決まる添字は DMA の記述子をそのつど生成するコストを乗せるはずだ、というのがレビュアーの最有力候補でした。もっともらしい理論です。</p>
+
+  <p>ところが同じプロジェクトの別のマイクロベンチマークが、<b>同じ indirect index の仕組みを使って 155 GB/s に達している</b>という実測を既に持っていました。今回のカーネルが詰まっている 51.4 GB/s よりずっと高い値です。indirect index という機構そのものが 51.4 GB/s しか出せない理由にはなり得ません。仮説 3 も殺れました。</p>
+
+  <p>3 つの仮説がすべて死にました。行列積を融合してもスロープはほぼ動かず、stationary と moving を入れ替えても改善はなく、indirect index という機構自体は別の実測で高い帯域を出せることが分かっています。<b>4 つの構造的な書き換えが同じ数字を返したなら、動かしている変数はボトルネックではありません。</b>ここで疑いの向きを変えました。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>決定的な実験 ― 行列積を消したら遅くなった</h2>
+  <p class="lead">最適化する前に、消してみる</p>
+
+  <p>それまでの 3 つの仮説は、いずれも計算側の何かを直すという方向でした。だから最後に、計算そのものを<b>丸ごと消して</b>みました。<code>static_range</code> の同じループから行列積の呼び出しだけを取り除き、重みの読み込みだけを残します。演算が無いのだから、計算が律速だったならこの版は速くなるはずです。</p>
+
+  <table>
+    <tr><th>版</th><th>帯域</th></tr>
+    <tr><td>行列積あり (元の実装)</td><td>51.4 GB/s</td></tr>
+    <tr><td>行列積を丸ごと削除</td><td>47.0 GB/s</td></tr>
+  </table>
+
+  <p><b>速くならず、むしろ遅くなりました。</b>これが決定的でした。計算を消しても数字が動かない、あるいは悪化するということは、<b>計算が上限を作っていたのではない</b>ということです。そして遅くなった側の実装が指しているのは、<b>読み込みがパイプライン化されていない</b>という事実です。計算をしている間に次の読み込みが進んでいたのではなく、読み込み自体がそもそも重なっていなかったので、計算を抜いても待ち時間は同じ場所に居座り続けます。むしろ命令列の形が変わったことで、スケジューラの並べ方がわずかに不利になった、というのが 47.0 という数字の説明です。</p>
+
+  <div class="key">
+    <b>ここが仕事の消し方の価値です。</b>3 つの構造的な書き換え (融合・入れ替え・indirect index の実測比較) では、それぞれ数字を 1% か 4% 動かすだけで、原因の在り処までは指してくれませんでした。<b>計算を消すという 1 回の操作</b>だけが「計算は主犯ではない」を直接示し、同時に「読み込み側を見ろ」という次の一手まで示しました。疑わしい仕事を最適化する前に消してみるのは、10 分で済み、3 つの書き換えより安く答えが出ます。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span><code>static_range</code> と <code>affine_range</code> ― パイプライン化を許可するのはどちらか</h2>
+  <p class="lead">命令が並んでいることと、並べてよいと宣言することは別です</p>
+
+  <p><code>static_range</code> はループを完全にアンロールします。命令はすべて静的に列に並び、コンパイラの list scheduler がその列を見ることができます。<b>ただし「見える」ことと「入れ替えて重ねてよいと保証されている」ことは別です。</b>アンロールされた命令列は、たまたま重ねられる部分があれば重なるという<b>機会的な</b>最適化の対象にしかなりません。反復という構造そのものは、アンロールした瞬間に消えているからです。</p>
+
+  <p><code>affine_range</code> はこれと逆の情報をコンパイラに渡します。<b>「この反復の間には依存が無い」という明示的な宣言</b>です。この宣言があるからこそ、コンパイラは反復 <var>i</var> の計算をしている裏で反復 <var>i+1</var> の読み込みを先に始めてよいと判断できます。これは機会ではなく<b>許可</b>です。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 260" role="img" aria-label="static_range の逐次実行と affine_range のパイプライン実行を比較する図">
+      <text x="360" y="24" text-anchor="middle" font-size="15" fill="#0f5132" font-weight="700">読み込みと計算 ― 逐次と重ね合わせ</text>
+      <g font-size="13" fill="#12211a">
+        <text x="16" y="60" font-weight="700">static_range (逐次)</text>
+        <rect x="130" y="46" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="165" y="64" text-anchor="middle">読込 1</text>
+        <rect x="205" y="46" width="70" height="26" fill="#43b581" stroke="#198754"/><text x="240" y="64" text-anchor="middle" fill="#fff">計算 1</text>
+        <rect x="280" y="46" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="315" y="64" text-anchor="middle">読込 2</text>
+        <rect x="355" y="46" width="70" height="26" fill="#43b581" stroke="#198754"/><text x="390" y="64" text-anchor="middle" fill="#fff">計算 2</text>
+        <rect x="430" y="46" width="70" height="26" fill="#8fd6b4" stroke="#198754"/><text x="465" y="64" text-anchor="middle">読込 3</text>
+        <rect x="505" y="46" width="70" height="26" fill="#43b581" stroke="#198754"/><text x="540" y="64" text-anchor="middle" fill="#fff">計算 3</text>
+        <line x1="130" y1="86" x2="575" y2="86" stroke="#b5401f" stroke-width="2"/>
+        <text x="352" y="102" text-anchor="middle" fill="#b5401f" font-weight="700">この長さがそのまま実行時間 ― 読み込み同士は重なっていない</text>
+
+        <text x="16" y="150" font-weight="700">affine_range (パイプライン)</text>
+        <rect x="130" y="136" width="70" height="24" fill="#8fd6b4" stroke="#198754"/><text x="165" y="153" text-anchor="middle" font-size="12">読込 1</text>
+        <rect x="200" y="136" width="70" height="24" fill="#8fd6b4" stroke="#198754"/><text x="235" y="153" text-anchor="middle" font-size="12">読込 2</text>
+        <rect x="270" y="136" width="70" height="24" fill="#8fd6b4" stroke="#198754"/><text x="305" y="153" text-anchor="middle" font-size="12">読込 3</text>
+        <rect x="340" y="136" width="70" height="24" fill="#8fd6b4" stroke="#198754"/><text x="375" y="153" text-anchor="middle" font-size="12">読込 4</text>
+        <rect x="200" y="168" width="70" height="24" fill="#0f5132" stroke="#0f5132"/><text x="235" y="185" text-anchor="middle" font-size="12" fill="#fff">計算 1</text>
+        <rect x="270" y="168" width="70" height="24" fill="#0f5132" stroke="#0f5132"/><text x="305" y="185" text-anchor="middle" font-size="12" fill="#fff">計算 2</text>
+        <rect x="340" y="168" width="70" height="24" fill="#0f5132" stroke="#0f5132"/><text x="375" y="185" text-anchor="middle" font-size="12" fill="#fff">計算 3</text>
+        <rect x="410" y="168" width="70" height="24" fill="#0f5132" stroke="#0f5132"/><text x="445" y="185" text-anchor="middle" font-size="12" fill="#fff">計算 4</text>
+        <line x1="130" y1="204" x2="480" y2="204" stroke="#198754" stroke-width="2"/>
+        <text x="305" y="222" text-anchor="middle" fill="#198754" font-weight="700">読込 2 は計算 1 の裏で始まっている ― 総時間が短い</text>
+        <text x="16" y="248" font-size="12" fill="#4a5d54">この重ね合わせを許すのは「反復間に依存が無い」という affine_range の宣言そのもの</text>
+      </g>
+    </svg>
+    <p class="cap">同じ量の読み込みと計算でも、コンパイラに重ねる許可があるかどうかで総時間が変わる</p>
+  </div>
+
+  <p>この許可の効果を単体で測るマイクロベンチマークを書きました。<code>affine_range</code> で書いたループの各反復が、スクラッチ行の<b>互いに重ならない</b>スライスに書き込むだけで、反復をまたぐ状態を一切持たない形です。<b>197.0 GB/s</b> に達しました。<code>static_range</code> + アキュムレータの 51.4 GB/s から見て 3.8 倍です。</p>
+
+  <p>この形を、実際の MoE カーネルに移植しました。ここで問題になるのが、元の実装がやっていた<b>縮約</b>です。gate や up の行列積は、隠れ次元 2048 を 128 幅のタイルに割って複数回に分け、その部分積を<b>1 つのアキュムレータに足し込みながら</b>進めます。このアキュムレータは反復 <var>i</var> の出力が反復 <var>i+1</var> の入力になるという、まさに<b>反復間の依存</b>です。<code>affine_range</code> はその依存が無いと宣言する構文なので、<b>アキュムレータを持ったまま <code>affine_range</code> に置き換えるのは、宣言を嘘にする</b>ことになります。コンパイラはその嘘を前提に並べ替えてよい立場にあるので、結果は遅いだけでは済まず、間違った答えになり得ます。</p>
+
+  <p>正しい移植は、宣言を<b>本当にする</b>ことでした。縮約の各ステップに、スクラッチ行の中の<b>自分専用の disjoint なスライス</b>を持たせ、どの反復も他の反復のスライスを読みも書きもしないようにします。そして縮約の総和は、<b>その読み込みが暮らしているループを抜けたあとに</b>まとめて取ります。これで各反復は本当に独立になり、<code>affine_range</code> の宣言が事実と一致します。</p>
+
+  <p>この形に書き換えた実カーネルの帯域は <b>140.2 GB/s</b> でした。<code>static_range</code> + アキュムレータの 51.4 GB/s から 2.7 倍、マイクロベンチマークが示した 197.0 GB/s の天井には届きませんが、これは実カーネルが実際の行列積と indirect index による読み込みを両方抱えているためで、マイクロベンチマークはそのどちらも持っていません。天井と実測の差は、まだ削れる何かが残っていることを示す数字であって、この回の主張を弱めるものではありません。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>往復のコストを払った 2 つの NKI の癖</h2>
+  <p class="lead">正しい形に着地するまでに、遠回りをさせられた場所です</p>
+
+  <p>両方のレビュアーが、部分積の縮約は <code>psum += nl.matmul(...)</code> という素直な形で書けばよいと勧めました。<b>この module tree では書けません。</b> <code>+=</code> はタイルの上では定義されておらず、<code>nl.add</code> は PSUM 同士の 2 オペランドを拒否します。片方ずつなら通る操作が、組み合わせると通らないという形の落とし穴で、それぞれ実機かシミュレータで 1 往復かけて確認するまで気づけませんでした。<b>だからこそ縮約は、ループの外でスクラッチ行を足し合わせるという、いま説明した形に落ち着いています。</b>素直な PSUM 内蓄積が言語として書けないことが、s6 の書き換えの形を決めた直接の理由です。</p>
+
+  <div class="warn">
+    <b>NKI のシミュレータは indirect indexing を再現しません。</b>スロット 0、2、3 を指す添字を渡しても、返ってくるのは常にスロット 0 の値です。スロットごとに異なるデータを仕込んだテストがシミュレータ上で通っても、それは<b>シミュレータの挙動を測っただけ</b>で、カーネルの正しさは何も確認していません。indirect index を使うギャザーの正しさは、実機で確定させるしかありません。今回の MoE カーネルはまさに expert 添字による indirect index を使うので、この 1 点は特に注意して確認しました。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>この回の要点</h2>
+
+  <div class="fig">
+    <svg viewBox="0 0 720 220" role="img" aria-label="4 つのループ形の帯域比較の棒グラフ">
+      <text x="360" y="22" text-anchor="middle" font-size="15" fill="#0f5132" font-weight="700">4 つのループ形が出した帯域 (GB/s)</text>
+      <g font-size="13" fill="#12211a">
+        <text x="16" y="55" text-anchor="start">static_range + アキュムレータ</text>
+        <rect x="270" y="42" width="102.8" height="22" fill="#43b581"/><text x="380" y="58" fill="#12211a">51.4</text>
+
+        <text x="16" y="90" text-anchor="start">同上、行列積を削除</text>
+        <rect x="270" y="77" width="94.0" height="22" fill="#b5401f"/><text x="371" y="93" fill="#12211a">47.0</text>
+
+        <text x="16" y="125" text-anchor="start">affine_range disjoint (単体)</text>
+        <rect x="270" y="112" width="394.0" height="22" fill="#0f5132"/><text x="671" y="128" fill="#12211a">197.0</text>
+
+        <text x="16" y="160" text-anchor="start">affine_range に書き換えた実カーネル</text>
+        <rect x="270" y="147" width="280.4" height="22" fill="#198754"/><text x="558" y="163" fill="#12211a">140.2</text>
+
+        <line x1="270" y1="180" x2="270" y2="188" stroke="#4a5d54"/>
+        <text x="270" y="204" text-anchor="middle" font-size="11" fill="#4a5d54">0</text>
+      </g>
+    </svg>
+    <p class="cap">計算を消すと遅くなり (赤)、独立を宣言できる形に書き換えると 2.7 倍になる (緑)</p>
+  </div>
+
+  <div class="steps">
+    <p><b>1. 帯域はスロープで測る。</b>複数サイズを振り、傾きから帯域を、切片から固定費を出す。切片が負なら定常状態に届いていない下限として扱う。</p>
+    <p><b>2. もっともらしい仮説は 1 つずつ、変数を 1 つだけ変えて殺す。</b>行列積の融合、stationary/moving の入れ替え、indirect index の実測比較。どれも単独で反証できる形にする。</p>
+    <p><b>3. 構造を変えても数字が動かないなら、その変数はボトルネックではない。</b>4 つの書き換えが同じ数字を返したことが、疑いの方向を変える根拠になる。</p>
+    <p><b>4. 疑わしい仕事は最適化する前に消す。</b>行列積を丸ごと削除する実験が 10 分で「計算は主犯ではない」を確定させた。</p>
+    <p><b>5. affine_range の「反復間に依存が無い」は、宣言するだけでなく本当にする。</b>アキュムレータを disjoint なスライスと事後の総和に分解する。</p>
+    <p><b>6. NKI 独自の演算子の制約とシミュレータの限界は、SDK に対して先に確認する。</b> <code>+=</code> の未定義、<code>nl.add</code> の PSUM 制限、indirect indexing を再現しないシミュレータの 3 つは、どれも往復して初めて分かった。</p>
+  </div>
+
+  <div class="key">
+    <b>この回だけ持ち帰るなら。</b>性能の帰属で詰まったとき、書き換えを 1 つ増やす前に<b>その仕事を消してみてください</b>。数字が動かなければ、それは犯人ではないという証拠で、しかも最も安く手に入る証拠です。そして NKI のループでは、命令が並んでいることとコンパイラに重ねる許可を与えることは別の話です。<code>affine_range</code> を選ぶなら、反復間の独立という宣言を、コードの形として本当にしてください。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: ループ形の比較と帯域の数値は、筆者が一般提供されている Trainium2 インスタンス上で、公開されている Neuron SDK、公開されている NKI API、公開モデルを用いて計測したものです。計時は <code>nki.benchmark</code> によるデバイス側計測で、帯域は複数サイズの傾きから、固定費は切片から取っています。本稿で述べた NKI API の挙動 (<code>+=</code> がタイルに定義されていないこと、<code>nl.add</code> が PSUM 同士の 2 オペランドを拒否すること、シミュレータが indirect indexing を再現しないこと) は、公開 SDK に対して再現できます。<code>static_range</code> と <code>affine_range</code> がそれぞれパイプライン化に対して持つ契約は、本稿の実測に用いた SDK バージョンの挙動です。バージョンによって別名に統一されるなど挙動が変わり得るため、この点は特に手元の SDK ドキュメントで確認してください。<b>制限公開の環境で得た数値は本稿には一切含めていません</b>。</p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-06 時点のものです。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-10-partial-occupancy.html">← 10: 部分占有と静かな故障</a>
+    <a href="./trn-porting-index.html">シリーズ目次 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
