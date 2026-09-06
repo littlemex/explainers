@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trainium 推論ポーティング - 12: 存在しないバグと、化けていた検証結果</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --l2:#3d7dca; --l3:#a06cd5; --l4:#e07a5f;
+    --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">TRAINIUM 推論ポーティング ・ 12</p>
+  <h1>同じ数字が 6 回 ― 探していたバグは存在しなかった</h1>
+  <p>6 回の書き換えがすべて同じエラー数を返し、対照実験だけがコンパイラのキャッシュを指し示すまで。検証の踏み台がそれぞれ違う欠陥にしか目が届かない話も</p>
+</header>
+<main>
+<a class="back" href="./trn-porting-index.html">← シリーズ目次</a>
+
+<section id="s0">
+  <h2><span class="num">0</span>この回の狙い</h2>
+  <p class="lead">第 11 回は疑わしい仕事を消してみることで本当の原因を見つけた記録でした。この回はその裏側です。<b>原因が最初から別のところにあったのに、それが分かるまでに何時間も費やした記録</b>を残します。</p>
+
+  <p>扱うのは<b>検証</b>という道具そのものについての話です。コンパイルが内部の検証アサーションで落ち続け、その原因をカーネルの中に探し続けました。書き換えを 6 回試し、6 回とも寸分違わず同じ数字が返ってきました。その一致こそが手がかりで、しかも一致は見た瞬間には読めていませんでした。もう 1 つの話は、検証の踏み台には見える欠陥の種類と見えない欠陥の種類があり、シミュレータとベンチマークと本番のモデルはそれぞれ違う欠陥にしか目が届かないという構造です。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>構造的に違う 6 つの書き換えが同じ数字を返したなら、動かしている変数は原因ではありません。</b>今回の真因はカーネルの中には無く、コンパイラのディスク上キャッシュに残った 1 件の壊れたエントリでした。<br>
+    そして<b>検証の踏み台は、それを作った目的の欠陥しか見えません。</b>シミュレータを通り、スタンドアロンのベンチマークも通ったカーネルが、それでも一度も実行されていないカーネルであり得ます。
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>事件の記録 ― 編集中に落ちたのだから、疑いは編集に向く</h2>
+  <p class="lead">症状がいつ現れたかは、まだ何も証明していません</p>
+
+  <p>手書きのカーネルを 1 つのモデルに統合している最中でした。モデルのグラフをコンパイルすると、アクセラレータのコンパイラが持つ内部検証アサーションで失敗しました。Activation エンジン向けのチェックです。ちょうどそのカーネルを編集している最中に失敗が出たので、疑いはそのままカーネルに向きました。<b>これは自然な反応ですが、症状が現れた時点と原因の在り処には、何の関係もありません。</b>この一文は、この回の終わりでもう一度、別の姿で出てきます。</p>
+
+  <p>失敗したビルドが報告する数字はいつも同じ形をしていました。<b>4 つのグラフがコンパイルされ、16 件のエラーが出る。</b>この形の数字を、これから 6 回見ることになります。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>6 回の書き換え、6 回とも同じ数字</h2>
+  <p class="lead">構造の異なる変更を積んでも、出てくる数字が動かない</p>
+
+  <p>カーネルが疑わしいので、カーネルの側を構造から変えました。1 回変えて落ちれば別の構造を試す、という順序で 6 回進めています。</p>
+
+  <table>
+    <tr><th>#</th><th>変えたこと</th><th>結果</th></tr>
+    <tr><td>1</td><td>非線形の活性化そのものを取り除く</td><td>4 コンパイル / 16 エラー</td></tr>
+    <tr><td>2</td><td>要素ごとの演算をすべてカーネルの外、フレームワーク側に出す</td><td>4 コンパイル / 16 エラー</td></tr>
+    <tr><td>3</td><td>中間タイルの向きを列指向から行指向に変える</td><td>4 コンパイル / 16 エラー</td></tr>
+    <tr><td>4</td><td>すべてのタイルに全パーティション数を持たせる</td><td>4 コンパイル / 16 エラー</td></tr>
+    <tr><td>5</td><td>1 つのカーネルを 2 つに分割する</td><td>4 コンパイル / 16 エラー</td></tr>
+    <tr><td>6</td><td>結果を追加のバッファ経由でステージする</td><td>4 コンパイル / 16 エラー</td></tr>
+  </table>
+
+  <p><b>6 回とも「4 コンパイル / 16 エラー」でした。</b>非線形を消すことと、要素演算を丸ごと外に出すことと、タイルの向きを変えることは、カーネルの計算内容に対してまったく別の変更です。それでも同じ数字が返ってきたという事実は、<b>すでにその時点で「原因はこの変数の中には無い」と告げていました。</b>読めていなかったのはこちらです。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>対照実験 ― 新しいカーネルを無効にしても、同じ数字が出た</h2>
+  <p class="lead">「直っても直らない」ときに初めて疑いの向きを変える</p>
+
+  <p>6 回目まで進んだところで、ようやく対照実験を回しました。新しいカーネルを、そのカーネルを差し込むための環境変数フラグで<b>無効化</b>し、その日の早い時間に問題なく動いていた構成に戻します。フラグを見る限り、この構成には新しいカーネルが一切含まれていません。</p>
+
+  <p><b>それでも同じ数字で落ちました。4 コンパイル / 16 エラーです。</b>新しいカーネルが原因なら、無効化した構成は成功するはずでした。ここでようやく、カーネルの中を疑い続けていたこと自体が誤りだったと分かります。</p>
+
+  <p>次にコンパイラのディスク上キャッシュを丸ごと退避し、キャッシュ無しの冷えた状態から同じ既定構成を走らせました。<b>その既定経路は問題なくコンパイルされ、サービングも通りました。</b>原因はカーネルではなく、<b>コンパイラのキャッシュに残っていた 1 件の壊れたエントリ</b>でした。以前の失敗したコンパイルが、そのエントリをキャッシュに残しており、それ以降の、内容的には無関係な複数の構成が、同じ内部エラーで揃って落ちていたという構造です。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 340" role="img" aria-label="6 回の書き換えがすべて同じエラー数を返し、対照実験とキャッシュ退避で真因に着地するまでのタイムライン">
+      <text x="380" y="24" text-anchor="middle" font-size="15" fill="#0f5132" font-weight="700">6 回の書き換え ― すべて「4 コンパイル / 16 エラー」</text>
+      <g font-size="12.5" fill="#12211a">
+        <line x1="70" y1="60" x2="690" y2="60" stroke="#d9e5df" stroke-width="2"/>
+        <g>
+          <circle cx="110" cy="60" r="8" fill="#b5401f"/><text x="110" y="46" text-anchor="middle">#1</text>
+          <circle cx="210" cy="60" r="8" fill="#b5401f"/><text x="210" y="46" text-anchor="middle">#2</text>
+          <circle cx="310" cy="60" r="8" fill="#b5401f"/><text x="310" y="46" text-anchor="middle">#3</text>
+          <circle cx="410" cy="60" r="8" fill="#b5401f"/><text x="410" y="46" text-anchor="middle">#4</text>
+          <circle cx="510" cy="60" r="8" fill="#b5401f"/><text x="510" y="46" text-anchor="middle">#5</text>
+          <circle cx="610" cy="60" r="8" fill="#b5401f"/><text x="610" y="46" text-anchor="middle">#6</text>
+        </g>
+        <text x="380" y="82" text-anchor="middle" fill="#b5401f" font-weight="700">構造の異なる 6 つの変更、すべて同じ数字</text>
+
+        <line x1="610" y1="60" x2="610" y2="130" stroke="#4a5d54" stroke-dasharray="4,3"/>
+        <path d="M610,130 L690,170" stroke="#4a5d54" fill="none" stroke-dasharray="4,3"/>
+
+        <rect x="530" y="160" width="220" height="46" rx="8" fill="#fdf1ec" stroke="#b5401f"/>
+        <text x="640" y="180" text-anchor="middle" font-weight="700">対照: 新カーネルを無効化</text>
+        <text x="640" y="197" text-anchor="middle" fill="#b5401f">それでも 4 / 16 ― 同じ数字</text>
+
+        <path d="M530,183 L360,183" stroke="#4a5d54" fill="none" marker-end="url(#arrow)"/>
+        <rect x="150" y="160" width="200" height="46" rx="8" fill="#f3f9f6" stroke="#198754"/>
+        <text x="250" y="180" text-anchor="middle" font-weight="700">キャッシュを退避</text>
+        <text x="250" y="197" text-anchor="middle" fill="#198754">冷えた状態から既定経路を実行</text>
+
+        <path d="M250,206 L250,250" stroke="#198754" fill="none" marker-end="url(#arrow)"/>
+        <rect x="150" y="252" width="200" height="46" rx="8" fill="#eaf5ef" stroke="#0f5132"/>
+        <text x="250" y="272" text-anchor="middle" font-weight="700" fill="#0f5132">コンパイル成功</text>
+        <text x="250" y="289" text-anchor="middle" fill="#0f5132">サービングも成功</text>
+
+        <text x="250" y="322" text-anchor="middle" font-size="12" fill="#4a5d54">真因: 失敗した過去のコンパイルがキャッシュに残した 1 件の壊れたエントリ</text>
+      </g>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/>
+        </marker>
+      </defs>
+    </svg>
+    <p class="cap">6 回の書き換えは全部同じ数字を返し、対照実験で新カーネルを外しても数字は動かず、キャッシュを退避して初めて数字が変わった</p>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>症状が出た時点は、原因の場所を何も教えない</h2>
+  <p class="lead">同じ日の同じ手が、同じ形の一致を 2 回、正反対に読んでいました</p>
+
+  <p>この失敗を情けないと思うのではなく、公開する価値があると考えるのには 2 つの理由があります。</p>
+
+  <p>1 つ目は、この教訓自体が<b>すでに手元の記録に書かれていた</b>ということです。以前の別の事故のときに、同じ構造の落とし穴を踏んで、その反省を残していました。それでも今回は適用されませんでした。理由は単純で、エラーが<b>カーネルを編集している最中に</b>出てきたので、もっともらしい疑いの矛先が編集そのものに向いてしまったからです。<b>症状がいつ現れたかは、何が原因かを何も教えません。</b>書かれた教訓を持っていても、それを呼び出す条件が「今の状況に似ているかどうか」ではなく「編集中に起きたかどうか」になっていれば、教訓は素通りします。</p>
+
+  <p>2 つ目は、<b>同じ人が、同じ日のうちに、同じ形のパターンをまったく正しく読んでいた</b>ということです。第 11 回で扱った帯域の調査では、4 つの構造的に異なる書き換えが同じ帯域の数字を返し、それを「動かしている変数はボトルネックではない」と正しく結論しました。今回は 6 つの構造的に異なる書き換えが同じエラー数を返したのに、それを同じように読みませんでした。パターンは<b>性能の数字の中では読めて、エラーメッセージの中では読めなかった</b>ということです。おそらく、性能の数字は最初から「疑わしい変数を 1 つずつ潰す」という実験計画のもとで見ていたのに対し、エラーメッセージは「原因を探す」という気持ちで見ていて、一致そのものを実験結果として扱っていなかったからです。</p>
+
+  <div class="warn">
+    <b>ここから引く規則は 2 つです。</b>1 つ目、対照実験は<b>それを思いついたときに回すのではなく、直しても直らなくなった時点で</b>回します。6 回目まで待つ必要はありませんでした。2 つ目、<b>構造の異なる変更を重ねても同じ数字が返り続けるなら、それは「動かしている変数が共通原因を持たない」ことの証拠</b>であり、この時点で変え続けるのをやめて、共通の何かを取り除く方向に切り替えます。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>検証の踏み台は、それを作った目的の欠陥しか見えない</h2>
+  <p class="lead">3 つの踏み台を並べて、誰が何を見落とすかを表にする</p>
+
+  <p>この統合作業では 3 つの検証の踏み台を使っていました。<b>それぞれが、他の 2 つには見えない種類の欠陥を捕まえ、同時に、他の 2 つが捕まえる欠陥には盲目でした。</b>この回のもう 1 つの主題は、この構造そのものです。</p>
+
+  <table>
+    <tr><th>踏み台</th><th>見える欠陥</th><th>見えない欠陥</th></tr>
+    <tr><td><b>機能シミュレータ</b></td><td>演算そのものの正しさ</td><td>indirect index (スロット 0、2、3 のどれを指しても常にスロット 0 を返す)、行列積の出力先 dtype の規則、バッファの配置、要素演算オペランドの開始パーティション一致、デバイスが要求する次元数より少ない reduction の結果を平気で受け取ってしまうこと</td></tr>
+    <tr><td><b>スタンドアロンの実機ベンチマーク</b></td><td>上記すべて。ただし<b>そのベンチマーク自身の fixture が使っている dtype に限る</b></td><td>fixture が本番と違う dtype を持っていること自体。本番が bf16 を使うところで fixture が float16 を持っていれば、測っているのは<b>別のカーネル</b></td></tr>
+    <tr><td><b>モデルそのもの</b></td><td>本番の dtype で実際に走ること、indirect index が router の選んだ行を本当に選んでいること</td><td>(これが唯一、他の 2 つが見落とすものを見る側)</td></tr>
+  </table>
+
+  <p>実際に起きたのはこの表の 2 行目です。スタンドアロンのベンチマークの fixture は float16 のタイルを持っており、本番の経路は bf16 を使っていました。float16 の fixture が報告した帯域は、本番がその dtype では<b>コンパイルすらできない</b>という事実の上に立っていました。つまりベンチマークが測っていたのは、本番には存在しないカーネルの帯域でした。</p>
+
+  <div class="key">
+    <b>結論はこうなります。</b>シミュレータを通り、スタンドアロンのベンチマークも通ったカーネルは、それでも<b>一度も実行されていないカーネル</b>であり得ます。3 つの踏み台のうち、本番の dtype で indirect index が正しい行を選ぶことを確認できるのは、<b>モデルそのものの上で動かす検証だけ</b>です。踏み台を増やすことは安心を増やしますが、その安心がどの種類の欠陥に対するものかを、踏み台ごとに書き出しておかなければ、増えた踏み台の数だけ死角も残ります。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>アクセラレータ自身の予約管理も漏れる</h2>
+  <p class="lead">状態はコンテナの中ではなく、ホストの側に残ります</p>
+
+  <p>ワーカープロセスを強制終了すると、ドライバの側にはコアの予約が残ったままになります。デバイス一覧を出すツールで確認すると、<b>もう存在しないプロセス ID がコアを握っている</b>という表示になります。この状態になると、新しいコンテナに入れ替えても直りません。予約はコンテナの中の状態ではなく、<b>ホストの側の状態</b>だからです。</p>
+
+  <p>この状態でモデルを起動すると、ランタイムの初期化で失敗します。一方で、単一コアだけを使うテストは問題なく通ります。矛盾しているように見えますが、理由は単純です。<b>空いているコアが 1 個しかなく、4 個ではない</b>からです。単一コアのテストはその 1 個で足りるので通り、4 コアを要求するモデルは足りずに失敗します。回復の方法は、これまでのところホストの再起動だけです。</p>
+
+  <div class="warn">
+    <b>罠の中にもう 1 つの罠があります。</b>デバイスが健全かどうかを確認するためのヘルスチェックが、内部でベンチマークのハーネスを呼び出す形になっていることがあります。<b>そのヘルスチェック自身が、通そうとしていた本番の実行より先にコアの予約を握ってしまい、道を空けるはずだったチェックが道を塞ぐ側に回ります。</b>だからデバイスの健全性は、<b>これから実行するものそのもので確認します。</b>代わりのプロキシで確認すると、確認の道具自体が新しい予約漏れの発生源になり得ます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>NKI とコンパイラで確認しておく事実</h2>
+  <p class="lead">この統合作業で往復して確認した、コンパクトな 3 点です</p>
+
+  <p><code>transpose_x=True</code> を付けた行列積だけが、PE アレイ上でオペランドを転置<b>しない</b>形です。これを付けない形は、内部で最初のオペランドを転置し、結果をアキュムレータメモリに置いたうえで、<b>stationary 側のオペランドは on-chip バッファに置かれていなければならない</b>という制約に反して失敗します。転置の有無は見た目には小さな引数ですが、結果の置き場所とオペランドの置き場所の両方を決めています。</p>
+
+  <p>行列積の出力先は fp32 でなければならないというエラーが出たことがありましたが、<b>これは行列積そのものの問題ではありませんでした。</b>fp32 への幅拡張を試みたコードが、その裏で dtype を変換するコピーを挿入しており、<b>この変換コピーが Activation エンジン上で走っていました。</b>第 1 節で触れた検証アサーションが Activation エンジン向けのチェックだったことを思い出してください。行列積そのものを疑うと同じ落とし穴に落ちます。高レベルの行列積のラッパーはオペランドの dtype からアキュムレータの dtype を推論するだけで、dtype を明示する引数を取りません。修正は、出力先を明示的に名指しできる低レベルの呼び出しに切り替えることで、これによりオペランドを帯域の要となる狭い dtype に保ったまま進められます。</p>
+
+  <p>ストア命令はアキュムレータメモリを直接のソースとして受け付けません。だから結果は必ず、<b>元の dtype と同じ</b> on-chip バッファのタイル 1 つを経由します。ここで<b>違う</b> dtype のタイルを使うと、まさに前段で説明した変換コピーを呼び戻すことになります。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>この回の要点</h2>
+
+  <div class="steps">
+    <p><b>1. 症状がいつ現れたかは、何が原因かを何も教えない。</b>編集中に出たエラーの犯人は、編集そのものとは限らない。</p>
+    <p><b>2. 構造的に違う変更が同じ数字を返し続けたら、動かしている変数は共通原因を持たない。</b>これ自体が実験結果であり、変え続ける前に読む。</p>
+    <p><b>3. 対照実験は、思いついた時ではなく、直しても直らなくなった時点で回す。</b>6 回書き換えて気づくより、1 回目で気づくほうが安い。</p>
+    <p><b>4. 検証の踏み台は、それを作った目的の欠陥しか見えない。</b>シミュレータ・スタンドアロンベンチマーク・本番モデルは、それぞれ違う死角を持つ。通過したことは「その踏み台が見える欠陥が無い」ことしか意味しない。</p>
+    <p><b>5. アクセラレータの予約状態はホスト側に残り、コンテナの再作成では消えない。</b>ヘルスチェック自身が予約を握る側になり得るので、確認は本番の実行そのものでする。</p>
+    <p><b>6. 書かれた教訓は、呼び出す条件が合っていなければ素通りする。</b>「似た状況で」ではなく「編集中に起きたから」で疑いを向けると、記録済みの教訓さえ働かない。</p>
+  </div>
+
+  <div class="key">
+    <b>この回だけ持ち帰るなら。</b>探しているバグが見つからないとき、まず疑うべきは<b>探し方が向いている方向</b>です。構造の違う書き換えが同じ数字を返し続けたら、それはボトルネックの正体を教えているのではなく、<b>その変数がボトルネックではないという証拠</b>です。そして、通ったはずの検証が実は違う dtype や違う入力を見ていた、通ったはずのヘルスチェックが実は自分で予約を握っていた、というように、<b>検証そのものが検証したい対象と同じ顔をして壊れる</b>ことがあります。踏み台を積むより先に、その踏み台が何を見ないかを書き出してください。
+  </div>
+
+  <div class="fn">
+    <p>出典と確認方法: 本稿で述べた挙動は、筆者が一般提供されている Trainium2 インスタンス上で、公開されている Neuron SDK、公開されている NKI API、公開モデルを用いて観測したものです。コンパイラとシミュレータの挙動として述べた点 (indirect indexing をシミュレータが再現しないこと、行列積の出力先 dtype の規則、<code>transpose_x</code> の意味、ストアがアキュムレータメモリを直接のソースとして受け付けないこと) は、公開 SDK に対して再現できます。名前や挙動の詳細は SDK のバージョンによって変わり得るため、正はソースと配布物です。<b>制限公開の環境で得た数値は本稿には一切含めていません。</b></p>
+    <p><b>確認時点</b>: 本稿の記述は 2026-09-06 時点のものです。バージョンが上がれば名前も挙動も変わりうるので、正はソースと配布物です。</p>
+  </div>
+
+  <div class="nav">
+    <a href="./trn-porting-11-pipeline-license.html">← 11: 36% の帯域と、行列積を消してみて分かったこと</a>
+    <a href="./trn-porting-index.html">シリーズ目次 →</a>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
