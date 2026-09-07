@@ -205,6 +205,10 @@
 
     <p><b>検査の数は安心の量ではありませんでした。</b>アサーション 210 万回・網羅検査 3 本・証明 12 本を積んでも、この開発で実際に時間を奪った欠陥は<b>1 件も引っかかりません</b>。すり抜けたものは全部「止まった」で、止まったことは 1 つの状態を見ても分かりません (「悪い状態にならない」と「いつか進む」は別の軸です)。そこで emulator に<b>わざと遅く・偏って・片側だけ止まる</b>ノブを足し、時間の上限を主張するテストを 90 項目書きました。過去の欠陥を入れ直して<b>落ちることを要求する</b>ところまでやると、4 回のうち 3 回は私のテスト側が間違っていました。詳細は <a href="./deepep-efa-09-liveness.html">09</a>。</p>
 
+    <p><b>そして emulator が通りました。</b>ただしそこへ行くには、差し込み方そのものを取り替える必要がありました。ホストのスレッドが CUDA の転送で、すでに走っていて自分を待っているカーネルにバイトを届ける ― この形はこの driver では成立しません。専用に確保したメモリを専用の非ブロッキング stream で 1 MB 転送しても<b>93 秒返らず</b>、最後に 719 を返します。カーネルはその copy が運ぶバイトを待ち、copy はカーネルが終わるのを待つからです。<b>BAR mapping への CPU 書き込みなら同じ状況で 0 ms</b>で、しかもそれは <code>aws-ofi-nccl</code> が実際に使っている機構なので、乗り換えると emulator は<b>より忠実</b>になりました。詳細は <a href="./deepep-efa-10-resident-kernel.html">10</a> と <a href="./deepep-efa-11-bar-mapping.html">11</a>。</p>
+
+    <p><b>較正は片側しか取れていません。</b>わざと契約を破る <code>violate-i1</code> を全ステップで強制し、payload を自己記述型にして 8 反復回しても、<b>破損は 1 件も出ません</b>。受理が counter ではなく in-band の header で門番されているので、早すぎる signal は空振りに成立して再 poll になるだけです。つまり DeepEP の unordered カーネルは<b>契約より頑健</b>で、この構成では検出すべき違反が存在しません。ここへ来る前にテスト側の欠陥が 2 つあり、どちらも「通った」を結果に見せていました。詳細は <a href="./deepep-efa-12-violation-tolerated.html">12</a>。</p>
+
     <p>そのうえで、借りた H100 クラスタが出した最も重要な事実は判定そのものより <b>emulator の動機</b>を書き換えるものでした。実 EFA ハードウェアを持つ Hopper クラスタでも、<b>fork が狙う GIN EFA-GDA backend は今日のベンダ plugin に存在しません</b> (aws-ofi-nccl 1.18.0 は GIN の記号を 1 つも持たず、NCCL は <code>globalGinSupport 0</code> と報告します)。emulator は EFA インスタンスを起動できない人のための代用品ではなく、<b>backend が出荷されるまでこのプロトコルを検証できる唯一の手段</b>です。</p>
   </div>
 
@@ -319,9 +323,30 @@
       <div class="meta"><span>2026-09-06</span><span class="go">開く →</span></div>
     </a>
 
+    <a class="card" href="./deepep-efa-10-resident-kernel.html">
+      <span class="cat">10 ・ 診断</span>
+      <h2>すでに走っているカーネルに、ホストからバイトを届ける</h2>
+      <p>凍った数字は誰の責任も指さない。回数に日付を足し、driver 呼び出しの在庫表を取ると、止まっていたのは NCCL ではなく自分だった。専用に確保したメモリを専用 stream で 1 MB 転送しても 93 秒返らないところまで測って、原因が差し込み方そのものだと確定させた記録。</p>
+      <div class="meta"><span>2026-09-07</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-11-bar-mapping.html">
+      <span class="cat">11 ・ 成立した形</span>
+      <h2>BAR に直接書いたら 0 ms だった</h2>
+      <p>CUDA が 93 秒返らない場所で、本物の backend が使っている機構に乗り換える。4 つの門を probe で順に測り、そのうち 1 つは自分の probe の不備で落ちていた。dispatch と combine が EFA インスタンスなしで通るまでと、途中で自分が作った deadlock。</p>
+      <div class="meta"><span>2026-09-07</span><span class="go">開く →</span></div>
+    </a>
+
+    <a class="card" href="./deepep-efa-12-violation-tolerated.html">
+      <span class="cat">12 ・ 較正</span>
+      <h2>わざと壊したら、壊れなかった</h2>
+      <p>否定テストが通ることは結果ではない。データを見ていなかったことと、敵が本気でなかったこと。両方直した先にあったのは、受理を in-band header で門番している unordered カーネルの頑健さだった。言えることと言えないことの棚卸し。</p>
+      <div class="meta"><span>2026-09-08</span><span class="go">開く →</span></div>
+    </a>
+
   </div>
 
-  <p class="note">記述の範囲について: 本シリーズの技術的記述はすべて公開ソースで確認できる範囲に限っています ―― <a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">deepseek-ai/DeepEP</a>、<a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a>、<a href="https://github.com/NVIDIA/nccl" target="_blank" rel="noopener">NVIDIA/nccl</a>、<a href="https://github.com/aws/aws-ofi-nccl" target="_blank" rel="noopener">aws/aws-ofi-nccl</a>、<a href="https://github.com/awslabs/awsome-distributed-ai" target="_blank" rel="noopener">awslabs/awsome-distributed-ai</a>。<b>引用した性能数値はすべて公開されている PR 本文の記述で、筆者の測定ではありません</b>。出典は本文に明記しています。第 7 回の emulator の判定は公開 API の読解と、同じ事実を独立に 2 つのモデルへ渡して評価させた結果が収束した部分です。<b>そのうち実験でしか決まらない 3 点は、すべて GPU の実機で確定させました</b> (第 7 回 §9。GPU 4 枚の箱を 17.7 分、次に H100 を 1 枚ずつ載せたホスト 3 台のクラスタ、そして RTX PRO 6000 Blackwell 1 枚のワークステーション)。実機で確かめた事実にはその旨を明記しています。<b>EFA デバイスの上限値 (<code>max_qp: 256</code>、<code>max_cq: 512</code>、<code>atomic_cap: ATOMIC_NONE</code>) と順序保証の不在は、設計文書からの引用ではなくデバイス自身の報告に差し替えました</b> (第 3 回・第 5 回)。性能に関する測定は一切していません。時点は 2026-09-05 です。背景として <a href="./ffn-moe-explainer.html">FFN から MoE へ</a> が MoE 側の、<a href="./09-collectives.html">集団通信の回</a> が通信側の入口になります。</p>
+  <p class="note">記述の範囲について: 本シリーズの技術的記述はすべて公開ソースで確認できる範囲に限っています ―― <a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">deepseek-ai/DeepEP</a>、<a href="https://github.com/amazon-contributing/DeepEP" target="_blank" rel="noopener">amazon-contributing/DeepEP</a>、<a href="https://github.com/NVIDIA/nccl" target="_blank" rel="noopener">NVIDIA/nccl</a>、<a href="https://github.com/aws/aws-ofi-nccl" target="_blank" rel="noopener">aws/aws-ofi-nccl</a>、<a href="https://github.com/awslabs/awsome-distributed-ai" target="_blank" rel="noopener">awslabs/awsome-distributed-ai</a>。<b>引用した性能数値はすべて公開されている PR 本文の記述で、筆者の測定ではありません</b>。出典は本文に明記しています。第 7 回の emulator の判定は公開 API の読解と、同じ事実を独立に 2 つのモデルへ渡して評価させた結果が収束した部分です。<b>そのうち実験でしか決まらない 3 点は、すべて GPU の実機で確定させました</b> (第 7 回 §9。GPU 4 枚の箱を 17.7 分、次に H100 を 1 枚ずつ載せたホスト 3 台のクラスタ、そして RTX PRO 6000 Blackwell 1 枚のワークステーション)。実機で確かめた事実にはその旨を明記しています。<b>EFA デバイスの上限値 (<code>max_qp: 256</code>、<code>max_cq: 512</code>、<code>atomic_cap: ATOMIC_NONE</code>) と順序保証の不在は、設計文書からの引用ではなくデバイス自身の報告に差し替えました</b> (第 3 回・第 5 回)。<b>第 10 回から第 12 回は、その RTX PRO 6000 Blackwell 1 枚の箱での実測です</b>。転送が返るまでの時間 (93 秒と 0 ms)、driver 呼び出しの在庫表、8 反復での破損件数はいずれも実行から取った数字で、<b>DeepEP の性能を測ったものではありません</b> ― 測っているのは emulator 自身が届けられるかどうかです。第 12 回の「I1 違反に耐える」は 2 rank・<code>kNumParts = 1</code>・128 token の構成についての主張で、カーネル一般についての主張ではありません。時点は 2026-09-08 です。背景として <a href="./ffn-moe-explainer.html">FFN から MoE へ</a> が MoE 側の、<a href="./09-collectives.html">集団通信の回</a> が通信側の入口になります。</p>
 </main>
 <footer>
   <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>

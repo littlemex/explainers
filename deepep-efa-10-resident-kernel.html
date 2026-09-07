@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 10: すでに走っているカーネルに、ホストからバイトを届ける</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+
+  .verdict-box{background:#f2fbf6;border:1px solid var(--g2);border-radius:14px;padding:20px 22px;margin:18px 0}
+  .verdict-box h3{margin:0 0 8px;font-size:18px;color:var(--g1)}
+  .ladder{display:grid;gap:12px;margin:18px 0}
+  .rung{background:#fff;border:1px solid var(--line);border-left:6px solid var(--g3);border-radius:0 12px 12px 0;padding:14px 18px}
+  .rung.cheap{border-left-color:var(--g2)}
+  .rung.no{border-left-color:#d98b6a}
+  .rung .hw{font-weight:700;color:var(--g1);font-size:16px}
+  .rung .what{font-size:14.5px;color:var(--sub);margin:6px 0 0}
+  .picker{background:#f7fbf9;border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0}
+  .picker h4{margin:0 0 4px;font-size:16px;color:var(--g1)}
+  .picker .hint{font-size:13.5px;color:var(--sub);margin:0 0 12px}
+  .picker label{display:block;font-size:14.5px;margin:8px 0}
+  .picker select{font-size:14px;padding:5px 8px;border-radius:7px;border:1px solid var(--line);margin-left:8px}
+  .picker .out{margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:14.5px}
+  .picker .out b{color:var(--g1)}
+  .trap{background:#fdf6f2;border-left:5px solid #d98b6a;border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0;font-size:14.5px}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}
+  .split .box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .split .box h4{margin:0 0 6px;font-size:16px;color:var(--g1)}
+  .split .box p{font-size:14.5px;margin:6px 0}
+  .sim{background:#f7fbf9;border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0}
+  .sim h4{margin:0 0 4px;font-size:16px;color:var(--g1)}
+  .sim .hint{font-size:13.5px;color:var(--sub);margin:0 0 12px}
+  .sim .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:14.5px;margin:8px 0}
+  .sim button{font-size:14px;padding:6px 14px;border-radius:8px;border:1px solid var(--g2);
+    background:var(--g2);color:#fff;cursor:pointer}
+  .sim button.ghost{background:#fff;color:var(--g2)}
+  .sim .out{margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:14.5px}
+  .sim .out b{color:var(--g1)}
+  .bar{height:16px;background:#e7f1eb;border-radius:8px;overflow:hidden;margin:4px 0 10px}
+  .bar span{display:block;height:100%;background:var(--g2)}
+  .bar.over span{background:#c9522b}
+  .knobs{display:grid;gap:10px;margin:16px 0}
+  .knob{background:#fff;border:1px solid var(--line);border-left:6px solid var(--g3);border-radius:0 12px 12px 0;padding:12px 16px}
+  .knob .n{font-weight:700;color:var(--g1);font-size:15.5px}
+  .knob .d{font-size:14.5px;color:var(--sub);margin:4px 0 0}
+  @media(max-width:600px){.split{grid-template-columns:1fr}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 10</p>
+  <h1>すでに走っているカーネルに、ホストからバイトを届ける</h1>
+  <p>凍った数字は誰の責任も指さない。日付と在庫表を足して、3 ラウンド分の誤読を畳んだ記録</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>止まっていたのは誰か</h2>
+    <p class="lead">エミュレータ上で DeepEP の dispatch が forwarding 段で止まる。その原因を私は 3 ラウンド続けて読み違えました。</p>
+
+    <p>エミュレータは NCCL の RMA plugin として振る舞い、TCP でバイトを運びます。受け取ったバイトは GPU のウィンドウへ書き込む必要があり、素朴にはこう書きます。</p>
+
+    <pre><code>cuMemcpyHtoDAsync(window + offset, host_buffer, bytes, stream);
+cuStreamSynchronize(stream);</code></pre>
+
+    <p>これで DeepEP の dispatch が forwarding のタイムアウトで死にます。そして私が最初に見た証拠がこれでした。plugin 側の統計を 5 秒ごとに出していたので、100 秒離れた 2 枚を比べられます。</p>
+
+    <pre><code>REPORT: context 0x441d8f60 is holding 54 operation(s) ... driven 254699 time(s)
+completion path: test() 2097 call(s), 139 done, 0 refused</code></pre>
+
+    <p><b>2 枚がバイト単位で同一でした。</b><code>driven</code> は <code>rmaProgress</code> が呼ばれた回数です。動かない。だから私は「NCCL が plugin を呼ぶのをやめた」と読み、54 個の未処理オペレーションを原因だと考えました。</p>
+
+    <div class="warn">
+      <p><b>これが誤りでした。</b>凍った数字は「呼ばれていない」と「最後の呼び出しが戻ってこない」を区別できません。同じ沈黙が、責任者の違う 3 つのバグと両立します。NCCL が呼ぶのをやめた、私の呼び出しが返ってこない、あるいはこの報告自体が古い。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>数字に日付を入れる</h2>
+    <p class="lead">回数は「何回」しか言いません。障害が問うているのは常に「いつから」です。</p>
+
+    <p>plugin には元々、各スレッドが今どの関数の中にいるかを置くパン屑の仕組みがありました。足りなかったのは 1 つだけで、<b>いつそこに置いたか</b>です。store 1 個の追加で、最初の 1 回の計測が答えを出しました。</p>
+
+    <pre><code>rank1: 受信エージェントは 4 バイトのデバイス操作の中に 350625 ms いる
+rank1: thread 26746: send_unit: staging ... (464055 回訪問, 最後に動いたのは 350625 ms 前)
+rank1: thread 64896: rmaProgress (1494089817 回訪問, 最後に動いたのは 0 ms 前)</code></pre>
+
+    <div class="key">
+      <p><b>NCCL は健全でした。</b><code>rmaProgress</code> に 15 億回入っていて、最後に動いたのは 0 ms 前です。凍っていたのは私のスレッドで、しかも 3 本が<b>同じ瞬間に</b>止まっていました。2 ラウンド分の推論がここで反転します。</p>
+    </div>
+
+    <p>読み方はこうなります。パン屑が <code>rmaProgress</code> を指していて 100000 ms 前に動いたなら、それは<b>返ってこない呼び出しの中</b>です。同じパン屑が 3 ms 前なら、それは<b>呼ばれて仕事が無いと答えている</b>だけです。回数はこの 2 つを永遠に区別しません。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>写真ではなく在庫表を取る</h2>
+    <p class="lead">スタックダンプは標本です。標本は、狙った瞬間を外します。</p>
+
+    <p>次に知りたいのは「driver の中で他に何が動いていないか」です。候補となる説明はどれも<b>別の 2 本目の呼び出し</b>を予言します。モジュールのロード待ち、仮想メモリのマッピング変更、ページ固定、ロックの逆転。だから測るべきは、その瞬間に driver の中にいる呼び出しの一覧です。</p>
+
+    <p>スタックダンプでほぼ答えが出そうで、出ませんでした。止まっているスレッドは確実に写りますが、犯人は標本が当たったときだけ写ります。5 回試して有効な採取は 2 回でした。</p>
+
+    <div class="key">
+      <p><b>在庫表は標本ではありません。</b>入ったのに出ていない記録は、戻るまで表に残ります。だからタイミングで取り逃がせません。<code>LD_PRELOAD</code> で libcuda の入口を包み、入場と退場を数えるだけの仕組みを書きました。DeepEP や PyTorch の呼び出しも見えるので、自分のコードを計測するのでは届かない範囲まで入ります。</p>
+    </div>
+
+    <p>結果は 1 行でした。</p>
+
+    <pre><code>== overdue: tid 1149344 has been inside cuMemcpyDtoHAsync_v2 for 103459 ms
+   tid 1149344: cuMemcpyDtoHAsync_v2, in flight for 103459 ms</code></pre>
+
+    <p><b>driver の中にいるのは 1 本だけ。</b>103 秒。モジュールのロードも、確保も、マッピングもありません。ロックの保持者は存在しませんでした。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>自前のメモリと自前の stream で試す</h2>
+    <p class="lead">保持者がいないなら、残るのはその copy 自身の引数です。</p>
+
+    <p>両端を自分で用意した probe を書きました。plugin 専用の確保、専用の非ブロッキング stream、どちらもカーネルが存在する前に作ったもの。DeepEP が一度も触っていないメモリです。</p>
+
+    <pre><code>probe: the large copy returned CUDA_ERROR_LAUNCH_FAILED (719) after 92903 ms
+probe: the small copy returned CUDA_ERROR_LAUNCH_FAILED (719) after 0 ms</code></pre>
+
+    <p>1 メガバイトが 93 秒ブロックし、そのあと続く 8 バイトは 0 ms で同じコードを返しました。後者が速いのは、その時点でコンテキストが既に死んでいるからです。</p>
+
+    <div class="key">
+      <p><b>サイズも stream も番地も無関係でした。</b>DeepEP の forwarding カーネルが resident で spin しているあいだ、<b>このコンテキストはバイトを 1 つも動かせません</b>。</p>
+    </div>
+
+    <p>これで順序も確定します。凍結までの間、driver はコンテキストを健全と報告し、stream を idle と報告します。719 が出るのは<b>最後</b>で、DeepEP が自分のタイムアウトで trap したときです。私が 3 ラウンド「最初の障害」として読んでいたコードは、いちばん後ろの出来事でした。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>なぜ待ちが解けないのか</h2>
+    <p class="lead">カーネルはその copy が運ぶバイトを待ち、copy はカーネルが終わるのを待ちます。</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 720 250" role="img" aria-label="カーネルと copy が互いを待つ循環">
+        <rect x="30" y="40" width="250" height="80" rx="12" fill="#eaf5ef" stroke="#198754"/>
+        <text x="155" y="72" text-anchor="middle" font-size="15" fill="#0f5132" font-weight="700">DeepEP の forwarding カーネル</text>
+        <text x="155" y="98" text-anchor="middle" font-size="13" fill="#4a5d54">SM を占有して spin し、バイトを待つ</text>
+
+        <rect x="440" y="40" width="250" height="80" rx="12" fill="#fdf1ec" stroke="#b5401f"/>
+        <text x="565" y="72" text-anchor="middle" font-size="15" fill="#b5401f" font-weight="700">ホストの cuMemcpy</text>
+        <text x="565" y="98" text-anchor="middle" font-size="13" fill="#4a5d54">submit の中で返ってこない</text>
+
+        <path d="M280 68 L440 68" stroke="#198754" stroke-width="2" marker-end="url(#a10)"/>
+        <path d="M440 100 L280 100" stroke="#b5401f" stroke-width="2" marker-end="url(#b10)"/>
+        <defs>
+          <marker id="a10" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 z" fill="#198754"/></marker>
+          <marker id="b10" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 z" fill="#b5401f"/></marker>
+        </defs>
+        <text x="360" y="60" text-anchor="middle" font-size="12.5" fill="#0f5132">バイトを待つ</text>
+        <text x="360" y="120" text-anchor="middle" font-size="12.5" fill="#b5401f">終わるのを待つ</text>
+
+        <rect x="130" y="165" width="460" height="58" rx="12" fill="#fff" stroke="#d9e5df"/>
+        <text x="360" y="190" text-anchor="middle" font-size="14" fill="#12211a">この循環はサイズ・stream・pinning・番地を変えても切れない</text>
+        <text x="360" y="211" text-anchor="middle" font-size="13" fill="#4a5d54">切れるのは、submit を伴わない書き込みに替えたときだけ</text>
+      </svg>
+      <p class="cap">計測で確定した循環。copy engine は SM と独立なので通るはずだ、という直感が外れる場所です。</p>
+    </div>
+
+    <p>copy engine は SM とは独立に動くので、resident なカーネルがあっても DMA は流れるはずだ、という直感があります。実際に止まるのは DMA ではなく <b>submit</b> です。stream は idle のままで、仕事がそこへ届いていません。ホストが CUDA に何かを積もうとする行為そのものが、このコンテキストでは進みません。</p>
+
+    <p>本物の NIC はこの問題を持ちません。driver を介さず DMA でメモリを書くからです。エミュレータには等価な手段が無い、というのがこの時点の結論でした。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>排除できたもの</h2>
+    <p class="lead">結論を「私のコードのどこかが悪い」に落とさないために、層を 1 つずつ潰しました。</p>
+
+    <table>
+      <tr><th>疑ったもの</th><th>どう排除したか</th></tr>
+      <tr><td>順序の緩さ</td><td>厳密な提出順を含む 6 種類のスケジュールで同じく失敗</td></tr>
+      <tr><td>ホスト側バッファの寿命</td><td>copy の直後に同 stream を synchronize している</td></tr>
+      <tr><td>signal を書くカーネルの SM 待ち</td><td>カーネルを使わない DMA に置き換えても失敗</td></tr>
+      <tr><td>NCCL が context を回していない</td><td>全 context を毎回進めても失敗。<code>rmaProgress</code> は 15 億回入っている</td></tr>
+      <tr><td>lazy なモジュールロードがロックを握る</td><td><code>CUDA_MODULE_LOADING=EAGER</code> で変化なし。凍結時に <code>cuModuleLoad</code> の中にいるスレッドは無い</td></tr>
+      <tr><td>コンテキストが既に fault している</td><td>凍結中、driver はコンテキストを健全・stream を idle と報告する</td></tr>
+      <tr><td>ページ固定メモリ・番地・サイズ・stream</td><td>専用確保 + 専用 stream の 1 MB でも 93 秒ブロック</td></tr>
+    </table>
+
+    <div class="key">
+      <p>残ったのは<b>差し込み方そのもの</b>でした。ホストのスレッドが CUDA の転送で、すでに走っていて自分を待っているカーネルにバイトを届ける。この形がこの driver では成立しません。</p>
+    </div>
+
+    <p>次の回では、成立する形を測ります。答えは既に本物の backend が使っていました。</p>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-09-liveness.html">← 09: 210 万回の検査が見なかった 1 本の軸</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
