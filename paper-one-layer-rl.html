@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1 層だけ訓練すれば足りるのか — RL の利得はどこで生まれるか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --math:#3d7dca;  /* C_math (青) */
+    --all:#e0a03f;   /* C_all (橙) */
+    --bad:#e07a5f;   /* 低貢献 (赤) */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:32px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 4 回</p>
+  <h1>1 層だけ訓練すれば足りるのか</h1>
+  <p>RL 後訓練の利得はネットワークのどこで生まれるのか — 層ごとの貢献度を測る</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「Is One Layer Enough? Training A Single Transformer Layer Can Match Full-Parameter RL Training」(Zhang ほか, arXiv:2607.01232v2) は、RLVR (検証可能な報酬による強化学習) の後訓練で得られる改善が、Transformer のどの層で生まれているのかを層ごとに測り切った論文です。答えは「ごく一部の層」でした。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    28 層や 36 層あるモデルで、<b>1 層だけを訓練して残りを全部凍結する</b>という実験を全層について繰り返しました。すると<b>たった 1 層の訓練が、全パラメータを訓練した場合の改善のほとんどを回収し、しばしば上回る</b>ことがわかりました。回収率を <b>層貢献度 (layer contribution)</b> という 1 つの量として定義し、7 つのモデル・3 つの RL アルゴリズム・数学/コード/エージェントの 3 領域で測ると、いずれも同じ形が出ます。<b>貢献度の高い層は概ね中央付近に集まり、両端は低い</b>。そしてこの構造は利用できます。貢献度の高い 10 層だけを訓練すると、Qwen3-8B の数学平均は<b>全パラメータ訓練の 66.4% に対して 69.1%</b> に上がりました。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>測るもの</td><td>層貢献度 $\mathcal{C}(k)$ = 層 $k$ だけを訓練して得た改善 ÷ 全パラメータ訓練で得た改善</td></tr>
+    <tr><td>単層訓練の実装</td><td>対象の decoder 層以外 (埋め込みと LM ヘッドも含む) を <code>requires_grad=False</code> で凍結</td></tr>
+    <tr><td>モデル</td><td>Qwen3-1.7B / 4B / 8B-Base、Qwen2.5-Math-1.5B、Qwen2.5-1.5B / 3B-Instruct、DeepSeek-R1-Distill-Qwen-7B の 7 種 (1.5B〜8B)</td></tr>
+    <tr><td>RL アルゴリズム</td><td>GRPO、Dr. GRPO、GiGPO の 3 種</td></tr>
+    <tr><td>タスク</td><td>数学 (NuminaMath-CoT / MATH / Skywork-OR1)、コード (DeepCoder)、エージェント (ALFWorld)</td></tr>
+    <tr><td>最良の単層</td><td>Qwen3-1.7B で $\mathcal{C}=1.14$ (全パラメータ訓練の 114% を回収)。7 モデルすべてで最良層が $\mathcal{C}\geq 1.0$</td></tr>
+    <tr><td>最悪の単層</td><td>Qwen3-8B の Layer 0 で $\mathcal{C}=-0.51$ (訓練するとベースモデルより悪化)</td></tr>
+    <tr><td>実用化</td><td>貢献度上位 10 層のみ訓練 (8B で 69.11 対 66.43)、プロファイリング不要の「中央 5 層」ヒューリスティクスでも全層訓練を上回る</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 何を測ったのか — 層貢献度の定義</a>
+    <a href="#s2">2. 【体験】層ごとの貢献度カーブ</a>
+    <a href="#s3">3. 1 層で 100% を超えるとはどういうことか</a>
+    <a href="#s4">4. 「中央集中」は本当か — 再集計してみる</a>
+    <a href="#s5">5. 【体験】どの層を訓練すると何が要らなくなるか</a>
+    <a href="#s6">6. 【体験】構造を使って全層訓練に勝つ</a>
+    <a href="#s7">7. 層ごとのモデルは違う問題を解く</a>
+    <a href="#s8">8. 重みの動く量では説明できない</a>
+    <a href="#s9">9. 批判的に読む — 6 つの留保</a>
+    <a href="#s10">10. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>何を測ったのか — 層貢献度の定義</h2>
+  <p class="lead">この論文の中身は、たった 1 つの量の定義と、それを愚直に全層で測り切った実験です。</p>
+  <p>RLVR の標準的な後訓練は、埋め込みから LM ヘッドまで<b>全パラメータを一斉に更新</b>します。これは暗黙に「どの層も同じくらい改善に寄与している」と仮定しています。論文はこの仮定を、次の単純な操作で検証します。$L$ 層のモデルの層 $k$ だけを更新し、残りを全部凍結する。</p>
+  <div class="mj">$$ \theta_k \leftarrow \theta_k - \alpha \nabla_{\theta_k}\mathcal{L}_{\text{GRPO}}(\theta), \qquad \text{他のパラメータはすべて凍結} $$</div>
+  <p>ここで大事な注意があります。<b>勾配 $\nabla_{\theta_k}$ はネットワーク全体を通した逆伝播で計算されます</b>。凍結しているのは「更新するパラメータ」だけで、層 $k$ が受け取る勾配は上の層すべてを経由してきた本物です。つまりこれは「層 $k$ を単独で切り出して訓練する」のではなく、<b>全体の中に置いたまま、層 $k$ の重みだけを動かす</b>実験です。</p>
+  <p>この操作を $k=0,1,\ldots,L-1$ について独立に繰り返し、それぞれのモデルを同じベンチマークで評価します。得られた性能を全パラメータ訓練と比べる比が層貢献度です。</p>
+  <div class="mj">$$ \mathcal{C}(k) = \frac{S_k - S_{\text{base}}}{S_{\text{full}} - S_{\text{base}}} $$</div>
+  <table>
+    <tr><th>値</th><th>意味</th></tr>
+    <tr><td>$\mathcal{C}(k) = 1.0$</td><td>その 1 層だけの訓練で、全パラメータ訓練の改善に並ぶ</td></tr>
+    <tr><td>$\mathcal{C}(k) > 1.0$</td><td>全パラメータ訓練を上回る。他の層を一緒に動かすと改善が薄まる、ということを示唆する</td></tr>
+    <tr><td>$\mathcal{C}(k) \approx 0$</td><td>その層は RL の信号を意味のある改善に変換できない</td></tr>
+    <tr><td>$\mathcal{C}(k) < 0$</td><td>その層だけを訓練すると、訓練前のモデルより悪くなる</td></tr>
+  </table>
+  <div class="key">
+    <b>この定義の性質を先に押さえておきます。</b>$\mathcal{C}$ は<b>分母が「全パラメータ訓練の伸び幅」という比の量</b>です。したがって全 RL の伸びが小さいモデルでは、分母が小さいぶん $\mathcal{C}$ は動きやすくなります。実際に Qwen3-1.7B の数学平均の分母は $50.8 - 44.1 = 6.7$ ポイントしかありません。§9 でこの点を数値で見積もります。<b>「1 層で 114%」という見出しの数字は、6.7 ポイントの伸びを 7.6 ポイントにした、という意味です</b>。
+  </div>
+  <p>比較の公平さについては、論文はかなり気を配っています。まず<b>全パラメータのベースライン側だけ学習率を 4 通り探索して最良を選び</b> ($5\times10^{-6}$)、単層訓練にはその値をそのまま使います。つまりベースラインを最強にしておいてから、単層訓練を同じ設定で走らせる、という向きの比較です。さらに付録では、上位 5 層と下位 5 層について学習率を 3 倍にして再訓練し、順位が入れ替わらないことを確認しています (下位 5 層の $\mathcal{C}$ の変化は最大 0.02)。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】層ごとの貢献度カーブ</h2>
+  <p class="lead">論文の付録にある全層の数値をそのまま入れた図です。モデルを切り替えて、形が同じかどうかを自分で確かめてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvLayer" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost" data-m="1.7b" id="b17">Qwen3-1.7B (28 層)</button>
+    <button class="ghost active" data-m="8b" id="b8">Qwen3-8B (36 層)</button>
+    <button class="ghost" data-m="4b" id="b4">Qwen3-4B (36 層)</button>
+    <button class="ghost" data-m="q25math" id="bq">Qwen2.5-Math-1.5B (Dr. GRPO)</button>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="mMath">数学 (in-domain) の $\mathcal{C}$</button>
+    <button class="ghost" id="mAll">4 分野平均の $\mathcal{C}$</button>
+    <button class="ghost" id="mBand">評価ばらつきの帯を重ねる</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#3d7dca"></span>数学の層貢献度 (論文の報告値)</span>
+    <span><span class="dot" style="background:#e0a03f"></span>4 分野平均の層貢献度 (本ページで算出)</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>$\mathcal{C}=1.0$ = 全パラメータ訓練と同等</span>
+  </div>
+  <p class="rdout" id="layerOut"></p>
+  <p>Qwen3-8B で見ると形はきれいです。Layer 0 は $\mathcal{C}=-0.51$ で、そこだけを訓練すると<b>ベースモデルより悪くなります</b>。そこから中央へ向かって上がり、Layer 16・17 で 1.07 の頂点に達し、後半で落ちて Layer 32 で 0.27 まで下がります。<b>最良の層と最悪の層の差は、1 本のモデルの中で 1.5 以上</b>あります。</p>
+  <p>「4 分野平均」に切り替えると別の話が見えます。これは数学 (in-domain) だけでなく、コード・推論・言語という<b>訓練していない分野</b>も含めた総合スコアで同じ式を計算したものです。高貢献層は数学だけでなく総合でも伸びる — つまり単層訓練は訓練目標への過適合ではなく<b>幅のある能力改善</b>を捉えている、というのが論文の主張です。実際、Qwen3-8B では Layer 15・16 の総合貢献度が 1.30 に達します。全パラメータ訓練が総合で 49.5 → 54.9 に上げたところを、Layer 16 だけの訓練は 56.5 まで上げています。</p>
+  <div class="warn">
+    <b>この図の出所と注意。</b>青い点は論文の付録表 (Qwen3 の 3 モデルは 12 ベンチマーク、Qwen2.5-Math-1.5B は 6 ベンチマーク) の $\mathcal{C}$ 列そのままです。<b>橙の点は論文が全層について報告していないため、付録表の Overall 列から本ページで $\mathcal{C}$ の定義式に当てはめて計算しました</b> (論文が本文表で挙げている数層の値とは一致します)。「評価ばらつきの帯」は、論文が別の節で報告している 3 回評価の標準偏差 ±0.40 ポイントを $\mathcal{C}$ の単位に換算した<b>本ページによる見積もり</b>で、論文が示した誤差範囲ではありません (換算の考え方は §9 参照)。Qwen2.5-Math-1.5B に総合スコアは存在しないので、そのモデルでは橙は表示されません。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>1 層で 100% を超えるとはどういうことか</h2>
+  <p class="lead">$\mathcal{C}>1.0$ という値は、単に「同じくらい良い」を意味しません。もう一歩踏み込んだ主張になります。</p>
+  <p>まず具体的な数字を見ます。Qwen3 の 3 モデルについて、代表的な層の結果です。</p>
+  <table>
+    <tr><th>モデル</th><th>設定</th><th class="num">MATH500</th><th class="num">GSM8K</th><th class="num">Olymp.</th><th class="num">AMC</th><th class="num">数学平均</th><th class="num">$\mathcal{C}_\text{math}$</th><th class="num">総合</th><th class="num">$\mathcal{C}_\text{all}$</th></tr>
+    <tr><td rowspan="4">Qwen3-1.7B</td><td>ベース</td><td class="num">57.4</td><td class="num">74.4</td><td class="num">18.7</td><td class="num">26.1</td><td class="num">44.1</td><td class="num">0.00</td><td class="num">35.4</td><td class="num">0.00</td></tr>
+    <tr><td>全パラメータ</td><td class="num">64.0</td><td class="num">82.0</td><td class="num">26.9</td><td class="num">30.2</td><td class="num">50.8</td><td class="num">1.00</td><td class="num">38.8</td><td class="num">1.00</td></tr>
+    <tr class="hl"><td>Layer 10 のみ</td><td class="num">68.6</td><td class="num">80.5</td><td class="num">27.3</td><td class="num">30.8</td><td class="num">51.8</td><td class="num">1.14</td><td class="num">38.9</td><td class="num">1.03</td></tr>
+    <tr><td>Layer 24 のみ</td><td class="num">60.6</td><td class="num">74.8</td><td class="num">21.2</td><td class="num">27.6</td><td class="num">46.1</td><td class="num">0.28</td><td class="num">35.6</td><td class="num">0.06</td></tr>
+    <tr><td rowspan="3">Qwen3-8B</td><td>全パラメータ</td><td class="num">80.0</td><td class="num">92.3</td><td class="num">42.8</td><td class="num">50.8</td><td class="num">66.5</td><td class="num">1.00</td><td class="num">54.9</td><td class="num">1.00</td></tr>
+    <tr class="hl"><td>Layer 16 のみ</td><td class="num">80.4</td><td class="num">91.8</td><td class="num">44.1</td><td class="num">52.0</td><td class="num">67.1</td><td class="num">1.07</td><td class="num">56.5</td><td class="num">1.30</td></tr>
+    <tr><td>Layer 0 のみ</td><td class="num">61.8</td><td class="num">79.6</td><td class="num">31.0</td><td class="num">42.4</td><td class="num">53.7</td><td class="num">-0.51</td><td class="num">48.7</td><td class="num">-0.15</td></tr>
+  </table>
+  <p>$\mathcal{C}>1.0$ が意味するのは、<b>全部の層を一緒に動かすと、一部の層の学習が他の層の学習を薄めている</b>ということです。全パラメータ訓練は「多く動かすほど良い」ではなく、<b>効かない層の更新が混ざったぶん、効く層の更新が弱まっている</b>可能性がある。§6 で見る実用的な戦略 (効く層だけ訓練する) は、この読みが正しいことの実証です。</p>
+  <div class="key">
+    <b>もう 1 つの読み。</b>1 層のパラメータ部分空間に RLVR の実効的な変化が収まるのなら、<b>RL 後訓練で起きている変化はそもそも低次元</b>なのではないか、という疑いが出てきます。これは LoRA のような低ランク適応が RL でも機能する理由と地続きの話ですが、この論文は<b>層という解釈しやすい軸で</b>それを示した点が違います。ただし論文は LoRA との直接比較を行っていません (§9)。
+  </div>
+  <p>7 モデル全体のまとめが次の表です。モデル族・規模・アルゴリズム・タスクを変えても、最良層が必ず $\mathcal{C}\geq1.0$ に届いています。</p>
+  <table>
+    <tr><th>モデル</th><th>アルゴリズム</th><th>タスク</th><th class="num">最良 $\mathcal{C}$</th><th class="num">最悪 $\mathcal{C}$</th><th class="num">$\mathcal{C}\geq1.0$ の層数</th></tr>
+    <tr><td>Qwen3-1.7B-Base</td><td>GRPO</td><td>数学</td><td class="num">1.14</td><td class="num">0.28</td><td class="num">5 / 28</td></tr>
+    <tr><td>Qwen3-4B-Base</td><td>GRPO</td><td>数学</td><td class="num">1.06</td><td class="num">0.66</td><td class="num">4 / 36</td></tr>
+    <tr><td>Qwen3-8B-Base</td><td>GRPO</td><td>数学</td><td class="num">1.07</td><td class="num">-0.51</td><td class="num">4 / 36</td></tr>
+    <tr><td>Qwen2.5-Math-1.5B</td><td>Dr. GRPO</td><td>数学</td><td class="num">1.01</td><td class="num">0.42</td><td class="num">2 / 28</td></tr>
+    <tr><td>Qwen2.5-1.5B-Instruct</td><td>GiGPO</td><td>エージェント</td><td class="num">1.02</td><td class="num">0.25</td><td class="num">1 / 8 (一部の層のみ)</td></tr>
+    <tr><td>Qwen2.5-3B-Instruct</td><td>GiGPO</td><td>エージェント</td><td class="num">1.01</td><td class="num">0.17</td><td class="num">1 / 11 (一部の層のみ)</td></tr>
+    <tr><td>DeepSeek-R1-Distill-Qwen-7B</td><td>GRPO</td><td>数学</td><td class="num">1.05</td><td class="num">0.33</td><td class="num">2 / 8 (一部の層のみ)</td></tr>
+  </table>
+  <p>エージェントタスク (ALFWorld) の結果は補強材料として重要です。ここでは RL の伸び幅が数学の 6〜10 ポイントに対して<b>83.7 ポイント</b> (Qwen2.5-1.5B-Instruct の成功率 4.1% → 87.8%) と桁違いに大きく、それでも Layer 14 単独で 89.1% ($\mathcal{C}=1.02$) に届いています。<b>この現象は小さな微調整に限った話ではない</b>、という主張がここで立ちます。</p>
+</section>
+<section id="s4">
+  <h2><span class="num">4</span>「中央集中」は本当か — 再集計してみる</h2>
+  <p class="lead">論文の 2 つ目の主張は「高貢献層は中央に集まり、入力側と出力側の端は substantially less しか寄与しない」です。全層の数値が公開されているので、自分で確かめられます。</p>
+  <p>各モデルについて、前方 15%・深さ 40〜60%・後方 15% の層の $\mathcal{C}_\text{math}$ を平均しました。</p>
+  <table>
+    <tr><th>モデル</th><th class="num">前方 15%</th><th class="num">中央 (40〜60%)</th><th class="num">後方 15%</th><th>読み</th></tr>
+    <tr><td>Qwen3-1.7B (28 層)</td><td class="num">0.885</td><td class="num">0.962</td><td class="num">0.383</td><td><b>前方は中央とほぼ同等</b>。落ちているのは後方だけ</td></tr>
+    <tr><td>Qwen3-4B (36 層)</td><td class="num">0.716</td><td class="num">0.989</td><td class="num">0.804</td><td>両端が低い。主張どおり</td></tr>
+    <tr><td>Qwen3-8B (36 層)</td><td class="num">0.188</td><td class="num">0.984</td><td class="num">0.598</td><td>両端が低い。前方が特に低い</td></tr>
+    <tr><td>Qwen2.5-Math-1.5B (28 層)</td><td class="num">0.713</td><td class="num">0.878</td><td class="num">0.542</td><td>両端が低い。主張どおり</td></tr>
+  </table>
+  <p>相関で見ると、$\mathcal{C}_\text{math}$ と「中央からの近さ」($-|{\rm 相対位置}-0.5|$) の Pearson 相関は <b>1.7B で 0.49、4B で 0.82、8B で 0.73</b> です。<b>中央集中という説明は 4B・8B ではよく当たり、1.7B では半分程度しか説明できていません</b>。</p>
+  <div class="warn">
+    <b>1.7B では主張と食い違う点が 2 つあります。</b>1 つ目。数学の $\mathcal{C}$ 上位 5 層は Layer 10 (1.14)、Layer 12 (1.12)、Layer 9 (1.04)、<b>Layer 2 (1.03)</b>、Layer 13 (1.01) です。<b>4 番目に良い層が、28 層のうち前から 3 番目の層</b>で、これは相対深さ 0.07 — 論文が「寄与が小さい」とする入力側の端そのものです。この値は論文の付録の学習率アブレーション表にも上位 5 層として載っており、3 倍の学習率でも 1.00 を保っています。2 つ目。総合スコアで計算した $\mathcal{C}_\text{all}$ では、<b>最良層は Layer 1 (1.32)</b> で、Layer 0 も 1.06 と上位 5 層に入ります。一方 Layer 19〜27 はすべて 0.3 以下で、Layer 25・26・27 は負です。つまりこのモデルで実際に起きているのは「中央 対 両端」ではなく<b>「後半が死んでいて、前半と中央は同じくらい効く」</b>という非対称です。§2 の図で 1.7B に切り替え、橙 (4 分野平均) を表示すると目で見えます。
+  </div>
+  <p>もっとも、これは論文の実用的な結論を壊しません。中央 5 層を選ぶヒューリスティクスは 3 モデルすべてで全パラメータ訓練を上回っています (§6)。<b>「中央を選べば外れない」は成立し、「端は必ず駄目」は成立しない</b>、というのが数値に忠実な整理です。</p>
+  <h3>データやタスクを変えても順位は保たれるのか</h3>
+  <p>論文は Qwen3-1.7B について、訓練データを変えて全層スキャンを繰り返し、層の順位の Spearman 順位相関を報告しています。</p>
+  <table>
+    <tr><th>比較</th><th>内容</th><th class="num">Spearman $\rho$</th></tr>
+    <tr><td>NuminaMath-CoT 対 DeepScaleR</td><td>どちらも数学。データ構成と難易度が違う</td><td class="num">0.76</td></tr>
+    <tr><td>NuminaMath-CoT 対 DeepCoder</td><td>数学とコード。目標とする能力そのものが違う</td><td class="num">0.59</td></tr>
+  </table>
+  <p>データを変えても、さらにタスクを数学からコードに変えても、<b>どの層が効くかの順位は大きくは動きません</b>。論文はここから「層貢献度は訓練データではなく事前学習済みの重みが決めている、モデル固有の性質である」と結論します。実務的な意味は明確で、<b>安いデータセットで 1 回プロファイリングすれば、その層選択を別のデータの訓練に流用できる</b>ということです。ただし $\rho=0.59$ は「順位がおおむね保たれる」程度の強さで、上位数層の並び順まで一致するという意味ではありません。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】どの層を訓練すると何が要らなくなるか</h2>
+  <p class="lead">「1 層だけ訓練する」と聞くと軽そうですが、実際に何が軽くなるのかは整理が必要です。図で確かめます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvStack" width="860" height="290"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost" data-sm="1.7b" id="sm17">Qwen3-1.7B (28 層)</button>
+    <button class="ghost active" data-sm="8b" id="sm8">Qwen3-8B (36 層)</button>
+  </div>
+  <div class="controls">
+    <button class="ghost active" data-sel="single" id="selSingle">単層 (スライダーで選ぶ)</button>
+    <button class="ghost" data-sel="b10" id="selB10">貢献度上位 10 層</button>
+    <button class="ghost" data-sel="mid5" id="selMid5">中央 5 層 (ヒューリスティクス)</button>
+    <button class="ghost" data-sel="full" id="selFull">全層</button>
+  </div>
+  <div class="controls">
+    <div class="slider">訓練する層 <input id="stkK" type="range" min="0" max="35" value="16"><span id="stkKv">16</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>重みを更新する層 (optimizer 状態を持つ)</span>
+    <span><span class="dot" style="background:#e0a03f"></span>更新しないが勾配の通り道になる層</span>
+    <span><span class="dot" style="background:#6b7a86"></span>順伝播だけで済む層</span>
+  </div>
+  <p class="rdout" id="stkOut"></p>
+  <p>見どころは<b>3 種類の層が生まれる</b>ことです。更新する層 (緑) は optimizer 状態 (AdamW なら 1 次・2 次モーメントの 2 本) を持ちます。その<b>上にある層 (橙) は更新しないけれど、損失から勾配を運び下ろすために逆伝播を通す必要があります</b>。そして<b>更新する層より下の層 (灰) は、逆伝播が到達しないので順伝播だけで済みます</b>。</p>
+  <p>ここから 2 つのことが言えます。1 つは、単層訓練の主な節約は<b>optimizer 状態のメモリ</b>だという点です。decoder 層はすべて同形なので、1 層だけ更新すれば optimizer 状態は素朴に $1/L$ になります。もう 1 つは、<b>計算量の節約は選ぶ層の位置に依存する</b>という点です。中央の層を選べば逆伝播は上半分だけになりますが、Layer 0 を選べば全層分の逆伝播が必要で、ほとんど節約になりません。</p>
+  <div class="warn">
+    <b>この節は本ページによる補足です。</b>論文は単層訓練の実装 (対象層以外を <code>requires_grad=False</code> にする) と「勾配は全ネットワークを通した逆伝播で計算される」ことを述べていますが、<b>メモリ使用量も学習時間も一切測定・報告していません</b>。上の「灰の層は順伝播だけ」という帰結は、PyTorch の autograd が入力側の勾配を必要としない場合に逆伝播を打ち切る挙動からの演繹であり、論文の記述ではありません。実測で確かめる場合は、activation checkpoint の設定や FSDP の実装によって挙動が変わりうる点に注意してください。また論文の目的は効率化ではなく<b>RL の適応がどこで起きているかの解明</b>であり、単層訓練自体は分析の道具として位置づけられています。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】構造を使って全層訓練に勝つ</h2>
+  <p class="lead">層ごとの差が実在するなら、全層を均一に扱う標準的な訓練は最適でないはずです。論文はこれを 3 つの戦略で確かめます。</p>
+  <table>
+    <tr><th>戦略</th><th>やること</th><th>プロファイリング</th></tr>
+    <tr><td>Boost B$k$</td><td>貢献度上位 $k$ 層の学習率だけ $1\times10^{-5}$ に上げ、残りは $5\times10^{-6}$ のまま全層訓練</td><td>必要</td></tr>
+    <tr><td>Only B$k$</td><td>貢献度上位 $k$ 層だけを訓練し、残りは凍結</td><td>必要</td></tr>
+    <tr><td>中央 $k$ 層</td><td>位置だけで中央の $k$ 層を選んで訓練 (28 層なら 11〜15、36 層なら 15〜19)</td><td><b>不要</b></td></tr>
+    <tr><td>Only W$k$ (対照)</td><td>貢献度<b>下位</b> $k$ 層だけを訓練する。仕組みが本物かを確かめるための実験</td><td>必要</td></tr>
+  </table>
+  <div class="canvas-wrap">
+    <canvas id="cvGuide" width="860" height="410"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost" data-g="1.7b" id="g17">Qwen3-1.7B</button>
+    <button class="ghost" data-g="4b" id="g4">Qwen3-4B</button>
+    <button class="ghost active" data-g="8b" id="g8">Qwen3-8B</button>
+  </div>
+  <p class="rdout" id="guideOut"></p>
+  <p>3 つの規模すべてで、<b>貢献度に導かれた戦略が全パラメータ訓練を上回ります</b>。Qwen3-8B では Only B10 が 69.11、全パラメータ訓練が 66.43 で、差の 2.68 ポイントは RL の総伸び幅の 32% に相当します。そして<b>下位層を選ぶ対照実験 (Only W5) は 62.04 と大きく落ちます</b>。この非対称性が重要で、これがなければ「凍結すること自体が効いた」「学習率を上げたのが効いた」という説明を排除できません。</p>
+  <p>実務的にいちばん重要なのは<b>紫の「中央 5 層」</b>です。全層スキャンという高価な下準備を一切せず、位置だけで選んで、それでも 3 モデルすべてで全パラメータ訓練を上回っています (8B で 68.19 対 66.43)。プロファイリングありの Only B5 (68.97) には少し届きませんが、費用はゼロです。</p>
+  <div class="key">
+    <b>規模による違いに注意。</b>1.7B では Boost B10 (53.70) が Only B5 (51.53) より強く、4B・8B では逆に Only 系が強くなります。論文はこれを「規模が大きくなるほど、低貢献層の更新が訓練に寄与せず、凍結したほうが最適化がきれいになる」と解釈しています。<b>小さいモデルでは全層を動かす価値がまだ残っている</b>、と読むこともできます。誤差棒はいずれも 3 回の実行の標準偏差で、1.7B の +2.88 や 8B の +2.68 は誤差棒より明確に大きいものの、中央 5 層の 1.7B での +0.53 は誤差と同程度です。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>層ごとのモデルは違う問題を解く</h2>
+  <p class="lead">高貢献層が複数あるとき、それらは同じ問題を解けるようになるのでしょうか。答えは「違う問題を解く」でした。</p>
+  <p>Qwen3-1.7B の 28 層すべてを個別に訓練し、上位 7 層のモデルを OlympiadBench で評価します。それぞれが<b>ベースモデルに対して新しく解けるようになった問題の集合</b>を取り、対ごとの Jaccard 類似度 ($|A\cap B| / |A\cup B|$) を測ると、平均で <b>34.1%</b> しかありません。たとえば Layer 10 のモデルと Layer 13 のモデルは正解率 27.3% と 28.3% でほぼ同じ性能ですが、<b>新しく解けた問題の共通部分は 31.9%</b> です。</p>
+  <p>この相補性は多数決で回収できます。</p>
+  <table>
+    <tr><th>設定</th><th class="num">OlympiadBench 正解率 (%)</th><th>意味</th></tr>
+    <tr><td>全パラメータ訓練</td><td class="num">26.9 ± 0.40</td><td>ベースライン</td></tr>
+    <tr><td>最良の単層モデル</td><td class="num">28.3 ± 0.25</td><td>単体で全パラメータ訓練を上回る</td></tr>
+    <tr><td>全パラメータ訓練モデルから 7 回サンプルして多数決</td><td class="num">31.3 ± 1.11</td><td>self-consistency。サンプリングの揺らぎによる多様性</td></tr>
+    <tr class="hl"><td>上位 7 層のモデルで多数決</td><td class="num">33.6 ± 0.91</td><td><b>構造的な多様性</b>。同じ回数の投票で 2.3 ポイント上</td></tr>
+  </table>
+  <div class="key">
+    <b>ここが面白いところです。</b>7 票を投じるという条件を揃えたうえで、<b>同じモデルから 7 回サンプルする多様性より、7 つの違う層を訓練して得た多様性のほうが強い</b> (33.6 対 31.3)。層の深さという解釈できる軸に沿って、異なる専門家に到達できている、ということになります。ただし論文自身が明言しているとおり、<b>これは分析の道具であって実用的な訓練戦略ではありません</b>。7 つのモデルを別々に訓練し、推論時に 7 回動かす必要があるので、費用は素朴に 7 倍です。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>重みの動く量では説明できない</h2>
+  <p class="lead">当然の反論があります。「中央の層が効くのは、全層訓練でも中央の重みが一番大きく動いているからではないか」。論文はこれを潰しています。</p>
+  <p>全パラメータ訓練の後で、層ごとの重み変化量 $\|\Delta\theta_k\|_2$ を測ると、<b>おおよそ 0.5〜0.8 の範囲でほぼ一様</b>でした。貢献度が 0.28 から 1.14 まで 4 倍以上ばらついている一方で、重みの動く量は層によってほとんど変わりません。<b>この乖離が、貢献度を「動きの大きさ」では説明できないことを示します</b>。</p>
+  <p>単層訓練の側でも同じ確認がされています。1 層だけで全部の改善を吸収しなければならないので、その層の変化量は全層訓練時 (0.5〜0.7) より大きく 0.8〜1.0 になります。しかし<b>この大きさは高貢献層でも低貢献層でもほぼ同じ</b>です。同じだけ動いて、結果がまったく違う。</p>
+  <div class="key">
+    <b>言い換えると。</b>層貢献度が測っているのは<b>その層のパラメータ部分空間が RL の改善を表現するのに適しているかどうか (effectiveness)</b> であって、<b>どれだけ動いたか (magnitude)</b> ではありません。中央の層は「よく動くから効く」のではなく、「<b>同じだけ動いたときに、その動きが役に立つ方向にある</b>」ということです。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>批判的に読む — 6 つの留保</h2>
+  <p class="lead">この論文は測定の設計が丁寧で、公平性への配慮も明示されています。そのうえで、数値を持ち帰る前に確認しておくべき点を影響の大きい順に挙げます。</p>
+
+  <h3>(1) 層ごとの $\mathcal{C}$ は 1 回の訓練・1 回の評価から出ている</h3>
+  <p>全層スキャンは 28〜36 回の RL 訓練なので、種を振る余裕はありません。したがって<b>$\mathcal{C}(k)$ は単一の訓練実行の単一評価</b>です。一方、§6 の実験では同じ Qwen3-1.7B の全パラメータ訓練の数学平均を <b>50.82 ± 0.40</b> と報告しています。この ±0.40 を $\mathcal{C}$ の単位に換算すると、分母が 6.7 ポイントなので $\sqrt{2}\times0.40/6.7 \approx 0.08$ です (分子と分母の両方に評価の揺らぎが乗ると仮定した本ページの見積もり)。同じ計算で 4B は約 0.05、8B は約 0.07 になります。</p>
+  <div class="warn">
+    <b>この見積もりの含意。</b>Qwen3-1.7B の上位 7 層 (1.14 から 1.01 まで) は<b>互いに 1〜2 標準偏差の中に収まっており、順位は決まっていません</b>。「最良は Layer 10」という言い方は、この解像度では強すぎます。一方、最良 1.14 と最悪 0.28 の差 0.86 は 10 標準偏差以上あるので、<b>層による大きな差そのものは揺るぎません</b>。さらに、総合スコアで計算した $\mathcal{C}_\text{all}$ は分母が 3.4 ポイントしかなく、同じ換算で標準偏差は約 0.17 になります。<b>「Layer 1 の総合貢献度 1.32」のような値は、この不確かさの中で読むべき</b>です。なお §6 の誤差棒について、図の説明は「3 回の独立な訓練実行」、本文は「3 回の独立な評価実行」と書いており食い違っています。前者なら訓練の揺らぎを含む強い誤差棒、後者なら評価だけの弱い誤差棒で、意味がかなり変わります。
+  </div>
+
+  <h3>(2) LoRA や他の parameter-efficient な手法との比較がない</h3>
+  <p>「RL の変化は狭い部分空間に収まる」という結論は、LoRA のような低ランク適応が RL でも成立することと地続きです。<b>同じ訓練予算で LoRA を全層に当てた場合との比較</b>があれば、「層という軸で選ぶこと」に固有の価値がどれだけあるかを切り分けられます。この比較は行われていません。実務では「中央 5 層だけ訓練」と「全層 LoRA」のどちらを選ぶかが現実の判断になるので、ここは空白です。</p>
+
+  <h3>(3) 見出しの主張と推奨される実践がずれている</h3>
+  <p>題名は「1 層で足りるのか」ですが、§6 で推奨されるのは<b>上位 5〜10 層、あるいは中央 5 層</b>を訓練する戦略です。単層訓練は分析の道具であり、実運用の推奨ではありません (論文も §7 の多数決について同じ注意を書いています)。<b>「1 層で足りる」は測定装置の設計であって、レシピではない</b>と読むのが正確です。</p>
+
+  <h3>(4) 「両端が低い」は最小のモデルで崩れている</h3>
+  <p>§4 で見たとおり、Qwen3-1.7B では前方 15% の平均 $\mathcal{C}$ が 0.885 で中央の 0.962 とほとんど変わらず、上位 5 層に Layer 2 が入り、総合スコアでは Layer 1 が最良です。<b>4 モデル中 1 つで構造の主張の半分 (入力側の端が低い) が成立していません</b>。7 モデルすべてに「中央集中あり」のチェックが付いた要約表は、この粒度の違いを潰しています。</p>
+
+  <h3>(5) 全層スキャンがあるのは 4 モデルで、3 モデルは部分スキャン</h3>
+  <p>要約表では 7 モデルが等しく並んでいますが、エージェント 2 モデルと DeepSeek 蒸留モデルは<b>計算資源の制約で代表的な層のみ</b> (8〜11 層) を訓練しています。部分スキャンでは、選んだ層の中に最良層が入っている保証がありません。<b>「最良層が $\mathcal{C}\geq1.0$」という主張はこの 3 モデルでは「訓練した層の中に $\mathcal{C}\geq1.0$ のものがあった」に弱まります</b> (主張の向きとしては安全側ですが、$\mathcal{C}$ の最大値や分布の形については何も言えません)。</p>
+
+  <h3>(6) なぜ中央なのかは説明されていない</h3>
+  <p>論文は現象を測り、使い、重み変化量では説明できないことまで示しますが、<b>中央の層の部分空間がなぜ RL の改善を表現しやすいのかという機構は未解明</b>です。層の役割に関する先行研究 (中間層が抽象的な表現を担うという知見) と整合はしますが、この論文自体は因果的な説明を与えていません。したがって<b>「中央 5 層」ヒューリスティクスが未知のモデルで成立する保証は、経験的な一貫性だけに依っています</b>。</p>
+
+  <div class="key">
+    <b>それでも残るもの。</b>以上を差し引いても、<b>層による貢献度の差が大きく、上位を選んで訓練すると全層訓練を上回る</b>という中心の結果は、7 モデル・3 アルゴリズム・3 領域という広さと、下位層を選ぶ対照実験の落ち込み、学習率アブレーションの 3 点で支えられています。特に<b>プロファイリング不要の「中央 5 層」で 3 モデルすべてが全層訓練を超えた</b>という結果は、明日から試せる形になっている点で価値があります。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>まとめ</h2>
+  <p class="lead">1 枚に畳みます。</p>
+  <table>
+    <tr><th>論点</th><th>この論文の答え</th><th>読み手としての評価</th></tr>
+    <tr><td>RL の利得はどこで生まれるのか</td><td>ごく一部の層。<b>1 層だけの訓練で全パラメータ訓練の改善のほとんど、しばしば 100% 超を回収</b></td><td>7 モデルで再現。$\mathcal{C}>1.0$ の余裕は小さいが、層間の大差は堅い</td></tr>
+    <tr><td>どの層か</td><td>概ね深さ 40〜60% の中央付近。入力側と出力側の端は低い</td><td>4B・8B では相関 0.73〜0.82 で当たる。<b>1.7B では前方が中央並みに効き、主張の半分が崩れる</b></td></tr>
+    <tr><td>データやタスクに依存するのか</td><td>しない。順位相関は数学どうしで 0.76、数学対コードで 0.59</td><td>プロファイリングの流用が正当化される。ただし上位の並び順までは保証されない</td></tr>
+    <tr><td>重みが大きく動く層なのか</td><td>違う。全層訓練での重み変化量は層によらずほぼ一様</td><td>「動きの大きさ」説を明確に排除した良い対照</td></tr>
+    <tr><td>実用になるのか</td><td>上位 10 層のみ訓練で 8B が 69.11 対 66.43。<b>プロファイリング不要の中央 5 層でも 68.19</b> で全層訓練超え</td><td>いちばん持ち帰りやすい結果。ただし LoRA との比較が空白</td></tr>
+    <tr><td>層ごとのモデルは同じものを学ぶのか</td><td>違う。新しく解けた問題の重なりは 34.1%。7 層で多数決すると 33.6% で self-consistency の 31.3% を超える</td><td>構造的多様性の存在は説得的。ただし費用 7 倍で実用戦略ではない</td></tr>
+  </table>
+  <div class="key">
+    <b>持ち帰り。</b>この論文を「1 層で足りる」という驚きとして覚えるより、<b>「RL 後訓練の更新は全層に均一に配るべきものではなく、層は配分の単位として使える」</b>という 1 つの操作として覚えるのが実用的です。いちばん安い形は<b>中央 5 層だけを訓練する</b>ことで、プロファイリングも実装の工夫も要りません。逆にこの論文が答えていないのは<b>なぜ中央なのか</b>と<b>LoRA と比べてどうか</b>で、自分の環境で試すならこの 2 つが最初の検証項目になります。
+  </div>
+  <div class="fn">
+    主要参照: Zijian Zhang, Rizhen Hu, Athanasios Glentis, Dawei Li, Chung-Yiu Yau, Hongzhou Lin, Mingyi Hong, "Is One Layer Enough? Training A Single Transformer Layer Can Match Full-Parameter RL Training" (<a href="https://arxiv.org/abs/2607.01232" target="_blank" rel="noopener">arXiv:2607.01232v2</a>, 2026-07-02 改訂)。本ページの層ごとの数値は arXiv の LaTeX ソースの付録表 (Qwen3-1.7B / 4B / 8B の全層、Qwen2.5-Math-1.5B の全層) から取りました。4 分野平均の層貢献度 $\mathcal{C}_\text{all}$ と、§4 の前方/中央/後方の平均・相関、§9 の標準偏差の換算は<b>本ページで計算したもの</b>で、論文が報告している値ではありません。関連手法: GRPO は DeepSeekMath (<a href="https://arxiv.org/abs/2402.03300" target="_blank" rel="noopener">arXiv:2402.03300</a>)、Dr. GRPO (<a href="https://arxiv.org/abs/2503.20783" target="_blank" rel="noopener">arXiv:2503.20783</a>)、GiGPO (<a href="https://arxiv.org/abs/2505.10978" target="_blank" rel="noopener">arXiv:2505.10978</a>)、環境は ALFWorld (<a href="https://arxiv.org/abs/2010.03768" target="_blank" rel="noopener">arXiv:2010.03768</a>)。同じシリーズの <a href="./paper-icrl.html">第 3 回 (ICRL)</a> も GRPO を扱っています。<br>
+    注意: §5 のスタック図は論文が測定していないメモリ・計算の内訳を、実装の記述から演繹して図示した<b>本ページの補足</b>です。§2 の「評価ばらつきの帯」も本ページの見積もりで、論文が示した誤差範囲ではありません。厳密な値は原論文を参照してください。
+  </div>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+function f2(x){return (Math.round(x*100)/100).toFixed(2);}
+
+/* 論文付録表の層貢献度 (数学 / in-domain)。Qwen3 は 12 ベンチ、Qwen2.5-Math は 6 ベンチ */
+const CMATH={
+ '1.7b':[0.89,0.87,1.03,0.75,0.77,0.78,0.87,0.80,0.72,1.04,1.14,0.92,1.12,1.01,0.92,0.95,0.85,0.83,0.66,0.52,0.32,0.40,0.47,0.32,0.28,0.35,0.36,0.54],
+ '4b':[0.77,0.70,0.66,0.70,0.75,0.77,0.89,0.82,0.84,0.87,0.93,0.92,0.98,0.88,1.02,0.98,1.06,0.99,0.96,1.02,0.95,0.93,1.00,0.89,0.87,0.81,0.76,0.74,0.76,0.74,0.73,0.89,0.74,0.75,0.75,0.89],
+ '8b':[-0.51,0.20,0.20,0.61,0.44,0.67,0.82,0.72,0.78,0.94,0.87,0.44,0.83,0.94,1.03,1.00,1.07,1.07,0.92,0.97,0.88,0.93,0.98,0.94,0.88,0.67,0.63,0.82,0.74,0.64,0.64,0.72,0.27,0.62,0.62,0.76],
+ 'q25math':[0.75,0.66,0.63,0.81,0.67,0.68,0.59,0.54,0.60,0.73,0.71,0.68,0.92,0.77,1.01,0.89,1.00,0.88,0.69,0.60,0.49,0.57,0.43,0.42,0.51,0.48,0.54,0.64]
+};
+/* 4 分野平均の層貢献度。付録の Overall 列から本ページで算出 */
+const CALL={
+ '1.7b':[1.059,1.324,1.088,0.912,0.853,0.676,0.912,1.088,0.706,1.059,1.029,0.941,1.265,0.882,0.882,1.059,0.706,0.676,0.471,0.206,0.088,0.324,0.176,0.176,0.059,-0.029,-0.118,-0.059],
+ '4b':[0.957,0.884,0.841,0.783,0.710,0.797,0.913,0.899,0.884,0.826,0.899,1.116,1.029,0.957,1.145,1.072,1.217,1.145,1.101,1.087,1.043,1.058,1.000,0.957,0.841,0.855,0.768,0.739,0.783,0.522,0.493,0.609,0.203,0.536,0.333,0.362],
+ '8b':[-0.148,0.481,0.296,0.815,0.759,0.833,1.111,0.907,0.796,0.759,1.074,0.574,0.944,0.907,1.185,1.296,1.296,1.167,1.056,1.037,0.759,0.852,0.796,0.611,0.500,0.519,0.333,0.556,0.481,0.407,0.315,0.389,-0.315,0.000,-0.167,-0.278]
+};
+const MNAME={'1.7b':'Qwen3-1.7B-Base (28 層, GRPO, NuminaMath-CoT)','4b':'Qwen3-4B-Base (36 層, GRPO, NuminaMath-CoT)',
+  '8b':'Qwen3-8B-Base (36 層, GRPO, NuminaMath-CoT)','q25math':'Qwen2.5-Math-1.5B (28 層, Dr. GRPO, MATH)'};
+/* sigma_C = sqrt(2) * 0.40 / (S_full - S_base)。本ページの見積もり */
+const SIG={'1.7b':{m:0.084,a:0.166},'4b':{m:0.049,a:0.082},'8b':{m:0.067,a:0.105},'q25math':{m:0.038,a:null}};
+function topK(arr,k){return arr.map(function(v,i){return [i,v];}).sort(function(a,b){return b[1]-a[1];}).slice(0,k).map(function(x){return x[0];});}
+
+// ============ デモ1: 層ごとの貢献度カーブ ============
+(function(){
+  const cv=document.getElementById('cvLayer'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='8b',showM=true,showA=false,band=false;
+  function draw(){
+    const cm=CMATH[mode],ca=CALL[mode]||null,L=cm.length;
+    ct.clearRect(0,0,W,H);
+    const pad={l:60,r:22,t:52,b:62},pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    let lo=-0.6,hi=1.45;
+    ct.textAlign='center';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(MNAME[mode]+' ｜ 層ごとの貢献度 C(k)',W/2,24);
+    function X(i){return pad.l+(L<=1?0.5:i/(L-1))*pw;}
+    function Y(v){return pad.t+(1-(v-lo)/(hi-lo))*ph;}
+    // 40-60% 深さ帯
+    ct.fillStyle='rgba(143,214,180,0.08)';
+    ct.fillRect(X(0.40*(L-1)),pad.t,X(0.60*(L-1))-X(0.40*(L-1)),ph);
+    ct.fillStyle='rgba(143,214,180,0.55)';ct.font='11px sans-serif';
+    ct.fillText('深さ 40〜60%',(X(0.40*(L-1))+X(0.60*(L-1)))/2,pad.t+14);
+    // グリッド
+    ct.strokeStyle=GRID;ct.lineWidth=1;ct.textAlign='right';ct.font='11px sans-serif';
+    for(let v=-0.5;v<=1.5;v+=0.5){const yy=Y(v);if(yy<pad.t||yy>H-pad.b)continue;
+      ct.beginPath();ct.moveTo(pad.l,yy);ct.lineTo(W-pad.r,yy);ct.stroke();
+      ct.fillStyle=SUBI;ct.fillText(v.toFixed(1),pad.l-8,yy+4);}
+    // 0 と 1.0 の基準線
+    ct.strokeStyle='rgba(143,214,180,0.85)';ct.setLineDash([6,4]);ct.lineWidth=1.8;
+    ct.beginPath();ct.moveTo(pad.l,Y(1.0));ct.lineTo(W-pad.r,Y(1.0));ct.stroke();ct.setLineDash([]);
+    ct.strokeStyle='rgba(138,143,152,0.6)';ct.setLineDash([3,3]);ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,Y(0));ct.lineTo(W-pad.r,Y(0));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='rgba(143,214,180,0.9)';ct.textAlign='right';ct.font='11.5px sans-serif';
+    ct.fillText('C = 1.0 (全パラメータ訓練と同等)',W-pad.r-4,Y(1.0)-8);
+    // 軸
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();
+    function series(arr,col,sg){
+      if(band&&sg){ct.fillStyle=col.replace('rgb','rgba').replace(')',',0.20)');
+        ct.beginPath();
+        for(let i=0;i<L;i++){ct.lineTo(X(i),Y(Math.min(hi,arr[i]+sg)));}
+        for(let i=L-1;i>=0;i--){ct.lineTo(X(i),Y(Math.max(lo,arr[i]-sg)));}
+        ct.closePath();ct.fill();}
+      ct.strokeStyle=col;ct.lineWidth=2;ct.beginPath();
+      for(let i=0;i<L;i++){const x=X(i),y=Y(arr[i]);i?ct.lineTo(x,y):ct.moveTo(x,y);}
+      ct.stroke();
+      const tops=topK(arr,5);
+      for(let i=0;i<L;i++){const x=X(i),y=Y(arr[i]);
+        ct.fillStyle=col;ct.beginPath();ct.arc(x,y,3.4,0,7);ct.fill();
+        if(tops.indexOf(i)>=0){ct.strokeStyle=col;ct.lineWidth=1.4;
+          ct.beginPath();ct.arc(x,y,7.5,0,7);ct.stroke();}}
+    }
+    if(showM) series(cm,'rgb(61,125,202)',SIG[mode].m);
+    if(showA&&ca) series(ca,'rgb(224,160,63)',SIG[mode].a);
+    // x 軸ラベル
+    ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='center';
+    const step=L>30?4:3;
+    for(let i=0;i<L;i+=step) ct.fillText(i,X(i),H-pad.b+16);
+    ct.font='12px sans-serif';
+    ct.fillText('層番号 (0 = 入力側 → '+(L-1)+' = 出力側)',pad.l+pw/2,H-pad.b+38);
+    // 読み出し
+    function best(arr){let bi=0;for(let i=1;i<L;i++)if(arr[i]>arr[bi])bi=i;return bi;}
+    function worst(arr){let wi=0;for(let i=1;i<L;i++)if(arr[i]<arr[wi])wi=i;return wi;}
+    function corrMid(arr){
+      const p=[],q=[];for(let i=0;i<L;i++){p.push(-Math.abs(i/(L-1)-0.5));q.push(arr[i]);}
+      const mp=p.reduce(function(a,b){return a+b;},0)/L,mq=q.reduce(function(a,b){return a+b;},0)/L;
+      let n=0,d1=0,d2=0;
+      for(let i=0;i<L;i++){n+=(p[i]-mp)*(q[i]-mq);d1+=(p[i]-mp)*(p[i]-mp);d2+=(q[i]-mq)*(q[i]-mq);}
+      return n/Math.sqrt(d1*d2);
+    }
+    const b=best(cm),w=worst(cm),ge=cm.filter(function(v){return v>=1.0;}).length;
+    let out='最良 Layer '+b+' (C='+f2(cm[b])+') ／ 最悪 Layer '+w+' (C='+f2(cm[w])+') ／ C≥1.0 は '+ge+' / '+L+' 層'
+      +' ／ 中央からの近さとの相関 '+f2(corrMid(cm));
+    if(showA&&ca){const ba=best(ca);out+=' ｜ 4 分野平均では最良 Layer '+ba+' (C='+f2(ca[ba])+')';}
+    if(band) out+=' ｜ 帯は ±'+(showA&&ca?f2(SIG[mode].a)+' / ':'')+f2(SIG[mode].m)+' の見積もり';
+    if(showA&&!ca) out+=' ｜ このモデルに総合スコアはないため 4 分野平均は表示できません';
+    document.getElementById('layerOut').textContent=out;
+  }
+  document.querySelectorAll('[data-m]').forEach(function(bt){
+    bt.onclick=function(){mode=this.dataset.m;
+      document.querySelectorAll('[data-m]').forEach(function(x){x.classList.remove('active');});
+      this.classList.add('active');draw();};
+  });
+  function tog(id,fn){document.getElementById(id).onclick=function(){fn();this.classList.toggle('active');draw();};}
+  tog('mMath',function(){showM=!showM;});
+  tog('mAll',function(){showA=!showA;});
+  tog('mBand',function(){band=!band;});
+  draw();
+})();
+
+// ============ デモ2: どの層を訓練すると何が要らなくなるか ============
+(function(){
+  const cv=document.getElementById('cvStack'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mm='8b',sel='single',k=16;
+  function trained(){
+    const L=CMATH[mm].length;
+    if(sel==='full'){const a=[];for(let i=0;i<L;i++)a.push(i);return a;}
+    if(sel==='b10') return topK(CMATH[mm],10).sort(function(a,b){return a-b;});
+    if(sel==='mid5'){const a=[],s=Math.floor(L/2-2.5),e=Math.floor(L/2+2.5);
+      for(let i=s;i<e;i++)a.push(i);return a;}
+    return [Math.min(k,L-1)];
+  }
+  function draw(){
+    const L=CMATH[mm].length,T=trained(),lowest=Math.min.apply(null,T);
+    ct.clearRect(0,0,W,H);
+    const pad={l:34,r:34,t:70,b:96},pw=W-pad.l-pad.r;
+    ct.textAlign='center';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('デコーダ層 '+L+' 枚。左が入力側、右が出力側',W/2,26);
+    const bw=pw/L, bh=86, y=pad.t+30;
+    for(let i=0;i<L;i++){
+      const x=pad.l+i*bw, isT=T.indexOf(i)>=0, isBk=(i>lowest);
+      ct.fillStyle= isT? 'rgba(67,181,129,0.95)' : (isBk? 'rgba(224,160,63,0.55)':'rgba(107,122,134,0.5)');
+      ct.fillRect(x+1,y,bw-2,bh);
+      ct.strokeStyle='rgba(13,43,32,0.7)';ct.lineWidth=1;ct.strokeRect(x+1,y,bw-2,bh);
+      if(bw>16){ct.save();ct.translate(x+bw/2,y+bh-6);ct.rotate(-Math.PI/2);
+        ct.fillStyle='#0d2b20';ct.font='bold 10px sans-serif';ct.textAlign='left';ct.fillText(i,0,3);ct.restore();}
+    }
+    // 逆伝播の到達範囲
+    const xs=pad.l+lowest*bw+bw/2, xe=pad.l+pw;
+    ct.strokeStyle='#e0a03f';ct.lineWidth=2;
+    ct.beginPath();ct.moveTo(xe,y-16);ct.lineTo(xs,y-16);ct.stroke();
+    ct.beginPath();ct.moveTo(xs,y-16);ct.lineTo(xs+9,y-21);ct.lineTo(xs+9,y-11);ct.closePath();ct.fillStyle='#e0a03f';ct.fill();
+    ct.textAlign='center';ct.font='12px sans-serif';
+    ct.fillText('逆伝播が通る範囲',(xs+xe)/2,y-24);
+    if(lowest>0){ct.strokeStyle='rgba(107,122,134,0.9)';ct.lineWidth=2;
+      ct.beginPath();ct.moveTo(pad.l,y+bh+18);ct.lineTo(xs,y+bh+18);ct.stroke();
+      ct.fillStyle='rgba(143,214,180,0.8)';
+      ct.fillText('ここは順伝播だけで済む',(pad.l+xs)/2,y+bh+36);}
+    const nT=T.length, nBk=(L-1-lowest)-(nT-1), nF=lowest;
+    ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('更新する層 '+nT+' 枚 ／ 更新しないが逆伝播を通す層 '+nBk+' 枚 ／ 順伝播だけの層 '+nF+' 枚',W/2,H-16);
+    const lbl={single:'単層 (Layer '+T[0]+')',b10:'貢献度上位 10 層 ['+T.join(', ')+']',
+      mid5:'中央 5 層 ['+T.join(', ')+']',full:'全層'};
+    document.getElementById('stkOut').textContent=
+      lbl[sel]+' ／ optimizer 状態は全層訓練の '+f2(nT/L*100)+'% ／ 逆伝播が必要な層は '+f2((L-lowest)/L*100)+'%'
+      +(sel==='single'?' ／ この層の貢献度 C='+f2(CMATH[mm][T[0]]):'');
+  }
+  document.querySelectorAll('[data-sm]').forEach(function(bt){
+    bt.onclick=function(){mm=this.dataset.sm;
+      document.querySelectorAll('[data-sm]').forEach(function(x){x.classList.remove('active');});
+      this.classList.add('active');
+      const L=CMATH[mm].length,r=document.getElementById('stkK');
+      r.max=L-1;if(k>L-1){k=L-1;r.value=k;document.getElementById('stkKv').textContent=k;}
+      draw();};
+  });
+  document.querySelectorAll('[data-sel]').forEach(function(bt){
+    bt.onclick=function(){sel=this.dataset.sel;
+      document.querySelectorAll('[data-sel]').forEach(function(x){x.classList.remove('active');});
+      this.classList.add('active');draw();};
+  });
+  document.getElementById('stkK').oninput=function(){k=+this.value;
+    document.getElementById('stkKv').textContent=k;
+    if(sel!=='single'){sel='single';
+      document.querySelectorAll('[data-sel]').forEach(function(x){x.classList.remove('active');});
+      document.getElementById('selSingle').classList.add('active');}
+    draw();};
+  draw();
+})();
+
+// ============ デモ3: 貢献度に導かれた訓練 (論文 §5 の報告値) ============
+(function(){
+  const cv=document.getElementById('cvGuide'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const G={
+   '1.7b':{t:'Qwen3-1.7B-Base ｜ 数学 4 ベンチ平均 (%)',full:50.82,bars:[
+     {n:'ベース',v:44.1,sd:0,c:'#6b7a86'},{n:'全パラメータ',v:50.82,sd:0.40,c:'#9fb3ab'},
+     {n:'Boost B10',v:53.70,sd:0.40,c:'#3d7dca'},{n:'Only B5',v:51.53,sd:0.24,c:'#43b581'},
+     {n:'Only B10',v:51.39,sd:0.46,c:'#43b581'},{n:'中央 5 層',v:51.35,sd:0.28,c:'#a86fd0'},
+     {n:'Only W5 (対照)',v:46.87,sd:0.41,c:'#e07a5f'}]},
+   '4b':{t:'Qwen3-4B-Base ｜ 数学 4 ベンチ平均 (%)',full:62.97,bars:[
+     {n:'ベース',v:52.2,sd:0,c:'#6b7a86'},{n:'全パラメータ',v:62.97,sd:0.78,c:'#9fb3ab'},
+     {n:'Boost B10',v:64.42,sd:0.13,c:'#3d7dca'},{n:'Only B5',v:65.87,sd:0.70,c:'#43b581'},
+     {n:'中央 5 層',v:64.80,sd:0.30,c:'#a86fd0'},{n:'Only W5 (対照)',v:59.40,sd:0.70,c:'#e07a5f'}]},
+   '8b':{t:'Qwen3-8B-Base ｜ 数学 4 ベンチ平均 (%)',full:66.43,bars:[
+     {n:'ベース',v:58.0,sd:0,c:'#6b7a86'},{n:'全パラメータ',v:66.43,sd:0.40,c:'#9fb3ab'},
+     {n:'Boost B10',v:67.42,sd:0.40,c:'#3d7dca'},{n:'Only B5',v:68.97,sd:0.31,c:'#43b581'},
+     {n:'Only B10',v:69.11,sd:0.10,c:'#43b581'},{n:'中央 5 層',v:68.19,sd:0.62,c:'#a86fd0'},
+     {n:'Only W5 (対照)',v:62.04,sd:0.23,c:'#e07a5f'}]}
+  };
+  let gm='8b';
+  function draw(){
+    const D=G[gm],B=D.bars;
+    ct.clearRect(0,0,W,H);
+    const pad={l:58,r:20,t:50,b:88},pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;
+    const vs=B.map(function(b){return b.v;});
+    const lo=Math.floor(Math.min.apply(null,vs)-2),hi=Math.ceil(Math.max.apply(null,vs)+2);
+    function Y(v){return pad.t+(1-(v-lo)/(hi-lo))*ph;}
+    ct.textAlign='center';ct.fillStyle=SUBI;ct.font='13px sans-serif';ct.fillText(D.t,W/2,24);
+    ct.strokeStyle=GRID;ct.lineWidth=1;ct.textAlign='right';ct.font='11px sans-serif';
+    for(let g=0;g<=4;g++){const v=lo+(hi-lo)*g/4,yy=Y(v);
+      ct.beginPath();ct.moveTo(pad.l,yy);ct.lineTo(W-pad.r,yy);ct.stroke();
+      ct.fillStyle=SUBI;ct.fillText(v.toFixed(0),pad.l-8,yy+4);}
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=1.2;
+    ct.beginPath();ct.moveTo(pad.l,pad.t);ct.lineTo(pad.l,H-pad.b);ct.lineTo(W-pad.r,H-pad.b);ct.stroke();
+    // 全層訓練の水準線
+    ct.strokeStyle='#ffd166';ct.setLineDash([6,4]);ct.lineWidth=1.8;
+    ct.beginPath();ct.moveTo(pad.l,Y(D.full));ct.lineTo(W-pad.r,Y(D.full));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle='#ffd166';ct.textAlign='left';ct.font='11.5px sans-serif';
+    ct.fillText('全パラメータ訓練 '+f2(D.full),pad.l+6,Y(D.full)-7);
+    const gw=pw/B.length,bw=Math.min(64,gw*0.6);
+    B.forEach(function(b,i){
+      const cx=pad.l+(i+0.5)*gw,y=Y(b.v);
+      ct.fillStyle=b.c;ct.fillRect(cx-bw/2,y,bw,(H-pad.b)-y);
+      if(b.sd>0){ // 誤差棒
+        ct.strokeStyle=INK;ct.lineWidth=1.5;
+        ct.beginPath();ct.moveTo(cx,Y(b.v-b.sd));ct.lineTo(cx,Y(b.v+b.sd));ct.stroke();
+        ct.beginPath();ct.moveTo(cx-7,Y(b.v+b.sd));ct.lineTo(cx+7,Y(b.v+b.sd));ct.stroke();
+        ct.beginPath();ct.moveTo(cx-7,Y(b.v-b.sd));ct.lineTo(cx+7,Y(b.v-b.sd));ct.stroke();
+      }
+      ct.fillStyle=INK;ct.font='bold 12px sans-serif';ct.textAlign='center';
+      ct.fillText(b.v.toFixed(2),cx,Y(b.v+b.sd)-9);
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+      const parts=b.n.split(' ');
+      ct.fillText(parts[0],cx,H-pad.b+18);
+      if(parts[1]) ct.fillText(parts.slice(1).join(' '),cx,H-pad.b+34);
+    });
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('誤差棒は 3 回実行の標準偏差 (論文の報告値)',W/2,H-14);
+    const win=B.filter(function(b){return b.v>D.full;}).sort(function(a,b){return b.v-a.v;});
+    document.getElementById('guideOut').textContent=
+      '全パラメータ訓練を上回った戦略: '+win.map(function(b){return b.n+' +'+f2(b.v-D.full);}).join(' ／ ')
+      +' ｜ 対照 (Only W5) は '+f2(B[B.length-1].v-D.full)+' ポイント';
+  }
+  document.querySelectorAll('[data-g]').forEach(function(bt){
+    bt.onclick=function(){gm=this.dataset.g;
+      document.querySelectorAll('[data-g]').forEach(function(x){x.classList.remove('active');});
+      this.classList.add('active');draw();};
+  });
+  draw();
+})();
+</script>
+</body>
+</html>
