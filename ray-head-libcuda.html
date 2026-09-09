@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<title>Ray head と libcuda.so.1 — なぜ CPU ノードの指揮役が GPU ドライバを要求するのか</title>
+<style>
+:root{--g900:#0d3b2e;--g700:#146b52;--g500:#1f9d76;--g300:#7ecfb4;--g100:#e6f5ef;
+--ink:#12211d;--mute:#5c706a;--line:#d3e6de;--bg:#f7fbf9;--red:#c0392b;--redbg:#fdeceb;
+--blue:#2b6cb0;--bluebg:#e8f1fb;--amber:#a06a00;--amberbg:#fff7e6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+ font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:52px 28px 100px}
+header{border-bottom:4px solid var(--g500);padding-bottom:22px;margin-bottom:34px}
+h1{margin:0 0 10px;font-size:29px;color:var(--g900);line-height:1.5}
+.sub{color:var(--mute);font-size:14.5px}
+h2{margin:54px 0 16px;font-size:22px;color:var(--g900);border-left:7px solid var(--g500);padding-left:14px}
+h3{margin:34px 0 10px;font-size:17.5px;color:var(--g700)}
+p{margin:14px 0}
+code{background:#eef4f1;border:1px solid #dce8e3;border-radius:4px;padding:1px 6px;
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px}
+figure{margin:26px 0 30px;background:#fff;border:1px solid var(--line);border-radius:12px;
+ padding:22px 20px 14px;overflow-x:auto}
+figcaption{margin-top:12px;color:var(--mute);font-size:13.5px;line-height:1.8}
+figcaption b{color:var(--g900)}
+.key{background:var(--g100);border:1px solid var(--g300);border-radius:12px;padding:18px 22px;margin:26px 0}
+.key .kh{font-weight:700;color:var(--g900);font-size:15px;margin-bottom:6px}
+.bad{background:var(--redbg);border:1px solid #e8b4b4;border-radius:12px;padding:16px 20px;margin:22px 0}
+.bad .kh{font-weight:700;color:#8a2020;margin-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:22px 0;font-size:14.5px;background:#fff}
+th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+th{background:var(--g700);color:#fff;font-weight:600}
+tbody tr:nth-child(even){background:#fafdfc}
+td.ok{color:var(--g700);font-weight:600}
+td.ng{color:var(--red);font-weight:600}
+footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--line);color:var(--mute);font-size:13.5px}
+svg{display:block;margin:0 auto;max-width:100%;height:auto}
+.svgtitle{font:700 15px -apple-system,"Hiragino Sans",sans-serif;fill:#0d3b2e}
+.lbl{font:600 13px -apple-system,"Hiragino Sans",sans-serif;fill:#12211d}
+.lbls{font:12px -apple-system,"Hiragino Sans",sans-serif;fill:#5c706a}
+.mono{font:12px ui-monospace,Menlo,monospace;fill:#12211d}
+.monos{font:11px ui-monospace,Menlo,monospace;fill:#5c706a}
+</style></head><body><div class="wrap">
+
+<header>
+<h1>Ray head と <code>libcuda.so.1</code><br>なぜ CPU ノードに置いた指揮役が GPU ドライバを要求するのか</h1>
+<div class="sub">miles GRPO テストケース (PR #1225) の Known Issues 3 の解説 &middot; 図 4 点</div>
+</header>
+
+<div class="key">
+<div class="kh">先に結論</div>
+GPU を 1 枚も使わないプロセスが、起動しただけで GPU ドライバのファイルを要求します。そのファイルはコンテナイメージの中には無く、GPU を要求したコンテナにだけホストから注入されます。head は GPU を要求しないので注入されず、そこに置かれた指揮役は <code>OSError: libcuda.so.1</code> で死にます。対処は「head にドライバを持たせる」ではなく「指揮役が head に置かれないようにする」で、その手段が <code>num-cpus: '0'</code> です。禁止ではなく、資源が足りないから選ばれないという形で効かせています。
+</div>
+
+<h2>1. まず配置。head は CPU ノードに置く</h2>
+
+<p>Ray のクラスタには head と worker がいます。head は指揮役で、ジョブの受付とアクターの配置を決めるだけで、行列積を 1 回もしません。GPU ノードは 1 台あたり H200 が 8 枚載っていて時間単価が高いので、そこに指揮役を住まわせるのは無駄です。だからこのマニフェストは head を CPU プールに置き、worker だけを GPU プールに置きます。</p>
+
+<figure>
+<svg viewBox="0 0 940 340" role="img" aria-label="クラスタ配置図">
+  <text x="470" y="24" text-anchor="middle" class="svgtitle">図 1  ノード配置と、それぞれに GPU ドライバがあるかどうか</text>
+
+  <!-- CPU node -->
+  <rect x="30" y="52" width="270" height="196" rx="12" fill="#e8f1fb" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="46" y="78" class="lbl">CPU ノード</text>
+  <text x="46" y="98" class="monos">node-role=cpu</text>
+  <rect x="46" y="112" width="238" height="120" rx="9" fill="#fff" stroke="#2b6cb0" stroke-width="1.5"/>
+  <text x="60" y="136" class="lbl">Ray head pod</text>
+  <text x="60" y="158" class="mono">NVIDIA_VISIBLE_DEVICES=void</text>
+  <text x="60" y="178" class="mono">rayStartParams: num-cpus '0'</text>
+  <rect x="60" y="190" width="210" height="28" rx="6" fill="#fdeceb" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="165" y="209" text-anchor="middle" class="lbl" fill="#8a2020">libcuda.so.1 が無い</text>
+
+  <!-- GPU nodes -->
+  <rect x="340" y="52" width="270" height="196" rx="12" fill="#e6f5ef" stroke="#1f9d76" stroke-width="2"/>
+  <text x="356" y="78" class="lbl">GPU ノード 1</text>
+  <text x="356" y="98" class="monos">node-role=gpu-p5en / H200 x8</text>
+  <rect x="356" y="112" width="238" height="120" rx="9" fill="#fff" stroke="#1f9d76" stroke-width="1.5"/>
+  <text x="370" y="136" class="lbl">Ray worker pod</text>
+  <text x="370" y="158" class="mono">nvidia.com/gpu: 8</text>
+  <text x="370" y="178" class="monos">GPU を要求している</text>
+  <rect x="370" y="190" width="210" height="28" rx="6" fill="#e6f5ef" stroke="#1f9d76" stroke-width="1.5"/>
+  <text x="475" y="209" text-anchor="middle" class="lbl" fill="#0d3b2e">libcuda.so.1 が注入される</text>
+
+  <rect x="650" y="52" width="260" height="196" rx="12" fill="#e6f5ef" stroke="#1f9d76" stroke-width="2"/>
+  <text x="666" y="78" class="lbl">GPU ノード 2</text>
+  <text x="666" y="98" class="monos">node-role=gpu-p5en / H200 x8</text>
+  <rect x="666" y="112" width="228" height="120" rx="9" fill="#fff" stroke="#1f9d76" stroke-width="1.5"/>
+  <text x="680" y="136" class="lbl">Ray worker pod</text>
+  <text x="680" y="158" class="mono">nvidia.com/gpu: 8</text>
+  <rect x="680" y="190" width="200" height="28" rx="6" fill="#e6f5ef" stroke="#1f9d76" stroke-width="1.5"/>
+  <text x="780" y="209" text-anchor="middle" class="lbl" fill="#0d3b2e">libcuda.so.1 が注入される</text>
+
+  <text x="470" y="286" text-anchor="middle" class="lbls">GPU ドライバの共有ライブラリはイメージに入っていない。GPU を要求したコンテナにだけ、ホストのドライバから注入される</text>
+  <text x="470" y="312" text-anchor="middle" class="lbls">head は GPU を要求しないので注入されない。ここまでは設計どおりで、問題ではない</text>
+</svg>
+<figcaption><b>注入という言葉が要点です。</b><code>libcuda.so.1</code> はイメージのレイヤに含まれず、NVIDIA のコンテナランタイムがホスト側のドライバから差し込みます。差し込むかどうかは、そのコンテナが GPU を要求したかで決まります。</figcaption>
+</figure>
+
+<h2>2. 問題は、GPU を使わないプロセスがドライバを要求すること</h2>
+
+<p>miles の指揮役アクター、たとえば <code>RolloutManager</code> は GPU を 1 枚も使いません。ところが起動時に <code>megatron.core</code> を import します。これが <code>transformer_engine</code> を引き込み、さらにその中で <code>libcuda.so.1</code> を <code>dlopen</code> します。GPU の枚数として <code>num_gpus=0</code> を指定していても関係ありません。計算のために開くのではなく、モジュールを読み込む時点で開くからです。</p>
+
+<figure>
+<svg viewBox="0 0 940 300" role="img" aria-label="import 連鎖の図">
+  <text x="470" y="24" text-anchor="middle" class="svgtitle">図 2  GPU を使わないアクターが、起動しただけでドライバに到達する経路</text>
+
+  <rect x="24" y="56" width="176" height="70" rx="10" fill="#fff" stroke="#146b52" stroke-width="2"/>
+  <text x="112" y="82" text-anchor="middle" class="lbl">RolloutManager</text>
+  <text x="112" y="104" text-anchor="middle" class="monos">num_cpus=1, num_gpus=0</text>
+
+  <path d="M200 91 L242 91" stroke="#146b52" stroke-width="2" marker-end="url(#ar)"/>
+  <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+    <path d="M0 0 L9 4.5 L0 9 z" fill="#146b52"/></marker>
+    <marker id="arR" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+    <path d="M0 0 L9 4.5 L0 9 z" fill="#c0392b"/></marker></defs>
+
+  <rect x="242" y="56" width="166" height="70" rx="10" fill="#fff" stroke="#146b52" stroke-width="2"/>
+  <text x="325" y="82" text-anchor="middle" class="mono">import megatron.core</text>
+  <text x="325" y="104" text-anchor="middle" class="lbls">起動時</text>
+
+  <path d="M408 91 L450 91" stroke="#146b52" stroke-width="2" marker-end="url(#ar)"/>
+
+  <rect x="450" y="56" width="176" height="70" rx="10" fill="#fff" stroke="#146b52" stroke-width="2"/>
+  <text x="538" y="82" text-anchor="middle" class="mono">transformer_engine</text>
+  <text x="538" y="104" text-anchor="middle" class="lbls">依存として読み込まれる</text>
+
+  <path d="M626 91 L668 91" stroke="#c0392b" stroke-width="2" marker-end="url(#arR)"/>
+
+  <rect x="668" y="56" width="246" height="70" rx="10" fill="#fdeceb" stroke="#c0392b" stroke-width="2"/>
+  <text x="791" y="82" text-anchor="middle" class="mono">dlopen("libcuda.so.1")</text>
+  <text x="791" y="104" text-anchor="middle" class="lbls" fill="#8a2020">ファイルが無ければ import が失敗する</text>
+
+  <rect x="242" y="164" width="672" height="58" rx="10" fill="#fff7e6" stroke="#a06a00" stroke-width="1.5"/>
+  <text x="578" y="188" text-anchor="middle" class="lbl" fill="#7a5a10">GPU の枚数を 0 と宣言しても、この経路は通る</text>
+  <text x="578" y="210" text-anchor="middle" class="lbls">GPU を「使う」かどうかとは無関係に、モジュールを「読む」時点でドライバのファイルを開くため</text>
+
+  <rect x="24" y="164" width="176" height="58" rx="10" fill="#fdeceb" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="112" y="188" text-anchor="middle" class="lbl" fill="#8a2020">head に置かれると</text>
+  <text x="112" y="208" text-anchor="middle" class="monos" fill="#8a2020">OSError: libcuda.so.1</text>
+
+  <text x="470" y="264" text-anchor="middle" class="lbls">投入から数秒から数十秒で死ぬので、ジョブの起動が遅いのか壊れたのかが区別しにくい</text>
+</svg>
+<figcaption><b>これは miles 側の性質です。</b>ゼロ GPU の制御プロセスがドライバを必要とするのは上流の設計であって、このテストケースが持ち込んだものではありません。ここでできるのは、その性質を前提に配置を組むことだけです。</figcaption>
+</figure>
+
+<h2>3. 対処は 2 通りあり、後者を選んだ</h2>
+
+<p>ドライバを head に持たせる道と、ドライバを要求するアクターを head に置かせない道があります。前者は GPU ノードに head を戻すか、head に GPU を 1 枚割り当てることを意味します。どちらも「指揮役のために計算資源を 1 枚専有する」ので、後者を選びました。</p>
+
+<p>手段は head の <code>rayStartParams</code> に <code>num-cpus: '0'</code> と書くことです。Ray はアクターが要求した資源を持たないノードにそのアクターを置きません。<code>RolloutManager</code> は <code>num_cpus=1</code> で作られるので、CPU を 0 個しか広告していない head は候補から自動的に外れます。<strong>禁止リストではなく、足りないから選ばれないという形</strong>で効かせているのが要点です。</p>
+
+<figure>
+<svg viewBox="0 0 940 400" role="img" aria-label="配置の分岐の図">
+  <text x="470" y="24" text-anchor="middle" class="svgtitle">図 3  head が CPU を広告するかどうかで、同じアクターの行き先が変わる</text>
+
+  <!-- left: broken -->
+  <rect x="24" y="48" width="430" height="326" rx="12" fill="#fdf4f3" stroke="#c0392b" stroke-width="2"/>
+  <text x="239" y="74" text-anchor="middle" class="lbl" fill="#8a2020">head が CPU を広告している場合 (壊れる)</text>
+
+  <rect x="48" y="90" width="180" height="56" rx="9" fill="#fff" stroke="#146b52" stroke-width="1.5"/>
+  <text x="138" y="112" text-anchor="middle" class="lbl">RolloutManager</text>
+  <text x="138" y="132" text-anchor="middle" class="monos">num_cpus=1 を要求</text>
+
+  <path d="M138 146 L138 186" stroke="#c0392b" stroke-width="2" marker-end="url(#arR)"/>
+  <text x="150" y="170" class="lbls" fill="#8a2020">条件を満たすので置かれる</text>
+
+  <rect x="48" y="190" width="180" height="76" rx="9" fill="#e8f1fb" stroke="#2b6cb0" stroke-width="1.5"/>
+  <text x="138" y="214" text-anchor="middle" class="lbl">head pod</text>
+  <text x="138" y="234" text-anchor="middle" class="monos">num-cpus: 192</text>
+  <text x="138" y="254" text-anchor="middle" class="monos" fill="#8a2020">libcuda.so.1 は無い</text>
+
+  <path d="M138 266 L138 300" stroke="#c0392b" stroke-width="2" marker-end="url(#arR)"/>
+  <rect x="48" y="304" width="380" height="50" rx="9" fill="#fdeceb" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="238" y="326" text-anchor="middle" class="lbl" fill="#8a2020">import の時点で OSError: libcuda.so.1</text>
+  <text x="238" y="345" text-anchor="middle" class="lbls" fill="#8a2020">ジョブは投入直後に落ちる</text>
+
+  <text x="330" y="120" class="lbls">GPU worker も候補だが</text>
+  <text x="330" y="140" class="lbls">head が先に選ばれ得る</text>
+
+  <!-- right: fixed -->
+  <rect x="486" y="48" width="430" height="326" rx="12" fill="#f2fbf7" stroke="#1f9d76" stroke-width="2"/>
+  <text x="701" y="74" text-anchor="middle" class="lbl" fill="#0d3b2e">head が CPU を 0 と広告する場合 (出荷構成)</text>
+
+  <rect x="510" y="90" width="180" height="56" rx="9" fill="#fff" stroke="#146b52" stroke-width="1.5"/>
+  <text x="600" y="112" text-anchor="middle" class="lbl">RolloutManager</text>
+  <text x="600" y="132" text-anchor="middle" class="monos">num_cpus=1 を要求</text>
+
+  <path d="M600 146 L600 186" stroke="#93a8a1" stroke-width="2" stroke-dasharray="5 4"/>
+  <rect x="510" y="190" width="180" height="76" rx="9" fill="#eef2f1" stroke="#93a8a1" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="600" y="214" text-anchor="middle" class="lbl" fill="#5c706a">head pod</text>
+  <text x="600" y="234" text-anchor="middle" class="monos" fill="#5c706a">num-cpus: 0</text>
+  <text x="600" y="254" text-anchor="middle" class="lbls" fill="#5c706a">候補にならない</text>
+
+  <path d="M690 118 L860 118" stroke="#1f9d76" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="775" y="108" text-anchor="middle" class="lbls">CPU がある唯一の場所へ</text>
+
+  <rect x="712" y="190" width="188" height="76" rx="9" fill="#e6f5ef" stroke="#1f9d76" stroke-width="1.5"/>
+  <text x="806" y="214" text-anchor="middle" class="lbl">GPU worker pod</text>
+  <text x="806" y="234" text-anchor="middle" class="monos">CPU あり / GPU 要求あり</text>
+  <text x="806" y="254" text-anchor="middle" class="monos" fill="#0d3b2e">libcuda.so.1 あり</text>
+
+  <path d="M806 266 L806 300" stroke="#1f9d76" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="510" y="304" width="390" height="50" rx="9" fill="#e6f5ef" stroke="#1f9d76" stroke-width="1.5"/>
+  <text x="705" y="326" text-anchor="middle" class="lbl" fill="#0d3b2e">import が通り、学習ループが始まる</text>
+  <text x="705" y="345" text-anchor="middle" class="lbls">head は受付と配置だけを続ける</text>
+</svg>
+<figcaption><b>ジョブの driver は別扱いです。</b>レシピを実行するプロセス自身は <code>--entrypoint-resources '{"gpu_node": 0.001}'</code> で GPU ノード側に固定しています。<code>0.001</code> という端数は、GPU を実際に消費せずに「GPU ノードであること」だけを条件にするための書き方です。</figcaption>
+</figure>
+
+<h3>この方法の限界が 2 つあります</h3>
+
+<div class="bad">
+<div class="kh">限界 1: <code>num_cpus=0</code> をちょうど要求するアクターは、CPU 0 の head でも候補に残る</div>
+0 個の要求は 0 個の広告で満たせてしまいます。miles の <code>MultiLoRAController</code> がまさにこれで、しかも head に固定される設計です。ただしこのテストケースのレシピはそれを作らないので、実際には当たりません。当たる構成に手を伸ばすときは、この段が効かなくなることを知っておく必要があります。
+</div>
+
+<div class="bad">
+<div class="kh">限界 2: <code>--pin-rollout-manager-to-head</code> は原理的に満たせない</div>
+miles には <code>RolloutManager</code> を head に固定するオプションがあります。CPU を 0 個しか広告しない head では、<code>num_cpus=1</code> のアクターをそこに置けません。<code>EXTRA_TRAIN_ARGS</code> 経由で渡せてしまうので、渡すと配置できずに止まります。
+</div>
+
+<h2>4. <code>NVIDIA_VISIBLE_DEVICES=none</code> は解決にならない</h2>
+
+<p>「GPU デバイスは見せずにドライバだけ入れる」ための値として <code>none</code> があります。head にこれを与えれば済むように見えますが、成り立ちません。この値を理解するのは古い注入方式だけで、GPU Operator が設定する CDI モードでは空のデバイス名として解決され、pod がそもそも起動しません。実測では、コンテナツールキット 1.18.1 の環境で <code>none</code> は <code>StartError</code> になりました。</p>
+
+<figure>
+<svg viewBox="0 0 940 268" role="img" aria-label="注入方式ごとの挙動">
+  <text x="470" y="24" text-anchor="middle" class="svgtitle">図 4  同じ設定値が、注入方式によって別の意味になる</text>
+
+  <rect x="30" y="52" width="410" height="184" rx="12" fill="#fff" stroke="#93a8a1" stroke-width="2"/>
+  <text x="235" y="78" text-anchor="middle" class="lbl">旧 (legacy hook) 方式</text>
+  <text x="52" y="106" class="mono">void</text><text x="200" y="106" class="lbls">注入しない</text>
+  <text x="52" y="134" class="mono">none</text><text x="200" y="134" class="lbls" fill="#0d3b2e">ドライバだけ注入する</text>
+  <text x="52" y="162" class="mono">management.nvidia.com/gpu=all</text>
+  <text x="52" y="182" class="lbls">解釈しない</text>
+  <text x="52" y="212" class="mono">nvidia.com/gpu: 1 の要求</text>
+  <text x="52" y="230" class="lbls" fill="#0d3b2e">実デバイスとドライバを割り当てる</text>
+
+  <rect x="470" y="52" width="440" height="184" rx="12" fill="#fff" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="690" y="78" text-anchor="middle" class="lbl" fill="#22557f">CDI 方式 (GPU Operator の既定)</text>
+  <text x="492" y="106" class="mono">void</text><text x="660" y="106" class="lbls">注入しない</text>
+  <text x="492" y="134" class="mono">none</text>
+  <text x="660" y="134" class="lbls" fill="#8a2020">空のデバイス名 / pod が起動しない</text>
+  <text x="492" y="162" class="mono">management.nvidia.com/gpu=all</text>
+  <text x="492" y="182" class="lbls" fill="#a06a00">起動しドライバも入るが、全 GPU を指揮役に見せる</text>
+  <text x="492" y="212" class="mono">nvidia.com/gpu: 1 の要求</text>
+  <text x="492" y="230" class="lbls" fill="#0d3b2e">実デバイスとドライバを割り当てる</text>
+</svg>
+<figcaption><b>両方の方式で確実に効くのは最下段だけです。</b>だから「どうしても CUDA が使える head が必要なら <code>nvidia.com/gpu: 1</code> を要求して <code>num-cpus: '0'</code> を外す」という案内にしています。GPU 1 枚を指揮役に払う代わりに、device plugin が本物のデバイスを割り当てるので、どちらの注入方式でも動きます。</figcaption>
+</figure>
+
+<h2>5. 手元で確かめる</h2>
+
+<p>head が本当に CPU を 0 個として広告しているかは、投入前に確認できます。次のコマンドは GPU ノード以外のノード、つまり head の資源を表示します。</p>
+
+<figure style="padding:16px 20px">
+<table>
+<thead><tr><th>確認したいこと</th><th>見るもの</th><th>期待</th></tr></thead>
+<tbody>
+<tr><td>head が CPU を広告していない</td><td>Ray の <code>ray.nodes()</code> の resources</td><td class="ok"><code>CPU</code> が 0 または不在</td></tr>
+<tr><td>head にドライバが無い</td><td>head pod での <code>ls /usr/lib/x86_64-linux-gnu/libcuda.so.1</code></td><td class="ok">not found</td></tr>
+<tr><td>worker にドライバがある</td><td>worker pod で同じコマンド</td><td class="ok">存在する</td></tr>
+<tr><td>指揮役が head に来ていない</td><td>投入後の Ray dashboard の actor 一覧</td><td class="ok">全アクターが GPU ノード</td></tr>
+<tr><td>この症状かどうかの判別</td><td>ジョブのログ</td><td class="ng"><code>OSError: libcuda.so.1</code></td></tr>
+</tbody>
+</table>
+</figure>
+
+<div class="key">
+<div class="kh">まとめると 3 行</div>
+<p style="margin:6px 0">GPU を使わないアクターが、import の時点で GPU ドライバのファイルを要求します。</p>
+<p style="margin:6px 0">そのファイルは GPU を要求したコンテナにだけ注入されるので、head には存在しません。</p>
+<p style="margin:6px 0">だから head に CPU を 0 個と広告させ、そのアクターが head を選べない状態を作っています。</p>
+</div>
+
+<footer>
+出典はこのブランチの <code>examples/training/miles/README.md</code> の Known Issues 3 と
+<code>examples/training/miles/kubernetes/raycluster.yaml</code>。
+<code>none</code> と <code>StartError</code> の挙動は p5en.48xlarge、コンテナツールキット 1.18.1 での実測。
+</footer>
+
+</div></body></html>
