@@ -39,6 +39,9 @@
     font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7;
     white-space:pre-wrap}
   .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
   .canvas-wrap{text-align:center;margin:18px 0}
   canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
   .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
@@ -81,13 +84,13 @@
   <p class="lead">「LatentPress: Context Compression Beyond Text and Vision」(Zhengze Zhou (Cornell) ・ Hejian Sang (Iowa State), arXiv:2609.01507v2, 2026-09-03) は、長い会話履歴や長文ドキュメントを圧縮して言語モデルに読ませるとき、<b>その保存形式は本当に人間が読める形でなければならないのか</b>を問い直した論文です。</p>
   <div class="key">
     <b>一言でいうと</b><br>
-    これまでの圧縮は<b>テキスト</b> (要約・剪定・検索) か<b>画像</b> (レンダリングして OCR で読み戻す) の 2 択で、どちらも人間が読める形を必ず経由します。でも消費するのは人間ではなく言語モデルです。LatentPress は第 3 の選択肢として、<b>凍結した読み手の入力埋め込み層にそのまま流し込める連続ベクトル</b>で保存します。推論時にテキストへ戻す段が存在しません。訓練するのは <b>d × d の線形アダプタ 1 枚だけ</b>で、エンコーダは読み手の下位 2 層を借りてきて凍結したまま使います。
+    これまでの圧縮は<b>テキスト</b> (要約・剪定・検索) か<b>画像</b> (レンダリングして OCR で読み戻す) の 2 択で、どちらも人間が読める形を必ず経由します。でも消費するのは人間ではなく言語モデルです。LatentPress は第 3 の選択肢として、<b>凍結した読み手の入力埋め込み層にそのまま流し込める連続ベクトル</b>で保存します。推論時にテキストへ戻す段が存在しません。訓練するのは <b>d × d のアダプタと、生の埋め込みとの混ぜ具合を決める d → 1 のゲート、この 2 枚だけ</b>で、エンコーダは読み手の下位 2 層を借りてきて凍結したまま使います。
   </div>
   <table>
     <tr><th>項目</th><th>値</th></tr>
     <tr><td>解く問題</td><td>長い履歴・長文を凍結した言語モデルに読ませるときの表現の選択。Write (テキストを状態に写す) と Read (その状態から答える) を分けて、境界を越えるべき表現は何かを問う</td></tr>
-    <tr><td>writer の構造</td><td>読み手のデコーダ下位 $L=2$ 層をディープコピーして凍結し、その上に $d \times d$ の線形アダプタを 1 枚。<b>恒等行列で初期化</b>するので訓練開始時は素のトークン埋め込みに近い</td></tr>
-    <tr><td>訓練するもの</td><td>アダプタのみ。4.196M (Qwen3-1.7B) / 12.849M (Qwen2.5-7B) / 16.781M (Qwen3-8B) / 26.220M (Qwen2.5-14B)</td></tr>
+    <tr><td>writer の構造</td><td>読み手の埋め込み層とデコーダ下位 $L=2$ 層を凍結したまま借りて、その上に線形層 2 枚。$d \times d$ のアダプタ $A$ (<b>恒等行列で初期化</b>) と、生の埋め込みとの混合比を決める $d \to 1$ のゲート。2 節で図にします</td></tr>
+    <tr><td>訓練するもの</td><td>その 2 枚のみ。$d^2 + d + 1$ 個で、4.196M (Qwen3-1.7B) / 12.849M (Qwen2.5-7B) / 16.781M (Qwen3-8B) / 26.220M (Qwen2.5-14B) と一致する</td></tr>
     <tr><td>読ませ方</td><td><code>inputs_embeds</code> 経由で soft token を注入し、その後ろに質問を連結。<b>デコーダの重みは 1 バイトも変わらない</b></td></tr>
     <tr><td>圧縮率の決め方</td><td>会話は役割ベース ($k_{\text{user}}=1$ で無圧縮、$k_{\text{assistant}} \in \{8,16,32\}$)、文書は一律 ($k \in \{4,8,16\}$)。<b>いずれも手で決めたヒューリスティック</b></td></tr>
     <tr><td>会話メモリの結果</td><td>LongMemEval で <b>0.504 @ 7.70x</b> 対 無圧縮 0.490。OCR は 0.426 → 0.312、テキスト要約は 0.184、ICAE は 0.452 → 0.174</td></tr>
@@ -98,7 +101,7 @@
   </table>
   <div class="toc">
     <a href="#s1">1. 【体験】圧縮した文脈は誰のためのものか</a>
-    <a href="#s2">2. 仕組み — Write と Read を分ける</a>
+    <a href="#s2">2. アーキテクチャ — writer の中身を開く</a>
     <a href="#s3">3. 【体験】圧縮率をどう決めるか</a>
     <a href="#s4">4. 何を訓練するのか</a>
     <a href="#s5">5. 【体験】会話メモリの結果</a>
@@ -140,22 +143,210 @@
 </section>
 
 <section id="s2">
-  <h2><span class="num">2</span>仕組み — Write と Read を分ける</h2>
+  <h2><span class="num">2</span>アーキテクチャ — writer の中身を開く</h2>
   <p class="lead">論文は文脈の利用を 2 つの操作に分けます。Write はテキストをコンパクトな状態に写す。Read はその状態を凍結したデコーダに与えて質問に答えさせる。この抽象は会話履歴にも長文ドキュメントにも同じように当てはまります。</p>
-  <div class="mj">$$ m = \mathrm{Write}_\phi(x;\pi), \qquad y = f_\theta\big([\,m\,;\,\mathrm{emb}(q)\,]\big) $$</div>
-  <p>$x$ が文脈のセグメント列、$\phi$ が writer のパラメータ、$\pi$ が各セグメントの圧縮率です。$m$ が連続ベクトルの列で、埋め込まれた質問 $\mathrm{emb}(q)$ の前に連結して凍結デコーダ $f_\theta$ に入れます。</p>
-  <h3>writer の中身は驚くほど小さい</h3>
-  <p>ここが実装上いちばん重要な部分です。writer は新しいモデルではなく、<b>読み手のデコーダの下位 2 層を借りてきたもの</b>です。</p>
+  <div class="mj">$$ m = \mathrm{Write}_\phi(x;\pi), \qquad y = f_\theta\big([\,m\,;\,\mathrm{emb}(q)\,]\big) \tag{1} $$</div>
+  <p>$x$ が文脈のセグメント列、$\phi$ が writer のパラメータ、$\pi$ が各セグメントの圧縮率です。$m$ が連続ベクトルの列で、埋め込まれた質問 $\mathrm{emb}(q)$ の前に連結して凍結デコーダ $f_\theta$ に入れます。ここから先は、この 1 行が実際にどんな部品でできているかを部品ごとに開いていきます。</p>
+
+  <h3>全体像 — トークンから soft token までの 1 本道</h3>
+  <p>まず 1 枚で見ます。<b>緑の枠が訓練される場所、灰色が凍結、橙が writer を通さない経路、青が読み手の埋め込み空間に住むベクトル</b>です。訓練される枠が 1 つしかない、というのがこの図のいちばんの主張です。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 745" role="img" aria-label="LatentPress の Write 経路と Read 経路の全体図">
+      <defs>
+        <marker id="lpA" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+        <marker id="lpO" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#c07d15"/></marker>
+      </defs>
+
+      <rect x="24" y="14" width="832" height="54" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="44" y="38" font-size="15.5" font-weight="700" fill="#0f5132">文脈 x = (x₁, …, x_T) — 会話ターン、または文書チャンク</text>
+      <text x="44" y="59" font-size="13" fill="#12211a">各ターンは "user: …" / "assistant: …" という文字列に整形されてから連結される。役割の印はトークン列の中に残る</text>
+
+      <path d="M440,68 L440,94" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+
+      <rect x="24" y="98" width="832" height="54" rx="10" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="44" y="122" font-size="15.5" font-weight="700" fill="#3f4c55">embed_tokens — 読み手のものをそのまま共有 (凍結)</text>
+      <text x="44" y="143" font-size="13" fill="#12211a">n トークンが d 次元ベクトル n 本になる。ここから user ターンと assistant ターンで経路が分かれる</text>
+
+      <path d="M224,152 L224,186" stroke="#c07d15" stroke-width="3" marker-end="url(#lpO)"/>
+      <text x="234" y="174" font-size="13.5" font-weight="700" fill="#8a5a06">k_user = 1</text>
+      <path d="M656,152 L656,186" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+      <text x="644" y="174" font-size="13.5" font-weight="700" fill="#0f5132" text-anchor="end">k_assistant ∈ {8, 16, 32}</text>
+
+      <rect x="24" y="190" width="400" height="88" rx="10" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="44" y="214" font-size="15" font-weight="700" fill="#8a5a06">writer を完全にバイパスする</text>
+      <text x="44" y="236" font-size="13" fill="#12211a">生のトークン埋め込みをそのまま soft 列に載せる</text>
+      <text x="44" y="256" font-size="13" fill="#12211a">実装でも圧縮率 1 の分岐だけは別扱いで、非可逆な処理を</text>
+      <text x="44" y="272" font-size="13" fill="#12211a">1 つも通らない。だから「可逆」と言える</text>
+
+      <rect x="456" y="190" width="400" height="88" rx="10" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="476" y="214" font-size="15" font-weight="700" fill="#3f4c55">借りたデコーダ下位 2 層 (凍結・因果マスク)</text>
+      <text x="476" y="236" font-size="13" fill="#12211a">c = layer₂(layer₁(E))。残差接続があるので c ≈ E + Δ</text>
+      <text x="476" y="256" font-size="13" fill="#12211a">長い会話では 512 トークンの窓ごとに独立に走らせて</text>
+      <text x="476" y="272" font-size="13" fill="#12211a">つなぐ。エンコーダが訓練長を超える入力を見ない</text>
+
+      <path d="M656,278 L656,306" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+
+      <rect x="456" y="310" width="400" height="92" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="476" y="334" font-size="15" font-weight="700" fill="#0f5132">訓練されるのはこの 2 枚だけ</text>
+      <text x="476" y="357" font-size="13.5" fill="#0d2b20">α = σ(gate(c))、fused = α·(A c) + (1 − α)·E</text>
+      <text x="476" y="378" font-size="13" fill="#12211a">gate: d → 1 ・ adapter A: d × d (bias なし)</text>
+
+      <path d="M656,402 L656,430" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+
+      <rect x="456" y="434" width="400" height="58" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="476" y="458" font-size="15" font-weight="700" fill="#22548f">平均プール — 隣り合う k 本を 1 本にする</text>
+      <text x="476" y="479" font-size="13" fill="#12211a">セグメント i は ⌈n_i / k⌉ 本になる。パラメータは無い</text>
+
+      <path d="M224,278 L224,516" stroke="#c07d15" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#lpO)"/>
+      <path d="M656,492 L656,516" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+
+      <rect x="24" y="520" width="832" height="54" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="44" y="544" font-size="15.5" font-weight="700" fill="#22548f">soft token 列 m — 読み手の埋め込み空間に住む連続ベクトル</text>
+      <text x="44" y="565" font-size="13" fill="#12211a">user ターンの生埋め込みと assistant ターンのプール結果を、元の順序で連結したもの</text>
+
+      <path d="M440,574 L440,600" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+
+      <rect x="24" y="604" width="832" height="58" rx="10" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="44" y="628" font-size="15.5" font-weight="700" fill="#3f4c55">凍結デコーダ f_θ に inputs_embeds で流す</text>
+      <text x="44" y="649" font-size="13" fill="#12211a">[ chat テンプレの前半 ; m ; 質問 + "Answer:" ] を 1 本のベクトル列として渡す。重みは 1 バイトも変わらない</text>
+
+      <path d="M440,662 L440,688" stroke="#4a5d54" stroke-width="3" marker-end="url(#lpA)"/>
+      <rect x="300" y="692" width="280" height="44" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="440" y="720" font-size="15" font-weight="700" fill="#0f5132" text-anchor="middle">回答 (greedy デコード)</text>
+    </svg>
+    <div class="legend">
+      <span><span class="dot" style="background:#0f5132"></span>訓練される</span>
+      <span><span class="dot" style="background:#6b7a86"></span>凍結</span>
+      <span><span class="dot" style="background:#e0a03f"></span>writer を通さない経路</span>
+      <span><span class="dot" style="background:#3d7dca"></span>読み手の埋め込み空間のベクトル</span>
+    </div>
+    <p class="cap">図 1: Write 経路と Read 経路。訓練される枠は 1 つだけで、それも線形層 2 枚。テキストへ戻す段はどこにも無い</p>
+  </div>
+
+  <h3>writer は nn.Linear が 2 枚だけ</h3>
+  <p>「writer」という名前から独立したエンコーダ・デコーダを想像しますが、中身は違います。<b>writer は新しいモデルではなく、読み手のデコーダの下位 2 層を借りてきたものに、線形層を 2 枚足しただけ</b>です。</p>
   <table>
     <tr><th>部品</th><th>中身</th><th>訓練するか</th></tr>
-    <tr><td>エンコーダ</td><td>凍結デコーダの下位 $L=2$ 層。読み手を汚さないようにディープコピーして持つ</td><td><b>しない</b></td></tr>
-    <tr><td>writer ヘッド</td><td>線形アダプタ 1 枚。$A \in \mathbb{R}^{d \times d}$ で<b>恒等行列で初期化</b></td><td><b>する</b></td></tr>
+    <tr><td>埋め込み</td><td>読み手の <code>embed_tokens</code> をそのまま共有。だから writer の出力は最初から読み手と同じ空間にいる</td><td><b>しない</b></td></tr>
+    <tr><td>エンコーダ</td><td>凍結デコーダの下位 $L=2$ 層。因果マスク付きで走るので、位置 $i$ は左側しか見ない</td><td><b>しない</b></td></tr>
+    <tr><td>adapter</td><td>$A \in \mathbb{R}^{d \times d}$、bias なし、<b>恒等行列で初期化</b></td><td><b>する</b></td></tr>
+    <tr><td>gate</td><td>$d$ 次元から 1 次元へ落とす線形層。出力を sigmoid にかけて混合比 $\alpha_i$ を作る</td><td><b>する</b></td></tr>
+    <tr><td>プール</td><td>$k$ 本ごとの単純な平均。パラメータを持たない</td><td>—</td></tr>
     <tr><td>デコーダ (読み手)</td><td>Qwen2.5-7B / Qwen2.5-14B / Qwen3-8B / Qwen3-1.7B のいずれか</td><td><b>しない</b></td></tr>
   </table>
-  <p>恒等初期化は地味ですが効いています。訓練開始時点で writer は<b>素のトークン埋め込みとほぼ同じもの</b>を出します。つまり最初から壊れていない状態で始まり、訓練が正当化する分だけそこから離れていく。</p>
-  <p>出てきたベクトルはプールされて短い列になり、読み手の埋め込み空間に住む soft token として <code>inputs_embeds</code> 経由で注入されます。デコーダの forward パス自体は一切変わりません。</p>
+  <p>論文の式 (2) は、位置 $i$ ごとに<b>そのトークンの literal な埋め込み $E_i$ と、文脈を見た抽象 $c_i$ を混ぜる</b>と書いてあります。</p>
+  <div class="mj">$$ h_i = H(E_i, c_i) \tag{2} $$</div>
+  <p>本文は $H$ を「軽量な実装を使い、学習される token 単位の融合は将来課題」としか書いていません。ではその軽量な $H$ は何か。公開実装を読むと、<b>highway network 型のゲート付き混合</b>です。</p>
+  <div class="mj">$$ \alpha_i = \sigma\big(w^\top c_i + b\big), \qquad h_i = \alpha_i \cdot (A c_i) + (1-\alpha_i)\cdot E_i $$</div>
+  <div class="fig">
+    <svg viewBox="0 0 880 380" role="img" aria-label="writer の 1 トークン分の内部構造">
+      <defs><marker id="lpB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <rect x="24" y="64" width="160" height="56" rx="9" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="104" y="88" font-size="14.5" font-weight="700" fill="#8a5a06" text-anchor="middle">E_i</text>
+      <text x="104" y="108" font-size="12.5" fill="#12211a" text-anchor="middle">生の埋め込み (d)</text>
+
+      <path d="M184,92 L212,92" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpB)"/>
+
+      <rect x="218" y="64" width="170" height="56" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="303" y="88" font-size="14.5" font-weight="700" fill="#3f4c55" text-anchor="middle">凍結 2 層</text>
+      <text x="303" y="108" font-size="12.5" fill="#12211a" text-anchor="middle">c_i ≈ E_i + Δ</text>
+
+      <path d="M388,84 C 412,84 412,42 434,42" fill="none" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpB)"/>
+      <path d="M388,104 C 412,104 412,126 434,126" fill="none" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpB)"/>
+
+      <rect x="440" y="16" width="192" height="52" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="536" y="38" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">gate  (d → 1)</text>
+      <text x="536" y="58" font-size="12.5" fill="#12211a" text-anchor="middle">α_i = σ(w·c_i + b)</text>
+
+      <rect x="440" y="100" width="192" height="52" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="536" y="122" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">adapter A  (d × d)</text>
+      <text x="536" y="142" font-size="12.5" fill="#12211a" text-anchor="middle">A c_i ・ bias なし</text>
+
+      <path d="M632,42 C 652,42 652,76 664,76" fill="none" stroke="#0f5132" stroke-width="2.5" marker-end="url(#lpB)"/>
+      <path d="M632,126 C 652,126 652,108 664,108" fill="none" stroke="#0f5132" stroke-width="2.5" marker-end="url(#lpB)"/>
+
+      <rect x="670" y="58" width="186" height="68" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="763" y="80" font-size="14" font-weight="700" fill="#22548f" text-anchor="middle">fused_i</text>
+      <text x="763" y="100" font-size="13" fill="#12211a" text-anchor="middle">= α_i·A c_i</text>
+      <text x="763" y="118" font-size="13" fill="#12211a" text-anchor="middle">+ (1 − α_i)·E_i</text>
+
+      <path d="M104,120 L104,178 L763,178 L763,130" fill="none" stroke="#c07d15" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#lpB)"/>
+      <text x="240" y="166" font-size="13" fill="#8a5a06">(1 − α_i) の経路 — 生の埋め込みをそのまま混ぜ戻す</text>
+
+      <rect x="24" y="192" width="832" height="52" rx="9" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="44" y="214" font-size="14" font-weight="700" fill="#0f5132">初期化: A = 恒等行列、gate の重み = 0、gate の bias = −2 → α = σ(−2) ≈ 0.119</text>
+      <text x="44" y="234" font-size="13" fill="#12211a">つまり訓練開始時の fused は 0.88·E_i + 0.12·c_i でほぼ生の埋め込み。ここは表 7 の「学習なし」0.325 とほぼ同じ地点</text>
+
+      <text x="24" y="274" font-size="14" font-weight="700" fill="#22548f">この後で k 本ごとに平均プール (k = 8 の例)</text>
+      <rect x="40" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="68" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₁</text>
+      <rect x="110" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="138" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₂</text>
+      <rect x="180" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="208" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₃</text>
+      <rect x="250" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="278" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₄</text>
+      <rect x="320" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="348" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₅</text>
+      <rect x="390" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="418" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₆</text>
+      <rect x="460" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="488" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₇</text>
+      <rect x="530" y="288" width="56" height="36" rx="6" fill="#e7f0fb" stroke="#3d7dca" stroke-width="1.6"/>
+      <text x="558" y="311" font-size="11" fill="#22548f" text-anchor="middle">fused₈</text>
+      <text x="313" y="348" font-size="12.5" fill="#4a5d54" text-anchor="middle">隣り合う 8 本 (この 8 本のうち user ターン側は最初からここに来ない)</text>
+      <path d="M594,306 L638,306" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpB)"/>
+      <rect x="646" y="280" width="210" height="52" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="751" y="303" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">soft token 1 本 (d)</text>
+      <text x="751" y="322" font-size="12.5" fill="#12211a" text-anchor="middle">単純な平均。パラメータ無し</text>
+    </svg>
+    <p class="cap">図 2: writer の 1 位置分。訓練される部品は gate と adapter の 2 枚で、あとは凍結した層と平均だけ</p>
+  </div>
+  <div class="key">
+    <b>恒等初期化が何のためにあるのか。</b>$A$ を恒等行列に、gate の重みを 0、bias を $-2$ に初期化すると、$\alpha \approx 0.119$ なので訓練開始時の出力は<b>ほぼ生のトークン埋め込み</b>です。ここが重要で、その地点はアブレーションの「学習なし = 埋め込みを単に平均プールする」設定に相当し、正解率 0.325 です。<b>訓練が買っているのは 0.325 から 0.476 への 0.15</b>で、$\alpha$ を上げて $A$ を恒等から離す分だけ効いている。8 節のアブレーションは、この初期化の意味を測った実験として読めます。
+  </div>
+
+  <h3>数式とコードの対応</h3>
+  <p>式と実装を 1 対 1 に並べます。形は $B$ をバッチ、$N$ をトークン数、$d$ を隠れ次元としたテンソルの形です。</p>
+  <table>
+    <tr><th>式の記号</th><th>実装</th><th>形</th><th>訓練</th></tr>
+    <tr><td>$E_i$</td><td>読み手の <code>embed_tokens</code> を呼ぶだけ</td><td>$(B, N, d)$</td><td>しない</td></tr>
+    <tr><td>$c_i$</td><td>読み手の下位 2 層をそのまま並べたもの。因果マスクと回転位置埋め込みは自分で組む</td><td>$(B, N, d)$</td><td>しない</td></tr>
+    <tr><td>$\alpha_i$</td><td><code>sigmoid(gate(c))</code>、<code>gate</code> は $d \to 1$ の線形層</td><td>$(B, N, 1)$</td><td><b>する</b></td></tr>
+    <tr><td>$A$</td><td><code>adapter</code>、$d \to d$ の線形層で bias なし・恒等初期化</td><td>$(d, d)$</td><td><b>する</b></td></tr>
+    <tr><td>$h_i = H(E_i,c_i)$</td><td><code>alpha * adapter(c) + (1 - alpha) * emb</code></td><td>$(B, N, d)$</td><td>—</td></tr>
+    <tr><td>プール</td><td>$k$ 本ずつに区切って平均。端は 0 埋めしてから平均</td><td>$(B, \lceil N/k \rceil, d)$</td><td>—</td></tr>
+    <tr><td>$m$ の注入</td><td><code>decoder(inputs_embeds=...)</code>。<code>input_ids</code> は使わない</td><td>$(1, M{+}T, d)$</td><td>しない</td></tr>
+  </table>
+  <p>数値精度の扱いにも実装上の理由があります。デコーダは bf16 のまま、<b>訓練される 2 枚だけ fp32</b> です。gate と adapter は小さいので fp32 で持っても安く、長い文脈での勾配が安定します。</p>
+
+  <h3>パラメータ数から実装を逆算する</h3>
+  <p>論文は訓練可能パラメータ数を読み手ごとに 4 つ報告しています。これが $d^2 + d + 1$ と<b>4 つとも一致します</b>。$d^2$ が adapter、$d+1$ が gate の重みと bias です。</p>
+  <table>
+    <tr><th>読み手</th><th class="num">$d$</th><th class="num">$d^2$ (adapter)</th><th class="num">$d+1$ (gate)</th><th class="num">合計</th><th class="num">論文の報告値</th></tr>
+    <tr><td>Qwen3-1.7B</td><td class="num">2,048</td><td class="num">4,194,304</td><td class="num">2,049</td><td class="num">4,196,353</td><td class="num">4.196M</td></tr>
+    <tr><td>Qwen2.5-7B</td><td class="num">3,584</td><td class="num">12,845,056</td><td class="num">3,585</td><td class="num">12,848,641</td><td class="num">12.849M</td></tr>
+    <tr><td>Qwen3-8B</td><td class="num">4,096</td><td class="num">16,777,216</td><td class="num">4,097</td><td class="num">16,781,313</td><td class="num">16.781M</td></tr>
+    <tr><td>Qwen2.5-14B</td><td class="num">5,120</td><td class="num">26,214,400</td><td class="num">5,121</td><td class="num">26,219,521</td><td class="num">26.220M</td></tr>
+  </table>
+  <p>この一致から、報告された設定について 3 つのことが言えます。<b>adapter に bias は無い</b> ($d^2$ ちょうどで、$d$ 個ぶんの余りが gate 側にしか回らない)。<b>gate は確かに数えられている</b> (adapter だけなら 1 つも合わない)。そして<b>プールにパラメータは無い</b> (実装には学習可能な attention プールも用意されているが、それを数えると 4 つとも合わなくなる)。</p>
   <div class="warn">
-    <b>代償を先に書いておきます。</b>soft token は特定の読み手の埋め込み空間に縛られます。だから論文でも<b>読み手ごとに 1 つずつ writer を訓練しています</b>。テキスト要約なら任意のモデルに渡せますが、この表現は渡せない。zero-copy と同じで、相手を固定して初めて成立する最適化です。
+    <b>論文本文と実装のずれ。</b>付録 A.1 は writer ヘッドを「線形アダプタ $A$ 1 枚」と書いていて、<b>gate に触れていません</b>。ですが式 (2) の $H$ には融合として highway network と GRU の文献が引かれており、実装のゲートはまさにその軽量版です。パラメータ数がゲート込みで完全に一致するので、報告値はゲートを含む実装のものです。読むときは「アダプタ 1 枚」ではなく「<b>混合比を決めるゲート付きのアダプタ</b>」だと思ったほうが正確です。
+  </div>
+
+  <h3>役割ごとの分岐と 512 トークンの窓</h3>
+  <p>図 1 の左右の分かれ道は、実装では圧縮率の値そのもので決まります。<b>$k=1$ のセグメントは writer を通さず生の埋め込みを取る</b>という分岐が入っていて、これがユーザー発言の「可逆」を成立させています。$k \ge 2$ のセグメントだけがエンコーダと融合とプールを通ります。</p>
+  <p>もう 1 つ、論文本文からは見えない設計が窓の扱いです。長い会話を一度にエンコーダへ入れるのではなく、<b>512 トークンの窓ごとに独立にエンコードしてプールし、その結果を連結します</b>。借りた 2 層が訓練時に見た長さを超えないようにするための処置で、代わりに<b>窓の境界を越えた文脈は $c_i$ に入りません</b>。soft token の列としては長くできる一方、各ベクトルが見ている範囲には上限がある、という非対称な構造です。</p>
+
+  <h3>読み手へどう差し込むか</h3>
+  <p>式 (1) は $[m; \mathrm{emb}(q)]$ と書きますが、実際には chat テンプレートの<b>中に</b>差し込みます。テンプレートを 1 度レンダリングしてから所定の位置で 2 つに割り、その間に $m$ を挟みます。</p>
+  <div class="math">left, right = テンプレートを所定の位置で 2 分割
+inp = cat([ emb(left), m, emb(right) ], dim=1)
+out = decoder.generate(inputs_embeds=inp, ...)</div>
+  <p>右側には「上の会話だけを使って答えよ。無ければ NOT MENTIONED と答えよ」という指示と質問、そして <code>Answer:</code> が入ります。<b>デコーダから見ると、user ターンの本文の途中に読めない文字列が挟まっているのと同じ形</b>です。だから forward パスも生成ループも一切変更が要らない。逆に言えば、この差し込み位置は chat テンプレートの構造に依存します。</p>
+  <div class="warn">
+    <b>代償を先に書いておきます。</b>soft token は特定の読み手の埋め込み空間に縛られます。埋め込み層を共有し、その読み手の下位 2 層で符号化しているので当然です。だから論文でも<b>読み手ごとに 1 つずつ writer を訓練しています</b>。テキスト要約なら任意のモデルに渡せますが、この表現は渡せない。zero-copy と同じで、相手を固定して初めて成立する最適化です。
   </div>
 </section>
 
@@ -191,6 +382,61 @@
   <div class="mj">$$ \mathcal{L}(\phi) = \mathcal{L}_{\mathrm{rec}} + \lambda\,\mathcal{L}_{\mathrm{fkl}}, \qquad \lambda = 1.0 $$</div>
   <div class="mj">$$ \mathcal{L}_{\mathrm{rec}} = -\frac{1}{N}\sum_t \log p_{\mathrm{comp},t}(y_t), \qquad \mathcal{L}_{\mathrm{fkl}} = \frac{1}{N}\sum_t \mathrm{KL}\big(p_{\mathrm{full},t} \,\|\, p_{\mathrm{comp},t}\big) $$</div>
   <p>$p_{\mathrm{full}}$ と $p_{\mathrm{comp}}$ は、凍結デコーダに完全な文脈を与えたときと圧縮文脈を与えたときの次トークン分布です。再構成項は圧縮文脈からターゲットのトークンを復元させ、<b>forward KL 項は完全文脈での振る舞いそのものを writer に蒸留します</b>。パディング位置は両方の項からマスクされます。</p>
+  <p>計算グラフにすると、同じチャンクを 2 回通していることが見えます。1 回は<b>生のまま凍結デコーダへ</b>入れて教師の分布を取り (勾配は流さない)、もう 1 回は<b>writer で潰してから</b>入れます。標準の設定ではターゲットが入力チャンク自身なので、再構成項は「<b>自分が潰した元のトークン列を、潰した結果から言い当てる</b>」という形になります。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 365" role="img" aria-label="LatentPress の訓練グラフ">
+      <defs>
+        <marker id="lpC" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+        <marker id="lpD" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#0f5132"/></marker>
+      </defs>
+
+      <text x="24" y="16" font-size="13" font-weight="700" fill="#8a5a06">教師の経路 (勾配なし)</text>
+      <rect x="24" y="24" width="150" height="52" rx="9" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="99" y="46" font-size="13.5" font-weight="700" fill="#8a5a06" text-anchor="middle">生のチャンク</text>
+      <text x="99" y="65" font-size="12.5" fill="#12211a" text-anchor="middle">2,048 トークン</text>
+      <path d="M174,50 L494,50" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <rect x="500" y="24" width="170" height="52" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="585" y="46" font-size="13.5" font-weight="700" fill="#3f4c55" text-anchor="middle">凍結デコーダ</text>
+      <text x="585" y="65" font-size="12.5" fill="#12211a" text-anchor="middle">勾配を切って 1 回</text>
+      <path d="M670,50 L694,50" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <rect x="700" y="24" width="156" height="52" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="778" y="46" font-size="13.5" font-weight="700" fill="#22548f" text-anchor="middle">p_full</text>
+      <text x="778" y="65" font-size="12.5" fill="#12211a" text-anchor="middle">教師の次トークン分布</text>
+
+      <text x="24" y="126" font-size="13" font-weight="700" fill="#0f5132">圧縮の経路 (ここに勾配が流れる)</text>
+      <rect x="24" y="134" width="150" height="52" rx="9" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="99" y="164" font-size="13.5" font-weight="700" fill="#8a5a06" text-anchor="middle">同じチャンク</text>
+      <path d="M174,160 L196,160" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <rect x="202" y="134" width="170" height="52" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="287" y="156" font-size="13.5" font-weight="700" fill="#0f5132" text-anchor="middle">writer</text>
+      <text x="287" y="175" font-size="12.5" fill="#12211a" text-anchor="middle">gate + adapter</text>
+      <path d="M372,160 L394,160" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <rect x="400" y="134" width="76" height="52" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="438" y="165" font-size="14" font-weight="700" fill="#22548f" text-anchor="middle">m</text>
+      <path d="M476,160 L494,160" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <rect x="500" y="134" width="170" height="52" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="585" y="156" font-size="13.5" font-weight="700" fill="#3f4c55" text-anchor="middle">凍結デコーダ</text>
+      <text x="585" y="175" font-size="12.5" fill="#12211a" text-anchor="middle">[ m ; チャンク ]</text>
+      <path d="M670,160 L694,160" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <rect x="700" y="134" width="156" height="52" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="778" y="165" font-size="13.5" font-weight="700" fill="#22548f" text-anchor="middle">p_comp</text>
+
+      <path d="M856,50 L868,50 L868,272 L860,272" fill="none" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+      <path d="M778,186 L778,232" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#lpC)"/>
+
+      <rect x="310" y="236" width="546" height="80" rx="9" fill="#ffffff" stroke="#0f5132" stroke-width="2"/>
+      <text x="330" y="260" font-size="14" font-weight="700" fill="#0f5132">損失 = L_rec + λ·L_fkl   (λ = 1.0)</text>
+      <text x="330" y="282" font-size="12.8" fill="#12211a">L_rec: 潰した文脈から元のチャンクの次トークンを当てる (pad はマスク)</text>
+      <text x="330" y="302" font-size="12.8" fill="#12211a">L_fkl: KL(p_full ‖ p_comp) — 完全文脈での振る舞いを writer に蒸留</text>
+
+      <path d="M310,276 L287,276 L287,194" fill="none" stroke="#0f5132" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#lpD)"/>
+      <text x="24" y="272" font-size="13.5" font-weight="700" fill="#0f5132">勾配が届くのは</text>
+      <text x="24" y="292" font-size="13.5" font-weight="700" fill="#0f5132">gate と adapter だけ</text>
+      <text x="24" y="314" font-size="12.5" fill="#4a5d54">d² + d + 1 個。デコーダにも</text>
+      <text x="24" y="331" font-size="12.5" fill="#4a5d54">借りた 2 層にも流れない</text>
+    </svg>
+    <p class="cap">図 3: 訓練グラフ。同じチャンクを生のまま 1 回、潰してから 1 回。勾配は破線の 1 本だけで、行き先は線形層 2 枚</p>
+  </div>
   <div class="warn">
     <b>用語の注意。</b>論文が reconstruction-free と言っているのは<b>推論時のインターフェース</b>のことで、訓練信号のことではありません。訓練では再構成項を使いますが、評価時にテキストへ戻すことは一度もありません。
   </div>
@@ -375,16 +621,16 @@
 <section id="s11">
   <h2><span class="num">11</span>まとめ</h2>
   <div class="key">
-    LatentPress の主張は新しい圧縮アルゴリズムではなく、<b>インターフェースの選択</b>です。文脈は人間が読める形で保存しなくてよい。読み手の下位 2 層を借りて線形アダプタ 1 枚だけを訓練すれば、凍結したデコーダの埋め込み層に直接流せる表現が作れて、テキストへ戻す段が消えます。会話メモリでは無圧縮に並び、書き込みは 1 会話 43 ms、読み込みは 5 から 9 倍速い。代償は相互運用性で、読み手ごとに writer を訓練する必要があります。そして肝心の<b>「どこに圧縮予算を使うか」は、まだ手で決めた役割ヒューリスティックのまま</b>です。
+    LatentPress の主張は新しい圧縮アルゴリズムではなく、<b>インターフェースの選択</b>です。文脈は人間が読める形で保存しなくてよい。読み手の埋め込み層と下位 2 層を凍結したまま借りて、その上の線形層 2 枚 (アダプタとゲート) だけを訓練すれば、凍結したデコーダの埋め込み層に直接流せる表現が作れて、テキストへ戻す段が消えます。会話メモリでは無圧縮に並び、書き込みは 1 会話 43 ms、読み込みは 5 から 9 倍速い。代償は相互運用性で、読み手ごとに writer を訓練する必要があります。そして肝心の<b>「どこに圧縮予算を使うか」は、まだ手で決めた役割ヒューリスティックのまま</b>です。
   </div>
   <h3>実務的に何が嬉しいのか</h3>
-  <p>新しいモデルを用意する必要がなく、既存の凍結デコーダの下位 2 層を借りるだけで済みます。訓練するのは数千万パラメータのアダプタ 1 枚で、1,000 ステップ。デコーダを触らないので、<b>サービング中のモデルをそのまま読み手として使えます</b>。長い履歴を毎回読み直しているシステムで、read レイテンシが支配的なら効果は大きい。</p>
+  <p>新しいモデルを用意する必要がなく、既存の凍結デコーダの下位 2 層を借りるだけで済みます。訓練するのは数千万パラメータぶんの線形層 2 枚で、1,000 ステップ。デコーダを触らないので、<b>サービング中のモデルをそのまま読み手として使えます</b>。長い履歴を毎回読み直しているシステムで、read レイテンシが支配的なら効果は大きい。</p>
   <h3>どこで使えるのか</h3>
   <p>読み手のモデルを固定できて、<b>同じ文脈に何度も質問する</b>運用が本命です。会話メモリ、社内ドキュメントへの反復質問、長い実行トレースを抱えたエージェント。逆にモデルを頻繁に入れ替える、文脈を人間も読む必要がある、1 文脈につき 1 回しか質問しない、といった条件では旨味が薄くなります。</p>
   <h3>次に測るべきこと</h3>
   <p>論文が外している検索の段を戻したときに何が起きるか。訓練長 2,048 トークンを超える文脈でどうなるか。そして圧縮スケジュールを学習させたら、手作りヒューリスティックをどれだけ超えるか。この 3 つが埋まっていない場所です。</p>
   <p class="fn">出典: Zhengze Zhou, Hejian Sang. "LatentPress: Context Compression Beyond Text and Vision." arXiv:2609.01507v2 [cs.LG], 2026-09-03. License CC BY 4.0. コードは <a href="https://github.com/HJSang/LatentPress">github.com/HJSang/LatentPress</a>。<br>
-  本ページの表とグラフの数値は論文の Table 1 から Table 8、Table 12 から Table 14、および本文の記述に基づきます。第 3 節の会話構成と第 7 節の質問回数は<b>読者が動かす仮定値</b>であり、そこから計算される圧縮率と総時間は論文の実測値ではありません。計算に使う単位時間 (43 ms、0.43 から 0.49 s など) と、第 1・5・6・8 節に表示される数値は論文由来です。</p>
+  本ページの表とグラフの数値は論文の Table 1 から Table 8、Table 12 から Table 14、および本文の記述に基づきます。第 2 節の図 1・図 2、第 4 節の図 3、および数式とコードの対応表・ゲートの存在・初期化の値・512 トークンの窓は、<b>論文本文には書かれておらず公開実装 (<code>softtoken/compressor.py</code> と <code>softtoken/train.py</code>) を読んで確認した内容</b>です。パラメータ数の一致 ($d^2+d+1$) は本ページでの検算です。第 3 節の会話構成と第 7 節の質問回数は<b>読者が動かす仮定値</b>であり、そこから計算される圧縮率と総時間は論文の実測値ではありません。計算に使う単位時間 (43 ms、0.43 から 0.49 s など) と、第 1・5・6・8 節に表示される数値は論文由来です。</p>
 </section>
 </main>
 <footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
