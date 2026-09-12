@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>読むのが機械なら、人間が読める形にしておく理由はない — LatentPress の soft token</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;   /* 上げる方向 */
+    --neg:#e07a5f;   /* 下げる方向 */
+    --alt:#e0a03f;   /* 比較対象 */
+    --mut:#6b7a86;
+    --warnc:#e07a5f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7;
+    white-space:pre-wrap}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 7 回</p>
+  <h1>読むのが機械なら、人間が読める形にしておく理由はない</h1>
+  <p>文脈圧縮の第 3 の表現 — LatentPress の direct-read soft token を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「LatentPress: Context Compression Beyond Text and Vision」(Zhengze Zhou (Cornell) ・ Hejian Sang (Iowa State), arXiv:2609.01507v2, 2026-09-03) は、長い会話履歴や長文ドキュメントを圧縮して言語モデルに読ませるとき、<b>その保存形式は本当に人間が読める形でなければならないのか</b>を問い直した論文です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    これまでの圧縮は<b>テキスト</b> (要約・剪定・検索) か<b>画像</b> (レンダリングして OCR で読み戻す) の 2 択で、どちらも人間が読める形を必ず経由します。でも消費するのは人間ではなく言語モデルです。LatentPress は第 3 の選択肢として、<b>凍結した読み手の入力埋め込み層にそのまま流し込める連続ベクトル</b>で保存します。推論時にテキストへ戻す段が存在しません。訓練するのは <b>d × d の線形アダプタ 1 枚だけ</b>で、エンコーダは読み手の下位 2 層を借りてきて凍結したまま使います。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>解く問題</td><td>長い履歴・長文を凍結した言語モデルに読ませるときの表現の選択。Write (テキストを状態に写す) と Read (その状態から答える) を分けて、境界を越えるべき表現は何かを問う</td></tr>
+    <tr><td>writer の構造</td><td>読み手のデコーダ下位 $L=2$ 層をディープコピーして凍結し、その上に $d \times d$ の線形アダプタを 1 枚。<b>恒等行列で初期化</b>するので訓練開始時は素のトークン埋め込みに近い</td></tr>
+    <tr><td>訓練するもの</td><td>アダプタのみ。4.196M (Qwen3-1.7B) / 12.849M (Qwen2.5-7B) / 16.781M (Qwen3-8B) / 26.220M (Qwen2.5-14B)</td></tr>
+    <tr><td>読ませ方</td><td><code>inputs_embeds</code> 経由で soft token を注入し、その後ろに質問を連結。<b>デコーダの重みは 1 バイトも変わらない</b></td></tr>
+    <tr><td>圧縮率の決め方</td><td>会話は役割ベース ($k_{\text{user}}=1$ で無圧縮、$k_{\text{assistant}} \in \{8,16,32\}$)、文書は一律 ($k \in \{4,8,16\}$)。<b>いずれも手で決めたヒューリスティック</b></td></tr>
+    <tr><td>会話メモリの結果</td><td>LongMemEval で <b>0.504 @ 7.70x</b> 対 無圧縮 0.490。OCR は 0.426 → 0.312、テキスト要約は 0.184、ICAE は 0.452 → 0.174</td></tr>
+    <tr><td>長文 QA の結果</td><td>ドメイン内訓練なら 4x と 8x で素の文脈を超える (Qwen2.5-14B は 47.93 → <b>57.99</b>)。ただし 16x では全読み手が下回る</td></tr>
+    <tr><td>速度</td><td>write は 1 会話 <b>43 ms</b> (OCR の約 934 ms の 22 分の 1)。read は f8 で 0.43 - 0.49 s と素の文脈の <b>5.0 - 9.2 倍速</b></td></tr>
+    <tr><td>代償</td><td>soft token は特定の読み手の埋め込み空間に縛られるので、<b>読み手ごとに writer を訓練し直す</b></td></tr>
+    <tr><td>コード</td><td><a href="https://github.com/HJSang/LatentPress">github.com/HJSang/LatentPress</a> ・ License CC BY 4.0</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 【体験】圧縮した文脈は誰のためのものか</a>
+    <a href="#s2">2. 仕組み — Write と Read を分ける</a>
+    <a href="#s3">3. 【体験】圧縮率をどう決めるか</a>
+    <a href="#s4">4. 何を訓練するのか</a>
+    <a href="#s5">5. 【体験】会話メモリの結果</a>
+    <a href="#s6">6. 【体験】長文ドキュメント QA</a>
+    <a href="#s7">7. 【体験】速度と償却</a>
+    <a href="#s8">8. 【体験】アブレーション</a>
+    <a href="#s9">9. 意外だった発見 4 つ</a>
+    <a href="#s10">10. 批判的に読む</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>【体験】圧縮した文脈は誰のためのものか</h2>
+  <p class="lead">長時間動くアシスタントやエージェントは、読み直すには高すぎる量の履歴を溜めていきます。指示、対話、計画、ツール呼び出し、観測、環境からのフィードバック。それでも後の判断に必要なのはごく一部です。長文ドキュメントを読ませて質問に答えさせる場合も同じ圧力がかかります。</p>
+  <p>ここで既存のやり方はすべて<b>離散テキスト</b>を経由します。テキストを検索する、要約する、剪定する、あるいは別のモダリティからテキストを復元する。テキストは人間に便利でシステム間の相互運用性も高い。しかし論文の問いはこうです。<b>モデルが使う文脈は、人間が読める形である必要が本当にあるのか。</b></p>
+  <div class="key">
+    <b>プログラマ向けのアナロジー。</b>これは <b>zero-copy</b> の話に近いです。プロセス間でデータを渡すとき、JSON にシリアライズして相手にパースさせるのが従来のやり方で、テキスト要約や OCR はまさにそれです。しかも OCR は「印刷して写真を撮ってから文字認識で読み直す」という往復まで挟みます。LatentPress がやるのは、<b>受け取り側のメモリレイアウトに合わせたバイト列を直接渡すこと</b>。シリアライズもデシリアライズも要らない。ただし互換性は失う。相手を固定して初めて成立する最適化だという点まで含めて、アナロジーは正確です。
+  </div>
+  <div class="canvas-wrap">
+    <canvas id="cvRoute" width="860" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="rtRaw">そのまま読む</button>
+    <button class="ghost" id="rtSum">テキスト要約</button>
+    <button class="ghost" id="rtOcr">画像 + OCR</button>
+    <button class="ghost" id="rtLp">LatentPress</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>推論時に走る書き込み処理</span>
+    <span><span class="dot" style="background:#43b581"></span>保存される表現</span>
+    <span><span class="dot" style="background:#6b7a86"></span>読み手が読む長さ</span>
+  </div>
+  <p class="rdout" id="rtOut"></p>
+  <p>見てほしいのは<b>段数</b>です。OCR ルートは「レンダリング」と「光学的な自己回帰デコード」の 2 段が推論時に増えます。要約ルートは要約用モデルの生成が挟まります。LatentPress は forward パス 1 回だけで、テキストに戻す段がありません。この段数の差が、7 節でそのまま速度の数字になって出てきます。</p>
+  <div class="warn">
+    <b>4,000 トークンという入力長は説明用の仮定です。</b>各ルートの圧縮率 (12.06x / 2.33x / 7.70x)、write コスト、LongMemEval の正解率は論文の実測値ですが、そこから計算した「読む長さ」は仮定の入力長に対する換算値です。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>仕組み — Write と Read を分ける</h2>
+  <p class="lead">論文は文脈の利用を 2 つの操作に分けます。Write はテキストをコンパクトな状態に写す。Read はその状態を凍結したデコーダに与えて質問に答えさせる。この抽象は会話履歴にも長文ドキュメントにも同じように当てはまります。</p>
+  <div class="mj">$$ m = \mathrm{Write}_\phi(x;\pi), \qquad y = f_\theta\big([\,m\,;\,\mathrm{emb}(q)\,]\big) $$</div>
+  <p>$x$ が文脈のセグメント列、$\phi$ が writer のパラメータ、$\pi$ が各セグメントの圧縮率です。$m$ が連続ベクトルの列で、埋め込まれた質問 $\mathrm{emb}(q)$ の前に連結して凍結デコーダ $f_\theta$ に入れます。</p>
+  <h3>writer の中身は驚くほど小さい</h3>
+  <p>ここが実装上いちばん重要な部分です。writer は新しいモデルではなく、<b>読み手のデコーダの下位 2 層を借りてきたもの</b>です。</p>
+  <table>
+    <tr><th>部品</th><th>中身</th><th>訓練するか</th></tr>
+    <tr><td>エンコーダ</td><td>凍結デコーダの下位 $L=2$ 層。読み手を汚さないようにディープコピーして持つ</td><td><b>しない</b></td></tr>
+    <tr><td>writer ヘッド</td><td>線形アダプタ 1 枚。$A \in \mathbb{R}^{d \times d}$ で<b>恒等行列で初期化</b></td><td><b>する</b></td></tr>
+    <tr><td>デコーダ (読み手)</td><td>Qwen2.5-7B / Qwen2.5-14B / Qwen3-8B / Qwen3-1.7B のいずれか</td><td><b>しない</b></td></tr>
+  </table>
+  <p>恒等初期化は地味ですが効いています。訓練開始時点で writer は<b>素のトークン埋め込みとほぼ同じもの</b>を出します。つまり最初から壊れていない状態で始まり、訓練が正当化する分だけそこから離れていく。</p>
+  <p>出てきたベクトルはプールされて短い列になり、読み手の埋め込み空間に住む soft token として <code>inputs_embeds</code> 経由で注入されます。デコーダの forward パス自体は一切変わりません。</p>
+  <div class="warn">
+    <b>代償を先に書いておきます。</b>soft token は特定の読み手の埋め込み空間に縛られます。だから論文でも<b>読み手ごとに 1 つずつ writer を訓練しています</b>。テキスト要約なら任意のモデルに渡せますが、この表現は渡せない。zero-copy と同じで、相手を固定して初めて成立する最適化です。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【体験】圧縮率をどう決めるか</h2>
+  <p class="lead">圧縮率のルール $\pi = (k_1,\ldots,k_T)$ は、隣接する何個のトークン位置を 1 個の soft token にプールするかを決めます。ここで論文は正直です。<b>このルールは学習しません。手で決めた単純なヒューリスティックです。</b>主張したいのはインターフェースそのものであって、圧縮スケジュールの最適化ではない、と明言しています。</p>
+  <table>
+    <tr><th>ルール</th><th>中身</th><th>使う場面</th></tr>
+    <tr><td>uniform pooling</td><td>全セグメントで $k$ を同じにする。$k \in \{4,8,16\}$</td><td>長文ドキュメント。構造がないので一律</td></tr>
+    <tr><td>role-based schedule</td><td>$k_{\text{user}} = 1$ でユーザー発言は<b>圧縮せず素の埋め込みのまま通す</b>。$k_{\text{assistant}} \in \{8,16,32\}$ でアシスタント発言だけを encode してプールする</td><td>会話メモリ。役割という既存の構造を利用する</td></tr>
+  </table>
+  <div class="mj">$$ \rho = |\mathcal{C}| \Big/ \sum_i \big\lceil n_i / k_{r_i} \big\rceil $$</div>
+  <p>$|\mathcal{C}|$ が元の履歴のトークン数、$n_i$ がターン $i$ の長さです。$k_{\text{user}}=1$ のターンは 1 トークンあたり 1 ベクトルを消費するので、$\rho$ はアシスタント側の率とユーザー・アシスタントのトークン比で決まります。つまり<b>会話全体の圧縮率は事前に決めた予算ではなく、役割と発言長の混ざり方から結果として出てきます</b>。論文の 4.62 倍や 7.70 倍は設定値ではなく評価セット上の実測平均です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRatio" width="860" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">ターン数 <input id="raT" type="range" min="2" max="30" value="12"><span id="raTv">12</span></div>
+    <div class="slider">user 平均長 <input id="raU" type="range" min="5" max="200" value="25"><span id="raUv">25</span></div>
+    <div class="slider">assistant 平均長 <input id="raA" type="range" min="20" max="600" value="200"><span id="raAv">200</span></div>
+  </div>
+  <div class="controls">
+    <div class="slider">$k_{\text{assistant}}$ <input id="raKa" type="range" min="1" max="64" value="8"><span id="raKav">8</span></div>
+    <div class="slider">$k_{\text{user}}$ <input id="raKu" type="range" min="1" max="16" value="1"><span id="raKuv">1</span></div>
+  </div>
+  <p class="rdout" id="raOut"></p>
+  <p>$k_{\text{assistant}}$ を 8 から 32 に上げても圧縮率が 4 倍にならないのは、ユーザー発言が無圧縮のまま残るからです。ユーザー発言が長い設定にすると、アシスタント側をいくら潰しても $\rho$ が伸びなくなる。これが<b>ユーザー側が圧縮率の天井を作る</b>構造で、論文の 4.62 倍から 7.70 倍という狭いレンジもこれで説明できます。$k_{\text{user}}$ を 1 から上げると $\rho$ は伸びますが、8 節のアブレーションで見るとおり精度が崩壊します。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>何を訓練するのか</h2>
+  <p class="lead">訓練する対象は writer ヘッドだけで、損失は 2 項の和です。</p>
+  <div class="mj">$$ \mathcal{L}(\phi) = \mathcal{L}_{\mathrm{rec}} + \lambda\,\mathcal{L}_{\mathrm{fkl}}, \qquad \lambda = 1.0 $$</div>
+  <div class="mj">$$ \mathcal{L}_{\mathrm{rec}} = -\frac{1}{N}\sum_t \log p_{\mathrm{comp},t}(y_t), \qquad \mathcal{L}_{\mathrm{fkl}} = \frac{1}{N}\sum_t \mathrm{KL}\big(p_{\mathrm{full},t} \,\|\, p_{\mathrm{comp},t}\big) $$</div>
+  <p>$p_{\mathrm{full}}$ と $p_{\mathrm{comp}}$ は、凍結デコーダに完全な文脈を与えたときと圧縮文脈を与えたときの次トークン分布です。再構成項は圧縮文脈からターゲットのトークンを復元させ、<b>forward KL 項は完全文脈での振る舞いそのものを writer に蒸留します</b>。パディング位置は両方の項からマスクされます。</p>
+  <div class="warn">
+    <b>用語の注意。</b>論文が reconstruction-free と言っているのは<b>推論時のインターフェース</b>のことで、訓練信号のことではありません。訓練では再構成項を使いますが、評価時にテキストへ戻すことは一度もありません。
+  </div>
+  <h3>訓練の規模</h3>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>訓練可能パラメータ</td><td>4.196M から 26.220M。論文の表記は「デコーダの約 0.1%」で、公称パラメータ数で割ると 0.17% から 0.25% にあたる</td></tr>
+    <tr><td>最適化</td><td>AdamW、学習率 $1\times10^{-4}$、<b>1,000 ステップ</b>、バッチサイズ 1 (LongBench では勾配累積 8)</td></tr>
+    <tr><td>訓練データ</td><td>UltraChat の 2,000 会話。<b>テキストのみで QA ラベルなし</b>。チャンク数 400、チャンク長 2,048 トークン</td></tr>
+    <tr><td>精度</td><td>デコーダ bf16、writer ヘッド fp32</td></tr>
+    <tr><td>評価</td><td>LongMemEval 500 問、greedy デコード、判定は Llama-3.1-70B-Instruct を vLLM の FP8 / TP2 で。5 シードの平均と標準偏差</td></tr>
+  </table>
+  <div class="key">
+    数字を見ると論文の主張の性質がはっきりします。<b>1,000 ステップ・バッチ 1・400 チャンク</b>という小さな訓練で届いている。良い意味では「これだけで足りる」という主張の強さになりますが、悪い意味では<b>スケールさせたときの挙動が未知</b>ということでもあります。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】会話メモリの結果</h2>
+  <p class="lead">評価の設定を誤解すると数字を読み違えるので、先に押さえます。</p>
+  <ul>
+    <li><b>訓練は UltraChat、評価は LongMemEval。</b>圧縮器は評価対象の会話を訓練中に一度も見ていないゼロショット設定です</li>
+    <li><b>oracle evidence 設定を使う。</b>各質問には正解の根拠セッションだけが与えられ、大量のダミーを含む本来の haystack は使いません。<b>検索の段を理想化して、圧縮と読解だけを切り出しています</b></li>
+    <li>500 問のテスト専用ベンチマーク。読み手は凍結した Qwen2.5-7B-Instruct</li>
+  </ul>
+  <p>論文はこの限定を隠していません。「我々が研究しているのは履歴をどう圧縮して読むかで、どう検索するかではない」と明記し、長い haystack は圧縮器の訓練長を超えるので検索と圧縮が混ざってしまう、と理由まで書いています。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvFront" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="frB0">Qwen2.5-7B</button>
+    <button class="ghost" id="frB1">Qwen3-8B</button>
+    <button class="ghost" id="frB2">Qwen3-1.7B</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>LatentPress</span>
+    <span><span class="dot" style="background:#60a5fa"></span>DeepSeek-OCR</span>
+    <span><span class="dot" style="background:#c084fc"></span>ICAE</span>
+    <span><span class="dot" style="background:#e07a5f"></span>テキスト要約</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>無圧縮 (1x)</span>
+  </div>
+  <p class="rdout" id="frOut"></p>
+  <p>Qwen2.5-7B では LatentPress が無圧縮に並び、圧縮率を上げても落ちません。Qwen3-8B に切り替えると、低圧縮側では OCR の 0.542 が最も高く、圧縮率を上げると逆転します。つまり<b>「OCR より常に強い」ではありません</b>。Qwen3-1.7B のような小さい読み手では差が最も大きく開きます。</p>
+  <table>
+    <tr><th>手法</th><th class="num">圧縮率</th><th class="num">Overall</th><th class="num">user-fact</th></tr>
+    <tr><td>無圧縮の oracle 根拠</td><td class="num">1.00x</td><td class="num">0.490</td><td class="num">0.946</td></tr>
+    <tr><td>LatentPress $k_a=8$</td><td class="num">4.62x</td><td class="num">0.476 ±0.014</td><td class="num">0.938 ±0.007</td></tr>
+    <tr><td>LatentPress $k_a=16$</td><td class="num">6.27x</td><td class="num">0.478 ±0.020</td><td class="num">0.891 ±0.015</td></tr>
+    <tr class="hl"><td>LatentPress $k_a=32$</td><td class="num">7.70x</td><td class="num">0.504 ±0.024</td><td class="num">0.938 ±0.010</td></tr>
+    <tr><td>ICAE</td><td class="num">4.12x</td><td class="num">0.452 ±0.017</td><td class="num">0.548 ±0.019</td></tr>
+    <tr><td>ICAE</td><td class="num">8.96x</td><td class="num">0.318 ±0.022</td><td class="num">0.381 ±0.023</td></tr>
+    <tr><td>ICAE</td><td class="num">17.28x</td><td class="num">0.174 ±0.029</td><td class="num">0.209 ±0.031</td></tr>
+    <tr><td>DeepSeek-OCR</td><td class="num">2.33x</td><td class="num">0.426</td><td class="num">0.797</td></tr>
+    <tr><td>DeepSeek-OCR</td><td class="num">5.97x</td><td class="num">0.390</td><td class="num">0.672</td></tr>
+    <tr><td>DeepSeek-OCR</td><td class="num">9.34x</td><td class="num">0.312</td><td class="num">0.594</td></tr>
+    <tr><td>テキスト要約</td><td class="num">12.06x</td><td class="num">0.184</td><td class="num">0.297</td></tr>
+  </table>
+  <div class="key">
+    読み取るべき点は 3 つです。<b>(1) 無圧縮が上限ではない。</b>完全な根拠を渡しても 0.490 しか出ず、7.70 倍に圧縮した 0.504 のほうが上。この課題は根拠が与えられていても複数セッションの統合、時間推論、知識更新の追跡、答えられないことの判断を要求するので、トークンが多いことが自動的に有利になりません。<b>(2) 他の圧縮ルートは率を上げると崩れる。</b>ICAE は 4.12x の 0.452 から 17.28x で 0.174、OCR は 0.426 から 0.312 へ単調に落ちる。<b>(3) テキスト要約が最弱。</b>user-fact が 0.297 で、無圧縮の 0.946 から見ると壊滅的。要約は具体的な事実を落とします。
+  </div>
+  <div class="warn">
+    グラフの $\times$ 軸ラベル (4.56 / 6.10 / 7.33) は 3 読み手で共有された論文 Table 3 の表記で、上の表にある Qwen2.5-7B の個別値 (4.62 / 6.27 / 7.70) は Table 2 由来です。無圧縮の値は Qwen2.5-7B のものだけが本文に明示されているため、他の 2 読み手では線を描いていません。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】長文ドキュメント QA</h2>
+  <p class="lead">会話には役割という構造がありました。それを取り払っても同じインターフェースが機能するかを、LongBench-QA 英語の 6 サブセット (narrativeqa, qasper, multifieldqa_en, hotpotqa, 2wikimqa, musique) で確かめています。ここでは uniform 圧縮を使い、QA の教師データの出どころを 2 通りに変えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvLB" width="860" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="lbIn">in-domain 訓練</button>
+    <button class="ghost" id="lbCr">cross-domain 転移</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>素の文脈を上回る</span>
+    <span><span class="dot" style="background:#e07a5f"></span>下回る</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>素の文脈の位置</span>
+  </div>
+  <p class="rdout" id="lbOut"></p>
+  <p>in-domain では Qwen2.5-14B が 47.93 から 4 倍で <b>57.99</b> まで上がります。10 ポイント以上の改善です。しかし 16 倍では 40.30 に落ちて素の文脈を下回る。cross-domain に切り替えると 4 倍でわずかに超えるだけで、あとは落ちるだけになります。この不安定さが in-domain 適応を導入した動機です。</p>
+  <div class="warn">
+    <b>in-domain の数字を読むときの注意。</b>4 倍や 8 倍で素の文脈を<b>超えている</b>のは、圧縮が魔法だからではありません。writer が対象ドメインの QA で訓練されているので、<b>タスクに効く情報だけを残すように適応している</b>のです。論文自身も「ゼロショットの LongMemEval 結果と比べたときの唯一のコストは、これがドメイン内で訓練されている点だ」と書いています。圧縮の効果と適応の効果が混ざっているので、素の文脈超えを圧縮そのものの功績として読むのは行き過ぎです。cross-domain の Qwen2.5-14B は論文の付録表にあり、本文に数値が明示されている 2 読み手だけを描いています。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】速度と償却</h2>
+  <p class="lead">速度は 2 つのコストに分けて測っています。write コストは圧縮表現を作る時間、read コストはそこから答えるときの推論レイテンシです。</p>
+  <h3>write コスト (H100 80GB 1 枚、bf16、Qwen3-8B、バッチ 8)</h3>
+  <table>
+    <tr><th>ルート</th><th class="num">1 会話あたり</th><th class="num">LatentPress 比</th><th>なぜその時間か</th></tr>
+    <tr class="hl"><td>LatentPress</td><td class="num">43 ms</td><td class="num">1.0x</td><td>forward パス 1 回だけ。自己回帰生成が一切ない</td></tr>
+    <tr><td>ICAE</td><td class="num">350 - 700 ms</td><td class="num">8 - 15x</td><td>下位 2 層ではなく LLM 全体でエンコードする</td></tr>
+    <tr><td>テキスト要約</td><td class="num">407 - 645 ms</td><td class="num">9 - 15x</td><td>要約を自己回帰で生成する</td></tr>
+    <tr><td>DeepSeek-OCR</td><td class="num">844 - 1,056 ms</td><td class="num">約 22x</td><td>ページを描画したうえで光学的に自己回帰デコードする</td></tr>
+  </table>
+  <h3>read コスト (LongBench-QA 30 例、全モデルをウォームロード済み)</h3>
+  <table>
+    <tr><th>読み手</th><th class="num">素の文脈</th><th class="num">LatentPress f8</th><th class="num">キャッシュ済み OCR</th></tr>
+    <tr><td>Qwen2.5-7B</td><td class="num">2.44 s</td><td class="num">0.49 s</td><td class="num">2.71 s</td></tr>
+    <tr><td>Qwen2.5-14B</td><td class="num">4.14 s</td><td class="num">0.49 s</td><td class="num">4.34 s</td></tr>
+    <tr><td>Qwen3-8B</td><td class="num">3.97 s</td><td class="num">0.43 s</td><td class="num">4.03 s</td></tr>
+  </table>
+  <p>素の推論より 5.0 から 9.2 倍速く、キャッシュ済み OCR ルートより 5.5 から 9.4 倍速い。<b>OCR をキャッシュしても速くならない</b>のが重要な点です。復元されたテキストは結局トークン数が多いので、読む側の負担が減らないからです。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvLat" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">同じ文脈への質問回数 N <input id="ltN" type="range" min="1" max="120" value="10"><span id="ltNv">10</span></div>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="ltR0">Qwen2.5-7B</button>
+    <button class="ghost" id="ltR1">Qwen2.5-14B</button>
+    <button class="ghost" id="ltR2">Qwen3-8B</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#8fd6b4"></span>素の文脈</span>
+    <span><span class="dot" style="background:#43b581"></span>LatentPress f8</span>
+    <span><span class="dot" style="background:#60a5fa"></span>キャッシュ済み OCR</span>
+  </div>
+  <p class="rdout" id="ltOut"></p>
+  <p>1 つの文脈を 1 回書いて N 回質問する状況です。$N=1$ でも LatentPress が勝ちますが、差は N が増えるほど広がります。read の差が毎回積み上がるからです。逆に write コストの差は 1 回しか効かないので、N が大きい運用では write の 22 倍差はほとんど意味を持たなくなります。<b>read が支配的になる</b>というのが、この機構をどこで使うべきかを決める境界です。</p>
+  <div class="warn">
+    <b>異なるベンチマークの実測値を組み合わせた概算です。</b>write は LongMemEval の 1 会話あたり、read は LongBench-QA の 1 例あたりで、単位時間はどちらも論文の実測値ですが、それを足し合わせた総時間は論文が報告した数字ではありません。傾向を見るための計算です。テキスト要約は read レイテンシが測られていないため除いています。<br>
+    なお論文は粗い粒度のジョブ全体の時間も出していて、in-domain LatentPress のジョブ時間 (アダプタ訓練 + 予測 + 評価) はコールドキャッシュの DeepSeek-OCR パイプラインより <b>6.0 から 13.7 倍短い</b>と報告しています。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【体験】アブレーション</h2>
+  <p class="lead">役割ベースの割り当てルールと、学習された writer のどちらが効いているのかを切り分けています。すべて Qwen2.5-7B、$k_a=8$、同じ 500 問です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvAbl" width="860" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="abRole">役割の割り当てと学習の切り分け</button>
+    <button class="ghost" id="abEnc">借りたエンコーダを訓練すべきか</button>
+  </div>
+  <p class="rdout" id="abOut"></p>
+  <table>
+    <tr><th>設定</th><th>ユーザー発言</th><th>アシスタント発言</th><th class="num">圧縮率</th><th class="num">Overall</th></tr>
+    <tr class="hl"><td>完全な LatentPress</td><td>素の埋め込み</td><td>学習された soft token</td><td class="num">4.62x</td><td class="num">0.476 ±0.014</td></tr>
+    <tr><td>学習なし</td><td>素の埋め込み</td><td>単に平均プールした埋め込み</td><td class="num">4.62x</td><td class="num">0.325 ±0.023</td></tr>
+    <tr><td>ユーザーのみ</td><td>素の埋め込み</td><td>削除</td><td class="num">9.6x</td><td class="num">0.217 ±0.031</td></tr>
+    <tr><td>役割を入れ替え</td><td>学習された soft token</td><td>素の埋め込み</td><td class="num">1.10x</td><td class="num">0.087 ±0.011</td></tr>
+  </table>
+  <p>同じ 4.62 倍で学習された writer を単純な平均プールに置き換えると 0.476 から 0.325 へ落ちます。つまり結果は役割の割り当てだけから来ているのではありません。一方で<b>役割を入れ替えると、ほぼ無圧縮の 1.10 倍なのに 0.087 まで崩壊します</b>。短いユーザー発言を verbatim で保つことが答えを保っている、ということです。</p>
+  <p>エンコーダのアブレーションでは、借りた 2 層を訓練しないほうが全ての率で勝ち (+0.018 から +0.066)、しかも高圧縮側で崩れません。UltraChat での fine-tune が訓練分布に過適合し、凍結した層のほうが読み手の一般的な表現を保っているという解釈です。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>意外だった発見 4 つ</h2>
+  <p class="lead">この論文で直感に反する結果が 4 つあります。いずれも「もっと情報を、もっと訓練を、もっと圧縮率を」が裏切られる形になっています。</p>
+  <h3>1. トークンが多いほど良いわけではない</h3>
+  <p>正解の根拠をそのまま渡しても 0.490。7.70 倍に圧縮した 0.504 のほうが上です。oracle 設定でも複数セッションの統合、時間推論、知識更新の追跡、答えられないことの判断が要求されるので、<b>圧縮がノイズ除去として働いている</b>可能性があります。ただし論文はそこまで踏み込んで検証していません。</p>
+  <h3>2. 訓練しないほうが強い</h3>
+  <p>借りた下位 2 層を fine-tune すると、全ての圧縮率で凍結より悪くなります。0.454 / 0.460 / 0.438 に対し凍結は 0.476 / 0.478 / 0.504。訓練コーパスへの過適合で、凍結した層は読み手の一般的な表現を保ちます。<b>訓練できる場所を増やすことが改善につながらない</b>という珍しい形の結果です。</p>
+  <h3>3. 何を verbatim で残すかがすべて</h3>
+  <p>役割を入れ替えると、ほぼ無圧縮の 1.10 倍でも 0.087 に崩壊します。答えを持っているのは短いユーザー発言のほうで、長いアシスタント発言は潰してよい。<b>圧縮率よりも配分が支配的</b>です。そしてこの配分は学習されておらず、手で決めた役割ヒューリスティックにすぎません。</p>
+  <h3>4. 高圧縮での失敗は情報損失だけではない</h3>
+  <p>16 倍での失敗を 6 種類に分類しています。答えられるはずの質問に棄権する、答えを JSON で包む、空出力、繰り返しループ、Qwen3 の思考タグが答えに漏れる、そして形式は正しいが事実が違う。<b>最後の 1 つだけが本当の情報損失で、残る 5 つはデコード時と書式の病理です。</b>圧縮率を上げると増えます。評価ハーネスの問題ではないことも確認されています。</p>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>批判的に読む</h2>
+  <p class="lead">どこが確かでどこが確かでないかを分けておきます。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>oracle evidence 設定</td><td>LongMemEval の本来の難しさである大量のダミーからの検索が外されています。論文は意図的な限定として明記し、検索器との統合を将来課題にしていますが、<b>実運用のメモリシステムとしての性能はこの数字からは分かりません</b>。理由も正直で、長い haystack は圧縮器の訓練長 2,048 トークンを超えてしまいます</td></tr>
+    <tr><td>読み手ごとに writer が必要</td><td>soft token は特定の読み手の埋め込み空間に縛られます。読み手を差し替えるたびに writer を訓練し直す。テキストで保存する運用の相互運用性を捨てる代償で、モデルを頻繁に入れ替える現場では効きません</td></tr>
+    <tr><td>in-domain 超えの解釈</td><td>4 倍と 8 倍で素の文脈を超えているのは、対象ドメインの QA で writer を訓練しているからです。<b>圧縮の効果とタスク適応の効果が混ざっています。</b>純粋な転移の結果は cross-domain 側で、そちらは 4 倍でわずかに超えるだけ</td></tr>
+    <tr><td>OCR より常に良いわけではない</td><td>Qwen3-8B の低圧縮側では DeepSeek-OCR の 0.542 が最良。LatentPress が優位に立つのは圧縮率を上げた領域です。要約が最弱という点だけは全ての読み手で一貫しています</td></tr>
+    <tr><td>圧縮スケジュールが手作り</td><td>論文自身が最大の将来課題として挙げています。role-based も uniform も手で決めたヒューリスティックで、<b>どこに圧縮予算を使うかは学習されていません</b>。強化学習で下流の報酬に対して最適化する方向が示唆されています</td></tr>
+    <tr><td>訓練規模の小ささ</td><td>1,000 ステップ、バッチサイズ 1、400 チャンク。「これだけで届く」という主張の強さでもあり、<b>スケール時の挙動が未知</b>ということでもあります</td></tr>
+    <tr><td>評価の頑健さ</td><td>判定は Llama-3.1-70B-Instruct による LLM judge ですが、判定器依存でないことを確認するために judge を使わない Token-F1 も付録で報告し、5 シードの平均と標準偏差も出しています。この点の作りは丁寧です</td></tr>
+    <tr><td>圧縮率は設定値ではない</td><td>4.62 倍などは評価セット上の実測平均であって予算ではありません。他手法と圧縮率を厳密に揃えた比較にはなっていない点は頭に置いたほうがよい</td></tr>
+  </table>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <div class="key">
+    LatentPress の主張は新しい圧縮アルゴリズムではなく、<b>インターフェースの選択</b>です。文脈は人間が読める形で保存しなくてよい。読み手の下位 2 層を借りて線形アダプタ 1 枚だけを訓練すれば、凍結したデコーダの埋め込み層に直接流せる表現が作れて、テキストへ戻す段が消えます。会話メモリでは無圧縮に並び、書き込みは 1 会話 43 ms、読み込みは 5 から 9 倍速い。代償は相互運用性で、読み手ごとに writer を訓練する必要があります。そして肝心の<b>「どこに圧縮予算を使うか」は、まだ手で決めた役割ヒューリスティックのまま</b>です。
+  </div>
+  <h3>実務的に何が嬉しいのか</h3>
+  <p>新しいモデルを用意する必要がなく、既存の凍結デコーダの下位 2 層を借りるだけで済みます。訓練するのは数千万パラメータのアダプタ 1 枚で、1,000 ステップ。デコーダを触らないので、<b>サービング中のモデルをそのまま読み手として使えます</b>。長い履歴を毎回読み直しているシステムで、read レイテンシが支配的なら効果は大きい。</p>
+  <h3>どこで使えるのか</h3>
+  <p>読み手のモデルを固定できて、<b>同じ文脈に何度も質問する</b>運用が本命です。会話メモリ、社内ドキュメントへの反復質問、長い実行トレースを抱えたエージェント。逆にモデルを頻繁に入れ替える、文脈を人間も読む必要がある、1 文脈につき 1 回しか質問しない、といった条件では旨味が薄くなります。</p>
+  <h3>次に測るべきこと</h3>
+  <p>論文が外している検索の段を戻したときに何が起きるか。訓練長 2,048 トークンを超える文脈でどうなるか。そして圧縮スケジュールを学習させたら、手作りヒューリスティックをどれだけ超えるか。この 3 つが埋まっていない場所です。</p>
+  <p class="fn">出典: Zhengze Zhou, Hejian Sang. "LatentPress: Context Compression Beyond Text and Vision." arXiv:2609.01507v2 [cs.LG], 2026-09-03. License CC BY 4.0. コードは <a href="https://github.com/HJSang/LatentPress">github.com/HJSang/LatentPress</a>。<br>
+  本ページの表とグラフの数値は論文の Table 1 から Table 8、Table 12 から Table 14、および本文の記述に基づきます。第 3 節の会話構成と第 7 節の質問回数は<b>読者が動かす仮定値</b>であり、そこから計算される圧縮率と総時間は論文の実測値ではありません。計算に使う単位時間 (43 ms、0.43 から 0.49 s など) と、第 1・5・6・8 節に表示される数値は論文由来です。</p>
+</section>
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./paper-index.html" style="color:var(--g2)">← 論文理解シリーズの目次へ</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', OCRC='#60a5fa', ICAEC='#c084fc', MUT='#6b7a86', RAWC='#8fd6b4';
+
+/* ============ デモ1: 3 ルート ============ */
+(function(){
+  const cv=document.getElementById('cvRoute'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,CTX=4000;
+  const R={
+   raw:{steps:[['INPUT','会話履歴 4,000 トークン',SUBI],['READ','凍結 LLM が 4,000 トークンを読む',MUT]],
+        tok:CTX,ratio:'1.00x',write:'なし',recon:'該当なし',acc:'0.490',
+        note:'基準。読むトークン数がそのまま推論コストになる'},
+   sum:{steps:[['INPUT','会話履歴',SUBI],['WRITE','要約 LLM が自己回帰で生成',NEG],['STORE','テキスト 約 332 トークン',POS],['READ','凍結 LLM がそのテキストを読む',MUT]],
+        tok:Math.round(CTX/12.06),ratio:'12.06x',write:'407 - 645 ms',recon:'不要。ただし保存物自体がテキスト',acc:'0.184',
+        note:'人間が読める。だが具体的な事実が落ちて user-fact が 0.297 まで崩れる'},
+   ocr:{steps:[['INPUT','会話履歴',SUBI],['WRITE 1','1024x1024 のページ画像に描画',NEG],['WRITE 2','OCR が光学的に自己回帰デコード',NEG],['STORE','復元テキスト 約 1,717 トークン',POS],['READ','凍結 LLM が復元テキストを読む',MUT]],
+        tok:Math.round(CTX/2.33),ratio:'2.33x',write:'844 - 1,056 ms',recon:'必要。推論時に毎回テキストへ戻す',acc:'0.426',
+        note:'段が最も多い。キャッシュしても読むトークン数は減らないので read も速くならない'},
+   lp:{steps:[['INPUT','会話履歴',SUBI],['WRITE','借りた下位 2 層 + アダプタで forward 1 回',NEG],['STORE','soft token 約 519 本 (連続ベクトル)',POS],['READ','inputs_embeds から凍結 LLM に直接注入',MUT]],
+        tok:Math.round(CTX/7.70),ratio:'7.70x',write:'43 ms',recon:'不要。テキストへ戻す段が存在しない',acc:'0.504',
+        note:'人間には読めない。読み手ごとに writer を訓練する必要がある'}
+  };
+  let cur='raw';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const r=R[cur];
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('推論時に走る処理の並び',24,24);
+    const n=r.steps.length, gap=10, bw=(W-48-gap*(n-1))/n, by=44, bh=74;
+    r.steps.forEach(function(s,i){
+      const x=24+i*(bw+gap);
+      ct.fillStyle='rgba(255,255,255,0.04)';ct.fillRect(x,by,bw,bh);
+      ct.strokeStyle=s[2];ct.lineWidth=1.6;ct.strokeRect(x,by,bw,bh);
+      ct.fillStyle=s[2];ct.font='bold 10.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(s[0],x+10,by+18);
+      ct.fillStyle=INK;ct.font='11px sans-serif';
+      const words=s[1].split(' ');let line='',ly=by+38;
+      words.forEach(function(w){
+        if(ct.measureText(line+w).width>bw-20){ct.fillText(line,x+10,ly);ly+=14;line=w+' ';}
+        else line+=w+' ';
+      });
+      ct.fillText(line,x+10,ly);
+      if(i<n-1){ct.fillStyle=MUT;ct.font='14px sans-serif';ct.textAlign='center';
+        ct.fillText('>',x+bw+gap/2,by+bh/2+5);}
+    });
+    /* トークン帯 */
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('凍結 LLM が実際に読む長さ  '+r.tok.toLocaleString()+' 単位',24,152);
+    const per=50, k=Math.min(Math.round(r.tok/per),84);
+    for(let i=0;i<k;i++){
+      ct.fillStyle=(cur==='lp')?POS:(cur==='ocr'?OCRC:(cur==='sum'?NEG:MUT));
+      ct.fillRect(24+i*10,164,7,16);
+    }
+    ct.fillStyle=MUT;ct.font='10.5px sans-serif';
+    ct.fillText('1 マス = 50 トークン',24,196);
+    /* 表 */
+    const ty=222, rows=[
+      ['圧縮率',r.ratio],['write コスト',r.write],['推論時の復元',r.recon],
+      ['LongMemEval 正解率 (Qwen2.5-7B)',r.acc]];
+    rows.forEach(function(rw,i){
+      const y=ty+i*30;
+      ct.fillStyle=(i%2)?'rgba(255,255,255,0.03)':'rgba(255,255,255,0.06)';
+      ct.fillRect(24,y,W-48,26);
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+      ct.fillText(rw[0],36,y+18);
+      ct.fillStyle=(i===3&&cur==='lp')?POS:INK;
+      ct.font='12.5px "SF Mono",Menlo,monospace';
+      ct.fillText(rw[1],330,y+18);
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText(r.note,24,H-14);
+    document.getElementById('rtOut').textContent=
+      '推論時の段数 = '+n+' / うち書き込み処理 = '+r.steps.filter(function(s){return s[0].indexOf('WRITE')===0;}).length+' 段';
+  }
+  const B={raw:'rtRaw',sum:'rtSum',ocr:'rtOcr',lp:'rtLp'};
+  Object.keys(B).forEach(function(k){
+    document.getElementById(B[k]).onclick=function(){
+      cur=k;Object.keys(B).forEach(function(j){
+        document.getElementById(B[j]).classList.toggle('active',j===k);});
+      draw();};
+  });
+  draw();
+})();
+
+/* ============ デモ2: 圧縮率 ============ */
+(function(){
+  const cv=document.getElementById('cvRatio'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  function draw(){
+    const T=+document.getElementById('raT').value, ul=+document.getElementById('raU').value,
+          al=+document.getElementById('raA').value, ka=+document.getElementById('raKa').value,
+          ku=+document.getElementById('raKu').value;
+    document.getElementById('raTv').textContent=T;
+    document.getElementById('raUv').textContent=ul;
+    document.getElementById('raAv').textContent=al;
+    document.getElementById('raKav').textContent=ka;
+    document.getElementById('raKuv').textContent=ku;
+    const uTok=T*ul, aTok=T*al, tot=uTok+aTok;
+    const uVec=T*Math.ceil(ul/ku), aVec=T*Math.ceil(al/ka), vec=uVec+aVec;
+    const rho=tot/vec, ceil=tot/uVec, uShare=uVec/vec;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('元のトークン数と、注入されるベクトル数',24,24);
+    const L=150,R=W-120,barH=34;
+    function row(y,label,uv,av,scale,cu,ca){
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='right';
+      ct.fillText(label,L-14,y+22);
+      const uw=uv/scale*(R-L), aw=av/scale*(R-L);
+      ct.fillStyle=cu;ct.fillRect(L,y,uw,barH);
+      ct.fillStyle=ca;ct.fillRect(L+uw,y,aw,barH);
+      ct.fillStyle='#0d2b20';ct.font='bold 11px sans-serif';ct.textAlign='center';
+      const ut='user '+uv.toLocaleString(), at='assistant '+av.toLocaleString();
+      if(ct.measureText(ut).width+10<uw) ct.fillText(ut,L+uw/2,y+21);
+      if(ct.measureText(at).width+10<aw) ct.fillText(at,L+uw+aw/2,y+21);
+      ct.fillStyle=INK;ct.font='12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText((uv+av).toLocaleString(),L+uw+aw+10,y+22);
+      ct.fillStyle=MUT;ct.font='10px sans-serif';
+      if(ct.measureText(ut).width+10>=uw||ct.measureText(at).width+10>=aw)
+        ct.fillText('user '+uv.toLocaleString()+' + assistant '+av.toLocaleString(),L+uw+aw+64,y+22);
+    }
+    row(50,'元のトークン',uTok,aTok,tot,'rgba(143,214,180,0.55)','rgba(143,214,180,0.9)');
+    row(104,'注入ベクトル',uVec,aVec,tot,'rgba(107,122,134,0.9)',POS);
+    /* rho */
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('圧縮率 ρ = 元トークン / 注入ベクトル',24,190);
+    ct.fillStyle=POS;ct.font='bold 40px "SF Mono",Menlo,monospace';
+    ct.fillText(rho.toFixed(2)+'x',24,232);
+    /* レンジ表示 */
+    const gx=250,gw=W-gx-40,gy=210,gh=22, mx=Math.max(16,ceil*1.05);
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(gx,gy,gw,gh);
+    ct.fillStyle='rgba(67,181,129,0.30)';
+    ct.fillRect(gx+4.62/mx*gw,gy,(7.70-4.62)/mx*gw,gh);
+    ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='center';
+    ct.fillText('論文の実測レンジ 4.62x - 7.70x',gx+6.16/mx*gw,gy-6);
+    ct.fillStyle=POS;ct.fillRect(gx+rho/mx*gw-1.5,gy-4,3,gh+8);
+    ct.fillStyle=NEG;ct.fillRect(gx+ceil/mx*gw-1.5,gy-4,3,gh+8);
+    ct.fillStyle=NEG;ct.font='10.5px sans-serif';ct.textAlign='left';
+    ct.fillText('天井 '+ceil.toFixed(2)+'x',gx+ceil/mx*gw+6,gy+gh+18);
+    [1,4,8,12,16].forEach(function(g){
+      if(g<=mx){ct.fillStyle=MUT;ct.font='10px sans-serif';ct.textAlign='center';
+        ct.fillText(g+'x',gx+g/mx*gw,gy+gh+16);}
+    });
+    /* 占有 */
+    const oy=286;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('注入ベクトルの占有',24,oy-8);
+    ct.fillStyle='rgba(107,122,134,0.9)';ct.fillRect(150,oy,uShare*(W-190),26);
+    ct.fillStyle=POS;ct.fillRect(150+uShare*(W-190),oy,(1-uShare)*(W-190),26);
+    ct.fillStyle='#0d2b20';ct.font='bold 11px sans-serif';ct.textAlign='center';
+    if(uShare>0.12) ct.fillText('user '+Math.round(uShare*100)+'%',150+uShare*(W-190)/2,oy+17);
+    if(uShare<0.88) ct.fillText('assistant '+Math.round((1-uShare)*100)+'%',150+uShare*(W-190)+(1-uShare)*(W-190)/2,oy+17);
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('アシスタント側を無限に潰しても ρ は '+ceil.toFixed(2)+'x を超えられない (user の '
+      +uVec.toLocaleString()+' ベクトルが残る)',24,H-16);
+    document.getElementById('raOut').textContent=
+      'ρ = '+rho.toFixed(2)+'x / 天井 = '+ceil.toFixed(2)+'x / user が占めるベクトル = '+Math.round(uShare*100)+'%';
+  }
+  ['raT','raU','raA','raKa','raKu'].forEach(function(i){document.getElementById(i).oninput=draw;});
+  draw();
+})();
+
+/* ============ デモ3: フロンティア ============ */
+(function(){
+  const cv=document.getElementById('cvFront'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const F=[
+   {n:'Qwen2.5-7B',lp:[[4.56,0.476],[6.10,0.478],[7.33,0.504]],
+    ocr:[[2.33,0.426],[5.97,0.390],[9.34,0.312]],sum:[[12.1,0.184]],
+    icae:[[4.12,0.452],[8.96,0.318],[17.28,0.174]],raw:0.490},
+   {n:'Qwen3-8B',lp:[[4.56,0.506],[6.10,0.514],[7.33,0.494]],
+    ocr:[[2.33,0.542],[5.97,0.506],[9.34,0.408]],sum:[[11.3,0.348]],
+    icae:null,raw:null},
+   {n:'Qwen3-1.7B',lp:[[4.56,0.434],[6.10,0.424],[7.33,0.416]],
+    ocr:[[2.33,0.264],[5.97,0.236],[9.34,0.156]],sum:[[28.7,0.106]],
+    icae:null,raw:null}
+  ];
+  let bi=0;
+  function draw(){
+    const d=F[bi];
+    ct.clearRect(0,0,W,H);
+    const PL=64,PR=W-24,PT=44,PB=H-52;
+    const lx=function(x){return Math.log(x)/Math.LN10;};
+    const x0=lx(1),x1=lx(32),y0=0.05,y1=0.60;
+    const sx=function(x){return PL+(lx(x)-x0)/(x1-x0)*(PR-PL);};
+    const sy=function(y){return PB-(y-y0)/(y1-y0)*(PB-PT);};
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('LongMemEval 正解率と圧縮率 ・ 読み手 '+d.n,24,24);
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    [0.1,0.2,0.3,0.4,0.5,0.6].forEach(function(g){
+      ct.beginPath();ct.moveTo(PL,sy(g));ct.lineTo(PR,sy(g));ct.stroke();
+      ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='right';
+      ct.fillText(g.toFixed(1),PL-8,sy(g)+4);
+    });
+    [1,2,4,8,16,32].forEach(function(g){
+      ct.strokeStyle='rgba(143,214,180,0.09)';
+      ct.beginPath();ct.moveTo(sx(g),PT);ct.lineTo(sx(g),PB);ct.stroke();
+      ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(g+'x',sx(g),PB+18);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('圧縮率 (対数軸)',(PL+PR)/2,PB+38);
+    ct.save();ct.translate(20,(PT+PB)/2);ct.rotate(-Math.PI/2);
+    ct.textAlign='center';ct.fillText('正解率',0,0);ct.restore();
+    function series(pts,col,dot,pos){
+      if(!pts) return;
+      if(pts.length>1){
+        ct.strokeStyle=col;ct.lineWidth=2.5;ct.beginPath();
+        pts.forEach(function(p,i){if(i===0)ct.moveTo(sx(p[0]),sy(p[1]));else ct.lineTo(sx(p[0]),sy(p[1]));});
+        ct.stroke();
+      }
+      pts.forEach(function(p,i){
+        ct.fillStyle=col;
+        if(dot==='d'){
+          ct.beginPath();ct.moveTo(sx(p[0]),sy(p[1])-7);ct.lineTo(sx(p[0])+7,sy(p[1]));
+          ct.lineTo(sx(p[0]),sy(p[1])+7);ct.lineTo(sx(p[0])-7,sy(p[1]));ct.closePath();ct.fill();
+        } else {
+          ct.beginPath();ct.arc(sx(p[0]),sy(p[1]),5,0,7);ct.fill();
+        }
+        ct.font='10.5px "SF Mono",Menlo,monospace';
+        var dx=9, dy=-10, al='left';
+        if(pos==='below'){dy=19;}
+        else if(pos==='left'){al='right';dx=-9;dy=4;}
+        else if(pos==='alt'){dy=(i%2===0)?-10:19;}
+        ct.textAlign=al;
+        ct.fillText(p[1].toFixed(3),sx(p[0])+dx,sy(p[1])+dy);
+      });
+    }
+    if(d.raw!==null){
+      ct.strokeStyle=RAWC;ct.setLineDash([5,4]);ct.lineWidth=1.5;
+      ct.beginPath();ct.moveTo(PL,sy(d.raw));ct.lineTo(PR,sy(d.raw));ct.stroke();ct.setLineDash([]);
+      series([[1,d.raw]],RAWC,'d','below');
+      ct.fillStyle=RAWC;ct.font='10.5px sans-serif';ct.textAlign='right';
+      ct.fillText('無圧縮の水準',PR-6,sy(d.raw)-8);
+    }
+    series(d.ocr,OCRC,null,'below');series(d.icae,ICAEC,null,'left');
+    series(d.sum,NEG,null,'below');series(d.lp,POS,null,'alt');
+    if(d.raw===null){
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='left';
+      ct.fillText('この読み手の無圧縮値は本文に数値が示されていないため未表示',PL+6,PT+14);
+    }
+    const msg=[
+      'LatentPress は圧縮率を上げても落ちず、7.33x で無圧縮 0.490 を超える。ICAE と OCR は単調に落ちる',
+      '低圧縮側では OCR の 0.542 が最良で、圧縮率を上げると LatentPress が逆転する。常に強いわけではない',
+      '小さい読み手ほど差が開く。OCR は 0.264 まで落ち、要約は 28.7x で 0.106'][bi];
+    document.getElementById('frOut').textContent=msg;
+  }
+  ['frB0','frB1','frB2'].forEach(function(id,i){
+    document.getElementById(id).onclick=function(){
+      bi=i;['frB0','frB1','frB2'].forEach(function(j,k){
+        document.getElementById(j).classList.toggle('active',k===i);});
+      draw();};
+  });
+  draw();
+})();
+
+/* ============ デモ4: LongBench ============ */
+(function(){
+  const cv=document.getElementById('cvLB'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const LB={
+   inn:[{n:'Qwen2.5-7B',raw:43.80,v:[49.06,43.77,37.78]},
+        {n:'Qwen3-8B',raw:30.80,v:[39.62,36.93,26.12]},
+        {n:'Qwen2.5-14B',raw:47.93,v:[57.99,52.18,40.30]}],
+   cr:[{n:'Qwen2.5-7B',raw:43.80,v:[45.13,40.69,32.94]},
+       {n:'Qwen3-8B',raw:30.80,v:[32.79,null,null]},
+       {n:'Qwen2.5-14B',raw:47.93,v:[null,null,null]}]
+  };
+  let mode='inn';
+  function draw(){
+    const rows=LB[mode], mx=62;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(mode==='inn'
+      ? 'LongBench-QA 英語 overall ・ in-domain 訓練 (対象ドメインの訓練スプリットを使う)'
+      : 'LongBench-QA 英語 overall ・ cross-domain 転移 (対象ドメインに触れない)',24,24);
+    const L=210,R=W-92,labs=['4x','8x','16x'];
+    rows.forEach(function(r,bi){
+      const by=48+bi*116;
+      ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+      ct.fillText(r.n,24,by+16);
+      ct.fillStyle=RAWC;ct.font='11px sans-serif';
+      ct.fillText('素の文脈 '+r.raw.toFixed(2),24,by+34);
+      const rx=L+r.raw/mx*(R-L);
+      ct.strokeStyle=RAWC;ct.setLineDash([4,3]);ct.lineWidth=1.5;
+      ct.beginPath();ct.moveTo(rx,by+2);ct.lineTo(rx,by+100);ct.stroke();ct.setLineDash([]);
+      r.v.forEach(function(v,k){
+        const y=by+8+k*31;
+        ct.fillStyle=SUBI;ct.font='11px "SF Mono",Menlo,monospace';ct.textAlign='right';
+        ct.fillText(labs[k],L-10,y+16);
+        if(v===null){
+          ct.strokeStyle='rgba(143,214,180,0.25)';ct.setLineDash([3,3]);ct.lineWidth=1;
+          ct.strokeRect(L,y,R-L,22);ct.setLineDash([]);
+          ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='left';
+          ct.fillText('本文に数値なし',L+10,y+16);
+        } else {
+          const bw=v/mx*(R-L), over=(v>=r.raw);
+          ct.fillStyle=over?POS:NEG;ct.fillRect(L,y,bw,22);
+          ct.fillStyle=over?POS:NEG;ct.font='12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+          ct.fillText(v.toFixed(2)+'  ('+(over?'+':'')+(v-r.raw).toFixed(2)+')',R+8,y+16);
+        }
+      });
+    });
+    document.getElementById('lbOut').textContent = (mode==='inn')
+      ? '4x と 8x は素の文脈を超え、16x は 3 読み手すべてで下回る。最大は Qwen2.5-14B の 47.93 → 57.99'
+      : '4x でわずかに超えるのが精一杯で、率を上げると落ちる。この不安定さが in-domain 適応の動機';
+  }
+  document.getElementById('lbIn').onclick=function(){mode='inn';
+    this.classList.add('active');document.getElementById('lbCr').classList.remove('active');draw();};
+  document.getElementById('lbCr').onclick=function(){mode='cr';
+    this.classList.add('active');document.getElementById('lbIn').classList.remove('active');draw();};
+  draw();
+})();
+
+/* ============ デモ5: 償却 ============ */
+(function(){
+  const cv=document.getElementById('cvLat'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const RD=[{n:'Qwen2.5-7B',raw:2.44,lp:0.49,ocr:2.71},
+            {n:'Qwen2.5-14B',raw:4.14,lp:0.49,ocr:4.34},
+            {n:'Qwen3-8B',raw:3.97,lp:0.43,ocr:4.03}];
+  const WR={raw:0,lp:0.043,ocr:0.934};
+  let ri=0;
+  function draw(){
+    const N=+document.getElementById('ltN').value, r=RD[ri];
+    document.getElementById('ltNv').textContent=N;
+    ct.clearRect(0,0,W,H);
+    const PL=64,PR=W-150,PT=44,PB=H-64, Nmax=120;
+    const lines=[{k:'raw',n:'素の文脈',w:WR.raw,rd:r.raw,c:RAWC},
+                 {k:'lp',n:'LatentPress f8',w:WR.lp,rd:r.lp,c:POS},
+                 {k:'ocr',n:'キャッシュ済み OCR',w:WR.ocr,rd:r.ocr,c:OCRC}];
+    let ymax=0;lines.forEach(function(l){const t=l.w+Nmax*l.rd;if(t>ymax)ymax=t;});
+    ymax*=1.05;
+    const sx=function(n){return PL+n/Nmax*(PR-PL);};
+    const sy=function(t){return PB-t/ymax*(PB-PT);};
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 回書いて N 回読むときの総時間 ・ 読み手 '+r.n,24,24);
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    for(let g=0;g<=ymax;g+=100){
+      ct.beginPath();ct.moveTo(PL,sy(g));ct.lineTo(PR,sy(g));ct.stroke();
+      ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='right';
+      ct.fillText(g+' s',PL-8,sy(g)+4);
+    }
+    [0,30,60,90,120].forEach(function(g){
+      ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(g,sx(g),PB+18);
+    });
+    ct.fillText('質問回数 N',(PL+PR)/2,PB+36);
+    lines.forEach(function(l){
+      ct.strokeStyle=l.c;ct.lineWidth=(l.k==='lp')?3.5:2;
+      ct.beginPath();ct.moveTo(sx(0),sy(l.w));ct.lineTo(sx(Nmax),sy(l.w+Nmax*l.rd));ct.stroke();
+      const t=l.w+Nmax*l.rd;
+      ct.fillStyle=l.c;ct.font='11.5px sans-serif';ct.textAlign='left';
+      ct.fillText(l.n,PR+8,sy(t)+4);
+    });
+    /* 現在の N */
+    ct.strokeStyle='rgba(224,160,63,0.9)';ct.setLineDash([4,3]);ct.lineWidth=1.5;
+    ct.beginPath();ct.moveTo(sx(N),PT);ct.lineTo(sx(N),PB);ct.stroke();ct.setLineDash([]);
+    const lp=lines[1].w+N*lines[1].rd;
+    const LDY={raw:20,lp:20,ocr:-12};
+    lines.forEach(function(l){
+      const t=l.w+N*l.rd;
+      ct.fillStyle=l.c;ct.beginPath();ct.arc(sx(N),sy(t),5,0,7);ct.fill();
+      ct.font='11px "SF Mono",Menlo,monospace';ct.textAlign=(N>Nmax*0.7)?'right':'left';
+      const dx=(N>Nmax*0.7)?-10:10;
+      ct.fillText(t.toFixed(2)+' s'+(l.k==='lp'?'':'  ('+(t/lp).toFixed(1)+'x)'),sx(N)+dx,sy(t)+LDY[l.k]);
+    });
+    ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='left';
+    ct.fillText('切片が write コスト (1 回だけ)、傾きが read コスト (N 回積み上がる)',PL,H-14);
+    document.getElementById('ltOut').textContent=
+      'N = '+N+' で LatentPress '+lp.toFixed(2)+' s ・ 素の文脈は '
+      +((lines[0].w+N*lines[0].rd)/lp).toFixed(1)+' 倍 ・ OCR は '
+      +((lines[2].w+N*lines[2].rd)/lp).toFixed(1)+' 倍';
+  }
+  document.getElementById('ltN').oninput=draw;
+  ['ltR0','ltR1','ltR2'].forEach(function(id,i){
+    document.getElementById(id).onclick=function(){
+      ri=i;['ltR0','ltR1','ltR2'].forEach(function(j,k){
+        document.getElementById(j).classList.toggle('active',k===i);});
+      draw();};
+  });
+  draw();
+})();
+
+/* ============ デモ6: アブレーション ============ */
+(function(){
+  const cv=document.getElementById('cvAbl'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='role';
+  const A=[{n:'完全な LatentPress',s:'user 素の埋め込み',s2:'assistant 学習された soft token',c:'4.62x',v:0.476,best:true},
+           {n:'学習なし',s:'user 素の埋め込み',s2:'assistant 単に平均プール',c:'4.62x',v:0.325},
+           {n:'ユーザーのみ',s:'user 素の埋め込み',s2:'assistant 削除',c:'9.6x',v:0.217},
+           {n:'役割を入れ替え',s:'user 学習された soft token',s2:'assistant 素の埋め込み',c:'1.10x',v:0.087}];
+  const K=['k_a = 8','k_a = 16','k_a = 32'], FT=[0.454,0.460,0.438], FZ=[0.476,0.478,0.504];
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const L=(mode==='role')?300:230, R=W-92;
+    if(mode==='role'){
+      ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+      ct.fillText('役割の割り当てと writer 学習の切り分け ・ Qwen2.5-7B',24,24);
+      A.forEach(function(x,i){
+        const y=52+i*80;
+        ct.fillStyle=x.best?POS:INK;ct.font=(x.best?'bold ':'')+'12.5px sans-serif';ct.textAlign='left';
+        ct.fillText(x.n,24,y+14);
+        ct.fillStyle=MUT;ct.font='10.5px sans-serif';
+        ct.fillText(x.s,24,y+30);
+        ct.fillText(x.s2,24,y+44);
+        ct.fillText('圧縮率 '+x.c,24,y+58);
+        const bw=x.v/0.55*(R-L);
+        ct.fillStyle=x.best?POS:(x.v<0.15?NEG:'rgba(67,181,129,0.45)');
+        ct.fillRect(L,y+8,bw,26);
+        ct.fillStyle=x.best?POS:(x.v<0.15?NEG:SUBI);
+        ct.font='13px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(x.v.toFixed(3),L+bw+10,y+27);
+      });
+      document.getElementById('abOut').textContent=
+        '同じ 4.62x で writer を平均プールに落とすと 0.476 → 0.325。役割を入れ替えると 1.10x でも 0.087 に崩壊';
+    } else {
+      ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+      ct.fillText('借りた下位 2 層を fine-tune するか凍結するか ・ Qwen2.5-7B',24,24);
+      for(let i=0;i<3;i++){
+        const by=54+i*102;
+        ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+        ct.fillText(K[i],24,by+14);
+        [['fine-tune する',FT[i],OCRC],['凍結する',FZ[i],POS]].forEach(function(p,j){
+          const y=by+22+j*30;
+          ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='right';
+          ct.fillText(p[0],L-12,y+16);
+          const bw=p[1]/0.55*(R-L);
+          ct.fillStyle=p[2];ct.fillRect(L,y,bw,22);
+          ct.fillStyle=p[2];ct.font='12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+          ct.fillText(p[1].toFixed(3),L+bw+10,y+16);
+        });
+        ct.fillStyle=POS;ct.font='11px sans-serif';ct.textAlign='right';
+        ct.fillText('凍結が +'+(FZ[i]-FT[i]).toFixed(3),R+72,by+14);
+      }
+      document.getElementById('abOut').textContent=
+        '凍結が全ての率で勝つ。fine-tune 版は高圧縮側で落ちる (0.460 → 0.438) のに、凍結版は上がり続ける (0.478 → 0.504)';
+    }
+  }
+  document.getElementById('abRole').onclick=function(){mode='role';
+    this.classList.add('active');document.getElementById('abEnc').classList.remove('active');draw();};
+  document.getElementById('abEnc').onclick=function(){mode='enc';
+    this.classList.add('active');document.getElementById('abRole').classList.remove('active');draw();};
+  draw();
+})();
+</script>
+</body>
+</html>

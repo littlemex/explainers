@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>感想戦で、どの一手が良かったのかを教える — TurnSight とターン単位の信用割当</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;   /* 上げる方向 */
+    --neg:#e07a5f;   /* 下げる方向 */
+    --alt:#e0a03f;   /* 比較対象 */
+    --mut:#6b7a86;
+    --warnc:#e07a5f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7;
+    white-space:pre-wrap}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 6 回</p>
+  <h1>感想戦で、どの一手が良かったのかを教える</h1>
+  <p>ツールを何度も呼ぶエージェントの信用割当 — TurnSight のターン単位 後知恵自己蒸留を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「TurnSight: Turn-Level Hindsight Self-Distillation for Tool-Integrated Reasoning」(Changle Qu ほか, 中国人民大学 + Baidu, arXiv:2608.04007v1, 2026-08-04) は、ツールを何度も呼びながら考えるエージェントを強化学習で鍛えるとき、<b>「途中のどのツール呼び出しが良かったのか」</b>をどうやって教えるかという問題を扱った論文です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    強化学習の標準的なやり方は、最後に正解したかどうかだけを見て、そこまでの一連のやり取り全部に同じ評価を配ります。TurnSight は、そこに<b>感想戦</b>を持ち込みます。対局中の自分と、<b>指し手の結果を見たあとの自分</b>に同じ一手を採点させて、評価がどう変わったかを測る。材料に使うのは正解答案ではなく、<b>エージェント自身が実際に受け取ったツールの返り値</b>です。採点はトークンではなく<b>ツールを 1 回呼ぶという意思決定のまとまり</b>で行い、得られた評価は強化学習の更新の<b>強さだけ</b>を調整します。向きは絶対に変えません。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>解く問題</td><td>多ターンのツール統合推論 (Tool-Integrated Reasoning, TIR) における時間的な信用割当。最終結果は成否しか教えず、どの中間操作が有用・冗長・有害だったかを教えない</td></tr>
+    <tr><td>要件の定式化</td><td>監督信号は (1) エージェントが実際に通った実行状態に整合し、(2) 意思決定 1 回分の粒度でまとまっていること</td></tr>
+    <tr><td>特権情報</td><td><b>ツールの実行結果のみ</b>。正解答案を足すとむしろ性能が落ちる</td></tr>
+    <tr><td>教師</td><td>訓練開始時の重みで<b>凍結した参照方策</b>。新しいモデルは不要で、生徒の出力を teacher forcing して採点するだけ</td></tr>
+    <tr><td>先読み深度</td><td>$\mathcal{D}_H = \{1,2,3\}$ の 3 つの後知恵ビュー。多数決で向きを決め、その向きで最強の教師を採用</td></tr>
+    <tr><td>介入のしかた</td><td>アドバンテージに有界な重み $w \in [1-\epsilon_w,\, 1+\epsilon_w]$ を掛ける。$w$ は必ず正なので<b>符号は変わらない</b></td></tr>
+    <tr><td>主な結果</td><td>Qwen3-8B の 3 ベンチ平均で従来最良 39.03 に対し <b>42.02</b> (相対 +7.7%、絶対 +2.99 ポイント)</td></tr>
+    <tr><td>最も効いた部品</td><td>ターン単位の集約。外すと FTRL 平均が 46.92 → <b>43.23</b> (−3.69) で 3 部品中最大の落ち込み</td></tr>
+    <tr><td>規模</td><td>Qwen3-4B / Qwen3-8B、verl、A800 80GB × 8 枚、3 エポック。1 バッチ 32 質問 × 16 軌跡 × 最大 10 ターン</td></tr>
+    <tr><td>コード</td><td><a href="https://github.com/quchangle1/TurnSight">github.com/quchangle1/TurnSight</a></td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 前提 — ツール統合推論は何をしているか</a>
+    <a href="#s2">2. 【体験】手柄の配分がうまくいかない</a>
+    <a href="#s3">3. 先行研究の 2 系統と、その穴</a>
+    <a href="#s4">4. 【体験】感想戦としての自己蒸留</a>
+    <a href="#s5">5. 【体験】ターン単位に集約する</a>
+    <a href="#s6">6. 【体験】3 人の教師の意見をまとめる</a>
+    <a href="#s7">7. 【体験】強さだけを変える重み</a>
+    <a href="#s8">8. 【体験】実験結果</a>
+    <a href="#s9">9. 意外だった発見 3 つ</a>
+    <a href="#s10">10. 批判的に読む</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>前提 — ツール統合推論は何をしているか</h2>
+  <p class="lead">ふつうの言語モデルは質問を受けて答えを一気に書きます。ツール統合推論のエージェントは、考える途中で外部のツールを呼び、その返り値を見てから次の行動を決めます。これを何回も繰り返します。</p>
+  <p>論文の記法では、1 回のやり取りを<b>ターン</b>と呼び $s_k = (n_k, \mathcal{C}_k, o_k)$ と書きます。$n_k$ がそのターンの自然言語の思考、$\mathcal{C}_k$ がそのターンで発行したツール呼び出しの集合 (ツール名と JSON 引数)、$o_k$ が返ってきた実行結果です。最終ターンでは答えを出力するのでツール呼び出しは空になります。ターン数の上限 $L$ に達しても終了します (実験では 10)。</p>
+  <div class="math">turn 1 思考   都市名から地点 ID を引く必要がある
+turn 1 呼出   geocode({"city": "Tokyo"})
+turn 1 結果   {"location_id": "JP-13", "tz": "Asia/Tokyo"}
+
+turn 2 思考   得た ID で予報を取る
+turn 2 呼出   forecast({"location_id": "JP-13", "day": "tomorrow"})
+turn 2 結果   {"t_max_f": 78.8, "unit": "F"}
+
+turn 3 思考   華氏で返ってきたので変換が必要
+turn 3 呼出   convert({"value": 78.8, "from": "F", "to": "C"})
+turn 3 結果   {"value": 26.0}
+
+turn 4        最終回答「26 度です」</div>
+  <p>ここで大事なのは、turn 1 で正しい地点 ID を取れたかどうかが turn 2 以降のすべてを左右する点です。つまり<b>前のターンの選択が、その後どんな状態に行けるかを変えてしまう</b>。この性質が、あとで出てくる「参照軌跡と食い違う」問題の根っこになります。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【体験】手柄の配分がうまくいかない</h2>
+  <p class="lead">このエージェントを鍛える標準的な方法が GRPO です。同じ質問に対して $G$ 本の軌跡 (実験では 16 本) をサンプリングし、そのグループ内での報酬の相対順位からアドバンテージを作ります。価値関数を別に学習しなくて済むので安い。</p>
+  <div class="mj">$$ \mathcal{J}_{\text{GRPO}}(\theta) = \mathbb{E}\Big[\tfrac{1}{G}\sum_{i}\tfrac{1}{|\tau_i|}\sum_{t}\big[\min(\rho_{i,t}\hat{A}_{i,t},\ \text{clip}(\rho_{i,t},1-\epsilon,1+\epsilon)\hat{A}_{i,t}) - \beta\,\mathbb{D}_{\text{KL}}(\pi_\theta\|\pi_{\text{ref}})\big]\Big] $$</div>
+  <p>$\rho_{i,t}$ は新旧方策の確率比、$\hat{A}_{i,t}$ がアドバンテージです。これが正なら「そのトークンを出す確率を上げろ」、負なら「下げろ」を意味します。</p>
+  <p>落とし穴はここです。GRPO のアドバンテージは<b>軌跡単位</b>で決まるので、その軌跡に含まれる全ターン・全トークンに同じ値が配られます。上の例で最終回答が当たっていれば、turn 1 の的確な <code>geocode</code> 呼び出しも、もし挟まっていた無駄な検索も、まったく同じだけ褒められる。逆に最後を外していれば、正しかった turn 1 まで一律に罰せられる。これが<b>時間的な信用割当 (credit assignment) 問題</b>です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvCredit" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="crGrpo">軌跡単位 (GRPO) で配る</button>
+    <button class="ghost" id="crIdeal">真の質どおりに配る (理想)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>確率を上げる方向</span>
+    <span><span class="dot" style="background:#e07a5f"></span>確率を下げる方向</span>
+  </div>
+  <p class="rdout" id="crOut"></p>
+  <p>GRPO 表示では、軌跡 A の 4 ターンすべてが同じ長さの緑になります。中に「無駄な検索」が混ざっていても同じだけ強化される。理想表示に切り替えると、本来配りたい形が見えます。<b>TurnSight が目指すのは、正解ラベルなしにこの理想の形へ近づけること</b>です。</p>
+  <div class="warn">
+    <b>この図の値は説明用です。</b>軌跡の中身、各ターンの「真の質」、アドバンテージの数値はいずれも私が作った例です。<b>GRPO が軌跡単位の値を全ターンに配るという構造だけが論文の記述に対応します</b>。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>先行研究の 2 系統と、その穴</h2>
+  <p class="lead">細かい信号を与える先行手法は 2 系統あり、TurnSight はその両方の穴から出発します。</p>
+  <table>
+    <tr><th>系統</th><th>やること</th><th>限界</th></tr>
+    <tr><td><b>参照軌跡との照合</b><br>ToolRL, MatchTIR</td>
+      <td>生成したツール呼び出しを、人手または自動で用意した正解のツール軌跡と突き合わせ、ターン単位の報酬にする</td>
+      <td>「その状態で参照の行動が今も妥当」という仮定に乗っている。エージェントが別のツールを呼んだ瞬間に環境が変わり、以降の状態は参照から外れる。事実上「用意された正解行動を真似る学習」に近づき、探索が縮む</td></tr>
+    <tr><td><b>自己蒸留 (OPSD)</b><br>SDPO, RLSD, SDAR, SOD</td>
+      <td>訓練時だけ使える特権情報を与えた「教師」で、生徒が実際に通った状態を採点する。参照軌跡を押し付けないので状態整合性がある</td>
+      <td>特権情報として正解答案や成功ロールアウト、蒸留済みスキルを使う。これらは「課題をどう解くか」を語るが、「その状態でそのツール呼び出しが妥当だったか」は語らない。しかも信号がトークン単位なので、同じターン内で符号が食い違う</td></tr>
+  </table>
+  <div class="key">
+    この 2 つの穴から、論文は要件を 2 つに定式化します。<b>(1) 監督信号はエージェントが実際に通った実行状態に整合していること。(2) 信号はターン (ツール利用 1 回分の意思決定) の粒度でまとまっていること。</b>TurnSight はこの 2 要件を満たすように組まれています。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】感想戦としての自己蒸留</h2>
+  <p class="lead">自己蒸留の発想はこうです。同じモデルを 2 つの条件で走らせる。生徒は本番と同じ情報だけを持つ。教師は訓練時にだけ使える特権情報を追加で持つ。そして生徒が実際に出力したトークンを両方で採点し、log 確率の差を取る。</p>
+  <div class="mj">$$ \delta_t = \log \pi_T(y_t \mid c_t^{+}) - \log \pi_\theta(y_t \mid c_t) $$</div>
+  <p>$c_t$ が生徒の文脈、$c_t^{+}$ が特権情報を足した教師の文脈、$y_t$ は生徒が実際に出したトークンです。$\delta_t > 0$ なら「特権情報を見たら、そのトークンがもっともらしく見えてきた」。$\delta_t < 0$ なら「見たらむしろ変に見えてきた」。</p>
+  <div class="key">
+    ここが直感の勘所です。<b>$\delta$ は「後から答え合わせをした自分が、さっきの自分の一手をどう評価するか」を数値化しています。</b>将棋や囲碁の感想戦で「あの手は良かった」「あれは悪手だった」と言うのに近い。
+  </div>
+  <p>TurnSight の最初の主張は、<b>この特権情報として使うべきものは正解答案ではなく、エージェント自身が実際に受け取ったツールの実行結果である</b>ということです。理由は 3 節で見たとおりで、正解答案は「課題全体をどう解くか」の情報でしかなく、いま採点したいターンがその状態で妥当だったかを直接教えてくれない。一方で実行結果は、そのターンが引き起こした結果そのものなので、状態に必ず整合します。</p>
+  <div class="mj">$$ \mathcal{H}_{i,k}^{(d)} = \big((\mathcal{C}_{i,k}, o_{i,k}), \ldots, (\mathcal{C}_{i,\bar{k}}, o_{i,\bar{k}})\big), \quad \bar{k} = \min(k+d-1,\, K_i) $$</div>
+  <div class="mj">$$ c_{i,t}^{+(d)} = c_{i,t} \oplus \mathcal{H}_{i,k}^{(d)}, \qquad \delta_{i,t}^{(d)} = \log \pi_{\mathrm{ref}}(y_{i,t} \mid c_{i,t}^{+(d)}) - \log \pi_\theta(y_{i,t} \mid c_{i,t}) $$</div>
+  <p>$\mathcal{H}$ が<b>後知恵ブロック</b>です。ターン $k$ から $d$ ターン先までの (ツール呼び出し, 実行結果) の並びを、そのターンを採点するときの文脈に貼り足します。$d$ が<b>先読み深度</b>。教師 $\pi_{\mathrm{ref}}$ は訓練開始時の重みで凍結された参照方策で、生徒の出力を teacher forcing して採点するだけです。<b>新しくモデルを用意する必要はありません。</b></p>
+  <div class="canvas-wrap">
+    <canvas id="cvGap" width="860" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="gpGood">ケース A: 良い一手</button>
+    <button class="ghost" id="gpBad">ケース B: 悪い一手</button>
+    <button id="gpToggle">後知恵を与える / 隠す</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#6b7a86"></span>生徒 (ロールアウト時の情報だけ)</span>
+    <span><span class="dot" style="background:#43b581"></span>教師 (実行結果まで見る)</span>
+  </div>
+  <p class="rdout" id="gpOut"></p>
+  <p>ケース B では、呼び出した時点では妥当に見えたツールが、実行結果を見ると「引数名を間違えていて空振りだった」と分かります。後知恵ありの教師はその一手を低く見積もるので $\delta$ が負になり、「このターンの確率を上げる力を弱めろ」という信号になります。<b>動くのは教師側だけで、生徒側の値は変わりません</b>。</p>
+  <div class="warn">
+    <b>log 確率の具体値は説明用です。</b>実行結果の中身と、後知恵で符号が反転するという構造は論文の記述どおりですが、$-1.42$ や $-2.55$ という数値は私が置いた例です。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】ターン単位に集約する</h2>
+  <p class="lead">ここまでで $\delta$ は得られました。しかし生の $\delta$ をそのまま使うと 3 つの困りごとがあり、TurnSight はそれぞれに部品を 1 つ当てます。まず粒度の話です。</p>
+  <table>
+    <tr><th>困りごと</th><th>なぜ困るか</th><th>部品</th></tr>
+    <tr><td>粒度が細かすぎる</td><td>$\delta$ はトークン単位。同じターン内で括弧や JSON の区切り記号など書式トークンの $\delta$ が暴れ、符号すら食い違う。独立に最適化すると同じ 1 回のツール利用に矛盾した手柄を配る</td><td><b>ターン単位の集約</b></td></tr>
+    <tr><td>先読みの長さが一意に決まらない</td><td>引数の間違いは 1 ターン先で分かるが、方針の良し悪しは数ターン先まで見ないと分からない。逆に長く見すぎると無関係な後のやり取りが混ざって薄まる</td><td><b>複数先読み + 方向一致選択</b></td></tr>
+    <tr><td>大きさが比較できない</td><td>$\delta$ の絶対値は問題の難しさ、軌跡の長さ、ターンの位置、訓練の進み具合で変わる。生の値を使うと単にスケールの大きい例が過大評価される</td><td><b>グループ正規化 + 有界重み</b></td></tr>
+  </table>
+  <div class="mj">$$ \bar{\delta}_{i,k}^{(d)} = \frac{1}{|\mathcal{Y}_{i,k}|} \sum_{t \in \mathcal{Y}_{i,k}} \delta_{i,t}^{(d)} $$</div>
+  <p>$\mathcal{Y}_{i,k}$ はターン $k$ に属するトークン位置の集合です。平均した 1 個の値をそのターンの全トークンで共有します。<b>思考 + ツール選択 + 引数構築がまとまって 1 回の意思決定</b>なので、評価もまとめて 1 個にする、という設計です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvTok" width="860" height="360"></canvas>
+  </div>
+  <div class="controls">
+    <button id="tkShuffle">再抽選</button>
+    <button class="ghost active" id="tkTok">トークン単位</button>
+    <button class="ghost" id="tkTurn">ターン集約</button>
+  </div>
+  <p class="rdout" id="tkOut"></p>
+  <p>トークン単位表示では、同じ 1 回のツール呼び出しの中で「上げろ」と「下げろ」が混在します。ターン集約表示では平均された 1 本の値が全トークンに共有され、意思決定として一貫した向きになります。図には散らばりの標準偏差も出しているので、<b>平均だけ見て安心してよいのか</b>を自分で判断してください。</p>
+  <div class="key">
+    アブレーションではこれが最も効いていて、外すと FTRL 平均が <b>46.92 → 43.23</b> と 3.69 ポイント落ちます (Qwen3-8B)。3 つの部品の中で最大の落ち込みで、論文の題名が turn-level を掲げているのはこの順序と整合しています。
+  </div>
+  <div class="warn">
+    <b>個々のトークンの $\delta$ は乱数で生成した例です。</b>「書式トークンで符号が散る」という構造と、集約が最も効くという実測結果が論文由来です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】3 人の教師の意見をまとめる</h2>
+  <p class="lead">$d = 1, 2, 3$ の 3 つの後知恵ビューを作ります。それぞれが独立した教師になり、同じターンに 3 つの意見を出します。食い違ったときの決め方が工夫のある部分で、2 段構えになっています。</p>
+  <div class="mj">$$ s_{i,k}^{(d)} = \begin{cases} +1 & \bar{\delta}_{i,k}^{(d)} \geq 0 \\ -1 & \text{otherwise} \end{cases}, \qquad v_{i,k} = \text{majority}\big(\{s_{i,k}^{(d)}\}_{d \in \mathcal{D}_H}\big) $$</div>
+  <div class="mj">$$ d_{i,k}^{*} = \operatorname*{arg\,max}_{d \,:\, s_{i,k}^{(d)} = v_{i,k}} \big|\bar{\delta}_{i,k}^{(d)}\big|, \qquad \bar{\delta}_{i,k}^{*} = \bar{\delta}_{i,k}^{(d_{i,k}^{*})} $$</div>
+  <p>全部を平均すると情報が薄まる。いちばん強い意見だけを採ると孤立した外れ値を増幅する。だから<b>まず向きを合議で決め、次にその向きの中でいちばん強い証拠を採る</b>という順にしています。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvVote" width="860" height="380"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">d = 1 <input id="vA" type="range" min="-30" max="30" value="12"><span id="vAv">+0.12</span></div>
+    <div class="slider">d = 2 <input id="vB" type="range" min="-30" max="30" value="-25"><span id="vBv">-0.25</span></div>
+    <div class="slider">d = 3 <input id="vC" type="range" min="-30" max="30" value="7"><span id="vCv">+0.07</span></div>
+  </div>
+  <p class="rdout" id="vOut"></p>
+  <p>初期値は「$d=2$ だけが強く反対している」状況です。単純平均は 0 付近になって信号がほぼ消えますが、方向一致選択は多数決で正の向きを選び、その中で最強の $d=1$ を採ります。<b>孤立した強い反対意見に引きずられずに済む</b>。一方で $d=2$ と $d=3$ を両方マイナスにすると多数決が反転し、選ばれる教師も変わります。</p>
+  <div class="warn">
+    <b>論文自身が示した意外な事実。</b>固定深度だけで比べると <b>$d = 1$ が最良</b>で、深度を伸ばすほど性能は落ちます。無関係な未来のやり取りが混ざってそのターン固有の証拠が薄まるためです。単純融合は最良の固定深度をわずかに上回るだけ。方向一致選択はその両方を超えます。つまり<b>複数の地平線は、選んで残したときだけ効く</b>というのがこの部品の主張で、深度を増やせば良くなるという話ではありません。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】強さだけを変える重み</h2>
+  <p class="lead">最後の部品は、得られた後知恵をどうやって強化学習の更新に混ぜるかです。ここに TurnSight の設計上いちばん大事な一点があります。</p>
+  <div class="mj">$$ \widehat{\delta}_{i,k} = \frac{\bar{\delta}_{i,k}^{*} - \mu_{q_i}^{\delta}}{\sigma_{q_i}^{\delta} + \epsilon} $$</div>
+  <p>$\mu$ と $\sigma$ は、同じ質問 $q_i$ から出た全ロールアウトの全有効ターン・全方策トークンにわたって計算する共有の平均と標準偏差です。ターン番号ごとに分けて正規化するのではなく、<b>質問単位で 1 組にまとめる</b>のがポイントで、質問固有のスケールのばらつきが消え、訓練を通して比較できる量になります。</p>
+  <div class="mj">$$ w_{i,t} = 1 + \epsilon_w \tanh\!\big(\mathrm{sign}(A_{i,t}^{\mathrm{base}})\, \widehat{\delta}_{i,k}\big) \;\in\; [\,1-\epsilon_w,\ 1+\epsilon_w\,] $$</div>
+  <div class="mj">$$ \widetilde{A}_{i,t} = A_{i,t}^{\mathrm{base}}\big[(1-\lambda) + \lambda w_{i,t}\big] $$</div>
+  <div class="key">
+    $\mathrm{sign}(A^{\mathrm{base}})$ が肝心です。後知恵の証拠を、強化学習がすでに決めている更新の向きに揃えます。後知恵と一致すれば $w > 1$ で更新を強め、食い違えば $w < 1$ で弱める。<b>$w$ は必ず正の数なので、アドバンテージの符号を絶対に変えません。</b>ミキサーのフェーダーであって、位相反転スイッチではない。だから追加の模倣目的関数が要らず、報酬の作り方にも依存せず、既存の方策勾配法にそのまま差し込めます。
+  </div>
+  <p>目的関数は GRPO の $\hat{A}$ を $\widetilde{A}$ に置き換えただけです。追加の損失項はなく、実験では KL 罰則も使っていません。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvW" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">$\lambda$ 混ぜ具合 <input id="wLam" type="range" min="0" max="100" value="50"><span id="wLamv">0.50</span></div>
+    <div class="slider">$\epsilon_w$ 上限幅 <input id="wEw" type="range" min="0" max="100" value="50"><span id="wEwv">0.50</span></div>
+    <div class="slider">$A^{\mathrm{base}}$ <input id="wAdv" type="range" min="-150" max="150" value="80"><span id="wAdvv">+0.80</span></div>
+  </div>
+  <div class="controls">
+    <button id="wShuffle">別の軌跡を引く</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>重み $w$ の曲線</span>
+    <span><span class="dot" style="background:#e0a03f"></span>介入なしの $w=1$</span>
+  </div>
+  <p class="rdout" id="wOut"></p>
+  <p>$\lambda = 0$ にすると全ターンが同じ長さに戻り、素の GRPO と一致します。$A^{\mathrm{base}}$ をマイナスにすると軌跡全体が「下げる」向きになり、そのとき後知恵が肯定的なターンは下げる力が弱まり、否定的なターンはより強く下げられます。これが<b>「軌跡としては失敗だったが、この 1 手は悪くなかった」を表現できている</b>ということです。どの設定でも棒の向きが揃ったままである点を確かめてください。</p>
+  <div class="key">
+    論文の最適値は $\lambda = 0.5$、$\epsilon_w = 0.5$ で、どちらも単峰性 (山が 1 つ) の感度を示します。$\lambda$ が大きすぎると局所的な手柄に寄りすぎて課題全体としての正しさへの誘導が弱まり、$\epsilon_w$ が大きすぎると不完全な教師と生徒の差に含まれるノイズまで増幅します。<b>どちらも「効かせすぎない」ことが条件</b>になっています。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【体験】実験結果</h2>
+  <p class="lead">評価は 3 つのベンチマークで、ドメイン内と ドメイン外の両方を見ています。訓練は FTRL の全 2,215 インスタンス、base チェックポイントから直接開始し、中間の教師ありファインチューニングは挟みません。</p>
+  <table>
+    <tr><th>項目</th><th>内容</th></tr>
+    <tr><td>ドメイン内評価</td><td>FTRL の 4 カテゴリ各 50 問 (Single-Hop / Parallel Single-Hop / Multi-Hop / Parallel Multi-Hop)。指標は Solve-P (発行した呼び出しのうち下位課題を解いた割合)、Solve-R (必要な下位課題のうち解いた割合)、その調和平均 Solve-F1</td></tr>
+    <tr><td>ドメイン外評価</td><td>BFCL の multi-turn 4 サブセット各 200 問 (Base / Missing Function / Missing Parameter / Long Context) と agentic 2 サブセット (Web Search 200, Memory 465)、ToolHop 995 問 (3,912 個の実行可能ツール、最終回答の正解率)</td></tr>
+    <tr><td>RL バックボーン</td><td>TurnSight と RLSD は RL アルゴリズム非依存なので、両方とも MatchTIR を土台にして比較</td></tr>
+  </table>
+  <div class="canvas-wrap">
+    <canvas id="cvRes" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="rsAll">全体平均</button>
+    <button class="ghost" id="rsIn">ドメイン内 (FTRL)</button>
+    <button class="ghost" id="rsBf">ドメイン外 (BFCL)</button>
+    <button class="ghost" id="rsHop">ドメイン外 (ToolHop)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#6b7a86"></span>RL なし</span>
+    <span><span class="dot" style="background:#0f5132"></span>TIR 向け RL 手法</span>
+    <span><span class="dot" style="background:#e0a03f"></span>自己蒸留系</span>
+    <span><span class="dot" style="background:#43b581"></span>TurnSight</span>
+  </div>
+  <p class="rdout" id="rsOut"></p>
+  <p><b>ドメイン外 (BFCL) を選ぶと、GRPO の 26.66 が RL なしの Vanilla 29.26 を下回っている</b>ことが分かります。訓練したデータの上では GRPO も伸びる (31.46 → 36.92) のに、見たことのないツール環境では素のモデルより悪い。結果だけを見て一律に手柄を配ると、その環境のパターンに寄った覚え方をしてしまい、転移しないということです。</p>
+  <h3>主結果 (Qwen3-8B)</h3>
+  <table>
+    <tr><th>手法</th><th class="num">FTRL 平均</th><th class="num">BFCL 平均</th><th class="num">ToolHop</th><th class="num">全体平均</th></tr>
+    <tr><td>Vanilla (RL なし)</td><td class="num">31.46</td><td class="num">29.26</td><td class="num">34.07</td><td class="num">31.60</td></tr>
+    <tr><td>GRPO</td><td class="num">36.92</td><td class="num">26.66</td><td class="num">29.21</td><td class="num">30.93</td></tr>
+    <tr><td>ToolRL</td><td class="num">38.82</td><td class="num">31.10</td><td class="num">35.68</td><td class="num">35.20</td></tr>
+    <tr><td>MatchTIR <span class="tag">従来最良</span></td><td class="num">42.78</td><td class="num">33.78</td><td class="num">40.54</td><td class="num">39.03</td></tr>
+    <tr><td>SDPO</td><td class="num">39.02</td><td class="num">25.94</td><td class="num">35.21</td><td class="num">33.39</td></tr>
+    <tr><td>RLSD</td><td class="num">38.14</td><td class="num">30.63</td><td class="num">38.29</td><td class="num">35.69</td></tr>
+    <tr><td>SDAR</td><td class="num">38.66</td><td class="num">34.09</td><td class="num">41.37</td><td class="num">38.04</td></tr>
+    <tr><td>SOD</td><td class="num">34.53</td><td class="num">28.54</td><td class="num">33.64</td><td class="num">32.23</td></tr>
+    <tr class="hl"><td>TurnSight</td><td class="num">46.92</td><td class="num">37.56</td><td class="num">41.58</td><td class="num">42.02</td></tr>
+  </table>
+  <p>伸びが大きいのは BFCL の Long Context (39.50 → 45.00) と Missing Parameter (37.00 → 42.00) という、<b>複数ターンにまたがって手柄を正しく帰属させる必要があるサブセット</b>です。Base は 57.00 → 59.50 に留まります。</p>
+  <h3>アブレーション (Qwen3-8B, FTRL)</h3>
+  <table>
+    <tr><th>構成</th><th class="num">Solve-P</th><th class="num">Solve-R</th><th class="num">Solve-F1</th><th class="num">平均</th><th class="num">差</th></tr>
+    <tr class="hl"><td>TurnSight (完全版)</td><td class="num">46.99</td><td class="num">50.71</td><td class="num">43.07</td><td class="num">46.92</td><td class="num">-</td></tr>
+    <tr><td>ターン単位の集約なし</td><td class="num">41.61</td><td class="num">47.53</td><td class="num">40.54</td><td class="num">43.23</td><td class="num">−3.69</td></tr>
+    <tr><td>グループ正規化なし</td><td class="num">42.84</td><td class="num">48.02</td><td class="num">40.09</td><td class="num">43.65</td><td class="num">−3.27</td></tr>
+    <tr><td>複数教師選択なし</td><td class="num">44.26</td><td class="num">50.24</td><td class="num">42.35</td><td class="num">45.62</td><td class="num">−1.30</td></tr>
+  </table>
+  <p>3 部品すべてが効いていますが、寄与は同じではありません。<b>ターン単位の集約が最大 (−3.69)</b>、次にグループ正規化 (−3.27)、複数教師選択は相対的に小さい (−1.30)。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>意外だった発見 3 つ</h2>
+  <p class="lead">論文の付随実験のうち、直感に反する 3 つを取り上げます。いずれも「もっと情報を、もっと先まで、もっと多く」が裏切られる形になっています。</p>
+  <h3>1. 情報を足すと悪くなる</h3>
+  <p>教師の文脈を 3 通りで比較しています。「ツール結果のみ」「ツール結果 + 正解答案」「正解答案のみ」。最良は<b>ツール結果のみ</b>で、正解答案を足すとかえって性能が落ちます。ツール結果は今のターンを評価するための状態整合な直接証拠であり、正解答案は軌跡全体の情報なのでターン単位の因果的な寄与を覆い隠してしまう、という解釈です。<b>特権情報は多いほど良いのではない。</b></p>
+  <h3>2. 先読みは短いほうが強い</h3>
+  <p>固定深度で比べると <b>1 ターン先読みが最良</b>で、2、3 と伸ばすと一貫して落ちます。長い先読みは無関係な未来のやり取りを持ち込み、いま採点したいターン固有の証拠を薄めるからです。それでも方向一致選択が両方を超えるので、複数の地平線には価値がある。ただし<b>選び取ったときだけ</b>です。</p>
+  <h3>3. 前半のターンほど効くが、全部やるのが最良</h3>
+  <p>自己蒸留を「最初の 5 ターンだけ」「最後の 5 ターンだけ」「全ターン」に限る比較では、全ターンが最良で、最初 5 ターン版を平均 2.36%、最後 5 ターン版を 3.88% 上回ります。最初 5 ターンが最後 5 ターンより良いのは、早い段階のツール選択がその後の状態を形作るからです。ただし全ターン監督の優位が明確なので、<b>信頼できる手柄配分には軌跡全体の後知恵が必要</b>ということになります。</p>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>批判的に読む</h2>
+  <p class="lead">論文をそのまま信じるのではなく、どこが確かでどこが確かでないかを分けておきます。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>「従来最良を 7.7% 改善」</td><td>相対値です。全体平均は 39.03 → 42.02 で、絶対では 2.99 ポイント。相対と絶対を混ぜて読まないほうがよい。また同一シードでの単発比較で、複数シードの分散や信頼区間は報告されていません</td></tr>
+    <tr><td>計算コスト</td><td>各ターンについて先読み深度 3 通りの教師 forward を追加で回しています。凍結モデルの forward だけで勾配は要らないとはいえ、1 バッチ 32 質問 × 16 軌跡 × 最大 10 ターンの規模では無視できない。<b>論文に実測の時間やメモリの比較は載っていません</b>。ここは自分で測るべき箇所です</td></tr>
+    <tr><td>教師が凍結された初期方策であること</td><td>教師は訓練開始時の重みで固定されます。訓練が進んで生徒が教師より強くなった後、後知恵の評価がどれだけ有効なままなのかは論じられていない。長い訓練では教師の更新や再初期化を検討する余地があります</td></tr>
+    <tr><td>MatchTIR を土台にしている点</td><td>TurnSight と RLSD は MatchTIR の上に載せた構成で評価されています。つまり報告された数値には、参照軌跡を使う MatchTIR のターン単位報酬が含まれる。<b>「参照軌跡なしで手柄配分できる」という主張は変調機構そのものについては正しいが、数値がその主張だけで得られたものではない</b>ことは押さえておきたい</td></tr>
+    <tr><td>ターン内の平均という選択</td><td>平均は最も素朴な集約です。書式トークンを重み 0 にする、意味のあるトークンだけ選ぶ、中央値を使うなどの代替は試されていません。5 節のデモで標準偏差を出しているのは、平均が代表値として妥当かを疑うためです</td></tr>
+    <tr><td>再現性</td><td>コードもデータ (FTRL・BFCL・ToolHop) も公開されているので追試の障壁は低い。A800 80GB × 8 枚が必要という点だけが実務上のハードルです</td></tr>
+  </table>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <div class="key">
+    TurnSight の中身は<b>「後から答え合わせをした自分の目で、1 回のツール利用ごとに良し悪しを採点し、それを強化学習の更新の<u>強さ</u>にだけ反映する」</b>という機構です。答え合わせの材料は正解答案ではなくエージェント自身が受け取った実行結果を使う。状態に必ず整合するからです。採点はトークンではなくターンでまとめる。1 回のツール利用が意思決定の最小単位だからです。そして更新の<b>向き</b>は決して変えない。だから探索を殺さず、既存の RL にそのまま差し込めます。
+  </div>
+  <h3>実務的に何が嬉しいのか</h3>
+  <p>新しく教師モデルを用意する必要がありません。使うのは訓練開始時に凍結した自分自身だけで、追加の学習も、人手で作った正解手順のアノテーションも要らない。ツール利用エージェントのアノテーションは 1 件あたりが重いので、ここが効きます。要するに<b>既存のツール利用 RL パイプラインに対する、後付け可能で符号安全なゲイン変調器</b>です。</p>
+  <h3>どこで使えるのか</h3>
+  <p>自前のツール群や MCP サーバ相手に RL 後訓練をしていて、ターン単位の正解軌跡を用意する予算がない場合が本命です。コーディングエージェント、検索エージェント、社内 API を叩く業務エージェントのように、<b>ツールの返り値が情報を持ち、かつ前の呼び出しが後の状態を変える環境</b>で効きます。逆に返り値がほぼ定型で後知恵にならない環境、ターン数が 2、3 で済む環境では旨味が薄い。</p>
+  <h3>汎用的な精度向上になる理由と、その限界</h3>
+  <p>採点の基準が環境に固有でないものに変わるからです。「最後に当たったか」ではなく「実行結果を見てその呼び出しは妥当だったか」を問うと、褒められる振る舞いは<b>エラーメッセージを読んで引数を直した、返ってきた ID を使って推測し直さなかった、同じ変換を二度呼ばなかった</b>といった<u>やり取りの作法</u>の側になります。作法はツールセットが変わっても持ち越せる。</p>
+  <p>ただし証拠の中身は偏っています。伸びが最大なのは Missing Parameter (+5.00) と Long Context (+5.50) で、どちらも作法が問われるサブセット。一方 Base は +2.50、新規ツール 3,912 個で多段合成させる ToolHop は <b>+1.04 しかありません</b>。つまり効いているのは「見たことのないツールでも正しく合成できる能力」ではなく、<b>うまくいかなかったときの立て直しが上手くなる</b>方向です。それが汎用的に見えるのは、実運用のツール環境では立て直しが必要な場面の比率が高いから、という理解が正確でしょう。</p>
+  <p class="fn">出典: Changle Qu, Sunhao Dai, Hengyi Cai, Yuqi Zhou, Xinran Chen, Simon, Jun Xu. "TurnSight: Turn-Level Hindsight Self-Distillation for Tool-Integrated Reasoning." arXiv:2608.04007v1 [cs.CL], 2026-08-04. License CC BY-NC-ND 4.0. コードは <a href="https://github.com/quchangle1/TurnSight">github.com/quchangle1/TurnSight</a>。<br>
+  本ページの表とグラフの数値は論文の Table 1 / Table 2 / Table 3 および本文の記述に基づきます。デモ内の $\delta$・重み・軌跡の値は<b>仕組みを体感するための合成値</b>であり、論文の実測値ではありません。第 8 節のグラフに出る数値のみが論文由来です。</p>
+</section>
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./paper-index.html" style="color:var(--g2)">← 論文理解シリーズの目次へ</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', ALT='#e0a03f', MUT='#6b7a86', DEEP='#0f5132';
+function sgn(x,n){n=(n===undefined)?2:n;return (x>=0?'+':'')+x.toFixed(n);}
+
+/* 共通: 中央基準の横棒 */
+function cbar(ct,cx,y,val,max,halfW,h){
+  ct.strokeStyle=GRID;ct.lineWidth=1;
+  ct.beginPath();ct.moveTo(cx,y-h/2-3);ct.lineTo(cx,y+h/2+3);ct.stroke();
+  const w=Math.min(Math.abs(val)/max,1)*halfW;
+  ct.fillStyle=(val>=0)?POS:NEG;
+  if(val>=0) ct.fillRect(cx,y-h/2,w,h); else ct.fillRect(cx-w,y-h/2,w,h);
+}
+
+/* ============ デモ1: 手柄の配分 ============ */
+(function(){
+  const cv=document.getElementById('cvCredit'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='grpo';
+  const TR=[
+   {n:'軌跡 A',r:'最終報酬 1.0',adv:0.80,t:[
+     ['geocode 呼び出し',1.0,'必要な地点 ID を最短で取得'],
+     ['news_search 呼び出し',-0.5,'天気に無関係な検索。無駄'],
+     ['forecast 呼び出し',0.9,'正しい ID で予報取得'],
+     ['最終回答',0.7,'単位変換して正答']]},
+   {n:'軌跡 B',r:'最終報酬 0.0',adv:-0.60,t:[
+     ['geocode 呼び出し',1.0,'ここは軌跡 A と同じで的確'],
+     ['forecast (引数欠落)',-1.0,'day を渡さず空振り'],
+     ['forecast 再試行',0.4,'直したが 1 ターン浪費'],
+     ['最終回答',-0.9,'華氏のまま答えて誤答']]},
+   {n:'軌跡 C',r:'最終報酬 0.5',adv:0.10,t:[
+     ['weather_by_city 呼出',0.6,'1 手で済ませた良い判断'],
+     ['convert 呼び出し',0.8,'単位変換に自分で気づいた'],
+     ['convert 再呼び出し',-0.7,'同じ変換を重複実行'],
+     ['最終回答',0.5,'正答だが冗長']]}
+  ];
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(mode==='grpo'?'GRPO: 軌跡 1 本のアドバンテージを全ターンに同じだけ配る'
+                             :'理想: 各ターンの本当の質に応じて配る',24,24);
+    const cx=470, halfW=300, top=52;
+    TR.forEach(function(tr,bi){
+      const by=top+bi*122;
+      ct.fillStyle=INK;ct.font='bold 13.5px sans-serif';ct.textAlign='left';
+      ct.fillText(tr.n,24,by+2);
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+      ct.fillText(tr.r+' / 軌跡アドバンテージ '+sgn(tr.adv),82,by+2);
+      tr.t.forEach(function(tn,k){
+        const y=by+22+k*22;
+        const v=(mode==='grpo')?tr.adv:(tn[1]*0.8);
+        cbar(ct,cx,y,v,1.0,halfW,14);
+        ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='right';
+        ct.fillText('t'+(k+1)+' '+tn[0],cx-halfW-8,y+4);
+        ct.fillStyle=(v>=0)?POS:NEG;ct.font='11.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(sgn(v),cx+halfW+10,y+4);
+      });
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(24,by+112);ct.lineTo(W-24,by+112);ct.stroke();
+    });
+    const bad=(mode==='grpo');
+    document.getElementById('crOut').textContent = bad
+      ? '軌跡 A の 4 ターンが同じ長さ。無駄だった news_search も的確な geocode と同じだけ強化される'
+      : '無駄な手には負の、良い手には正の力がかかる。この形を正解ラベルなしに作るのが目標';
+  }
+  document.getElementById('crGrpo').onclick=function(){mode='grpo';
+    this.classList.add('active');document.getElementById('crIdeal').classList.remove('active');draw();};
+  document.getElementById('crIdeal').onclick=function(){mode='ideal';
+    this.classList.add('active');document.getElementById('crGrpo').classList.remove('active');draw();};
+  draw();
+})();
+
+/* ============ デモ2: 後知恵で δ が動く ============ */
+(function(){
+  const cv=document.getElementById('cvGap'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const C={good:{call:'forecast({"location_id": "JP-13", "day": "tomorrow"})',
+                 obs:'{"t_max_f": 78.8, "unit": "F"}',
+                 note:'要求した情報がそのまま返っている',s:-1.42,t:-0.61},
+           bad:{call:'forecast({"location_name": "Tokyo"})',
+                obs:'{"error": "unknown argument location_name; required: location_id"}',
+                note:'引数名を間違えていて何も得られていない',s:-1.38,t:-2.55}};
+  let cs='good', show=false;
+  function box(x,y,w,h,col,title){
+    ct.fillStyle='rgba(255,255,255,0.04)';ct.fillRect(x,y,w,h);
+    ct.strokeStyle=col;ct.lineWidth=1.5;ct.strokeRect(x,y,w,h);
+    ct.fillStyle=col;ct.font='bold 12px sans-serif';ct.textAlign='left';
+    ct.fillText(title,x+12,y+19);
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const c=C[cs], d=show?(c.t-c.s):0;
+    box(24,16,W-48,58,SUBI,'turn 2 で生徒が出した出力 (これを採点する)');
+    ct.fillStyle=INK;ct.font='13px "SF Mono",Menlo,monospace';
+    ct.fillText(c.call,36,58);
+    box(24,86,W-48,60,show?ALT:MUT,'turn 2 の実行結果 = 後知恵ブロック H (d=1)');
+    ct.fillStyle=show?INK:MUT;ct.font='12.5px "SF Mono",Menlo,monospace';
+    ct.fillText(show?c.obs:'…… まだ教師に見せていない ……',36,124);
+    if(show){ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='right';
+      ct.fillText(c.note,W-36,105);}
+    /* logprob bars */
+    const bx=210, bw=W-bx-150, y1=192, y2=232, sc=bw/3.0;
+    ct.textAlign='right';ct.font='12.5px sans-serif';
+    ct.fillStyle=MUT;ct.fillText('生徒  π_θ',bx-12,y1+5);
+    ct.fillStyle=POS;ct.fillText('教師  π_ref',bx-12,y2+5);
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    ct.beginPath();ct.moveTo(bx,170);ct.lineTo(bx,252);ct.stroke();
+    ct.fillStyle=MUT;ct.fillRect(bx,y1-11,Math.abs(c.s)*sc,22);
+    const tv=show?c.t:c.s;
+    ct.fillStyle=POS;ct.fillRect(bx,y2-11,Math.abs(tv)*sc,22);
+    ct.textAlign='left';ct.font='12.5px "SF Mono",Menlo,monospace';
+    ct.fillStyle=INK;ct.fillText(c.s.toFixed(2),bx+Math.abs(c.s)*sc+8,y1+5);
+    ct.fillText(tv.toFixed(2),bx+Math.abs(tv)*sc+8,y2+5);
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='left';
+    ct.fillText('棒が長いほど log 確率が小さい (自信がない)',bx,158);
+    /* delta */
+    const cx=W/2;
+    ct.textAlign='center';ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('δ = log π_ref − log π_θ',cx,292);
+    ct.font='bold 30px "SF Mono",Menlo,monospace';
+    ct.fillStyle=(d>0)?POS:(d<0?NEG:MUT);
+    ct.fillText(sgn(d),cx,326);
+    cbar(ct,cx,352,d,2.0,300,14);
+    document.getElementById('gpOut').textContent = !show
+      ? '後知恵を与えていないので教師と生徒は同じ。差はゼロ'
+      : (d>0? '後知恵を見たら、この一手がもっともらしく見えてきた → 上げる力を強める'
+            : '後知恵を見たら、この一手は妥当でなかったと分かった → 上げる力を弱める');
+  }
+  document.getElementById('gpGood').onclick=function(){cs='good';
+    this.classList.add('active');document.getElementById('gpBad').classList.remove('active');draw();};
+  document.getElementById('gpBad').onclick=function(){cs='bad';
+    this.classList.add('active');document.getElementById('gpGood').classList.remove('active');draw();};
+  document.getElementById('gpToggle').onclick=function(){show=!show;draw();};
+  draw();
+})();
+
+/* ============ デモ3: トークン単位とターン集約 ============ */
+(function(){
+  const cv=document.getElementById('cvTok'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const TOK=[['まず',0],['地点',0],['ID',0],['を',1],['引く',0],
+    ['tool_call',1],['{',1],['"name"',1],[':',1],['"forecast"',0],
+    [',',1],['"args"',1],[':',1],['{',1],['"location_id"',0],
+    [':',1],['"JP-13"',0],[',',1],['"day"',0],['"tomorrow"',0],
+    ['}',1],['}',1],['/tool_call',1]];
+  let vals=[], mode='tok';
+  function gen(){
+    let base=0.35+Math.random()*0.5;
+    if(Math.random()<0.35) base=-base;
+    vals=TOK.map(function(tk){
+      const noise=(Math.random()*2-1)*(tk[1]?1.05:0.30);
+      return base*(tk[1]?0.15:1.0)+noise;
+    });
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const n=vals.length;
+    let sum=0;for(let i=0;i<n;i++)sum+=vals[i];
+    const mean=sum/n;
+    let sd=0;for(let i=0;i<n;i++)sd+=(vals[i]-mean)*(vals[i]-mean);sd=Math.sqrt(sd/n);
+    let pos=0;for(let i=0;i<n;i++){if(vals[i]>=0)pos++;}
+    const L=40,R=W-24,mid=150,amp=100,bw=(R-L)/n;
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    ct.beginPath();ct.moveTo(L-10,mid);ct.lineTo(R,mid);ct.stroke();
+    [-1.5,-0.75,0.75,1.5].forEach(function(g){
+      ct.beginPath();ct.moveTo(L-10,mid-g/1.6*amp);ct.lineTo(R,mid-g/1.6*amp);ct.stroke();
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='right';
+    ct.fillText('+1.5',L-14,mid-1.5/1.6*amp+4);
+    ct.fillText('0',L-14,mid+4);
+    ct.fillText('-1.5',L-14,mid+1.5/1.6*amp+4);
+    for(let i=0;i<n;i++){
+      const v=(mode==='tok')?vals[i]:mean;
+      const hh=Math.min(Math.abs(v)/1.6,1)*amp;
+      const x=L+i*bw+1.5;
+      ct.fillStyle=(v>=0)?POS:NEG;
+      if(v>=0) ct.fillRect(x,mid-hh,bw-3,hh); else ct.fillRect(x,mid,bw-3,hh);
+      ct.save();
+      ct.translate(x+bw/2,mid+amp+18);ct.rotate(-Math.PI/3);
+      ct.fillStyle=TOK[i][1]?MUT:SUBI;ct.font='10px "SF Mono",Menlo,monospace';ct.textAlign='right';
+      ct.fillText(TOK[i][0],0,0);
+      ct.restore();
+    }
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText(mode==='tok'
+      ? 'トークン単位: 同じ 1 回のツール呼び出しの中で向きが矛盾する'
+      : 'ターン集約: 平均した 1 本の値を全トークンが共有する',L,22);
+    ct.fillStyle=MUT;ct.font='11px sans-serif';
+    ct.fillText('灰色のラベルは書式トークン (意味を持たないのに δ が振れる)',L,H-14);
+    document.getElementById('tkOut').textContent=
+      'ターン平均 δ̄ = '+sgn(mean,3)+' / トークン間の標準偏差 = '+sd.toFixed(3)
+      +' / 符号の内訳 正 '+pos+' 個・負 '+(n-pos)+' 個';
+  }
+  document.getElementById('tkShuffle').onclick=function(){gen();draw();};
+  document.getElementById('tkTok').onclick=function(){mode='tok';
+    this.classList.add('active');document.getElementById('tkTurn').classList.remove('active');draw();};
+  document.getElementById('tkTurn').onclick=function(){mode='turn';
+    this.classList.add('active');document.getElementById('tkTok').classList.remove('active');draw();};
+  gen();draw();
+})();
+
+/* ============ デモ4: 3 人の教師 ============ */
+(function(){
+  const cv=document.getElementById('cvVote'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const ids=['vA','vB','vC'], labs=['即時の実行品質','中間','遅れて現れる影響'];
+  function draw(){
+    const v=ids.map(function(i){return document.getElementById(i).value/100;});
+    ids.forEach(function(i,k){document.getElementById(i+'v').textContent=sgn(v[k]);});
+    ct.clearRect(0,0,W,H);
+    const s=v.map(function(x){return x>=0?1:-1;});
+    const pos=s.filter(function(x){return x>0;}).length;
+    const maj=(pos>=2)?1:-1;
+    let pick=-1,best=-1;
+    for(let i=0;i<3;i++){if(s[i]===maj&&Math.abs(v[i])>best){best=Math.abs(v[i]);pick=i;}}
+    const mean=(v[0]+v[1]+v[2])/3;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('3 つの先読み深度が出す δ̄ と、その扱い',24,24);
+    const cx=330, halfW=230;
+    for(let i=0;i<3;i++){
+      const y=70+i*52;
+      cbar(ct,cx,y,v[i],0.30,halfW,20);
+      ct.fillStyle=(i===pick)?POS:SUBI;ct.font=(i===pick?'bold ':'')+'12.5px sans-serif';ct.textAlign='right';
+      ct.fillText('d = '+(i+1),cx-halfW-12,y-2);
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';
+      ct.fillText(labs[i],cx-halfW-12,y+12);
+      ct.textAlign='left';ct.font='12.5px "SF Mono",Menlo,monospace';
+      ct.fillStyle=(v[i]>=0)?POS:NEG;
+      ct.fillText(sgn(v[i]),cx+halfW+10,y+4);
+      ct.font='11px sans-serif';
+      if(i===pick){ct.fillStyle=POS;ct.fillText('◀ 採用',cx+halfW+58,y+4);}
+      else if(s[i]===maj){ct.fillStyle=MUT;ct.fillText('合議に一致 (弱い)',cx+halfW+58,y+4);}
+      else {ct.fillStyle=NEG;ct.fillText('合議と不一致で除外',cx+halfW+58,y+4);}
+    }
+    /* 下段: 2 つのまとめ方 */
+    const py=250,pw=(W-72)/2;
+    function panel(x,title,val,col,note){
+      ct.fillStyle='rgba(255,255,255,0.04)';ct.fillRect(x,py,pw,104);
+      ct.strokeStyle=col;ct.lineWidth=1.5;ct.strokeRect(x,py,pw,104);
+      ct.fillStyle=col;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+      ct.fillText(title,x+14,py+22);
+      ct.font='bold 27px "SF Mono",Menlo,monospace';ct.fillStyle=col;
+      ct.fillText(sgn(val,3),x+14,py+58);
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+      ct.fillText(note,x+14,py+84);
+    }
+    panel(24,'単純融合 (全部を平均)',mean,Math.abs(mean)<0.03?NEG:ALT,
+      Math.abs(mean)<0.03?'打ち消し合って信号がほぼ消えている':'残るが強い証拠は薄まる');
+    panel(48+pw,'方向一致選択 (TurnSight)',v[pick],POS,
+      '多数決 '+(maj>0?'正':'負')+' (賛成 '+(maj>0?pos:3-pos)+'/3) の中で最強の d = '+(pick+1));
+    document.getElementById('vOut').textContent=
+      '合議の向き = '+(maj>0?'+1':'-1')+' / 採用した教師 = d '+(pick+1)+' / 単純平均との差 = '+sgn(v[pick]-mean,3);
+  }
+  ids.forEach(function(i){document.getElementById(i).oninput=draw;});
+  draw();
+})();
+
+/* ============ デモ5: 重みと最終アドバンテージ ============ */
+(function(){
+  const cv=document.getElementById('cvW'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NAMES=['geocode 呼び出し','forecast 呼び出し','convert 呼び出し','最終回答'];
+  let raw=[];
+  function gen(){raw=[];for(let k=0;k<4;k++){raw.push([0,1,2].map(function(){return (Math.random()*2-1)*0.30;}));}}
+  function draw(){
+    const lam=document.getElementById('wLam').value/100,
+          ew=document.getElementById('wEw').value/100,
+          adv=document.getElementById('wAdv').value/100;
+    document.getElementById('wLamv').textContent=lam.toFixed(2);
+    document.getElementById('wEwv').textContent=ew.toFixed(2);
+    document.getElementById('wAdvv').textContent=sgn(adv);
+    ct.clearRect(0,0,W,H);
+    /* 左: w 曲線 */
+    const PL=58,PR=W/2-20,PT=44,PB=H-58;
+    const x0=-3,x1=3,y0=0,y1=2;
+    const sx=function(x){return PL+(x-x0)/(x1-x0)*(PR-PL);};
+    const sy=function(y){return PB-(y-y0)/(y1-y0)*(PB-PT);};
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('重み w の形',PL-20,26);
+    ct.fillStyle='rgba(67,181,129,0.10)';
+    ct.fillRect(sx(x0),sy(1+ew),sx(x1)-sx(x0),sy(1-ew)-sy(1+ew));
+    ct.strokeStyle=GRID;ct.lineWidth=1;
+    [0,0.5,1,1.5,2].forEach(function(g){
+      ct.beginPath();ct.moveTo(PL,sy(g));ct.lineTo(PR,sy(g));ct.stroke();
+      ct.fillStyle=SUBI;ct.font='10.5px sans-serif';ct.textAlign='right';
+      ct.fillText(g.toFixed(1),PL-8,sy(g)+4);
+    });
+    ct.strokeStyle='rgba(224,160,63,0.8)';ct.setLineDash([5,4]);
+    ct.beginPath();ct.moveTo(PL,sy(1));ct.lineTo(PR,sy(1));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=ALT;ct.font='10.5px sans-serif';ct.textAlign='left';
+    ct.fillText('w = 1',PR-42,sy(1)-6);
+    ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(sx(0),PT);ct.lineTo(sx(0),PB);ct.stroke();
+    ct.strokeStyle=POS;ct.lineWidth=3;ct.beginPath();
+    for(let i=0;i<=120;i++){
+      const x=x0+(x1-x0)*i/120, w=1+ew*Math.tanh((adv>=0?1:-1)*x);
+      if(i===0) ct.moveTo(sx(x),sy(w)); else ct.lineTo(sx(x),sy(w));
+    }
+    ct.stroke();
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('正規化後の後知恵 δ̂',(PL+PR)/2,PB+22);
+    ct.fillText('上限 '+(1+ew).toFixed(2)+' / 下限 '+(1-ew).toFixed(2),(PL+PR)/2,PB+40);
+    /* 右: 4 ターンの Ã */
+    const sel=[];
+    for(let k=0;k<4;k++){
+      const v=raw[k], s=v.map(function(x){return x>=0?1:-1;});
+      const pos=s.filter(function(x){return x>0;}).length, maj=(pos>=2)?1:-1;
+      let pick=-1,b=-1;
+      for(let i=0;i<3;i++){if(s[i]===maj&&Math.abs(v[i])>b){b=Math.abs(v[i]);pick=i;}}
+      sel.push({d:pick+1,val:v[pick]});
+    }
+    let m=0;for(let k=0;k<4;k++)m+=sel[k].val;m/=4;
+    let sd=0;for(let k=0;k<4;k++)sd+=(sel[k].val-m)*(sel[k].val-m);sd=Math.sqrt(sd/4);
+    const cx=W/2+230, halfW=150;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('4 ターンの最終アドバンテージ Ã',W/2+20,26);
+    for(let k=0;k<4;k++){
+      const y=76+k*66;
+      const dh=(sel[k].val-m)/(sd+1e-8);
+      const w=1+ew*Math.tanh((adv>=0?1:-1)*dh);
+      const A=adv*((1-lam)+lam*w);
+      cbar(ct,cx,y,A,1.6,halfW,18);
+      ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='left';
+      ct.fillText('turn '+(k+1)+' '+NAMES[k],W/2+20,y-16);
+      ct.fillStyle=MUT;ct.font='10.5px "SF Mono",Menlo,monospace';
+      ct.fillText('δ̂ '+sgn(dh)+'  w '+w.toFixed(3)+'  (d='+sel[k].d+')',W/2+20,y+26);
+      ct.fillStyle=(A>=0)?POS:NEG;ct.font='12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(sgn(A,3),cx+halfW+8,y+4);
+    }
+    document.getElementById('wOut').textContent=
+      '基底 A = '+sgn(adv)+' は全ターン共通。λ = '+lam.toFixed(2)+' で強さだけが動き、符号は'
+      +(adv>=0?'すべて正':'すべて負')+'のまま';
+  }
+  ['wLam','wEw','wAdv'].forEach(function(i){document.getElementById(i).oninput=draw;});
+  document.getElementById('wShuffle').onclick=function(){gen();draw();};
+  gen();draw();
+})();
+
+/* ============ デモ6: 実験結果 ============ */
+(function(){
+  const cv=document.getElementById('cvRes'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const D=[
+   {n:'Vanilla (RL なし)',all:31.60,ind:31.46,bf:29.26,hop:34.07,g:MUT},
+   {n:'GRPO',            all:30.93,ind:36.92,bf:26.66,hop:29.21,g:DEEP},
+   {n:'ToolRL',          all:35.20,ind:38.82,bf:31.10,hop:35.68,g:DEEP},
+   {n:'MatchTIR',        all:39.03,ind:42.78,bf:33.78,hop:40.54,g:DEEP},
+   {n:'SDPO',            all:33.39,ind:39.02,bf:25.94,hop:35.21,g:ALT},
+   {n:'RLSD',            all:35.69,ind:38.14,bf:30.63,hop:38.29,g:ALT},
+   {n:'SDAR',            all:38.04,ind:38.66,bf:34.09,hop:41.37,g:ALT},
+   {n:'SOD',             all:32.23,ind:34.53,bf:28.54,hop:33.64,g:ALT},
+   {n:'TurnSight',       all:42.02,ind:46.92,bf:37.56,hop:41.58,g:POS}
+  ];
+  const TT={all:'全体平均 (3 ベンチ)',ind:'FTRL ドメイン内 平均',bf:'BFCL ドメイン外 平均',hop:'ToolHop ドメイン外 正解率'};
+  let key='all';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    let mx=0;D.forEach(function(r){if(r[key]>mx)mx=r[key];});
+    mx*=1.1;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(TT[key]+' ・ Qwen3-8B',24,24);
+    const L=176,R=W-70;
+    /* Vanilla 基準線 */
+    const van=D[0][key];
+    const vx=L+van/mx*(R-L);
+    ct.strokeStyle='rgba(107,122,134,0.9)';ct.setLineDash([5,4]);ct.lineWidth=1.5;
+    ct.beginPath();ct.moveTo(vx,40);ct.lineTo(vx,H-24);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+    ct.fillText('RL なしの水準',vx,H-8);
+    D.forEach(function(r,i){
+      const y=54+i*40, v=r[key], bw=v/mx*(R-L);
+      ct.fillStyle=r.g;ct.fillRect(L,y,bw,22);
+      ct.fillStyle=(r.g===POS)?POS:SUBI;
+      ct.font=(r.g===POS?'bold ':'')+'12.5px sans-serif';ct.textAlign='right';
+      ct.fillText(r.n,L-12,y+16);
+      ct.fillStyle=INK;ct.font='12.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(v.toFixed(2),L+bw+8,y+16);
+      if(v<van){ct.fillStyle=NEG;ct.font='10.5px sans-serif';
+        ct.fillText('▼ RL なし以下',L+bw+56,y+16);}
+    });
+    const worse=D.filter(function(r){return r[key]<van;}).length;
+    document.getElementById('rsOut').textContent = (key==='bf')
+      ? 'GRPO は 26.66 で RL なしの 29.26 を下回る。結果報酬だけの最適化は未見のツール環境に転移しない'
+      : (key==='hop' ? 'ToolHop では TurnSight 41.58 と SDAR 41.37 の差はわずか。新規ツールでの多段合成はあまり伸びない'
+        : (key==='ind' ? 'ドメイン内では全 RL 手法が素モデルを超える。ここだけ見ると GRPO も成功に見える'
+          : 'RL なしの水準を下回る手法が '+worse+' 個ある。細かい手柄配分がないと転移が壊れる'));
+  }
+  const btn={all:'rsAll',ind:'rsIn',bf:'rsBf',hop:'rsHop'};
+  Object.keys(btn).forEach(function(k){
+    document.getElementById(btn[k]).onclick=function(){
+      key=k;Object.keys(btn).forEach(function(j){
+        document.getElementById(btn[j]).classList.toggle('active',j===k);});
+      draw();};
+  });
+  draw();
+})();
+</script>
+</body>
+</html>
