@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 29 章 契約で防げない失敗 — 規約</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 29 章</div>
+<h1>第 29 章 契約で防げない失敗 — 規約</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 26 から 28 章までの契約 (宣言 + 測定 + 重みダイジェスト) を実際に走らせたら、
+  それでも捕まらない失敗が 2 つ出た。1 つは dtype (数値表現) が明示的に落ちる話、もう 1 つは
+  <b>「簡潔な指示の次トークンが答えである」という読み出しの規約そのものが壊れて、精度がほぼ乱択の床まで落ちる</b>
+  話で、これは重みダイジェストが一致していても捕まらない。契約に第 3 の category が要る。
+</div>
+
+<h2>1. コードを実際に走らせて初めて出た、2 つの失敗</h2>
+
+<p>第 26 から 28 章までの検討は、設定ファイルと残差の幾何から導いた契約だった。実際に J の構築を
+第 2・第 3 のモデルで走らせると、その契約のどの項目にも書かれていない失敗が 2 つ出た。
+性質は正反対である。</p>
+
+<h3>失敗 1: 大声で落ちる、しかも何週間も動いていたコードで</h3>
+
+<p>J の構築は残差を離れるところで <code>epsilon * v</code> を加える。箱の FP8 環境では活性が
+float32 に脱量子化されて渡ってくるので float32 の摂動がそのまま足せる。bf16 のモデルでは残差が
+bf16 のままで、次の行列積が型の不一致を拒む —
+<code>expected mat1 and mat2 to have the same dtype, but got: float != c10::BFloat16</code>。
+<b>手法そのものは無関係</b>で、壊れたのは<b>実装</b>が箱の数値表現について暗黙に置いていた前提だった。
+どの宣言にもレビューにも、探す理由がなかった前提である。</p>
+
+<h3>失敗 2: 静かに落ちる、しかも一度は数字として発表されていた</h3>
+
+<p>答えの文字は、最後のプロンプト位置の次トークンから読む —「選択肢の文字だけで答えよ」という
+指示に従うモデルなら正しい方法である。<code>empero-ai/Qwen3.8-9B-Distill</code> は兄弟モデルと
+<code>model_type</code>・d_model・層数・語彙サイズ・<code>len(tokenizer)</code>・tied フラグ・dtype・
+attention の周期まで一致しているにもかかわらず、この読み出しで<b>精度 0.0899</b> —
+10 択の乱択の床 0.10 とほぼ同じだった。</p>
+
+<div class="flag">
+  <b>ラベルはノイズだった</b>
+  この状態でゲートの比較を走らせれば、2 つのノイズの並びを比べて数字を報告することになる。
+  第 26〜28 章の契約のどの項目も<b>この失敗を止められない</b> — モデルの形は正しく、dtype も正しく、
+  トークナイザの長さも正しく、そして重みダイジェストも判定器が対象としていたモデルのものと一致していたはずである。
+</div>
+
+<h2>2. 契約に足す第 3 の category: 規約</h2>
+
+<p>読み出しの規約 (「答えは次トークンに出る」) はモデルのフィールドではなく、重みから測定できる定数でもない。
+それは<b>指示にどう従うかについての仮定</b>であり、ヤコビアンと同じように、モデルを跨いでは移らない。
+マニフェストにはこれを検査する項目を書けず、ダイジェストもこれにライセンスを与えられない。</p>
+
+<table>
+<tr><th>category</th><th>例</th><th>検査できるか</th></tr>
+<tr><td>宣言</td><td>d_model、層数、トークナイザのダイジェスト</td><td class="ok">受け入れ時に比較できる</td></tr>
+<tr><td>測定</td><td>線形の振幅、較正した層</td><td>ダイジェスト一致がライセンスになる (第 28 章)</td></tr>
+<tr class="hl"><td><b>規約</b></td><td><b>「次トークンが答え」という読み出しの前提</b></td><td class="ng"><b>マニフェストにも書けず、ダイジェストでも保証できない</b></td></tr>
+</table>
+
+<h2>3. 捕まえられるのは、買い手側の基準率だけ</h2>
+
+<div class="good">
+  <b>唯一の防御線: 判定器を使う前に、買い手自身の項目で基準率を測る</b>
+  規約が壊れているかどうかを検査する方法は、<b>判定器の出力をまだ使わない状態で、買い手のデータに
+  対する基準率を測ること</b>だけである。これはマニフェストに書ける宣言ではなく、
+  <b>ランタイムが毎回実行する測定</b>である。この床は 10 択のタスクに対して 0.20 として
+  ハーネスに事前登録されており、下回ったら判定を報告する代わりに拒否するようにした。
+</div>
+
+<h2>この章が導く結論</h2>
+
+<p><b>買った判定器を安全にするものの一部は、その判定器と一緒には売れない。</b>契約 (宣言 + 測定 +
+ダイジェスト) は売り手が渡せるものの上限であり、規約の健全性は<b>買い手が自分の環境で測るしかない</b>。
+これは判定器の売買可能性そのものに関わる制約で、次の章以降 (業界の実装、売れる形の条件) に直結する。</p>
+
+<footer>
+第 28 章 &larr; <a href="gateway-28-undeclarable-constants.html">宣言できない定数がある</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-30-foreign-judge.html">第 30 章 他モデルの判定器でも門は動く</a>
+</footer>
+</div>
+</body>
+</html>

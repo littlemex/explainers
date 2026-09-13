@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 30 章 他モデルの判定器でも門は動く</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.bar{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:13.5px}
+.bar span.nm{width:150px;text-align:right;color:var(--ink2)}
+.bar div.tr{flex:1;height:20px;background:#eef4f0;border-radius:4px;position:relative;overflow:hidden}
+.bar div.fl{height:100%;border-radius:4px;background:var(--g2)}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 30 章</div>
+<h1>第 30 章 他モデルの判定器でも門は動く</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 27 章は「モデル間の残差はモデル内の問い同士より遠い」という<b>幾何</b>から
+  「重みダイジェストで拒否するしかない」という<b>挙動の結論</b>に飛んでいた。実際に振る舞いを測ると、
+  <b>他モデル用に作った判定器でも、判定器なしより良い</b>。差は有意でなく、第 27 章の結論の一部を撤回する。
+</div>
+
+<h2>1. 幾何から挙動へ、測っていなかった一段</h2>
+
+<p>第 27 章は「同じプロンプトに対するモデル間のコサイン (0.56〜0.61) が、同じモデル内の違うプロンプト
+同士のコサイン (0.88〜0.90) より低い」ことを実測し、そこから「持ち越した判定器は誤った空間を読むので
+契約は重みダイジェストで拒否するしかない」と結論した。これは<b>幾何から挙動への推論</b>で、
+挙動そのものは測っていなかった。ここでそれを測る。</p>
+
+<h2>2. 実測: 他モデル用の判定器でも、判定器なしより良い</h2>
+
+<p>2 モデル (A, B) を 1 プロセスに同居させ、同じ 712 項目で <code>J</code> を両方に L18・α = 0.2・
+256 方向で構築する。4 つの J-lens 特徴は<b>常に B の残差</b>から計算し、ロジスティック回帰の頭は
+<b>常に B の結果</b>で適合する。違うのは <code>J</code> がどちらのモデルから来たかだけである。</p>
+
+<table>
+<tr><th>門</th><th class="n">AUC</th><th class="n">通過分の精度 (50% 通過)</th></tr>
+<tr class="hl"><td><b>native</b> — B の J で B をゲートする</td><td class="n">0.6206</td><td class="n"><b>0.7529</b></td></tr>
+<tr><td><b>foreign</b> — A の J で B をゲートする</td><td class="n">0.5740</td><td class="n"><b>0.7176</b></td></tr>
+<tr><td>門なし — 全項目通過</td><td class="n">—</td><td class="n">0.6667</td></tr>
+</table>
+
+<div class="bar"><span class="nm">native</span><div class="tr"><div class="fl" style="width:75.3%"></div></div><span>0.7529</span></div>
+<div class="bar"><span class="nm">foreign</span><div class="tr"><div class="fl" style="width:71.8%;background:#8a5a12"></div></div><span>0.7176</span></div>
+<div class="bar"><span class="nm">門なし</span><div class="tr"><div class="fl" style="width:66.7%;background:#9aa"></div></div><span>0.6667</span></div>
+
+<div class="flag">
+  <b>native − foreign = +0.0353、95% 区間 [−0.0294, +0.0824] — FAIL</b>
+  事前に決めた基準 0.03 の大きさは満たすが、356 件の保留データでは区間がゼロを跨ぐので
+  <b>「持ち越した判定器は劣る」という主張は成立しない</b>。一方で foreign は門なしより
+  <b>+0.0509</b> 良い — <b>他モデル用に作った判定器でも、何もしないより良い。</b>
+</div>
+
+<h2>3. 生き残る理由は、型の穴と同じ 1 つの事実の裏返し</h2>
+
+<p>幾何は確かに確認されている — <code>J_A</code> と <code>J_B</code> を平坦化したコサインは
+<b>0.5744</b> で、これは残差そのもののコサインとほぼ一致する。それでも挙動が大きく壊れないのは、
+<b>最終段のロジスティック回帰の頭を B のデータで再適合しているから</b>である。第 26 章は
+「4 つのスカラーに縮約すると出自を止める仕組みがない」ことを型安全性の穴として指摘したが、
+<b>その同じ狭さが、ここでは間違ったヤコビアンのコストの大半を吸収する</b> — 1 つの事実に
+2 つの結果があり、これまでは警告に聞こえる方だけを書いていた。</p>
+
+<h2>4. 設計への含意: 拒否よりも「宣言して再測定」</h2>
+
+<div class="good">
+  <b>ダイジェスト不一致で大声に拒否するのは、正しい選択の一つであっても唯一の選択ではない</b>
+  実測が支持するのは、より測定に忠実な設計である —
+  <b>不一致を宣言として認めたうえで受け入れ、買い手自身の項目で基準率とゲートの上乗せ (増分) を
+  再測定してから判定器の出力を信用する</b>。第 29 章はランタイムが基準率を測る必要があると示したが、
+  ここではもう一段深く、<b>増分そのものも測る必要がある</b> — ダイジェストの不一致が実際に動かす量は
+  この増分であり、その大きさは宣言だけからは予測できないほど小さい。
+</div>
+
+<h2>5. 撤回: 第 27 章の結論をどこまで残すか</h2>
+
+<div class="note">
+  <b>私が明確に間違えていたこと</b>
+  第 27 章の見出し — 「持ち越した判定器は無関係な問い同士より遠い空間を読むので、契約は重みダイジェストで
+  拒否するしかない」— は、<b>本物の測定を使って、その測定が支えない挙動の結論に飛んでいた</b>。
+  ダイジェストは第 28 章が定めた<b>測定された定数のライセンス</b>としては今も正しい鍵である
+  (そこには再適合による吸収が効かない)。だが<b>判定器全体を拒否する根拠としては確立していない</b>。
+</div>
+
+<footer>
+第 29 章 &larr; <a href="gateway-29-convention-failure.html">契約で防げない失敗 — 規約</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-31-industry-epp.html">第 31 章 業界はどこで判定を外に出しているか</a>
+</footer>
+</div>
+</body>
+</html>

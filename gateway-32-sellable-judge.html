@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 32 章 黒箱の判定器を売れる形にするには何が必要か</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+pre{background:#0f2119;color:#dcefe4;padding:14px 16px;border-radius:7px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 32 章</div>
+<h1>第 32 章 黒箱の判定器を売れる形にするには何が必要か</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 26 から 30 章までは「自分の判定器を他モデルに当てる」話だった。ここでは視点を変え、
+  <b>判定器そのものを他者に売る (あるいは他者から買う) には何が要るか</b>を、パネル形式の検討で整理する。
+  <b>WASM だけではロジックを隠せない</b>し、暗号的な相互秘匿はホットパスに重すぎる。
+  代わりに「<b>何も呼べない黒箱</b>」という設計で、難所の多くが消える。
+</div>
+
+<h2>1. 売買可能性の 4 条件</h2>
+
+<table>
+<tr><th>条件</th><th>内容</th></tr>
+<tr><td>記述できる</td><td>何を判定する装置か、対象モデルは何かを契約文として書ける (第 26〜29 章)</td></tr>
+<tr><td>買い手が自分のデータで測れる</td><td>受け入れ検査として、買い手の項目集合で基準率・増分を測れる (第 29・30 章)</td></tr>
+<tr><td>隔離できる</td><td>判定器の実行が、買い手の他のワークロードや秘密に触れない</td></tr>
+<tr><td>適合を機械が判定できる</td><td>「このモデルに対して有効か」を人間の判断なしに検査できる (重みダイジェスト、第 28 章)</td></tr>
+</table>
+
+<p>ここまでの章がすでに前半 2 つ (記述・測定可能性) の骨格を作っている。ここからは<b>隔離</b>が本題になる —
+判定器のロジックを買い手から隠したまま実行させることは、技術的に何を意味するのか。</p>
+
+<h2>2. WASM だけではロジックを隠せない</h2>
+
+<div class="flag">
+  <b>汎用の virtual black-box obfuscation は不可能である (Barak et al.)</b>
+  WebAssembly のようなサンドボックスは実行環境を隔離するが、<b>プログラムのロジックそのものを
+  数学的に隠す</b>ことはできない。Barak らの結果は、任意のプログラムを入出力の振る舞いだけから
+  区別不能にする汎用の難読化が<b>存在しないこと</b>を証明している。バイナリを配布する形の判定器は、
+  十分な労力をかければリバースエンジニアリングされる可能性が常に残る。
+</div>
+
+<h2>3. 相互秘匿の第一候補: TEE、ただし信頼の種類が変わる取引</h2>
+
+<p>Trusted Execution Environment (TEE、ハードウェアが保護する実行領域) は、判定器のロジックを
+買い手の OS やハイパーバイザからも隔離できる現実的な候補である。ただしこれは
+<b>数学的な秘匿ではなく、ハードウェア・ファームウェア・attestation (実行環境が本当にその TEE であることの
+証明) を信頼するという、別の種類の取引</b>である。攻撃面は「暗号を破る」から
+「ハードウェアの実装やサプライチェーンを信頼するかどうか」に移る。</p>
+
+<h2>4. 買う前の完全な開示は、そもそも情報のパラドックスに当たる</h2>
+
+<div class="note">
+  <b>Arrow の情報パラドックス</b>
+  買い手が判定器の価値を完全に評価するには、その中身 (どう判定するか) を知る必要がある。しかし
+  それを知ってしまえば、もはや買う必要がない。<b>価値を確認できることと、価値を保護できることは
+  原理的に両立しない</b> — これは判定器に限らず、情報財の売買一般が持つ構造である。
+  ZKP (零知識証明) や MPC (秘密計算)、FHE (完全同型暗号) はこの緊張を数学的に緩和できるが、
+  <b>ミリ秒単位のホットパス (推論のたびに呼ばれる経路) には計算コストが過剰</b>である。
+</div>
+
+<h2>5. 「黒箱は何も呼べない」という設計</h2>
+
+<p>秘匿を数学に求めるのではなく、<b>判定器が持てる能力そのものを絞る</b>方向で難所を消す。
+判定器は外部の何も直接呼べず、代わりに「型 X の観測が欲しい」と<b>要求</b>するだけで、
+実際にその観測を取得するかどうか、どう取得するかはランタイム側が決め、値か「取得不能」を返す。</p>
+
+<table>
+<tr><th>判定器が持つ能力</th><th>内容</th></tr>
+<tr><td><code>read_observation</code></td><td>指定した型の観測 (残差、生成の長さなど) を要求する</td></tr>
+<tr><td><code>read_candidate_snapshot</code></td><td>ルーティング候補の状態のスナップショットを要求する</td></tr>
+<tr><td><code>read_budget_snapshot</code></td><td>残り予算のスナップショットを要求する</td></tr>
+<tr><td><code>return_decision</code></td><td>判定結果を返す。これ以外に外部へ出力する経路を持たない</td></tr>
+</table>
+
+<div class="good">
+  <b>これで消える難所が 4 つ</b>
+  時計や価格を判定器が自由に読めると、それ自体が持ち出しチャネルになりうる (第 33 章で詳述)。
+  <b>時計も価格もバージョンつきの入力として渡す</b>ことで、判定器は外の世界を覗く手段を持たない。
+  金額の上限は<b>呼び出す前には強制できない</b> (呼んだ後にしか使用量が分からない) ので、
+  予算は<b>呼び出し回数・トークン数・壁時計時間</b>で強制する — 事前の $ 上限という発想そのものを捨てる。
+</div>
+
+<h2>6. 売る単位は「判定器族」であって「方策」ではない</h2>
+
+<p>第 28 章が確立したとおり、判定器が持つ測定済みの定数は特定の重みに対してのみ有効である。
+だから誠実に売買できる単位は<b>特定の重み (あるいはその近傍) に対する判定器の一族</b>であり、
+「この方策に従え」という個々の意思決定ではない。買い手は判定器を受け入れ検査 (第 29・30 章の基準率と
+増分の測定) にかけたうえで、自分の環境でどう使うかを決める。</p>
+
+<footer>
+第 31 章 &larr; <a href="gateway-31-industry-epp.html">業界はどこで判定を外に出しているか</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-33-probe-pitfalls.html">第 33 章 API をプローブに使うときの罠</a>
+</footer>
+</div>
+</body>
+</html>

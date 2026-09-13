@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 26 章 形の検査は半分しか捕まえない</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 26 章</div>
+<h1>第 26 章 形の検査は半分しか捕まえない</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  ここから話題が変わる。<b>J-lens という判定器を、他のモデルに転用したらどうなるか</b>という
+  相互運用性の問いに入る。作った箱 (Qwen3.6-35B-A3B FP8) の判定器を 2 つの他モデルに当てたら、
+  6 要素のうち<b>2 つは明示的に落ち、3 から 4 つは黙って間違える</b>。形が同じことは安全の証明にならない。
+</div>
+
+<h2>1. 契約が要る理由を、契約を作る前に確かめる</h2>
+
+<p>判定器 (箱の残差を読んで難易度を推定する仕組み) を別のモデルにそのまま向けたとき、何が起きるかを
+先に知っておく必要がある。比較のため 2 つのモデルを選ぶ。<code>Ornith-1.5-9B</code> は箱と同じ
+アーキテクチャ系 (<code>qwen3_5</code>) で、語彙サイズ 248,320 まで箱と完全に一致する。
+<code>gemma-4-12B-it</code> は形のすべての軸で箱と異なる。</p>
+
+<table>
+<tr><th></th><th>箱: Qwen3.6-35B-A3B</th><th>Ornith-1.5-9B</th><th>gemma-4-12B-it</th></tr>
+<tr><td>d_model (隠れ層の次元)</td><td>2048</td><td class="ng"><b>4096</b></td><td class="ng"><b>3840</b></td></tr>
+<tr><td>層数</td><td>40</td><td class="ng"><b>32</b></td><td class="ng"><b>48</b></td></tr>
+<tr><td>語彙サイズ</td><td>248320</td><td class="ok"><b>248320 (一致)</b></td><td class="ng">262144</td></tr>
+<tr><td>埋め込みの共有 (tied)</td><td>なし</td><td>なし</td><td class="ng"><b>あり</b></td></tr>
+<tr><td>dtype (数値表現)</td><td><b>FP8</b></td><td>bf16</td><td>bf16</td></tr>
+</table>
+
+<h2>2. 判定器が持っている部品を全部並べ、それぞれの先での挙動を見る</h2>
+
+<table>
+<tr><th>部品</th><th>Ornith で</th><th>gemma-4 で</th></tr>
+<tr><td>残差に J を適用する</td><td>大声で失敗</td><td>大声で失敗</td></tr>
+<tr><td>層インデックス 32 を使う</td><td>大声で失敗 (層が 32 しかない)</td><td class="ng"><b>黙って間違う</b> (存在するが深さの 67%、意図は 80%)</td></tr>
+<tr><td>verbaliser のトークン id</td><td class="ng"><b>黙って間違う</b></td><td>大声または黙って失敗</td></tr>
+<tr><td><code>W_U</code> (読み出し行列)</td><td>形状が合わず失敗</td><td class="ng"><b>黙って間違う</b> (tied なので別の写像になる)</td></tr>
+<tr><td>4 特徴に適合させたロジスティック回帰</td><td class="ng"><b>黙って間違う</b></td><td class="ng"><b>黙って間違う</b></td></tr>
+<tr><td>振幅 α (線形近似が保つ範囲)</td><td class="ng"><b>黙って間違う</b></td><td class="ng"><b>黙って間違う</b></td></tr>
+<tr class="hl"><td><b>合計</b></td><td>大声 2 / <b>黙って 3</b></td><td>大声 2 / <b>黙って 4</b></td></tr>
+</table>
+
+<div class="flag">
+  <b>形だけの契約は、判定器を走らせて無音でゲートを悪化させる</b>
+  6 要素のうち 3 から 4 つが黙って間違う。特に予測しにくかったのが 2 つある。
+</div>
+
+<ul>
+<li><b>語彙サイズの一致は安全ではない。</b>Ornith は箱と同じ系で語彙サイズも完全一致するが、
+それは「トークン id 12345 が同じ文字列を指す」ことを何も保証しない。<b>トークナイザのハッシュ値</b>が
+必要で、「vocab_size が一致」と書くだけでは足りない。</li>
+<li><b>縮約は型の安全性を破壊する。</b>最終的な判定器は 4 つのスカラーに適合したロジスティック回帰
+でしかないので、その 4 つの数字がどのモデルの残差から来たかを止める仕組みがどこにもない。
+どんなモデルの残差から出した 4 つの数字でも受理されてしまう —
+<b>パイプラインが縮約すればするほど、型システムは守れなくなる</b>。これは「狭い interface の方が安全」
+という直感の逆である。</li>
+</ul>
+
+<h2>3. 契約が最低限持つべきもの</h2>
+
+<p>上の列挙から逆算すると、すべての行を大声で失敗させる最小の契約は次の 5 つになる —
+推測ではなく、実際に何が壊れるかから導いたものである。</p>
+
+<table>
+<tr><th>契約に含めるもの</th><th>理由</th></tr>
+<tr><td>モデル同一性のハッシュ</td><td>形が同じでも重みが違う (第 27・28 章で決着する)</td></tr>
+<tr><td>d_model</td><td>読み出し行列の形状が変わる</td></tr>
+<tr><td>層数</td><td>深さの意図が変わる (32 は Ornith では全深さ)</td></tr>
+<tr><td><b>トークナイザのハッシュ</b> (語彙サイズではなく)</td><td>語彙サイズが一致しても文字列の対応は保証されない</td></tr>
+<tr><td>tied embedding フラグ</td><td>読み出しの写像そのものが変わる</td></tr>
+<tr><td>判定器が較正された dtype</td><td>振幅の安全域が dtype に依存する (第 28 章)</td></tr>
+</table>
+
+<h2>4. まだ確定していない予測</h2>
+
+<p>この時点で 1 つだけ、まだ検証していない予測がある。振幅を小さくしたときに崩れる床
+(α = 0.001 でコサイン −0.0026、応答のノルムが発散する) が、<b>箱の FP8 量子化に固有の性質</b>か、
+それとも別の理由かである。Ornith は同じ系の bf16 なので、量子化が原因なら Ornith ではこの床が
+もっと下まで伸びるはずである。<b>この予測は次章 (F57・F58) の実測で撤回される。</b></p>
+
+<footer>
+第 25 章 &larr; <a href="gateway-25-steering-no-info.html">座標を動かしても情報は増えない</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-27-declarable-fields.html">第 27 章 宣言できるフィールドが全部一致する 2 モデル</a>
+</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 31 章 業界はどこで判定を外に出しているか</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-top:8px}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 31 章</div>
+<h1>第 31 章 業界はどこで判定を外に出しているか</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  ここまでの判定器 (J-lens ゲート) を、どこに配線するかを考える前に、業界がすでに<b>判定をゲートウェイの
+  外に出す</b>ためにどんな型を使っているかを実コードから確定させる。Envoy の ext_proc と
+  Gateway API Inference Extension (GIE) の EndpointPicker (EPP) は<b>エンドポイント単位の状態</b>しか
+  扱えず、<b>ここまでの門が読む「prefill 後の残差」は、EPP が呼ばれる時点にはまだ存在しない</b>。
+</div>
+
+<h2>1. 実コードから確定した型</h2>
+
+<p>Envoy の <code>ext_proc</code> (external processing、外部プロセスにリクエスト処理を委譲する拡張点)
+と、その上に立つ Kubernetes Gateway API Inference Extension (GIE) の EndpointPicker (EPP) は、
+LLM サービングのルーティングを実際に外部化している数少ない業界標準である。EPP の拡張点を型として
+書き出すとこうなる。</p>
+
+<table>
+<tr><th>要素</th><th>型・内容</th></tr>
+<tr><td>入力</td><td><code>Request{RequestId, TargetModel, Prompt, Headers}</code> と、候補となる
+<b>エンドポイントの一覧</b></td></tr>
+<tr><td>拡張点 1</td><td><code>Filter</code> — 候補を絞り込む</td></tr>
+<tr><td>拡張点 2</td><td><code>Scorer</code> — 各エンドポイントを <code>[0, 1]</code> に正規化して採点する。
+重みは設定側が持つ</td></tr>
+<tr><td>拡張点 3</td><td><code>Picker</code> と <code>ProfileHandler</code> — 採点を集約して 1 つを選ぶ</td></tr>
+<tr><td>出力</td><td><code>PickResult{Endpoint, Fallbacks, MutatedBody, ExtraHeaders}</code></td></tr>
+<tr><td>呼ばれるフェーズ</td><td><code>ProcessingRequest_RequestHeaders</code> / <code>_RequestBody</code></td></tr>
+<tr><td>宛先の伝達</td><td>選ばれた Pod の IP を <code>x-gateway-destination-endpoint</code> ヘッダに書く</td></tr>
+</table>
+
+<p>既存の scorer は <code>queue-scorer</code> (待ち行列の長さ)、<code>kv-cache-utilization-scorer</code>
+(KV キャッシュの使用率)、<code>prefix-cache-scorer</code> (プレフィックスキャッシュのヒット予測)、
+<code>lora-affinity-scorer</code> (LoRA アダプタとの適合) の 4 つで、<b>すべてがエンドポイント単位</b>
+(どの Pod/レプリカが空いているか、キャッシュを持っているか) の量である。</p>
+
+<div class="demo">
+  <h3>図: EPP は誰の「前」に立っているか</h3>
+  <svg viewBox="0 0 960 220" role="img" aria-label="EPP の位置とゲートの位置">
+  <g font-size="12">
+    <rect x="20" y="70" width="160" height="60" rx="8" fill="#fff" stroke="#d5e3da"/>
+    <text x="100" y="95" text-anchor="middle" font-size="12.5">クライアント</text>
+    <text x="100" y="112" text-anchor="middle" font-size="10.5" fill="#3c5a4c">プロンプトのみ</text>
+    <path d="M180 100 H236" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a)"/>
+
+    <rect x="240" y="60" width="200" height="80" rx="9" fill="#fdf3e2" stroke="#8a5a12" stroke-width="2.5"/>
+    <text x="340" y="84" text-anchor="middle" font-size="13" font-weight="700" fill="#8a5a12">EPP (Scorer/Picker)</text>
+    <text x="340" y="102" text-anchor="middle" font-size="10.5" fill="#8a5a12">エンドポイント単位の状態のみ</text>
+    <text x="340" y="118" text-anchor="middle" font-size="10.5" fill="#8a5a12">= まだ推論していない</text>
+    <path d="M440 100 H496" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a)"/>
+
+    <rect x="500" y="30" width="200" height="140" rx="9" fill="#f6faf7" stroke="#2f9e63" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="600" y="52" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f4a2e">エンジン (vLLM 等)</text>
+    <rect x="518" y="64" width="164" height="34" rx="6" fill="#fff" stroke="#d5e3da"/>
+    <text x="600" y="86" text-anchor="middle" font-size="11.5">prefill (文脈を読む)</text>
+    <rect x="518" y="104" width="164" height="34" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+    <text x="600" y="126" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0f4a2e">L32 の残差 ← 第 23 章の門</text>
+    <text x="600" y="150" text-anchor="middle" font-size="10.5" fill="#3c5a4c">ここでしか観測できない</text>
+
+    <rect x="740" y="70" width="200" height="60" rx="8" fill="#fff" stroke="#d5e3da"/>
+    <text x="840" y="95" text-anchor="middle" font-size="12.5">decode (生成)</text>
+    <text x="840" y="112" text-anchor="middle" font-size="10.5" fill="#3c5a4c">第 2 段はここで測る</text>
+    <path d="M700 100 H736" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a)"/>
+  </g>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+    <path d="M0 0 L8 4 L0 8 z" fill="#3c5a4c"/></marker></defs>
+  </svg>
+  <div class="legend"><span>EPP はエンジンより手前で呼ばれるので、prefill 後の残差はまだ存在しない。</span></div>
+</div>
+
+<h2>2. 決定的な食い違い</h2>
+
+<div class="flag">
+  <b>EPP はエンジンの上流で呼ばれるので、第 23 章の門が読む量はその時点に存在しない</b>
+  第 22〜25 章の門はどれも<b>prefill を終えたモデルの内部残差</b>を読む。EPP の拡張点が呼ばれるのは
+  リクエストのヘッダ・本文を見た直後で、まだどのエンジンにも到達していない。
+  つまり<b>この門を業界標準の EPP プラグインとしてそのまま実装することはできない</b> —
+  読みたい量を生む処理そのものが、EPP の後で初めて起こる。
+</div>
+
+<h2>3. 和解の形</h2>
+
+<table>
+<tr><th>手段</th><th>できること</th><th>限界</th></tr>
+<tr><td><code>ExtraHeaders</code> / <code>MutatedBody</code></td><td>観測をリクエストに乗せて運ぶ</td>
+<td>まだ観測が存在しない段階では空である</td></tr>
+<tr><td><code>Fallbacks</code></td><td>エスカレーション先を先に用意しておく</td>
+<td>「読んでから決める」ではなく「決めてから読む」順序になる</td></tr>
+<tr><td>2 リクエスト方式</td><td>1 回目で prefill だけ行い門を読み、2 回目で decode を委譲する</td>
+<td>prefix cache (直前の文脈をキャッシュしておく仕組み) が効くことが前提。効かないと prefill を 2 回払う</td></tr>
+</table>
+
+<p>もっとも自然な妥協は、<b>エンジン側 (プラグインではなく vLLM 等の内部) に第 1 段の門を実装し、
+決定をヘッダで EPP 側に伝え返す</b>という向きである。これは EPP の標準的な拡張点の想定とは逆方向の
+データフローで、<b>GIE の plugin 面には、結果を方策へ書き戻す拡張点 (<code>PostResponse</code> など)
+が無い</b>。つまり「エンジンが判定し、ルータがそれを使う」という向きの配線は、
+現行の GIE の型には収まらない。</p>
+
+<h2>4. 公開実測からの警告: 1 本の軸だけを見ると混雑を作る</h2>
+
+<div class="note">
+  <b>lora-affinity 単独 0.92 req/sec 対 複合スコアリング 1.24 req/sec</b>
+  公開されている実測では、<code>lora-affinity-scorer</code> だけでルーティングすると
+  0.92 req/sec しか出ず、複数の scorer を組み合わせると 1.24 req/sec に上がる、と報告されている。
+  <b>単一の軸だけを見るスコアラーは、他の軸 (待ち行列や KV キャッシュの使用率) を無視して混雑を作る</b>。
+  第 22〜30 章の判定器を EPP に足す場合も、単独の軸として置くのではなく、既存の scorer と
+  同じ重み付けの枠に載せる必要がある。
+</div>
+
+<h2>この章が主張しないこと</h2>
+
+<p>ここで確定させたのは EPP と ext_proc の型と、既存 scorer の性質だけであり、
+第 1 段の門を実際にエンジン側に実装して EPP と組み合わせる実験はまだ行っていない。</p>
+
+<footer>
+第 30 章 &larr; <a href="gateway-30-foreign-judge.html">他モデルの判定器でも門は動く</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-32-sellable-judge.html">第 32 章 黒箱の判定器を売れる形にするには何が必要か</a>
+</footer>
+</div>
+</body>
+</html>

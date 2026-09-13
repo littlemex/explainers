@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 33 章 API をプローブに使うときの罠</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 33 章</div>
+<h1>第 33 章 API をプローブに使うときの罠</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 32 章の「黒箱は何も呼べない」という設計を、API 経由の判定器 (自前で重みを持たず、他社の API を
+  プローブとして叩くタイプ) に当てはめると、罠がもう 1 段増える。<b>呼び出しの引数そのものが
+  持ち出しチャネルになる</b>こと、<b>タイムアウトは欠測ではなく観測値であること</b>、そして
+  <b>第二意見の独立性は幻想でありうる</b>ことの 3 つを扱う。
+</div>
+
+<h2>1. 呼び出しの引数が持ち出しチャネルになる</h2>
+
+<p>判定器に「自由な HTTP リクエストを組み立ててよい」という能力を与えると、それは
+<b>封ではない</b> — リクエストのボディやヘッダに、判定器が知っているどんな情報でも埋め込んで
+外部に送り出せてしまう。第 32 章の「黒箱は何も呼べない」という設計は、この経路をふさぐために
+そのまま引き継がれる。<b>プローブは型付きの操作の列挙として宣言し、実際のリクエストを組み立てるのは
+ランタイム側</b>にする — 判定器は「このプロンプトでこのモデルを呼んでほしい」と要求するだけで、
+実際の HTTP リクエストを自分では作らない。</p>
+
+<h2>2. タイムアウトは欠測ではなく観測値である</h2>
+
+<div class="flag">
+  <b>難しい入力ほどタイムアウトするので、欠測が難易度と相関する</b>
+  API 呼び出しがタイムアウトしたとき、それを単純に「データが無い」として捨てると、
+  <b>捨てているのはランダムな部分集合ではなく、難しい (時間のかかる) 項目に偏った部分集合</b>である。
+  統計でいう MAR (missing at random、欠測がランダムであること) が成立しないので、
+  タイムアウトを欠測として扱う集計は<b>それ自体が偏った推定</b>になる。
+  正しい扱いは、タイムアウトを「この項目は難しかった」という<b>観測値そのもの</b>として記録することである。
+</div>
+
+<h2>3. 第二意見の独立性の幻想</h2>
+
+<p>判定を複数の候補の一致で決める設計 (このシリーズの序盤で扱った quorum 方式) は、
+候補が<b>独立に間違う</b>ことを前提にしている。ブランドが違うだけで、実際には同じ基盤モデルから
+蒸留された候補どうしは、この前提を満たさない。</p>
+
+<div class="good">
+  <b>これは第 27 章の残差コサイン 0.57 が、まさにその実例である</b>
+  <code>Ornith-1.5-9B</code> と <code>empero-ai/Qwen3.8-9B-Distill</code> は名前もブランドも別だが、
+  第 27 章で見たとおり系譜を共有している可能性が高く、宣言できるフィールドはすべて一致する。
+  こうした候補を「独立した第二意見」として quorum に入れると、<b>誤りが相関するので一致することの
+  情報量は見た目より小さい</b>。判定器を売買する市場でも、同じ現象が「別会社の判定器を 2 つ買えば
+  安心」という誤った直感を生む。
+</div>
+
+<h2>4. 費用も帰属先の階層を持つ</h2>
+
+<p>プローブにかかる費用を単純な合計として扱うと、どこで漏れているかが見えなくなる。
+帰属先ごとに階層が違うことを区別する必要がある。</p>
+
+<table>
+<tr><th>費用の種類</th><th>帰属先の単位</th></tr>
+<tr><td>現金 (API 料金)</td><td><b>(エンドポイント, 時刻)</b> のペア — 価格は時間帯・提供者によって動く</td></tr>
+<tr><td>計算資源</td><td><b>エンジンの実行実体</b> — 同じモデルでも実体ごとに負荷が違う</td></tr>
+<tr><td>遅延</td><td><b>候補</b> — 呼び出しごとの待ち時間で、現金や計算とは別に効いてくる</td></tr>
+</table>
+
+<h2>5. プローブが本番の資源を共有すると、対照群も汚染される</h2>
+
+<div class="flag">
+  <b>共有すると差分そのものが測れなくなる</b>
+  プローブ用の呼び出しが本番と同じレート制限のバケット・同じ GPU・同じキャッシュを共有すると、
+  プローブを実行すること自体が本番の挙動を変えてしまう。<b>比較対象 (対照群) が、比較している本人の
+  行動によって動く</b>ので、そこで測った差分はもう「介入の効果」だけを表さない。
+  プローブは専用の資源枠 (別のレート制限バケット、別のキャッシュ名前空間) を持つ必要がある。
+</div>
+
+<h2>この章が主張しないこと</h2>
+
+<p>ここで挙げた 3 つの罠は、いずれも API 経由の判定器という設計を選んだ場合に生じる固有の問題であり、
+自前で重みを持つ判定器 (第 22〜30 章) には当てはまらない。設計を選ぶ際の比較材料として書いている。</p>
+
+<footer>
+第 32 章 &larr; <a href="gateway-32-sellable-judge.html">黒箱の判定器を売れる形にするには何が必要か</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-34-boundary.html">第 34 章 ルーティングの責務を 5 者に分ける</a>
+</footer>
+</div>
+</body>
+</html>

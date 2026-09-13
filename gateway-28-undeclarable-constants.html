@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 28 章 宣言できない定数がある</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 28 章</div>
+<h1>第 28 章 宣言できない定数がある</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  構造・dtype・深さの割合が完全に同じ 2 モデルで、判定器の一部である<b>線形の振幅の最良値が 4 倍違う</b>。
+  判定器が持つ定数は「宣言できる (比較できる)」ものと「測定するしかない」ものに分かれ、
+  <b>重みのダイジェストは後者にライセンスを与えるためのものである</b>という位置づけが定まる。
+</div>
+
+<h2>1. 「これは導出できるはず」だった量を測る</h2>
+
+<p>第 26・27 章は判定器が持つ定数を挙げてきたが、構造から導出できるはずの量が本当に導出できるのかは
+まだ確かめていなかった。前向き差分によるヤコビアン近似が線形性を保つ振幅 <code>α</code> を、
+同じ深さの割合で測る。</p>
+
+<table>
+<tr><th>α</th><th>箱 (Qwen3.6-35B-A3B FP8, L32 = 深さ 80%)</th><th>Ornith-1.5-9B bf16, L18 = 深さ 56%</th><th>Qwen3.8-9B-Distill bf16, L18 = 深さ 56%</th></tr>
+<tr><td>0.001</td><td class="n">−0.0026</td><td class="n">−0.0531</td><td class="n">0.0557</td></tr>
+<tr><td>0.005</td><td class="n">—</td><td class="n">0.6398</td><td class="n">0.7253</td></tr>
+<tr><td>0.02</td><td class="n">—</td><td class="n">0.9351</td><td class="n">0.9741</td></tr>
+<tr class="hl"><td><b>0.05</b></td><td class="n">—</td><td class="n"><b>0.9913 (ピーク)</b></td><td class="n">0.9950</td></tr>
+<tr class="hl"><td><b>0.2</b></td><td class="n">—</td><td class="n">0.9848</td><td class="n"><b>0.9986 (ピーク)</b></td></tr>
+<tr><td>0.5</td><td class="n"><b>0.9965 (ピーク)</b></td><td class="n">0.9084</td><td class="n">0.9850</td></tr>
+</table>
+
+<div class="flag">
+  <b>構造・dtype・深さの比率まで同一の 2 モデルで、最良値が 4 倍違う</b>
+  Ornith-1.5-9B と Qwen3.8-9B-Distill は両方が <code>qwen3_5</code>、d_model 4096、32 層、bf16、
+  同じ深さの割合 (18/32) で読んでいる — 構造上完全な双子である。それでもピークの位置は
+  <b>α = 0.05 対 α = 0.2</b> で 4 倍違う。<b>α はアーキテクチャの性質ではなく重みの性質であり、
+  どの宣言からも導出できない。</b>
+</div>
+
+<h2>2. 契約に必要な区別: 宣言できる vs 測定するしかない</h2>
+
+<p>第 26・27 章は「宣言されたフィールドを、実際に載っているモデルと比較する」という契約を組み立ててきた。
+それは必要だが十分ではない。判定器が持つ定数には 2 種類ある。</p>
+
+<table>
+<tr><th>種類</th><th>例</th><th>受け入れ時の検査</th><th>不一致のコスト</th></tr>
+<tr><td><b>宣言 (declared)</b></td><td>d_model、層数、トークナイザのダイジェスト、tied フラグ</td><td>実際のモデルと比較できる</td><td>大声で拒否される</td></tr>
+<tr class="hl"><td><b>測定 (measured)</b></td><td>線形の振幅、較正した層、適合したロジスティック回帰の係数</td><td class="ng"><b>比較できない — 再測定しかない</b></td><td class="ng"><b>黙って劣化する</b></td></tr>
+</table>
+
+<h2>3. 市場への含意: 重みのダイジェストは「測定」側にライセンスを与える</h2>
+
+<div class="good">
+  <b>ダイジェストが効くのは、宣言をチェックするためではない</b>
+  判定器を売る側は、自分の重み X に対して<b>測定した</b>定数を出荷する。買う側の受け入れ検査が
+  「重みが本当に X であること」を確認できれば、その測定済みの定数は<b>信頼してよい</b>という
+  結論が初めて成立する — <b>重みのダイジェストは、測定された半分の定数に対する「有効期限つきの
+  ライセンス」として働く。</b>逆に、形・語彙サイズ・<code>len(tokenizer)</code> のような弱い鍵
+  (第 27 章がまさに一致させて見せたもの) では、宣言された半分は通過し、
+  測定された半分は黙って間違ったままになる — これが<b>最悪の組み合わせ</b>で、
+  検査を通過したように見えてしまう。
+</div>
+
+<p>この区別には、新しいモデルに判定器を対応させる作業の見積もりにも直結する含意がある —
+<b>それは移植 (port) ではない。</b>測定された定数はすべて新しい重みの上で再確立する必要があるので、
+「このモデルの形 S に対応する判定器」という主張は誰にもできない。誠実に売れる単位は
+<b>特定の重みダイジェストに対する判定器</b>であり、2 番目のモデルへの対応は設定変更ではなく
+<b>もう一度測定するプロジェクト</b>である。</p>
+
+<footer>
+第 27 章 &larr; <a href="gateway-27-declarable-fields.html">宣言できるフィールドが全部一致する 2 モデル</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-29-convention-failure.html">第 29 章 契約で防げない失敗 — 規約</a>
+</footer>
+</div>
+</body>
+</html>

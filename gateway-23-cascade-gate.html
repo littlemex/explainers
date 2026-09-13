@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 23 章 段階的な門 (カスケード) が成立する</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ctl label{display:block;font-size:14px;margin:12px 0}
+.ctl input[type=range]{width:100%;max-width:420px;display:block;margin-top:5px}
+.val{font-weight:700;color:var(--gd);font-variant-numeric:tabular-nums}
+.twocol{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0}
+.twocol>div{flex:1 1 190px;background:var(--gp);border-radius:8px;padding:14px 16px;text-align:center}
+.twocol h4{margin:0 0 8px;font-size:13.5px;color:var(--gd)}
+.twocol b{font-size:23px;display:block;font-variant-numeric:tabular-nums;color:var(--gd);line-height:1.2}
+.twocol .verdict{font-size:12.5px;margin-top:4px;color:var(--ink2)}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 23 章</div>
+<h1>第 23 章 段階的な門 (カスケード) が成立する</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 22 章の J-lens を「素の読み出しと競争させる」のは比較の設計を間違えていた。
+  <b>2 段階の門として読むと、第 1 段は prefill (最初の文脈処理) の残差を読むだけなので追加費用ゼロで、
+  説明条件でそのまま 0.8571 まで届く。</b>第 2 段は新情報を運ぶが、生成が終われば無料で手に入る
+  生成の長さに負けるので、第 2 段に J は要らない。
+</div>
+
+<h2>1. 比較の設計を間違えていた</h2>
+
+<p>前章の統合スコア (0.7626 対 0.8424、答えのエントロピーという別の信号との比較) を見て、
+最初は「J-lens はこれに負けているので使えない」と報告した。この判断には 2 つの誤りがあった。</p>
+
+<ul>
+<li><b>prefill を費用として数えていた。</b>箱がどうせ答えを返すなら、prefill (最初に文脈を読み込む処理)
+は必ず払う費用である。だから L32 の残差を読む門は<b>追加費用がゼロ</b>で、生成が終わった後にしか使えない
+答えのエントロピーとは、そもそも同じ「1 枠」を争っていない。</li>
+<li><b>第 1 段に上乗せ (uplift、より強いモデルに投げ直したら直るかどうかの精度) を要求していた。</b>
+第 1 段が決めるのは「もっと観測を買うか」だけで、上乗せの精度が要るのは<b>最終的な投げ直しの判断</b>
+であり、そこでは生成がすでに存在し、より強い信号が使える。</li>
+</ul>
+
+<h2>2. カスケードとして測ると、半分を無料で通せる</h2>
+
+<p>保留データで、箱の全体精度が 0.6221 のとき、通過率ごとにこうなる。</p>
+
+<table>
+<tr><th>通過させる割合</th><th class="n">通過分の精度</th><th class="n">残り (第 2 段へ)</th><th class="n">残りの精度</th><th class="n">天井 (生成後の門)</th></tr>
+<tr class="hl"><td><b>50%</b></td><td class="n"><b>0.8070</b></td><td class="n">50.0%</td><td class="n">0.4370</td><td class="n">0.8755</td></tr>
+<tr><td>60%</td><td class="n">0.7760</td><td class="n">40.0%</td><td class="n">0.3916</td><td class="n">0.8355</td></tr>
+<tr><td>70%</td><td class="n">0.7330</td><td class="n">30.0%</td><td class="n">0.3636</td><td class="n">0.7810</td></tr>
+<tr><td>80%</td><td class="n">0.6964</td><td class="n">20.0%</td><td class="n">0.3252</td><td class="n">0.7253</td></tr>
+<tr><td>90%</td><td class="n">0.6672</td><td class="n">10.0%</td><td class="n">0.2168</td><td class="n">0.6796</td></tr>
+</table>
+
+<p>半分を追加費用ゼロで通した精度 0.8070 は、箱の平均より 18.5 ポイント高い。残された半分は精度 0.4370 —
+これが「生成を 1 回払う価値がある」母集団である。生成後の門 (天井) はこの半分で 0.8755 に達するので、
+<b>無料の第 1 段だけで、生成 1 回分を払わないと届かない天井のほとんどを回収できている。</b>
+正しい比較は「無料の 0.8070」対「生成 1 回分の 0.8755」であって、「0.7626 対 0.8424」ではない。</p>
+
+<h2>3. 説明条件でそのまま効き、プロンプト条件を跨いで移る</h2>
+
+<p>ここまでは即答条件 (terse、選択肢の文字だけを即答させる条件) の話で、その場合「生成後」は実質存在しない。
+本来の設計対象は<b>説明条件</b> (箱が推論を書いてから答える条件) で、そこでは答えの分布そのものが
+書き終わるまで存在しないので、L32 の読み出しは<b>判断の瞬間に得られる唯一の信号</b>である。</p>
+
+<table>
+<tr><th>通過させる割合</th><th class="n">terse で作った J による J-lens</th><th class="n">logit lens</th><th class="n">ランダム J</th></tr>
+<tr><td>40%</td><td class="n"><b>0.8592</b></td><td class="n">0.7606</td><td class="n">0.8028</td></tr>
+<tr class="hl"><td><b>50%</b></td><td class="n"><b>0.8571</b></td><td class="n">0.7744</td><td class="n">0.8008</td></tr>
+<tr><td>60%</td><td class="n">0.8558</td><td class="n">0.7900</td><td class="n">0.8088</td></tr>
+<tr><td>70%</td><td class="n">0.8333</td><td class="n">0.7903</td><td class="n">0.8038</td></tr>
+</table>
+
+<div class="good">
+  <b>50% 通過で箱の素の精度 0.7853 を大きく超える</b>
+  logit lens に <b>+0.0827</b>、ランダム対照に <b>+0.0564</b>、いずれも事前に決めた基準を通過する。
+  そして <code>J_32</code> は<b>即答条件のプロンプトで推定したのに、説明条件でそのまま機能する</b>。
+  <code>J</code> はモデルの重みが持つ性質であってプロンプトの性質ではないので、条件を跨いで
+  移ってよい理屈と一致する。これは条件を跨ぐと信号が消えるという過去の経験則
+  (プロンプト条件を変えると項目の並びが変わる、という別の実測) とは違う軸の話で、
+  <b>行列の並び (どの項目が当たるか) が動くことと、行列を作る材料 (重みの性質) が動かないことは矛盾しない。</b>
+</div>
+
+<h2>4. 第 2 段には新情報があるが、生成の長さに負ける</h2>
+
+<p>第 1 段が通さなかった項目について、生成後の残差を読み直す (第 2 段) 価値を測る。</p>
+
+<table>
+<tr><th>第 2 段の信号</th><th class="n">AUC (判別の良さ、0.5 が当てられていない水準)</th></tr>
+<tr><td>第 1 段と同じ位置の J-lens</td><td class="n">0.4703 (ほぼ当てられていない)</td></tr>
+<tr><td>生成の中に入った、より後ろの位置の J-lens</td><td class="n"><b>0.6293</b></td></tr>
+<tr><td>両方の位置</td><td class="n">0.6301</td></tr>
+<tr class="hl"><td><b>生成の長さ (生成が終われば無料で手に入る)</b></td><td class="n"><b>0.6978</b></td></tr>
+</table>
+
+<p>後ろの位置を読むと <b>+0.1590</b> の新情報が乗る (PASS)。ただしそれは生成の長さという、
+生成が終わった時点で費用ゼロで手に入る量に負ける。さらに J-lens を生成の長さに<b>足しても</b>、
+その上乗せは J-lens 自身のランダム対照 (0.7521) に負ける (<b>-0.0165</b>、FAIL)。
+つまり第 2 段で効いているのは「密な行列を通して語彙に射影すること」そのもので、
+<code>J</code> である必要はない。</p>
+
+<div class="note">
+  <b>2 つの段は違うものを要求している</b>
+  第 1 段では残差しか観測できないので、<code>J</code> が次トークンから「モデルが言うであろうこと」へ
+  読み出しを移すことが決定的に効く。第 2 段ではモデルはすでに何かを言っているので、
+  知りたい量は直接観測できてしまい、ランダムな混合で十分になる。<b>だから第 2 段に J は不要である。</b>
+</div>
+
+<h2>5. 設計上の利点: 判定のオーバーヘッドが乗らない</h2>
+
+<p>第 1 段が prefill の残差だけを読むということは、<b>判定が prefill の直後、decode (トークンを 1 つずつ
+生成する処理) を始める前に終わる</b>ということでもある。通せば prefill をそのまま decode へ続けるだけで、
+判定のための追加のフォワードパスも待ち時間も発生しない。半分の項目がこの経路で片付くなら、
+<b>ゲート自体のレイテンシがサービング全体の待ち時間に上乗せされない</b>という設計上の利点が成立する。</p>
+
+<h2>この章が主張しないこと</h2>
+
+<p>ここで測っているのは L32 の 1 層で、通過率のしきい値をどこに置くべきかは費用と誤りの許容度に依存する
+別の意思決定である。第 2 段の「生成の長さに負ける」という結果は、この保留データでの結果であり、
+生成の長さの分布が違う運用では入れ替わり得る。</p>
+
+<footer>
+第 22 章 &larr; <a href="gateway-22-jspace.html">J space とは何か</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-24-intervention.html">第 24 章 論文の中心的証拠である介入</a>
+</footer>
+</div>
+</body>
+</html>

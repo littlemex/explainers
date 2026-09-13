@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 22 章 J space とは何か、そして予測できる</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin:24px 0}
+.demo h3{margin-top:0}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-top:8px}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 22 章</div>
+<h1>第 22 章 J space とは何か、そして予測できる</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  ここから先はルーティングの経済ではなく、<b>判定器そのものが何を読んでいるか</b>を扱う。
+  論文 (arXiv:2607.15495) が定義する J space というレンズを実際に箱の上に作り、
+  安定した推定であること (split-half 相関 0.9612) と、それが<b>次トークンではなく「モデルが言うであろうこと」を
+  予測する</b>ことの両方を実測で確かめる。
+</div>
+
+<h2>1. J space とは何か</h2>
+
+<p>Transformer の各層は、入力の残差 (residual、層をまたいで積み重なる中間表現) を少し変えて次の層に渡す。
+その「少し変える」写像を、ある位置対 (どの位置がどの位置に効くか) について期待値をとってヤコビアン
+(Jacobian、入力の微小変化が出力をどれだけ動かすかを表す行列) として書いたものを <code>J_l</code> と呼ぶ。
+論文の主張は、この <code>J</code> を残差に掛けてから通常の読み出し行列 <code>W_U</code> (語彙への射影) と
+softmax を通した <b>lens = softmax(W_U norm(J h))</b> が、素の残差を直接読み出すよりも
+「モデルが言葉にできる何か」を鋭く取り出す、という点にある。論文はこの J space が<b>活性分散の 10% 未満</b>
+しか占めないのに、直近の次トークン予測 (すぐ次に出る単語だけを当てる読み) はこの空間にほとんど無い、と報告する。</p>
+
+<p><code>J</code> を厳密に計算するにはヤコビアン全体を求める必要があるが、実際には<b>前向き差分</b>
+(残差にごく小さいベクトルを加えて、出力がどれだけ変わるかを見る近似) で <code>Jv</code> (方向 <code>v</code> への
+作用) だけを何本も集めれば十分で、行列全体を持たずに済む。この章で使う <code>J_22</code> と <code>J_32</code>
+(層 22 と層 32) はすべてこの方法で、MoE (Mixture of Experts、複数の専門家ネットワークを切り替える構成) の
+router (どの専門家に振るかを決める部分) を<b>入力側で固定</b>してから作った。</p>
+
+<h2>2. 安定しているか — split-half で確かめる</h2>
+
+<p>まず、この推定が偶然の産物でないかを先に確かめる。プローブに使うプロンプトを無関係な 2 つの半分に割り、
+それぞれから独立に <code>J</code> を作って比べる。</p>
+
+<table>
+<tr><th>検査</th><th class="n">結果</th><th>基準</th></tr>
+<tr class="hl"><td>split-half 要素相関</td><td class="n"><b>0.9612</b></td><td class="ok">0.70 以上 — PASS</td></tr>
+<tr><td>split-half 相対 Frobenius ノルム (行列全体としての差)</td><td class="n">0.3355</td><td class="ok">0.60 以下 — PASS</td></tr>
+<tr><td>対角成分が持つ質量の割合</td><td class="n">0.108134</td><td>ランダム行列なら 1/2048 = 0.00049 — 実測は<b>その 220 倍</b></td></tr>
+</table>
+
+<p>プロンプトの半分を入れ替えても同じ行列が出てくるので、<b>これは仮定ではなく安定した推定である。</b>
+対角成分の質量が偏っていることも、残差ネットワークのヤコビアンが持つべき形と一致している。</p>
+
+<h2>3. 「分散の 10% 未満」は、帰無でも成立する</h2>
+
+<p>論文の headline (見出し) の主張を、初めて帰無 (何もしていない対照) と一緒に測る。<code>k</code> 個の
+方向を選んだときに、その部分空間が活性の分散の何割を占めるかを見る。</p>
+
+<table>
+<tr><th>k</th><th class="n">J-lens</th><th class="n">logit lens (素の読み出し)</th><th class="n">ランダム k 次元</th><th class="n">上位 k 主成分</th></tr>
+<tr><td>16</td><td class="n">1.75%</td><td class="n">1.34%</td><td class="n">0.78%</td><td class="n">67.88%</td></tr>
+<tr><td>25</td><td class="n">2.47%</td><td class="n">1.93%</td><td class="n">1.22%</td><td class="n">72.99%</td></tr>
+<tr><td>64</td><td class="n">5.68%</td><td class="n">4.35%</td><td class="n">3.12%</td><td class="n">82.08%</td></tr>
+</table>
+
+<div class="note">
+  <b>「10% 未満」は真だが、それだけでは何も言えない</b>
+  ランダムな k 次元部分空間でさえ 0.78% から 3.12% しか分散を持たない。主成分 (データの分散が大きい方向)
+  は 68% から 82% を持つ。J-lens はランダムの約 2.2 倍、主成分の 12 分の 1 程度で、
+  <b>主成分方向に沿っていない部分空間ならほぼ何でもこの条件を満たす</b>。
+  つまり「分散が小さいから特別だ」という読み方は、帰無と比べない限り成立しない。
+</div>
+
+<p>ただし<b>順序そのもの</b>には意味がある。<code>J-lens &gt; logit lens &gt; ランダム</code> がすべての k で
+成立し、<code>J</code> を掛けることは分散をランダムから遠ざけ、むしろ増やす方向に働く。
+「情報は分散の小さい特別な空間にある」という直感とは逆方向で、この事実自体は本物である。</p>
+
+<h2>4. J-lens は次トークンでなく「モデルが言うであろうこと」を予測する</h2>
+
+<p>本題は、この読み出しが実際に何かを予測できるかである。線形プローブでは <code>norm(J h)</code> が
+<code>h</code> の線形関数である以上、素の残差の線形プローブに勝てないことは自明 (線形写像の合成は線形写像
+なので上限を超えられない)。だから比較対象は<b>語彙と softmax を通した非線形な読み出し</b>にする。</p>
+
+<table>
+<tr><th>層</th><th>読み出し</th><th class="n">エントロピー</th><th class="n">最大確率</th><th class="n">verbaliser 対数オッズ</th><th class="n">4 項目の統合</th></tr>
+<tr><td rowspan="3">L22</td><td><b>J-lens</b></td><td class="n">0.6364</td><td class="n">0.5976</td><td class="n"><b>0.6870</b></td><td class="n"><b>0.7439</b></td></tr>
+<tr><td>logit lens (素の読み出し)</td><td class="n"><b>0.6838</b></td><td class="n"><b>0.6645</b></td><td class="n">0.5743</td><td class="n">0.7002</td></tr>
+<tr><td>ランダム J (同じノルム)</td><td class="n">0.5004</td><td class="n">0.5161</td><td class="n">0.6097</td><td class="n">0.6257</td></tr>
+<tr><td rowspan="3">L32</td><td><b>J-lens</b></td><td class="n">0.5741</td><td class="n">0.5779</td><td class="n"><b>0.7629</b></td><td class="n"><b>0.7626</b></td></tr>
+<tr><td>logit lens</td><td class="n"><b>0.6721</b></td><td class="n"><b>0.6220</b></td><td class="n">0.5011</td><td class="n">0.6729</td></tr>
+<tr><td>ランダム J (同じノルム)</td><td class="n">0.6102</td><td class="n">0.6213</td><td class="n">0.5277</td><td class="n">0.6797</td></tr>
+</table>
+
+<p>「verbaliser 対数オッズ」は、モデルが「自分は分からない」と言葉にする側に傾いているかどうかを示す指標
+(値が大きいほど、不確かさを言葉にする準備ができている)。この項目だけを見ると差は際立つ —
+L22 で 0.6870 対 0.5743、L32 で 0.7629 対 0.5011 (これはほぼ当てられていない水準)。
+一方エントロピーと最大確率 (どちらも次トークンの分布そのものの形を表す) は素の読み出しの方が勝つ。</p>
+
+<div class="good">
+  <b>これが本質であり、次トークンから「モデルが言うであろうこと」への移動である</b>
+  <code>J</code> を掛けることは読み出しを均等に良くするのではなく、<b>次トークンが得意な軸から、
+  モデルが不確かさを言葉にする軸へ、読み出しの対象を移す</b>。だから 4 項目の統合スコアで見ると
+  L22 では僅差 (0.7439 対 0.7002)、L32 ではしっかり勝つ (0.7626 対 0.6729) が、内訳を見ないと
+  この移動そのものが見えない。統合スコアだけを見て「大差ない」と判断するのは誤りである。
+</div>
+
+<p>L32 では素の読み出しに対しても帰無に対しても両方の基準を通過する (統合スコアで +0.0897 と +0.0829)。
+一方でランダム J は答えの文字を当てる項目では素の読み出しにわずかに勝つ (0.6406 対 0.5974) ので、
+<b>ここでの主張は「帰無に勝つこと」に置くべきで、「素の読み出しに勝つこと」だけを主張の軸にしてはいけない。</b></p>
+
+<h2>この章が主張しないこと</h2>
+
+<p>ここで測っているのは L22 と L32 の 2 層のみで、論文が報告する帯全体を再現したわけではない。
+また 4 つの読み出し特徴 (エントロピー・最大確率・verbaliser 対数オッズ・答えの文字の順位) は測定前に
+決めたものだが、無数にある特徴の一部であり、統合スコアはこのレンズの性能の上限ではない。</p>
+
+<footer>
+<a href="gateway-index.html">シリーズ目次</a> / 次 → <a href="gateway-23-cascade-gate.html">第 23 章 段階的な門が成立する</a>
+</footer>
+</div>
+</body>
+</html>

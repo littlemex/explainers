@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 27 章 宣言できるフィールドが全部一致する 2 モデル</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:26px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 27 章</div>
+<h1>第 27 章 宣言できるフィールドが全部一致する 2 モデル</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 26 章が挙げた「トークナイザのハッシュを見よ」という対策を、実際にハッシュまで一致する 2 モデルに
+  当てたら<b>それでも足りなかった</b>。同じ問いに対する<b>モデル間</b>の残差のコサイン類似度が、
+  <b>同じモデル内の違う問い同士</b>の類似度より低い。鍵は重みのダイジェストしかありえない。
+</div>
+
+<h2>1. 前章の対策を実際に試す</h2>
+
+<p><code>ornith-ai/Ornith-1.5-9B</code> と <code>empero-ai/Qwen3.8-9B-Distill</code> を 1 つのプロセスに
+同居させる。この 2 つは <code>model_type</code>、d_model (4096)、層数 (32)、語彙サイズ (248320)、
+tied embedding フラグ、dtype (bf16)、attention の周期、重みファイルのサイズ、そして
+<b><code>len(tokenizer)</code> まで 248077 で完全に一致する</b>。第 26 章で名指しした「トークナイザの
+ハッシュを見よ」という対策の、その手前の量までことごとく一致してしまう組である。異なるのは名前と
+重みそのものだけで、その重みの第 1 層の統計量も小数第 5 位でしか違わない (平均 5e-06 対 6e-06、
+標準偏差 0.015346 対 0.015420)。<b>統計的な指紋も脆い。</b></p>
+
+<h2>2. 決め手になった数字</h2>
+
+<p>同じ層、同じ位置で、同じプロンプトを両モデルに読ませて残差を比べる。</p>
+
+<table>
+<tr><th>比較</th><th class="n">コサイン類似度</th></tr>
+<tr class="hl"><td><b>同じ問い・違うモデル</b></td><td class="n"><b>0.5995 / 0.6102 / 0.5711 / 0.5625</b></td></tr>
+<tr><td>違う問い・同じモデル</td><td class="n">0.8983 / 0.8995 / 0.8750</td></tr>
+</table>
+
+<div class="flag">
+  <b>モデル間の距離が、問い同士の距離を超える</b>
+  持ち越した判定器は、較正された場所よりも<b>無関係な 2 つの問いより遠い空間</b>を読むことになる。
+  そして残差のノルム (大きさ) の比は 0.4511 対 0.4694 でわずか 1.04 倍しか違わない —
+  <b>大きさを見るだけの sanity check では、この食い違いは絶対に捕まらない</b>。
+  なお蒸留モデルは兄弟モデルと系譜を共有している可能性が高く、0.57 という値は類似度の
+  <b>上限</b>と見るべきで、結論はむしろ保守的である。
+</div>
+
+<h2>3. 同居が壊さなかったもの: フックの所有者はエンジンではない</h2>
+
+<p>2 モデルの層は別々の Python オブジェクトで、片方に登録した hook (中間表現を横取りする仕組み) は
+もう片方の forward では 1 回も発火しない (1 対 0)。<b>hook はモジュール木に属し、エンジンには属さない。</b>
+1 つのエンジンが複数モデルを同時に持っていても観測が混ざることはない — これは複数モデルを
+1 台に同居させる設計にとって、確認しておくべき前提だった。</p>
+
+<h2>4. その他に測れた 2 つの事実</h2>
+
+<table>
+<tr><th>事実</th><th>内容</th></tr>
+<tr><td>Ornith は dense (専門家混合ではない)</td><td>router (専門家選択の機構) が <b>0 個</b>見つかる。「router を固定できることが前提」と宣言する判定器は、
+同じ系の一部のモデルには当てはまらない性質を要求していることになる</td></tr>
+<tr><td>線形近似が保つ振幅 α は移らない</td><td>Ornith ではコサインが α = 0.05 で 0.9913 とピークになり、
+箱の運用点 α = 0.5 では 0.9084 まで落ちている (箱では α = 0.5 が最良の 0.9965)</td></tr>
+</table>
+
+<h2>5. 予測の撤回: 床は FP8 特有ではなかった</h2>
+
+<div class="note">
+  <b>第 26 章の予測は外れた</b>
+  第 26 章は「小振幅で崩れる床 (α = 0.001 でコサイン −0.0026) は箱の FP8 量子化に固有で、
+  bf16 では起きないはずだ」と予測していた。<b>実測は逆だった。</b>Ornith (bf16) でも
+  α = 0.001 でコサイン −0.0531 と崩れており、箱よりむしろ悪化している。しかも同一の摂動を
+  2 回与えた差は <b>0.000e+00</b> (完全に決定的) だったので、これは実行ごとのノイズではなく
+  <b>小さい摂動に対する丸めの性質</b>である。<b>床は量子化形式の性質ではなく、算術そのものの性質だった。</b>
+</div>
+
+<h2>この章が確定させたこと</h2>
+
+<div class="good">
+  <b>鍵は重みのダイジェスト以外にありえない</b>
+  形・dtype・語彙サイズ・トークナイザの長さ・埋め込みの構成・重みの統計量 — ここまで挙げたどの検査も、
+  この 2 モデルを通す。<b>宣言できるフィールドをどれだけ増やしても、この組は素通りする。</b>
+  安全な契約が最終的に依拠できるのは、重みそのものを一意に識別する<b>ダイジェスト</b>だけである。
+</div>
+
+<footer>
+第 26 章 &larr; <a href="gateway-26-shape-check.html">形の検査は半分しか捕まえない</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-28-undeclarable-constants.html">第 28 章 宣言できない定数がある</a>
+</footer>
+</div>
+</body>
+</html>
