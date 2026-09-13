@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>どこを読むかを、モデル自身に宣言させる — Declarative Attention</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14px;overflow-x:auto;line-height:1.75;
+    white-space:pre-wrap}
+  .math .tg{color:#8fd6b4;font-weight:700}
+  .math .cm{color:#6b7a86}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 11 回</p>
+  <h1>どこを読むかを、モデル自身に宣言させる</h1>
+  <p>chain-of-thought に attention の計画を書かせる Declarative Attention を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「Declarative Attention」(KAIST AI と Google DeepMind、arXiv:2609.02737v1, 2026-09-02) は、長い文脈を読むときに<b>どの部分に attention するかをモデル自身に宣言させて</b>、推論エンジンがその宣言どおりに KV キャッシュの読み出しを削る、という提案です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    attention の重みは文脈のごく一部に集中しているのに、モデルは<b>毎ステップ KV キャッシュを全部読んで</b>その一部を探しています。1M トークンの会話なら、返答の 1 トークンごとに全部を走査します。既存の対策は軽量なスコアで「読むべき場所」を予測しますが、そのスコア計算自体が毎ステップ $O(N)$ かかります。この論文の問いは単純です。<b>そもそもモデルは、どこが関係あるか自分で分かっているのではないか。</b>そこで chain-of-thought の中に <code>&lt;global&gt;</code> / <code>&lt;focus&gt;</code> / <code>&lt;local&gt;</code> というタグを書かせ、推論エンジンがそれを<b>tool call のようにパースして</b>マスクを組みます。追加の学習はゼロ。既製モデルへの zero-shot で、decode 中の attended トークンが <b>52.0% / 31.1% 減</b>、精度低下は <b>1.27pp / 2.75pp</b> です。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>解く問題</td><td>長文脈の decode では KV キャッシュの読み出しレイテンシが支配的。Qwen-3.5-397B-A17B なら 1M トークンで<b>1 ステップあたり約 15 GB</b> の読み出しで、これは 17B の活性パラメータを読むのと同程度</td></tr>
+    <tr><td>既存手法との違い</td><td>静的なヒューリスティック (recency / 過去の attention 量) は将来のクエリが要るトークンを当てられない。動的な proxy scan は当てられるが<b>毎ステップ $O(N)$ の走査コストが残る</b>。DA は<b>選択コストを完全に消す</b> ($O(N)$ の読みはモデルが宣言した global 期間だけに残る)</td></tr>
+    <tr><td>3 つのモード</td><td><code>&lt;global&gt;</code> は文脈全体を見て次に読む場所を探す。<code>&lt;focus magic_chunks="7"&gt;</code> は指定した断片だけを見る。<code>&lt;local&gt;</code> は文脈を一切見ず、自分の出力だけで考える</td></tr>
+    <tr><td>文脈の渡し方</td><td>約 2,048 トークンごとに分割し、<b>「magic chunk」という名前で tool 応答の形に見せる</b>。実際に tool は呼ばれない。境界を<b>モデルが post-training で慣れている特殊トークン</b>に一致させるための工夫</td></tr>
+    <tr><td>実装</td><td>vLLM の attention metadata builder にフックを入れ、<b>KV ブロックテーブルを書き換えるだけ</b>。カーネル改造もスケジューラ変更も無し。FlashAttention はそのまま動く</td></tr>
+    <tr><td>主結果</td><td>15 の長文脈タスクで、Gemma-4-31B は attended トークン <b>-52.0%</b> ・ 精度 -1.27pp、Qwen-3.6-27B は <b>-31.1%</b> ・ -2.75pp</td></tr>
+    <tr><td>節約の出どころ</td><td>プロンプト形式だけの ablation (DA-nm) は attended トークンが<b>むしろ vanilla より 66.2% 増える</b>。マスクがそれを覆して <b>-52.0%</b> にする。<b>節約はマスクから来ている</b></td></tr>
+    <tr><td>スケーリング</td><td>モデルが大きいほど精度の差が縮む (Gemma は vanilla 比 29% → <b>99%</b>)。文脈が長いほど絶対の節約が伸びる (短文脈で約 1M、最長 bin で約 <b>21M トークン</b>)</td></tr>
+    <tr><td>wall-clock の見込み</td><td>roofline 見積りで decode 時間が vanilla の <b>0.71 倍</b> (Gemma) と <b>0.77 倍</b> (Qwen)。ただし<b>実測ではなく理論上の天井</b></td></tr>
+    <tr><td>正直な弱点</td><td>zero-shot なので decode ステップが <b>31 - 35% 増える</b>。thinking モードとは併用できない。そして<b>protocol と噛み合わない 6 つのタスクは主要スイートから外して付録で報告</b>している</td></tr>
+    <tr><td>公開物</td><td>本文にリポジトリの記載なし。プロンプト全文と実装詳細は付録に記載</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. なぜ decode で attention が主役なのか</a>
+    <a href="#s2">2. protocol — 3 つのモードと magic chunk</a>
+    <a href="#s3">3. 実装 — テキストからマスクへ</a>
+    <a href="#s4">4. 【体験】15 タスクの主結果</a>
+    <a href="#s5">5. 【体験】節約はマスクから来る</a>
+    <a href="#s6">6. 規模と文脈長でどうスケールするか</a>
+    <a href="#s7">7. 【体験】roofline の内訳</a>
+    <a href="#s8">8. 【体験】この前提は将来も成り立つか</a>
+    <a href="#s9">9. 【体験】うまくいかない 6 つのタスク</a>
+    <a href="#s10">10. 批判的に読む</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ decode で attention が主役なのか</h2>
+  <p class="lead">前提を押さえます。1 トークン生成するたびに、Transformer は<b>それまでの全トークンの KV を HBM から読みます</b>。長文脈ではこの読み出しが decode 時間を支配します。</p>
+  <p>論文が挙げる例が具体的です。Qwen-3.5-397B-A17B で 1M トークンの文脈を持つと、<b>1 系列あたり約 15 GB の KV キャッシュを毎ステップ読む</b>ことになります。これは活性パラメータ 17B を読むのと同程度の帯域要求です。<b>モデルを 1 回読むのと同じ重さのものを、文脈のために毎回読んでいる</b>わけです。</p>
+  <p>しかも、その大半は要りません。attention のスコアはごく一部のトークンに集中します。問題は<b>どこに集中するかが事前に分からない</b>ことです。真のスコアは attention 行列を計算し終わってからしか分かりません。ここで既存研究は 2 系統に分かれます。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 400" role="img" aria-label="sparse attention の 3 系統の比較">
+      <defs><marker id="daA" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <rect x="24" y="16" width="270" height="170" rx="10" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="159" y="42" font-size="14.5" font-weight="700" fill="#3f4c55" text-anchor="middle">1. 静的なヒューリスティック</text>
+      <text x="44" y="66" font-size="12.5" fill="#12211a">直近のトークンを残す (recency)</text>
+      <text x="44" y="86" font-size="12.5" fill="#12211a">過去の attention 量が多いものを残す</text>
+      <text x="44" y="112" font-size="12.5" font-weight="700" fill="#3f4c55">選択コスト: ほぼ 0</text>
+      <text x="44" y="136" font-size="12.5" fill="#b5401f">問題: 固定の規則は将来のクエリが</text>
+      <text x="44" y="154" font-size="12.5" fill="#b5401f">必要とするトークンを予測できない</text>
+      <text x="44" y="176" font-size="12.5" fill="#b5401f">長文脈の性能が落ちる</text>
+
+      <rect x="306" y="16" width="270" height="170" rx="10" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="441" y="42" font-size="14.5" font-weight="700" fill="#8a5a06" text-anchor="middle">2. 動的な proxy scan</text>
+      <text x="326" y="66" font-size="12.5" fill="#12211a">毎ステップ KV を軽量にスキャンして</text>
+      <text x="326" y="84" font-size="12.5" fill="#12211a">読むべきトークンを近似する</text>
+      <text x="326" y="112" font-size="12.5" font-weight="700" fill="#8a5a06">クエリ依存性は扱える</text>
+      <text x="326" y="136" font-size="12.5" fill="#b5401f">問題: 定数倍は下がるが、</text>
+      <text x="326" y="154" font-size="12.5" fill="#b5401f">1 ステップあたりの計算量は</text>
+      <text x="326" y="176" font-size="12.5" font-weight="700" fill="#b5401f">O(N) のまま残る</text>
+
+      <rect x="588" y="16" width="268" height="170" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="722" y="42" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">3. Declarative Attention</text>
+      <text x="608" y="66" font-size="12.5" fill="#12211a">モデルが CoT の中で「次はここを</text>
+      <text x="608" y="84" font-size="12.5" fill="#12211a">読む」とタグで宣言する</text>
+      <text x="608" y="112" font-size="12.5" font-weight="700" fill="#0f5132">選択コスト: 0 (テキストを読むだけ)</text>
+      <text x="608" y="136" font-size="12.5" fill="#12211a">O(N) の読みは、モデルが自分で</text>
+      <text x="608" y="154" font-size="12.5" fill="#12211a">宣言した global 期間だけに残る</text>
+      <text x="608" y="176" font-size="12.5" font-weight="700" fill="#0f5132">毎ステップの固定費ではなくなる</text>
+
+      <path d="M441,186 L441,214" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#daA)"/>
+
+      <rect x="24" y="218" width="832" height="72" rx="10" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="44" y="242" font-size="14" font-weight="700" fill="#0f5132">3 の発想の根拠</text>
+      <text x="44" y="264" font-size="12.5" fill="#12211a">言語モデルは隠れ状態の中に「これから書くこと」の情報を持っていることが知られている。CoT はその潜在的な計算を読めるテキストとして表に出す仕組み。</text>
+      <text x="44" y="283" font-size="12.5" fill="#12211a">この論文は同じ原理を「何を考えるか」から<tspan font-weight="700">「どこを読むか」</tspan>へ拡張する。マスクを活性値から近似せず、生成されたテキストから直接導く</text>
+
+      <rect x="24" y="300" width="832" height="86" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="44" y="324" font-size="14" font-weight="700" fill="#22548f">先行研究との距離</text>
+      <text x="44" y="346" font-size="12.5" fill="#12211a">同じ振る舞いを学習で入れる試みは既にあった。ただしタスクごとに個別に fine-tune し、手作りの文脈分割と注釈構文で、2K トークンの文脈まで。</text>
+      <text x="44" y="365" font-size="12.5" fill="#12211a">この論文の主張は<tspan font-weight="700">「いまの既製モデルは、1 つの固定プロンプトで zero-shot にこれをやる」</tspan>こと。文脈は 100K トークン規模、タスクは 15 種類</text>
+      <text x="44" y="381" font-size="12" fill="#4a5d54">だから著者は結果を「下限」と呼ぶ。protocol 自体に post-training すれば伸びる余地がある、という位置づけ</text>
+    </svg>
+    <p class="cap">図 1: 3 系統の位置関係。DA が消しているのは「どこを読むかを決めるコスト」そのもので、読む量の削減はその結果として付いてくる</p>
+  </div>
+  <div class="key">
+    <b>人の読み方との対比。</b>長い文書を読んで質問に答えるとき、人は<b>1 語ごとに全文を読み返しません</b>。論文の出発点はこの直観で、attention のスコアが実際にごく一部に集中しているという実証と合わせて、<b>「全部読む」機構は認知的にも計算的にも過剰だ</b>と整理しています。DA はその過剰を、モデル自身の言葉で削ります。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>protocol — 3 つのモードと magic chunk</h2>
+  <p class="lead">DA がモデルに要求するのは 2 つだけです。(i) <b>attention の範囲が変わらない連続した区間に推論を区切る</b>こと、(ii) その範囲を<b>決まったタグ構文で宣言する</b>こと。以下は論文の例です。</p>
+  <div class="math"><span class="cm">質問: Acme 社は創業から何年後に上場したか</span>
+
+<span class="tg">&lt;global&gt;</span>
+創業年と上場年が必要だ。会社沿革は Magic Chunk 2 にありそうだ。
+<span class="tg">&lt;/global&gt;</span>
+<span class="tg">&lt;focus magic_chunks="2"&gt;</span>"Acme Corp was founded in 2003 in San Jose."<span class="tg">&lt;/focus&gt;</span>
+<span class="tg">&lt;global&gt;</span>
+上場年がまだ無い。Magic Chunk 7 が財務の節目を扱っている。
+<span class="tg">&lt;/global&gt;</span>
+<span class="tg">&lt;focus magic_chunks="7"&gt;</span>"Acme Corp went public on the NYSE in 2011."<span class="tg">&lt;/focus&gt;</span>
+<span class="tg">&lt;local&gt;</span>2011 - 2003 = 8 years.<span class="tg">&lt;/local&gt;</span>
+<span class="tg">&lt;answer&gt;</span>8 years<span class="tg">&lt;/answer&gt;</span></div>
+  <table>
+    <tr><th>モード</th><th>文脈のうち何が見えるか</th><th>役割</th></tr>
+    <tr><td><code>&lt;global&gt;</code></td><td><b>全セグメント</b></td><td>探索。全体を見渡して<b>次にどこを読むかを決め</b>、なぜそこが関係あるかを短く書く</td></tr>
+    <tr class="hl"><td><code>&lt;focus&gt;</code></td><td><b>タグで名指ししたセグメントだけ</b></td><td>特定の領域での推論。必要な値をそこから<b>verbatim で抜き出す</b></td></tr>
+    <tr><td><code>&lt;local&gt;</code></td><td><b>何も見えない</b></td><td>自己完結した推論。質問に対する計画と、抜き出した値からの最終的な合成</td></tr>
+  </table>
+  <p>どのモードでも、<b>質問と指示と自分のそれまでの出力は常に見えます</b>。モードが変えるのは文脈領域の可視性だけです。そして<b>いつ、何回、どの順でモードを使うかは protocol が縛りません</b>。zero-shot で引き出すので、プロンプトはモードごとの使い方の指針を与えて足場を作るだけです。</p>
+  <h3>なぜ「magic chunk」という名前なのか</h3>
+  <p>focus モードを使うには、モデルが<b>読みたい領域を名指しできる</b>必要があります。そのためには、セグメントがどこで始まってどこで終わるかをモデルが追跡できないといけません。ここで論文の工夫が 2 つ入ります。</p>
+  <table>
+    <tr><th>工夫</th><th>中身</th><th>理由</th></tr>
+    <tr><td>分割の位置</td><td>約 2,048 トークンを目標に、<b>上限を超えた単位だけ</b>を、いちばん粗い境界から順に切る。段落 (空行) → 改行 → 文末 → 節の区切り → 語境界</td><td>意味の境界に合わせたい。<b>語の内側で切れることは無い</b></td></tr>
+    <tr><td>提示の形</td><td>各セグメントを<b>tool 応答として見せる</b>。assistant が <code>get_magic_chunk</code> を呼び、tool 応答が <code>Magic Chunk N</code> という見出しでテキストを返す形の会話を、あらかじめ組んでおく</td><td>境界が<b>モデルが post-training で何度も見た特殊トークン</b>の上に乗る。慣れた境界のほうが追跡が正確</td></tr>
+  </table>
+  <p><b>tool は実際には 1 回も実行されません</b>。生成が始まる前に全セグメントが所定の位置にあります。「モデルが文書を magic chunk 単位で 1 つずつ取ってきた」という履歴に見せかけているだけです。名前を「magic chunk」にしたのも意図的で、<b>文書自身の章や節と混同させない</b>ためです。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 470" role="img" aria-label="プロンプト構造とマスクの導出">
+      <defs><marker id="daB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <text x="24" y="20" font-size="14" font-weight="700" fill="#22548f">プロンプトの構造</text>
+      <rect x="24" y="28" width="300" height="34" rx="7" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="174" y="50" font-size="12.5" font-weight="700" fill="#22548f" text-anchor="middle">system 指示 (attention sink を埋める)</text>
+
+      <rect x="24" y="68" width="300" height="120" rx="7" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="174" y="90" font-size="12.5" font-weight="700" fill="#3f4c55" text-anchor="middle">文脈 = 可視性を制御される領域</text>
+      <rect x="38" y="98" width="272" height="20" rx="4" fill="#ffffff" stroke="#8fd6b4"/>
+      <text x="174" y="112" font-size="11" fill="#12211a" text-anchor="middle">Magic Chunk 1 (約 2,048 トークン)</text>
+      <rect x="38" y="122" width="272" height="20" rx="4" fill="#ffffff" stroke="#8fd6b4"/>
+      <text x="174" y="136" font-size="11" fill="#12211a" text-anchor="middle">Magic Chunk 2</text>
+      <text x="174" y="156" font-size="11" fill="#6b7a86" text-anchor="middle">…</text>
+      <rect x="38" y="160" width="272" height="20" rx="4" fill="#ffffff" stroke="#8fd6b4"/>
+      <text x="174" y="174" font-size="11" fill="#12211a" text-anchor="middle">Magic Chunk N</text>
+
+      <rect x="24" y="194" width="300" height="30" rx="7" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="174" y="214" font-size="12.5" font-weight="700" fill="#22548f" text-anchor="middle">質問</text>
+      <rect x="24" y="230" width="300" height="30" rx="7" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="174" y="250" font-size="12.5" font-weight="700" fill="#22548f" text-anchor="middle">DA 指示 (3 モードの定義と使い方)</text>
+      <text x="174" y="280" font-size="12" fill="#22548f" text-anchor="middle">青の 3 つ = scaffold。常に見える</text>
+
+      <path d="M330,144 L364,144" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#daB)"/>
+
+      <text x="380" y="20" font-size="14" font-weight="700" fill="#0f5132">導出されるセグメント単位のマスク</text>
+      <text x="380" y="42" font-size="11.5" fill="#4a5d54">行 = 推論ステップ ・ 列 = 文脈のセグメント</text>
+
+      <text x="380" y="76" font-size="12" font-weight="700" fill="#0f5132">&lt;global&gt;</text>
+      <rect x="470" y="62" width="46" height="20" rx="4" fill="#43b581"/>
+      <rect x="520" y="62" width="46" height="20" rx="4" fill="#43b581"/>
+      <rect x="570" y="62" width="46" height="20" rx="4" fill="#43b581"/>
+      <rect x="620" y="62" width="46" height="20" rx="4" fill="#43b581"/>
+      <rect x="670" y="62" width="46" height="20" rx="4" fill="#43b581"/>
+      <text x="730" y="77" font-size="11.5" fill="#12211a">全部読む</text>
+
+      <text x="380" y="112" font-size="12" font-weight="700" fill="#0f5132">&lt;focus 2&gt;</text>
+      <rect x="470" y="98" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="520" y="98" width="46" height="20" rx="4" fill="#43b581"/>
+      <text x="543" y="113" font-size="11" font-weight="700" fill="#0d2b20" text-anchor="middle">F</text>
+      <rect x="570" y="98" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="620" y="98" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="670" y="98" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <text x="730" y="113" font-size="11.5" fill="#12211a">1 つだけ読む</text>
+
+      <text x="380" y="148" font-size="12" font-weight="700" fill="#0f5132">&lt;local&gt;</text>
+      <rect x="470" y="134" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="520" y="134" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="570" y="134" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="620" y="134" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <rect x="670" y="134" width="46" height="20" rx="4" fill="none" stroke="#6b7a86" stroke-dasharray="4 3"/>
+      <text x="730" y="149" font-size="11.5" fill="#12211a">1 つも読まない</text>
+
+      <rect x="380" y="176" width="476" height="84" rx="8" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="398" y="198" font-size="12.5" font-weight="700" fill="#0f5132">どのモードでも常に読むもの</text>
+      <text x="398" y="218" font-size="12" fill="#12211a">system 指示 ・ 質問 ・ DA 指示 ・ そこまでの自分の出力</text>
+      <text x="398" y="240" font-size="12" fill="#12211a">scaffold を常に見せるのは、protocol の足場を切らさないため。</text>
+      <text x="398" y="256" font-size="12" fill="#12211a">system 指示が attention sink を埋めるので、文脈が sink に入らない</text>
+
+      <rect x="24" y="296" width="832" height="76" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="44" y="320" font-size="14" font-weight="700" fill="#0f5132">&lt;global&gt; タグは状態遷移を起こさない</text>
+      <text x="44" y="342" font-size="12.5" fill="#12211a">state machine の既定状態が global なので、&lt;global&gt; は「宣言」としては何もしない。プロンプト上の構造としてだけ存在する。</text>
+      <text x="44" y="361" font-size="12.5" fill="#12211a">それでも書かせるのは、<tspan font-weight="700">推論を「範囲が一定の連続した区間」に整理させる</tspan>ため。protocol の形をモデルに追跡させる足場</text>
+
+      <rect x="24" y="382" width="832" height="76" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="44" y="406" font-size="14" font-weight="700" fill="#b5401f">この protocol が触らないもの</text>
+      <text x="44" y="428" font-size="12.5" fill="#12211a">DA が効くのは<tspan font-weight="700">global attention 層だけ</tspan>。sliding window attention や Gated DeltaNet のような層は、1 ステップの費用が窓や再帰状態で決まっていて</text>
+      <text x="44" y="447" font-size="12.5" fill="#12211a">文脈長に比例しないので、マスクで削れるものが無い。7 節で見るとおり、この「削れない床」が節約の上限を決める</text>
+    </svg>
+    <p class="cap">図 2: 左がプロンプト、右が生成テキストから導かれるマスク。行が推論ステップで、破線が読まないセグメント。F が focus で名指しされたセグメント</p>
+  </div>
+</section>
+<section id="s3">
+  <h2><span class="num">3</span>実装 — テキストからマスクへ</h2>
+  <p class="lead">宣言を効かせるには、生成の途中でマスクを差し替える仕組みが要ります。ここが「アイデア」と「速くなる実装」を分ける部分です。</p>
+  <h3>state machine</h3>
+  <p>DA の state machine は推論エンジンの横で走り、出力ストリームを読んでモード遷移を拾います。遷移するのは<b>開きタグの閉じ括弧 <code>&gt;</code> の文字</b>で、対応する閉じタグで global に戻ります。既定状態は global です。</p>
+  <h3>block 整列がすべてを決める</h3>
+  <p>ここが実装上いちばん重要な洞察です。vLLM は KV キャッシュを<b>16 から 32 トークンの固定ブロック</b>で保持し、attention カーネルは<b>ブロック単位で読みます</b>。だから、</p>
+  <div class="key">
+    <b>散らばった個別トークンを落としても、メモリ読み出しは 1 バイトも減りません。</b>時間が減るのは<b>ブロックまるごとを飛ばせたときだけ</b>です。そこで state machine は<b>ブロック粒度でマスクを掛け</b>、保持する区間を<b>外側に丸めます</b> (モデルが宣言したトークンを絶対に落とさないため)。代償は区間の両端でせいぜい 1 ブロックずつ、つまり 2,048 トークンのセグメントに対して数十トークンです。結果は<b>ただのブロックリスト</b>なので、FlashAttention のような既存カーネルがそのまま動きます。
+  </div>
+  <p>vLLM への統合は<b>attention metadata builder へのフック 1 か所</b>で、カーネル改造もスケジューラ変更もありません。各 decode ステップで、そのリクエストの<b>KV キャッシュのブロックテーブルを書き換える</b>だけ。カーネルは単に読む量が減ります。</p>
+  <div class="math"><span class="cm">各 decode ステップでやること</span>
+1. 出力ストリームから現在のモードを決める     <span class="cm">(タグをパースするだけ)</span>
+2. モードから「見せるセグメント」を決める      <span class="cm">(global = 全部 / focus = 名指し / local = なし)</span>
+3. その範囲をブロック境界に外側へ丸める         <span class="cm">(宣言されたトークンを落とさない)</span>
+4. ブロックテーブルを書き換える                 <span class="cm">(カーネルは変更なし)</span></div>
+  <h3>トレードオフを先に書いておく</h3>
+  <p>DA は<b>「decode ステップを増やして、1 ステップあたりの attention コストを下げる」</b>取引です。これが得になるかは配備の状況に依存します。論文はここを roofline wall-time という枠組みで整理していて、結論は<b>大バッチ ・ 長文脈のサービングで最も効く</b>というものです。</p>
+  <table>
+    <tr><th>コスト成分</th><th>何に比例するか</th><th>DA で減るか</th></tr>
+    <tr><td>FFN と射影の行列積</td><td>decode ステップ数と活性パラメータ。<b>文脈長には依存しない</b>。大バッチでパラメータ読み出しが償却され compute-bound になる</td><td><b>減らない</b> (ステップが増えるので少し増える)</td></tr>
+    <tr class="hl"><td>global attention の KV 読み出し</td><td><b>文脈長 × decode ステップ数</b>。系列ごとの読み出しなのでバッチで償却されず memory-bound のまま</td><td><b>ここだけ減る</b></td></tr>
+    <tr><td>効率的な層の読み出し</td><td>ステップ数のみ。SWA の窓や GDN の再帰状態は固定サイズ</td><td><b>減らない</b> (削る余地が無い)</td></tr>
+  </table>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】15 タスクの主結果</h2>
+  <p class="lead">評価は 15 の長文脈ソース (RULER ・ LongBench v1/v2 ・ LooGLE ・ ZeroSCROLLS) で、単一スパンの検索と複数スパンの推論の 2 カテゴリに分かれます。文脈長は 6.4K から 1,071K まで。<b>3 つの arm</b> を比べます。</p>
+  <table>
+    <tr><th>arm</th><th>中身</th><th>何を切り分けるか</th></tr>
+    <tr><td>Vanilla</td><td>生の文脈をそのまま並べ、答えを <code>&lt;answer&gt;</code> で囲む指示だけ。完全な causal attention</td><td>基準</td></tr>
+    <tr><td>DA-nm (no mask)</td><td>DA と<b>同じプロンプト</b>だが、attention は完全な causal のまま</td><td>Vanilla との差 = <b>プロンプト形式だけの効果</b></td></tr>
+    <tr class="hl"><td>DA</td><td>同じプロンプト + <b>マスクを効かせる</b></td><td>DA-nm との差 = <b>マスクだけの効果</b></td></tr>
+  </table>
+  <div class="canvas-wrap">
+    <canvas id="cvMain" width="860" height="520"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="mnAcc">精度 (%)</button>
+    <button class="ghost" id="mnTok">attended トークン (M / 応答)</button>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="mnG">Gemma-4-31B</button>
+    <button class="ghost" id="mnQ">Qwen-3.6-27B</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#6b7a86"></span>Vanilla</span>
+    <span><span class="dot" style="background:#e0a03f"></span>DA-nm (マスク無し)</span>
+    <span><span class="dot" style="background:#43b581"></span>DA</span>
+  </div>
+  <p class="rdout" id="mnOut"></p>
+  <p>集計値は Gemma で精度 87.01 → 85.74 (<b>-1.27pp</b>)、attended トークン 13.43M → 6.45M (<b>-52.0%</b>)。Qwen で 85.31 → 82.56 (<b>-2.75pp</b>)、22.54M → 15.52M (<b>-31.1%</b>) です。ただし集計はタスクごとのばらつきを隠します。</p>
+  <table>
+    <tr><th>観察</th><th>中身</th></tr>
+    <tr><td>勝っているタスクもある</td><td>Gemma で 15 中 <b>7 タスク</b>、Qwen で 5 タスクが vanilla 以上。ただし多くは niah 系の<b>天井 (100%) での引き分け</b></td></tr>
+    <tr><td>単独で伸びた例</td><td>Gemma の longdep_qa (<b>+3.1pp</b>)、Qwen の code_repo (<b>+5.6pp</b>)</td></tr>
+    <tr><td>損失の偏り</td><td><b>複数スパンの推論のほうが痛い</b>。Gemma はカテゴリ平均で 2.28pp 対 0.78pp、Qwen は 3.59pp 対 2.34pp</td></tr>
+    <tr><td>絶対の節約が大きいタスク</td><td>いちばん文脈が長いところ。code_repo で <b>41.8M</b> (Gemma) と <b>52.0M</b> (Qwen)、dialogue_history で 22.1M と 39.1M トークン</td></tr>
+    <tr><td>Qwen で増えるタスクもある</td><td>5 つのソースで attended トークンが<b>vanilla を上回ります</b> (とくに qmsum と LBv2 の 2 つの QA)。DA の生成が長いぶんが 1 ステップの節約を食う</td></tr>
+  </table>
+  <div class="warn">
+    <b>評価は LLM judge です。</b>自由形式の生成なので完全一致では測れず、質問ごとに Gemini-3-Flash が厳格な受理基準を作り、それを thinking を有効にした Qwen-3.5-4B が適用します。judge の検証は丁寧で、2,993 応答のサンプルで<b>フロンティア judge (Gemini-3.1-Pro) と個別判定が 98.53% 一致</b> ($\kappa=0.940$)、per-cell の精度の相関は $r=0.992$、不一致は対称 (McNemar $p=0.65$)、全体の差は <b>-0.13pp</b> です。<b>形式の失敗は不正解として数えられます</b>。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【体験】節約はマスクから来る</h2>
+  <p class="lead">この論文でいちばん効いている切り分けがここです。DA の数字は「プロンプトを変えたから」なのか「マスクを掛けたから」なのか。3 つの arm を 3 つの軸で見ると、答えは一意に決まります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvSrc" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="srAcc">精度</button>
+    <button class="ghost" id="srStep">decode ステップ数</button>
+    <button class="ghost" id="srTok">attended トークン</button>
+  </div>
+  <p class="rdout" id="srOut"></p>
+  <p>3 つの軸が示すことを順に並べます。</p>
+  <table>
+    <tr><th>軸</th><th>読み取れること</th></tr>
+    <tr><td>精度</td><td>DA-nm は<b>ほぼ無損失</b>。Gemma では vanilla と同点 (87.01 対 87.01)、Qwen でも 0.69pp 差。<b>チャンク化されたプロンプト形式そのものは、ほぼ無料</b></td></tr>
+    <tr><td>decode ステップ</td><td>DA も DA-nm も vanilla より<b>15 - 35% 多く</b>ステップを踏みます (Gemma 332 → 448 で +35%、Qwen 573 → 752 で +31%)。zero-shot protocol の副産物</td></tr>
+    <tr class="hl"><td>attended トークン</td><td><b>DA-nm は vanilla より増えます</b> (Gemma +66.2%、Qwen +28.8%)。増えたステップを全 attention で走るからです。マスクを入れると<b>そこから 71.1% (Gemma) と 46.5% (Qwen) 削られ</b>、vanilla より下に落ちます</td></tr>
+  </table>
+  <div class="key">
+    <b>この 3 段の動きが結論です。</b>Gemma では <b>vanilla より 66.2% 多い</b>ところから、マスクによって <b>vanilla より 52.0% 少ない</b>ところまで動きます。つまり<b>節約はプロンプトではなく完全にマスクから来ています</b>。そして精度のコストも同じ場所から来ていて、DA-nm がほぼ無損失なので、<b>-1.27pp (Gemma) と -2.06pp (Qwen) の大半はマスクが情報を隠したぶん</b>です。<b>利得と損失が同じ 1 つの機構に帰属する</b>という、珍しく綺麗な切り分けになっています。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>規模と文脈長でどうスケールするか</h2>
+  <p class="lead">zero-shot でこれをやらせるので、<b>モデルの地力</b>が protocol の成否を決めます。論文は 6 モデル (Gemma-4 の 31B / 12B / E4B、Qwen の 3.6-27B / 3.5-9B / 3.5-4B) で測っています。</p>
+  <table>
+    <tr><th>指標</th><th>小さいモデル</th><th>大きいモデル</th><th>読み方</th></tr>
+    <tr class="hl"><td>vanilla 比の精度 (Gemma)</td><td>E4B で <b>29%</b></td><td>31B で <b>99%</b></td><td><b>規模とともに単調に parity へ近づく</b></td></tr>
+    <tr><td>vanilla 比の精度 (Qwen)</td><td>4B で <b>64%</b></td><td>27B で <b>97%</b></td><td>同じ傾向</td></tr>
+    <tr><td>focus の成功率 (Gemma)</td><td>E4B で <b>58%</b></td><td>31B で <b>99%</b></td><td>タグが有効なチャンク参照として解決できた割合</td></tr>
+    <tr><td>focus の成功率 (Qwen)</td><td>4B で <b>89%</b></td><td>27B で <b>99%</b></td><td>最大のモデルは<b>ほぼ完璧に protocol を守る</b></td></tr>
+    <tr><td>1 応答あたりの focus 試行数</td><td colspan="2"><b>約 1.4 - 1.9 で、規模の傾向なし</b></td><td>強いモデルは<b>試行を減らすのではなく、より確実にパースさせる</b>ことで勝っている</td></tr>
+    <tr><td>vanilla 比の attended トークン</td><td colspan="2">Gemma は <b>46 - 48%</b>、Qwen は <b>50 - 69%</b></td><td><b>規模の傾向は無い</b>。1 ステップの節約率は約 0.5 でほぼ規模不変で、総量の差は生成の長さから来る</td></tr>
+  </table>
+  <p>いちばん小さい Gemma-4-E4B が vanilla 比 29% しか保てないのは、<b>推論の失敗というより protocol を守れない失敗</b>です。focus の成功率が 58% しかなく、パースできる答えを出せていません。論文の結論は<b>「DA には最低限の地力が必要で、最小のモデルはまだそこに達していない」</b>。逆に言えば、この手法は<b>モデルが強くなるほど効く</b>方向のスケーリングを持っています。</p>
+  <div class="warn">
+    <b>Gemma-4-12B だけ vanilla より attended トークンが多い</b>という例外があります。原因はマスクの失敗ではなく、<b>DA 応答の約 6% が 8K の生成上限まで終わらない</b>ことです。非終了の応答を両 arm から除くと vanilla の 98% まで下がります。Qwen-3.5-4B にも同じ効果が弱く出て (50% → 38%)、しかもこちらは vanilla 側でも非終了が起きるので、<b>DA の性質ではなく小さいモデルの性質</b>だと整理されています。
+  </div>
+  <h3>文脈が長いほど得になる</h3>
+  <p>15 ソースをまとめて文脈長で bin に分けると、形はこうです。</p>
+  <table>
+    <tr><th>文脈長</th><th>vanilla 比の精度</th><th>attended トークンの差</th></tr>
+    <tr><td>32K まで</td><td><b>約 1pp 以内</b></td><td>約 <b>-1M</b> トークン</td></tr>
+    <tr class="hl"><td>最長の bin</td><td>約 <b>96%</b> まで緩やかに低下</td><td>約 <b>-21M</b> トークン</td></tr>
+  </table>
+  <p>1 ステップの節約率が約 50% でほぼ一定なので、<b>絶対の節約は生の文脈長に比例して伸びます</b>。長文脈の decode がいちばん高くつくところで、いちばん効くという形です。一方で<b>長文脈での精度低下はマスク由来</b>だと分かります。DA-nm の線にはこの低下が現れません。</p>
+  <p>モードの使い方も文脈長で変わります。Gemma-4-31B では <code>&lt;global&gt;</code> が生成トークンの約 <b>27%</b> で、残り 73% が focus と local です。この 2 つは安いモードで、vanilla の 1 ステップに対して<b>それぞれ約 12% と 6% のトークンしか読みません</b> (トークンあたり 76 - 99% の節約)。ただし<b>global の割合は最長の bin で約 45% まで上がり</b>、そこでの総節約に上限をかけます。</p>
+</section>
+<section id="s7">
+  <h2><span class="num">7</span>【体験】roofline の内訳</h2>
+  <p class="lead">attended トークンが半分になっても、実際の時間が半分になるとは限りません。論文は decode 時間を 3 成分に分けて、B200 1 枚での roofline 見積りを出しています。<b>各成分をそれぞれのハードウェア上限で課金する</b>という考え方です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRoof" width="860" height="450"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="rfMs">時間の内訳 (ms)</button>
+    <button class="ghost" id="rfWork">仕事量 (TFLOP と GB)</button>
+    <button class="ghost" id="rfShare">vanilla の decode 時間の構成比</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#c084fc"></span>行列積 (compute-bound)</span>
+    <span><span class="dot" style="background:#43b581"></span>global attention の KV 読み出し</span>
+    <span><span class="dot" style="background:#e0a03f"></span>効率的な層の読み出し (削れない床)</span>
+  </div>
+  <p class="rdout" id="rfOut"></p>
+  <p>数字の形を追います。Gemma では global の読み出しが 1,100 GB から <b>528 GB</b> へ半分以下に落ちます。ところが<b>行列積は 22.9 → 30.9 ms、効率的な層は 49.7 → 67.1 ms と増えます</b>。decode ステップが 35% 増えたぶんです。合計は 269.1 → 192.3 ms で <b>0.71 倍</b>。</p>
+  <div class="key">
+    <b>2 つのモデルで「どれだけ残るか」が違う理由。</b>Qwen の効率的な層は GDN の再帰状態で、DA の attention 時間のうち<b>わずか 5%</b> です。だから global の削減がほぼそのまま通ります。一方 Gemma の効率的な層は<b>SWA の床</b>で、60 層のうち 50 層を占め、DA の attention 時間の <b>42%</b> です。global 自体は半分以下に落ちているのに、<b>この床が節約の上限を決めます</b>。同じマスクでも、アーキテクチャの「削れない部分」の大きさで見返りが変わる、というのが実務的な教訓です。
+  </div>
+  <div class="warn">
+    <b>これは実測の wall-clock ではありません。</b>MFU 40% (compute-bound) と MBU 70% (memory-bound) を仮定した<b>理論上の天井</b>で、しかも<b>prefill を除いています</b> (phase-disaggregated なサービングでは別のプールで走るという前提)。DA が触るのは decode 側だけなので切り出しは妥当ですが、<b>0.71 倍という数字は実装を回して測ったものではない</b>と読む必要があります。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【体験】この前提は将来も成り立つか</h2>
+  <p class="lead">DA の価値は「global attention が decode コストの主役である」という前提に乗っています。ところが最近のアーキテクチャは、まさにそこを削りに来ています。論文はこの反論を自分で立てて、計算しています。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvShare" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="shM">文脈 1M トークン</button>
+    <button class="ghost" id="sh244">244K</button>
+    <button class="ghost" id="sh128">128K</button>
+    <button class="ghost" id="shAll">3 つを並べる</button>
+  </div>
+  <p class="rdout" id="shOut"></p>
+  <p>アーキテクチャ側の努力は本物です。大半の層を局所 ・ 線形 attention (SWA、GDN) に置き換え、各エントリを低ランク表現 (MLA) やトークン統合で縮め、読み出し自体を軽量な indexer で減らす。合わせて<b>文脈トークンあたりの KV 読み出しバイト数は最大 2 桁下がっています</b>。</p>
+  <p>それでも、1M トークンでは attention が decode 時間の大半を占めます。vanilla の global attention を残している Kimi-K3 は <b>94%</b>、indexer ベースの疎な設計でも <b>56 - 97%</b>。ただし表を切り替えると分かるとおり、<b>この比率は文脈長に強く依存します</b>。GLM-5.3-Flash は 1M で 56.49% ですが、128K では <b>14.25%</b> まで落ちます。<b>攻めた設計 + 短めの文脈では、DA が削れる余地は小さい</b>ということです。</p>
+  <div class="key">
+    <b>agentic な運用についての論点。</b>「エージェントは tool call で少しずつ文脈を取ってくるから、検索が既に問題を解いているのでは」という反論に対して、論文の答えは明確です。<b>検索は「何を文脈に入れるか」を決め、DA は「入ったもののうち何を読むか」を決める</b>。別の問題です。むしろ<b>検索は DA が狙うコストを増やします</b>。tool の結果は残りのエピソードの間ずっと文脈に居座るのに、それが関係あるのは要求したステップの周辺だけです。結果が積み上がるほど文脈は伸び、ターンをまたいで持ち越されます。<b>agentic な文脈こそ DA の節約が最大になる領域</b>という主張です。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>【体験】うまくいかない 6 つのタスク</h2>
+  <p class="lead">ここは論文の付録にある内容ですが、手法の輪郭を理解するのに最も重要な部分です。<b>主要スイートの 15 ソースは、DA が噛み合うタスクを選んだ結果</b>で、噛み合わない 6 つは別に報告されています。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvFail" width="860" height="450"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="flAcc">精度 (%)</button>
+    <button class="ghost" id="flTok">attended トークン (M / 応答)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#6b7a86"></span>Vanilla</span>
+    <span><span class="dot" style="background:#e0a03f"></span>DA-nm</span>
+    <span><span class="dot" style="background:#43b581"></span>DA</span>
+  </div>
+  <p class="rdout" id="flOut"></p>
+  <p>この 6 つでは、精度が <b>63.28 → 54.26</b> に落ち、attended トークンは <b>38.62M → 45.97M</b> と<b>vanilla より増えます</b>。主要スイートの結論とは逆向きです。論文はこれを 2 つの構造的な噛み合わなさに分類しています。</p>
+  <table>
+    <tr><th>失敗の型</th><th>中身</th><th>例</th><th>何が起きるか</th></tr>
+    <tr><td><b>分割で証拠が壊れる</b></td><td>答えに必要な情報が<b>セグメント分割を跨いで生き残らない</b></td><td>全セグメントにまたがる数え上げ (cwe)、segmenter が割ってしまう表 (structured_data)</td><td>精度が <b>-30 / -21pp</b> 崩壊する。1 ステップの attention は下がっているのに</td></tr>
+    <tr><td><b>出力長が文書に比例する</b></td><td>セグメントや項目ごとに 1 単位の出力を出すタスク</td><td>語頻度の列挙 (fwe)、セグメント毎の要約 (summ_screen_fd)、全文書の並べ替え (book_sum_sort)、例ごとの in-context learning</td><td>decode ステップが文書長に比例するので、1 ステップの節約があっても<b>総量が積み上がる</b></td></tr>
+  </table>
+  <p>論文の弁明にも筋があります。<b>1 ステップあたりの attention は 6 つすべてで -39% から -67% 下がっています</b>。機構は働いていて、噛み合っていないのは分解の仕方です。型 1 は表を割らない構造認識の分割と、focus をセグメント上で掃く map-reduce パターンで対処できる。型 2 は精度ではなく decode 長の問題で、<b>長い出力を global ではなく focus の下で書かせれば</b> 1 ステップのコストが抑えられる、と。</p>
+  <div class="warn">
+    <b>さらに 2 つのソースは完全に除外されています。</b>RULER の qa_1 と qa_2 で、理由は<b>タスクのプロンプトが中間推論を明示的に禁止している</b>ことです ("Only give me the answer and do not output any other words")。DA は CoT の中に宣言を書かせる手法なので、<b>中間推論を禁じられると成立しません</b>。cwe / fwe / vt でも同じ摩擦があると注記されています。この制約は zero-shot 版に固有ですが、<b>「思考を書かせない」運用とは原理的に両立しない</b>という性質は覚えておく価値があります。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>批判的に読む</h2>
+  <p class="lead">どこが確かで、どこが確かでないかを分けます。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>タスクスイートの選び方</td><td>いちばん重要な論点です。<b>15 ソースは DA が噛み合うタスクを選んだ結果</b>で、噛み合わない 6 つは付録で、さらに 2 つは完全に除外されています。付録の 6 つでは<b>精度 -9.02pp かつ attended トークン +19%</b> と結論が反転します。<b>開示は誠実 (数字も理由も分類も書いてある) ですが、ヘッドラインの -52.0% / -1.27pp はこの選択の後の数字</b>です</td></tr>
+    <tr><td>wall-clock が実測されていない</td><td>0.71 倍 / 0.77 倍は<b>MFU 40% ・ MBU 70% を仮定した roofline の理論値</b>です。vLLM 統合は実装されていて attended トークンは実測ですが、<b>時間そのものは測られていません</b>。カーネル起動やブロックテーブル書き換えのオーバーヘッド、実バッチでの干渉は入っていません</td></tr>
+    <tr><td>decode ステップの増加</td><td>31 - 35% 増えます。roofline では行列積と局所読み出しが<b>実際に増えています</b> (Gemma で 22.9 → 30.9 ms、49.7 → 67.1 ms)。<b>compute-bound 寄りの配備 (小さい文脈 ・ 小バッチ) では、この増加が節約を食い潰す</b>可能性があります。論文もそれを「配備の状況に依存する」と書いています</td></tr>
+    <tr><td>thinking モードと併用できない</td><td>「thinking タグの中では protocol に従えなかった」ため、全モデルで thinking を無効にしています。<b>推論モデルの主力の使い方と衝突する</b>ので、実務ではここが最初の障害になります</td></tr>
+    <tr><td>global 比率が節約の天井</td><td>最長の bin では global が生成の <b>45%</b> を占めます。global では節約が定義上 0 なので、<b>いちばん節約したい長さでいちばん global が増える</b>という逆行があります。zero-shot でモデルが決めているぶんなので改善余地とも読めますが、現状の数字はこの制約込みです</td></tr>
+    <tr><td>前提の耐用年数</td><td>attention が decode 時間の大半という前提は、<b>文脈長と設計に強く依存</b>します。GLM-5.3-Flash では 1M で 56% ・ 128K で 14% です。<b>攻めた KV 最適化 + 中程度の文脈</b>という組み合わせでは DA の削り代が小さくなります</td></tr>
+    <tr><td>マスクが精度を削る量</td><td>DA-nm がほぼ無損失なので、<b>精度低下はほぼ全部マスク由来</b>と切り分けられています。これは綺麗な結果ですが、同時に<b>「宣言が外れたときに救う仕組みが無い」</b>ことも意味します。宣言が誤ったセグメントを指したら、その情報は物理的に見えません</td></tr>
+    <tr><td>セグメント分割がヒューリスティック</td><td>約 2,048 トークンを目標に境界の粗さ順で切るだけです。論文も「簡便のための近似」と書いています。<b>表を割る失敗 (structured_data で -21pp) はここから来ています</b></td></tr>
+    <tr><td>zero-shot ゆえの不確定性</td><td>モード構成も focus 試行数 (1.4 - 1.9) も<b>モデルが勝手に決めた値</b>で、タスクにとって最適とは限りません。論文はこれを「下限」の根拠として使っていて、主張としては妥当ですが、<b>いま得られる数字が設計の結果ではない</b>ことは押さえるべきです</td></tr>
+    <tr><td>再現性</td><td>本文にリポジトリの記載がありません。ただし<b>プロンプト全文 ・ segmenter ・ vLLM 統合の詳細 ・ judge のプロンプト</b>が付録にあり、変更点が「フック 1 か所」に局所化されているので移植は現実的です</td></tr>
+    <tr><td>この論文の良い点</td><td>ablation (DA-nm) の設計が主張と正確に対応している。失敗タスクを分類して数字ごと出している。roofline を「実測ではない」と繰り返し明示している。judge を 2,993 応答でフロンティアモデルと突き合わせている。<b>自分の主張を「下限」と呼ぶ節度</b>も含めて、誇張の少ない書き方です</td></tr>
+  </table>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <div class="key">
+    Declarative Attention の芯は 1 つの視点の転換です。<b>どこを読むかを活性値から推測するのをやめて、モデルに言わせる</b>。<code>&lt;global&gt;</code> で探し、<code>&lt;focus magic_chunks="7"&gt;</code> で読み、<code>&lt;local&gt;</code> で考える。推論エンジンはそのテキストを tool call のようにパースして、KV ブロックテーブルを書き換えるだけです。<b>選択のコストがゼロになり、$O(N)$ の読み出しはモデルが宣言した global 期間だけに残ります</b>。既製モデルへの zero-shot で attended トークンが 52.0% / 31.1% 減り、精度低下は 1.27pp / 2.75pp。<b>節約はプロンプト形式ではなくマスクから来ている</b>ことが ablation で切り分けられていて、同じマスクが精度コストの大半も生んでいます。モデルが大きいほど差が縮み、文脈が長いほど絶対の節約が伸びる。<b>ただし protocol と噛み合わない 6 つのタスクでは結論が反転し、wall-clock は測られていません</b>。
+  </div>
+  <h3>実務に持ち帰れるもの</h3>
+  <p>3 つあります。1 つ目、<b>ブロック粒度で考える</b>。散らばったトークンを落としてもメモリ読み出しは減りません。マスクの設計は KV キャッシュのブロック構造から出発すべきです。2 つ目、<b>削れない床を先に測る</b>。同じマスクでも SWA の床が 42% あるモデルと GDN が 5% のモデルでは見返りが違います。3 つ目、<b>境界はモデルが慣れた形に置く</b>。セグメントの区切りを tool 応答の特殊トークンに乗せるという工夫だけで、最大モデルの参照成功率が 99% に届いています。</p>
+  <h3>どこがまだ空いているのか</h3>
+  <p>いちばん大きいのは<b>protocol への post-training</b>で、論文自身がそこを「下限である理由」として挙げています。モード選択の方策と、表を壊さない分解をモデルに教えられれば、9 節の失敗の両方に効きます。次に<b>thinking モードとの共存</b>。いまは併用できないので、推論モデルの主流の使い方から外れます。そして<b>実測の wall-clock</b> です。attended トークンの削減は実測されていますが、それが実バッチの時間になる部分はまだ理論値のままです。</p>
+  <p class="fn">出典: "Declarative Attention" (KAIST AI ・ Google DeepMind), arXiv:2609.02737v1 [cs.CL], 2026-09-02.<br>
+  本ページの表とグラフの数値は<b>すべて論文の実測値または論文が計算した見積り</b>です。第 4 節と第 5 節は Table 2 と decode ステップの表、第 6 節は 5.2 節 ・ 5.3 節 ・ 6 節の本文に書かれた端点の値 (図のみの中間点は使っていません)、第 7 節は Table 3 の roofline 見積り、第 8 節は付録の architecture 比較表、第 9 節は付録 D.4 の 6 ソース表に基づきます。<b>第 7 節と第 8 節は roofline による理論値で、実測の wall-clock ではありません</b>。関連する解説として<a href="./paper-crisp.html">CRISP の sparse prefill</a>、<a href="./attn-swa.html">Sliding Window Attention</a>、<a href="./03-flash-attention.html">FlashAttention</a>、<a href="./attn-mla.html">MLA</a> があります。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./paper-index.html" style="color:var(--g2)">← 論文理解シリーズの目次へ</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* Table 2: [源, Gアクcv, Gアクnm, Gアクda, Qアクcv, Qアクnm, Qアクda, Gトクcv, Gトクnm, Gトクda, Qトクcv, Qトクnm, Qトクda] */
+const T2=[
+ ['niah_single_1',      100.0,100.0,100.0, 100.0,100.0,100.0,  1.89,  1.49,  0.88,  2.08,  2.68,  1.71,1],
+ ['niah_single_2',      100.0,100.0, 99.2, 100.0,100.0, 97.7,  2.08,  1.62,  1.03,  2.49,  2.30,  1.84,1],
+ ['niah_single_3',      100.0,100.0,100.0, 100.0, 99.2, 96.1,  2.86,  2.53,  1.12,  3.39,  3.32,  1.96,1],
+ ['niah_multikey_2',    100.0,100.0,100.0, 100.0,100.0,100.0,  1.74,  1.62,  0.95,  1.27,  1.84,  1.29,1],
+ ['niah_multikey_3',    100.0,100.0, 99.2, 100.0,100.0, 94.5,  4.31,  4.61,  1.92,  4.29,  5.69,  4.48,1],
+ ['LBv1/qmsum',          97.7, 96.9, 97.7,  96.9, 93.8, 91.4,  2.93,  2.64,  1.59,  1.77,  3.91,  2.67,1],
+ ['LBv2/multidoc_qa',    97.7, 97.7, 96.1,  96.9, 96.9, 89.8, 22.10, 21.57, 13.30, 16.17, 37.70, 20.89,1],
+ ['LooGLE/summarization',74.2, 71.9, 69.5,  70.3, 70.3, 65.6,  5.46,  6.14,  5.15,  5.81, 10.42,  4.12,1],
+ ['LBv2/code_repo',      72.2, 77.8, 72.2,  72.2, 72.2, 77.8, 64.86,143.96, 23.08,134.00,162.25, 81.96,1],
+ ['ZS/quality',          88.9, 88.9, 88.9,  94.4, 94.4, 94.4,  2.84,  4.78,  1.14,  3.51,  5.89,  1.92,1],
+ ['LBv2/singledoc_qa',   97.7, 96.9, 95.3,  95.3, 95.3, 88.3, 20.27, 17.27,  9.34, 12.39, 27.24, 18.00,2],
+ ['LBv2/dialogue_history',76.9,74.4, 71.8,  69.2, 66.7, 69.2, 41.81, 82.05, 19.68, 93.98, 99.45, 54.83,2],
+ ['LooGLE/longdep_qa',   65.6, 71.1, 68.8,  65.6, 71.1, 64.1, 10.57, 15.37,  6.54, 18.80, 21.85, 11.96,2],
+ ['LooGLE/shortdep_cloze',91.4,89.8, 86.7,  73.4, 65.6, 68.8, 10.78, 18.41,  6.10, 14.54, 22.32, 11.34,2],
+ ['ZS/space_digest',     43.0, 39.8, 40.6,  45.3, 43.8, 40.6,  6.93, 10.62,  4.88, 23.61, 28.50, 13.88,2]
+];
+const TOT={g:{acc:[87.01,87.01,85.74],tok:[13.43,22.31,6.45],steps:[332,null,448]},
+           q:{acc:[85.31,84.62,82.56],tok:[22.54,29.02,15.52],steps:[573,null,752]}};
+
+/* ============ デモ1: 15 タスクの主結果 ============ */
+(function(){
+  const cv=document.getElementById('cvMain'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let metric='acc', mdl='g';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const off=(metric==='acc'?1:7)+(mdl==='g'?0:3);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText((metric==='acc'?'精度 (%)':'attended トークン (M / 応答、対数軸)')+' ・ '+
+                (mdl==='g'?'Gemma-4-31B':'Qwen-3.6-27B'),24,24);
+    const x0=182,y0=48,gw=W-70-x0,rowh=(H-104)/15;
+    const vals=[];T2.forEach(function(r){vals.push(r[off],r[off+1],r[off+2]);});
+    const mx=Math.max.apply(null,vals);
+    function px(v){
+      if(metric==='acc') return x0+Math.max(0,(v-35)/65)*gw;
+      return x0+Math.log10(Math.max(v,0.5)/0.5)/Math.log10(mx*1.15/0.5)*gw;
+    }
+    if(metric==='acc'){[40,60,80,100].forEach(function(v){
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(px(v),y0-6);ct.lineTo(px(v),y0+15*rowh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10px sans-serif';ct.textAlign='center';ct.fillText(v,px(v),H-42);});}
+    else {[1,3,10,30,100].forEach(function(v){ if(v>mx*1.15) return;
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(px(v),y0-6);ct.lineTo(px(v),y0+15*rowh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10px sans-serif';ct.textAlign='center';ct.fillText(v+'M',px(v),H-42);});}
+    T2.forEach(function(r,i){
+      const y=y0+i*rowh;
+      if(i===0||r[13]!==T2[i-1][13]){
+        ct.fillStyle=ALT;ct.font='bold 10.5px sans-serif';ct.textAlign='left';
+        ct.fillText(r[13]===1?'単一スパンの検索/推論':'複数スパンの推論',24,y+9);
+      }
+      ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='right';
+      ct.fillText(r[0],x0-8,y+rowh/2+7);
+      const bh=Math.min(6,rowh/4);
+      [[r[off],MUT,0],[r[off+1],ALT,1],[r[off+2],POS,2]].forEach(function(a){
+        const w=Math.max(1.5,px(a[0])-x0);
+        ct.fillStyle=a[1];ct.globalAlpha=(a[2]===2)?0.95:0.55;
+        ct.fillRect(x0,y+3+a[2]*(bh+1.5),w,bh);ct.globalAlpha=1;
+      });
+      const d=r[off+2]-r[off];
+      ct.fillStyle=(metric==='acc'?(d>=0?POS:NEG):(d<=0?POS:NEG));
+      ct.font='bold 10.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText((d>=0?'+':'')+d.toFixed(metric==='acc'?1:2),x0+gw+8,y+rowh/2+7);
+    });
+    const T=TOT[mdl][metric];
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('15 ソース平均: Vanilla '+T[0].toFixed(2)+' / DA-nm '+T[1].toFixed(2)+' / DA '+T[2].toFixed(2)+
+      (metric==='acc'?' pp':' M'),24,H-16);
+    ct.fillStyle=(metric==='acc')?NEG:POS;ct.font='bold 12.5px sans-serif';ct.textAlign='right';
+    ct.fillText(metric==='acc'?('DA − Vanilla = '+(T[2]-T[0]).toFixed(2)+' pp')
+      :('DA は Vanilla の '+(T[2]/T[0]*100).toFixed(1)+'% ('+((T[2]/T[0]-1)*100).toFixed(1)+'%)'),W-24,H-16);
+    document.getElementById('mnOut').textContent=
+      (metric==='acc'
+        ? 'DA が Vanilla 以上のソースは '+T2.filter(function(r){return r[off+2]>=r[off];}).length+' / 15'
+        : 'DA が Vanilla より多く読むソースは '+T2.filter(function(r){return r[off+2]>r[off];}).length+' / 15');
+  }
+  bindBtns({acc:'mnAcc',tok:'mnTok'},function(k){metric=k;draw();});
+  bindBtns({g:'mnG',q:'mnQ'},function(k){mdl=k;draw();});
+  draw();
+})();
+
+/* ============ デモ2: 節約の出どころ ============ */
+(function(){
+  const cv=document.getElementById('cvSrc'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let axis='acc';
+  const AX={
+    acc:{n:'精度 ・ vanilla を 100 とした相対値',unit:'',key:'acc',good:'high'},
+    step:{n:'decode ステップ数 ・ vanilla を 100 とした相対値',unit:'',key:'steps',good:'low'},
+    tok:{n:'attended トークン ・ vanilla を 100 とした相対値',unit:'',key:'tok',good:'low'}
+  };
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const A=AX[axis];
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(A.n,24,24);
+    const groups=[['Gemma-4-31B','g'],['Qwen-3.6-27B','q']];
+    const arms=[['Vanilla',0,MUT],['DA-nm',1,ALT],['DA',2,POS]];
+    const y0=60,gh=H-196,x0=70,gw=W-40-x0;
+    const lo=0,hi=190;
+    function py(v){return y0+gh-(v-lo)/(hi-lo)*gh;}
+    [0,50,100,150].forEach(function(v){
+      const y=py(v);
+      ct.strokeStyle=(v===100)?'rgba(255,255,255,0.4)':GRID;ct.lineWidth=(v===100)?1.8:1;
+      ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      ct.fillStyle=(v===100)?INK:MUT;ct.font='10.5px sans-serif';ct.textAlign='right';
+      ct.fillText(v,x0-8,y+4);
+    });
+    ct.fillStyle=INK;ct.font='11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('100 = vanilla',x0+gw-6,py(100)-8);
+    const gwid=gw/2;
+    groups.forEach(function(g,gi){
+      const base=TOT[g[1]][A.key][0];
+      const cx=x0+gi*gwid;
+      ct.fillStyle=SUBI;ct.font='bold 12.5px sans-serif';ct.textAlign='center';
+      ct.fillText(g[0],cx+gwid/2,y0+gh+52);
+      arms.forEach(function(a,ai){
+        const raw=TOT[g[1]][A.key][a[1]];
+        const bw=gwid/5, bx=cx+gwid/2-bw*1.6+ai*bw*1.1;
+        if(raw===null){
+          ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+          ct.fillText('論文に',bx+bw/2,py(0)-30);ct.fillText('数値なし',bx+bw/2,py(0)-16);
+          ct.strokeStyle=MUT;ct.setLineDash([3,3]);
+          ct.strokeRect(bx,py(115),bw,py(0)-py(115));ct.setLineDash([]);
+          return;
+        }
+        const rel=raw/base*100;
+        ct.fillStyle=a[2];ct.globalAlpha=(ai===2)?0.95:0.6;
+        ct.fillRect(bx,py(rel),bw,py(0)-py(rel));ct.globalAlpha=1;
+        ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='center';
+        ct.fillText(rel.toFixed(0),bx+bw/2,py(rel)-8);
+        ct.fillStyle=a[2];ct.font='11px sans-serif';
+        ct.fillText(a[0],bx+bw/2,py(0)+16);
+        ct.fillStyle=MUT;ct.font='10px "SF Mono",Menlo,monospace';
+        ct.fillText(A.key==='steps'?raw:raw.toFixed(2),bx+bw/2,py(0)+30);
+      });
+    });
+    const by=H-46;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    if(axis==='acc') ct.fillText('DA-nm はほぼ無損失 (Gemma で同点、Qwen で 0.69pp 差)。チャンク化されたプロンプト形式そのものは、ほぼ無料',24,by);
+    if(axis==='step') ct.fillText('DA-nm の実数は論文に無く、本文に「DA と DA-nm はどちらも vanilla より 15 - 35% 多い」と書かれている',24,by);
+    if(axis==='tok') ct.fillText('DA-nm は vanilla より増える (+66.2% / +28.8%)。増えたステップを全 attention で走るため',24,by);
+    ct.fillStyle=POS;ct.font='bold 12px sans-serif';
+    if(axis==='tok') ct.fillText('マスクがそこから 71.1% (Gemma) と 46.5% (Qwen) 削り、vanilla より下へ落とす',24,by+20);
+    if(axis==='acc') ct.fillText('だから精度コストの大半もマスク由来 (-1.27pp / -2.06pp、DA-nm 比)',24,by+20);
+    if(axis==='step') ct.fillText('Gemma 332 → 448 (+35%) ・ Qwen 573 → 752 (+31%)。これが roofline で行列積の時間を押し上げる',24,by+20);
+    const T=TOT.g[A.key];
+    document.getElementById('srOut').textContent=
+      (axis==='acc'?'Gemma: 100 → 100.0 (DA-nm) → 98.5 (DA) ・ Qwen: 100 → 99.2 → 96.8'
+      :axis==='step'?'Gemma: 332 → 448 ステップ (135) ・ Qwen: 573 → 752 ステップ (131)'
+      :'Gemma: 100 → 166 (DA-nm) → 48 (DA) ・ Qwen: 100 → 129 → 69');
+  }
+  bindBtns({acc:'srAcc',step:'srStep',tok:'srTok'},function(k){axis=k;draw();});
+  draw();
+})();
+/* ============ デモ3: roofline の内訳 (Table 3) ============ */
+(function(){
+  const cv=document.getElementById('cvRoof'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const R=[
+    {m:'Gemma-4-31B',a:'Vanilla',mm:22.9,gl:196.5,lo:49.7,tf:20.6,gb:1100,lb:278,tot:269.1},
+    {m:'Gemma-4-31B',a:'DA',     mm:30.9,gl: 94.4,lo:67.1,tf:27.8,gb: 528,lb:376,tot:192.3},
+    {m:'Qwen-3.6-27B',a:'Vanilla',mm:34.4,gl:263.8,lo: 8.0,tf:30.9,gb:1477,lb: 45,tot:306.2},
+    {m:'Qwen-3.6-27B',a:'DA',     mm:45.1,gl:181.6,lo:10.5,tf:40.6,gb:1017,lb: 59,tot:237.3}
+  ];
+  let view='ms';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(view==='ms'?'1 応答あたりの decode 時間の roofline 見積り (ms) ・ B200 1 枚 ・ MFU 40% / MBU 70%':
+                view==='work'?'仕事量 ・ 行列積は TFLOP、メモリは GB (全 decode ステップの合計)':
+                             'vanilla の decode 時間のうち global attention が占める割合',24,24);
+    if(view==='share'){
+      const S=[{m:'Gemma-4-31B',v:196.5/269.1},{m:'Qwen-3.6-27B',v:263.8/306.2}];
+      const x0=190,y0=90,gw=W-90-x0;
+      S.forEach(function(s,i){
+        const y=y0+i*110, bh=44;
+        ct.fillStyle=SUBI;ct.font='bold 13.5px sans-serif';ct.textAlign='right';
+        ct.fillText(s.m,x0-16,y+bh/2+5);
+        ct.fillStyle=POS;ct.fillRect(x0,y,gw*s.v,bh);
+        ct.fillStyle=MUT;ct.globalAlpha=0.5;ct.fillRect(x0+gw*s.v,y,gw*(1-s.v),bh);ct.globalAlpha=1;
+        ct.fillStyle='#0d2b20';ct.font='bold 15px sans-serif';ct.textAlign='center';
+        ct.fillText((s.v*100).toFixed(0)+'%',x0+gw*s.v/2,y+bh/2+6);
+        ct.fillStyle=MUT;ct.font='12px sans-serif';
+        ct.fillText('その他',x0+gw*s.v+gw*(1-s.v)/2,y+bh/2+6);
+        ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+        ct.fillText('DA が削れるのはこの緑の部分だけ',x0,y+bh+20);
+      });
+      ct.fillStyle=INK;ct.font='12.5px sans-serif';ct.textAlign='left';
+      ct.fillText('vanilla では global attention の KV 読み出しが decode 時間の 73% (Gemma) と 86% (Qwen) を占める',24,H-64);
+      ct.fillStyle=ALT;ct.font='bold 12.5px sans-serif';
+      ct.fillText('だが DA 適用後は、Gemma では SWA の床が attention 時間の 42% を占めて節約に上限をかける (Qwen の GDN は 5%)',24,H-40);
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';
+      ct.fillText('この差が 0.71 倍 (Gemma) と 0.77 倍 (Qwen) の違いを生む',24,H-18);
+      document.getElementById('rfOut').textContent='vanilla の decode 時間のうち global attention は 73% (Gemma) / 86% (Qwen)';
+      return;
+    }
+    const x0=180,y0=56,gh=H-140,rowh=gh/4;
+    const keys=(view==='ms')?[['mm',PUR,'行列積'],['gl',POS,'global KV'],['lo',ALT,'局所/再帰']]
+                            :[['tf',PUR,'TFLOP'],['gb',POS,'global GB'],['lb',ALT,'局所 GB']];
+    const mx=(view==='ms')?320:1600;
+    const gw=W-120-x0;
+    function px(v){return v/mx*gw;}
+    R.forEach(function(r,i){
+      const y=y0+i*rowh+8, bh=Math.min(30,rowh-22);
+      ct.fillStyle=(r.a==='DA')?POS:SUBI;ct.font=(r.a==='DA'?'bold ':'')+'12.5px sans-serif';ct.textAlign='right';
+      ct.fillText(r.m+' / '+r.a,x0-12,y+bh/2+5);
+      let acc=0;
+      keys.forEach(function(k){
+        const w=px(r[k[0]]);
+        ct.fillStyle=k[1];ct.globalAlpha=(r.a==='DA')?0.95:0.55;
+        ct.fillRect(x0+acc,y,w,bh);ct.globalAlpha=1;
+        if(w>44){
+          ct.fillStyle='#0d2b20';ct.font='bold 11px "SF Mono",Menlo,monospace';ct.textAlign='center';
+          ct.fillText(r[k[0]],x0+acc+w/2,y+bh/2+4);
+        }
+        acc+=w;
+      });
+      if(view==='ms'){
+        ct.fillStyle=INK;ct.font='bold 12.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(r.tot.toFixed(1)+' ms',x0+acc+8,y+bh/2+5);
+        if(r.a==='DA'){
+          const base=R[i-1].tot;
+          ct.fillStyle=POS;ct.font='bold 12px sans-serif';
+          ct.fillText('= vanilla の '+(r.tot/base).toFixed(2)+' 倍',x0+acc+80,y+bh/2+5);
+        }
+      }
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    if(view==='ms'){
+      ct.fillText('DA で減るのは global KV の読み出しだけ。行列積と局所/再帰の読み出しは decode ステップが 31 - 35% 増えたぶん逆に増える',24,H-58);
+      ct.fillStyle=ALT;ct.font='bold 12px sans-serif';
+      ct.fillText('Gemma: 行列積 22.9 → 30.9 ms ・ 局所 (SWA) 49.7 → 67.1 ms。節約分を一部食い返している',24,H-36);
+      ct.fillStyle=NEG;ct.font='11.5px sans-serif';
+      ct.fillText('これは実測の wall-clock ではなく、指定した利用率での理論上の天井。prefill は含まない',24,H-14);
+    } else {
+      ct.fillText('global の読み出しバイト数は Gemma で 1,100 → 528 GB、Qwen で 1,477 → 1,017 GB',24,H-58);
+      ct.fillStyle=ALT;ct.font='bold 12px sans-serif';
+      ct.fillText('一方 TFLOP と局所 GB は増える。Gemma の局所は 278 → 376 GB (SWA の窓を余分なステップぶん読む)',24,H-36);
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+      ct.fillText('バイト数はすべて bf16 で、全 decode ステップの合計',24,H-14);
+    }
+    document.getElementById('rfOut').textContent=
+      (view==='ms'?'合計 269.1 → 192.3 ms (0.71 倍) ・ 306.2 → 237.3 ms (0.77 倍)'
+                  :'global GB は Gemma -52% / Qwen -31% ・ 局所 GB は +35% / +31% で増える');
+  }
+  bindBtns({ms:'rfMs',work:'rfWork',share:'rfShare'},function(k){view=k;draw();});
+  draw();
+})();
+
+/* ============ デモ4: アーキテクチャ別の attention 比率 ============ */
+(function(){
+  const cv=document.getElementById('cvShare'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const A=[
+    {n:'Qwen-3.6-27B',   v:[99.37,97.47,95.29],note:'本論文の評価対象'},
+    {n:'Gemma-4-31B',    v:[98.53,94.23,89.54],note:'本論文の評価対象'},
+    {n:'Qwen3.8-Max',    v:[98.15,92.82,87.15],note:''},
+    {n:'MiniMax-M3',     v:[97.50,90.49,83.31],note:''},
+    {n:'Kimi-K3',        v:[94.11,79.58,67.16],note:'vanilla の global attention を維持'},
+    {n:'DeepSeek-V4-Flash',v:[83.22,54.75,38.83],note:'indexer ベースの疎な設計'},
+    {n:'DeepSeek-V4-Pro',v:[66.55,32.68,20.30],note:'indexer ベースの疎な設計'},
+    {n:'GLM-5.3-Flash',  v:[56.49,24.05,14.25],note:'indexer ベースの疎な設計'}
+  ];
+  const LEN=['1M','244K','128K'];
+  let view=0;
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(view===3?'decode wall-time のうち attention が占める割合 (%) ・ 3 つの文脈長':
+                         'decode wall-time のうち attention が占める割合 (%) ・ 文脈 '+LEN[view],24,24);
+    const x0=200,y0=54,rowh=(H-110)/A.length,gw=W-150-x0;
+    [0,25,50,75,100].forEach(function(v){
+      const x=x0+v/100*gw;
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0-6);ct.lineTo(x,y0+A.length*rowh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(v,x,y0+A.length*rowh+18);
+    });
+    A.forEach(function(a,i){
+      const y=y0+i*rowh;
+      const own=(i<2);
+      ct.fillStyle=own?POS:SUBI;ct.font=(own?'bold ':'')+'12px sans-serif';ct.textAlign='right';
+      ct.fillText(a.n,x0-10,y+rowh/2+4);
+      if(view===3){
+        const bh=Math.min(7,rowh/4);
+        [0,1,2].forEach(function(j){
+          const c=[POS,BLUE,PUR][j];
+          ct.fillStyle=c;ct.globalAlpha=0.85;
+          ct.fillRect(x0,y+4+j*(bh+1.5),a.v[j]/100*gw,bh);ct.globalAlpha=1;
+        });
+        ct.fillStyle=INK;ct.font='10.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(a.v.map(function(x){return x.toFixed(1);}).join(' / '),x0+gw+8,y+rowh/2+4);
+      } else {
+        const bh=Math.min(22,rowh-8), v=a.v[view];
+        ct.fillStyle=own?POS:(v>=80?MUT:NEG);ct.globalAlpha=own?0.9:0.6;
+        ct.fillRect(x0,y+(rowh-bh)/2,v/100*gw,bh);ct.globalAlpha=1;
+        ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(v.toFixed(2)+'%',x0+v/100*gw+8,y+rowh/2+4);
+        if(a.note&&v>30){
+          ct.fillStyle='rgba(13,43,32,0.9)';ct.font='bold 10.5px sans-serif';
+          ct.fillText(a.note,x0+10,y+rowh/2+4);
+        }
+      }
+    });
+    if(view===3){
+      [['1M',POS],['244K',BLUE],['128K',PUR]].forEach(function(l,i){
+        ct.fillStyle=l[1];ct.fillRect(24+i*90,H-26,10,10);
+        ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='left';ct.fillText(l[0],38+i*90,H-17);
+      });
+    } else {
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+      ct.fillText(view===0?'1M トークンでは、どの設計でも attention が decode 時間の過半を占める':
+                  view===1?'244K では indexer ベースの設計で 3 割前後まで落ちる':
+                           '128K では GLM-5.3-Flash は 14.25% ・ DA が削れる余地は小さい',24,H-18);
+    }
+    document.getElementById('shOut').textContent=
+      (view===3?'文脈が短くなるほど attention の比率は落ちる ・ 落ち方は設計で大きく違う'
+       :'最大 '+A[0].v[view].toFixed(2)+'% (Qwen-3.6-27B) から最小 '+A[7].v[view].toFixed(2)+'% (GLM-5.3-Flash)');
+  }
+  bindBtns({0:'shM',1:'sh244',2:'sh128',3:'shAll'},function(k){view=+k;draw();});
+  draw();
+})();
+
+/* ============ デモ5: うまくいかない 6 タスク ============ */
+(function(){
+  const cv=document.getElementById('cvFail'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const F=[
+    {n:'RULER/cwe',           acc:[100.0,95.3,70.3], tok:[26.50,53.42,25.12],cat:1},
+    {n:'LBv2/structured_data',acc:[68.4,52.6,47.4],  tok:[133.88,350.96,165.93],cat:1},
+    {n:'RULER/fwe',           acc:[98.4,99.2,99.2],  tok:[3.22,21.43,6.16],cat:2},
+    {n:'ZS/summ_screen_fd',   acc:[23.4,27.3,28.1],  tok:[2.15,4.89,2.89],cat:2},
+    {n:'LBv2/in_context_learning',acc:[69.1,67.3,67.3],tok:[59.34,157.88,68.52],cat:2},
+    {n:'ZS/book_sum_sort',    acc:[20.3,12.5,13.3],  tok:[6.64,15.10,7.22],cat:2}
+  ];
+  const TOTF={acc:[63.28,59.05,54.26],tok:[38.62,100.61,45.97]};
+  let metric='acc';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText((metric==='acc'?'精度 (%)':'attended トークン (M / 応答、対数軸)')+' ・ Gemma-4-31B ・ 主要スイートから外された 6 ソース',24,24);
+    const x0=210,y0=56,rowh=(H-140)/6,gw=W-110-x0;
+    const mx=(metric==='acc')?100:400;
+    function px(v){
+      if(metric==='acc') return x0+v/100*gw;
+      return x0+Math.log10(Math.max(v,1)/1)/Math.log10(mx)*gw;
+    }
+    (metric==='acc'?[0,25,50,75,100]:[1,10,100]).forEach(function(v){
+      const x=px(v);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0-6);ct.lineTo(x,y0+6*rowh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(metric==='acc'?v:(v+'M'),x,y0+6*rowh+16);
+    });
+    F.forEach(function(f,i){
+      const y=y0+i*rowh;
+      if(i===0||f.cat!==F[i-1].cat){
+        ct.fillStyle=ALT;ct.font='bold 10.5px sans-serif';ct.textAlign='left';
+        ct.fillText(f.cat===1?'型 1: 分割で証拠が壊れる':'型 2: 出力長が文書に比例する',24,y+9);
+      }
+      ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='right';
+      ct.fillText(f.n,x0-8,y+rowh/2+8);
+      const bh=Math.min(7,rowh/4);
+      [[f[metric][0],MUT],[f[metric][1],ALT],[f[metric][2],POS]].forEach(function(a,j){
+        ct.fillStyle=a[1];ct.globalAlpha=(j===2)?0.95:0.55;
+        ct.fillRect(x0,y+4+j*(bh+1.5),Math.max(1.5,px(a[0])-x0),bh);ct.globalAlpha=1;
+      });
+      const d=f[metric][2]-f[metric][0];
+      ct.fillStyle=(metric==='acc'?(d>=0?POS:NEG):(d<=0?POS:NEG));
+      ct.font='bold 10.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText((d>=0?'+':'')+d.toFixed(metric==='acc'?1:2),x0+gw+8,y+rowh/2+8);
+    });
+    const T=TOTF[metric];
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('6 ソース平均: Vanilla '+T[0].toFixed(2)+' / DA-nm '+T[1].toFixed(2)+' / DA '+T[2].toFixed(2),24,H-58);
+    ct.fillStyle=NEG;ct.font='bold 12.5px sans-serif';
+    ct.fillText(metric==='acc'?('DA − Vanilla = '+(T[2]-T[0]).toFixed(2)+' pp ・ 主要スイートの -1.27pp とは別の世界')
+      :('DA は Vanilla の '+(T[2]/T[0]*100).toFixed(0)+'% ・ つまり読む量が増えている'),24,H-36);
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+    ct.fillText('ただし 1 ステップあたりの attention は 6 つすべてで -39% から -67% 下がっている。機構は働いていて、分解が噛み合っていない',24,H-14);
+    document.getElementById('flOut').textContent=
+      (metric==='acc'?'精度 63.28 → 54.26 (-9.02pp) ・ 型 1 では -30 / -21pp の崩壊'
+                     :'attended トークン 38.62M → 45.97M (+19%) ・ 主要スイートと符号が逆');
+  }
+  bindBtns({acc:'flAcc',tok:'flTok'},function(k){metric=k;draw();});
+  draw();
+})();
+</script>
+</body>
+</html>
