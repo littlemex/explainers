@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>質量を 95% 集めるという目標が、探しているものを取り逃がす — CRISP の sparse prefill</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7;
+    white-space:pre-wrap}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 9 回</p>
+  <h1>質量を 95% 集めるという目標が、探しているものを取り逃がす</h1>
+  <p>sparse prefill の router と予算配分を作り直した CRISP を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「CRISP: Cliff-awaRe Input-adaptive Sparse Prefilling with Structural-Mass-Motivated Routing」(Huy Huu Nguyen ほか、University of Oregon と Adobe Research、arXiv:2609.01925v1, 2026-09-01) は、長い文脈の prefill を速くする sparse attention の中で、<b>どのトークンを選ぶかを決める規則そのもの</b>を作り直した論文です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    現行の最良手法 (FlexPrefill) は「attention 質量の 95% を覆うまでブロックを集める」という規則で予算を決めます。この論文の指摘は、<b>softmax 後の質量は等価ではない</b>ということです。sink が質量の 9 割を吸っていることがあり、その場合 95% という目標は<b>sink の内側で達成されてしまい、肝心の答えのブロックに到達しません</b>。逆に sink が薄いと、目標を満たすために<b>ほぼ 0 の質量しか持たないノイズブロックを大量に飲み込みます</b>。CRISP はカバー率を捨てて<b>ノイズの床</b>を基準にし、さらに router 側の JSD 計算も<b>すでに計算済みの値の足し算</b>で置き換えます。結果は retrieval で最大 +28.0 pp、512k で 5.30 倍の高速化です。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>解く問題</td><td>prefill の self-attention は系列長の二乗で伸びる。動的な sparse attention はヘッドごとにパターンを選んで計算量を削るが、<b>その選び方に 2 つの構造的な欠陥がある</b></td></tr>
+    <tr><td>直す欠陥 1</td><td>router が <b>JSD (Jensen-Shannon 距離)</b> という間接的な指標を使っており、そのために専用の matmul と softmax と KL 計算が必要。ヘッドごと、毎回</td></tr>
+    <tr><td>直す欠陥 2</td><td>予算を<b>累積カバー率 $\gamma$</b> で決めているため、softmax 後の質量の階層 (sink / signal / noise) を跨いで無差別に集めてしまう</td></tr>
+    <tr><td>提案 1: $C_{\text{struct}}$</td><td>proxy attention の<b>先頭 128 トークンと直近 128 トークンの質量を足すだけ</b>。JSD の判断と Llama で <b>94.0%</b>、Qwen で <b>88.1%</b> 一致し、追加コストは実質ゼロ</td></tr>
+    <tr><td>提案 2: sink-aware 閾値</td><td>常時保持する先頭と末尾のブロックを除いた<b>残り質量の平均 $\mu$</b> を求め、$\mu$ を超えるブロックだけ選ぶ。$\alpha=1.0$ が<b>較正のいらない既定値</b></td></tr>
+    <tr><td>理論の芯</td><td>背景ノイズ 1 トークンの質量は $\epsilon \approx 1/n$ なので、カバー率の残りを埋めるのに必要なノイズトークン数は $\gamma_{\text{res}}\cdot n$、つまり <b>$O(n)$ で増える</b></td></tr>
+    <tr><td>精度</td><td>InfiniteBench で <b>dense attention を上回る</b> (Llama 48.7 対 48.6、Qwen 28.7 対 24.0)。retrieval 系は FlexPrefill 比で最大 <b>+28.0 pp</b></td></tr>
+    <tr><td>速度</td><td>512k トークンで FlashAttention 比 <b>5.30 倍</b> ($\alpha=1.25$)。FlexPrefill の 4.41 倍に対して、長くなるほど差が開く</td></tr>
+    <tr><td>正直な弱点</td><td>Llama の RULER だけ <b>-0.40 pp</b> 負ける (広い範囲を集める必要があるタスクで、境界ブロックをノイズと見なすため)。短い文脈では sparse 化そのものが損</td></tr>
+    <tr><td>評価</td><td>Llama-3.1-8B と Qwen2.5-7B、InfiniteBench (131K) ・ RULER (4K-131K) ・ LongBench (4K-16K)。レイテンシは H100 1 枚の attention 単体時間</td></tr>
+    <tr><td>コード</td><td>本文にリポジトリの記載なし。License CC BY 4.0</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 前提 — prefill の何が重く、2 経路とは何か</a>
+    <a href="#s2">2. 【体験】mass cliff を見る</a>
+    <a href="#s3">3. 直し 1 — router を JSD から足し算へ</a>
+    <a href="#s4">4. 直し 2 — 予算をノイズの床から決める</a>
+    <a href="#s5">5. 【体験】ノイズが $O(n)$ で増える</a>
+    <a href="#s6">6. 【体験】精度はどこまで戻るのか</a>
+    <a href="#s7">7. 【体験】レイテンシと損益分岐</a>
+    <a href="#s8">8. 2 つの直しは独立ではない</a>
+    <a href="#s9">9. 頑健性の検査</a>
+    <a href="#s10">10. 批判的に読む</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>前提 — prefill の何が重く、2 経路とは何か</h2>
+  <p class="lead">長い入力を与えたとき、最初のトークンが出るまでの時間 (prefill) は attention の計算で決まります。ここは系列長 $n$ の二乗で伸びるので、131k や 512k では支配的なコストになります。sparse attention はこの計算を<b>インデックス集合 $\mathcal{S}$ の中だけ</b>に限ります。</p>
+  <div class="mj">$$ A(Q,K,V,\mathcal{S})=\mathrm{Softmax}\!\left(\frac{QK^\top}{\sqrt{d}}+M_{\mathcal{S}}\right)V \tag{1} $$</div>
+  <p>$M_{\mathcal{S}}$ はマスクで、選ばれた位置は 0、それ以外は $-\infty$ です。問題は<b>$\mathcal{S}$ をどう決めるか</b>だけになります。</p>
+  <table>
+    <tr><th>世代</th><th>やり方</th><th>限界</th></tr>
+    <tr><td>固定パターン</td><td>Sparse Transformer、BigBird、Longformer。窓と大域トークンをあらかじめ決め打ちする</td><td>入力ごとに違う attention の構造に合わせられない</td></tr>
+    <tr><td>オフライン推定</td><td>MInference。事前にヘッドごとのパターンを profiling して割り当てる</td><td>実行時の入力依存な変化 (とくに sink 質量の違い) に追従できない</td></tr>
+    <tr><td>動的ルーティング</td><td>FlexPrefill。<b>実行時に</b>ヘッドを分類して予算を配る。現行最良</td><td><b>分類の指標と予算の決め方の両方に構造的な欠陥がある</b> ← この論文</td></tr>
+  </table>
+  <h3>2 経路 — なぜヘッドを 2 種類に分けるのか</h3>
+  <p>FlexPrefill はヘッドを 2 つの経路に振り分けます。この分岐の根拠は情報理論にあります。分布のエントロピー $H(a)$ に対して $e^{H(a)}$ が<b>実効的な台の大きさ</b>で、集中したヘッドは $e^{H}\approx 1$、拡散したヘッドは $e^{H}\approx n$ です。</p>
+  <table>
+    <tr><th>経路</th><th>どんなヘッドか</th><th>何をするか</th></tr>
+    <tr><td>Vertical-Slash (VS)</td><td><b>低エントロピー</b>。質量が少数の位置に集中している。しかもその位置は構造的に予測できる (sink、縦の列、斜めの対角)</td><td>proxy attention の列平均 (vertical) と対角平均 (slash) を別々に取り、それぞれで重要なブロックを選んで<b>和集合</b>を取る</td></tr>
+    <tr><td>Pooled-Estimation (PE)</td><td><b>高エントロピー</b>。質量が広く散っていて支配的なパターンが無い</td><td>$Q$ と $K$ を両方プールして粗い attention を作り、平坦化して並べ、カバー率まで集める</td></tr>
+  </table>
+  <p>この記事で重要なのは、<b>CRISP が変えるのは VS 経路と router だけ</b>だという点です。PE 経路は FlexPrefill のまま残します。理由は 4 節で扱いますが、一言でいうと<b>PE ヘッドには壊すべき崖が無い</b>からです。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 470" role="img" aria-label="CRISP のルーティング全体図">
+      <defs>
+        <marker id="crA" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+        <marker id="crG" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#0f5132"/></marker>
+      </defs>
+
+      <rect x="24" y="18" width="180" height="58" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="114" y="42" font-size="14" font-weight="700" fill="#3f4c55" text-anchor="middle">Q, K, V</text>
+      <text x="114" y="62" font-size="12.5" fill="#12211a" text-anchor="middle">1 つのヘッド</text>
+
+      <path d="M204,47 L246,47" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#crA)"/>
+
+      <rect x="252" y="18" width="222" height="58" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="363" y="40" font-size="14" font-weight="700" fill="#3f4c55" text-anchor="middle">proxy attention Â</text>
+      <text x="363" y="60" font-size="12" fill="#12211a" text-anchor="middle">代表クエリ (末尾ブロック) の分だけ計算</text>
+
+      <path d="M474,47 L516,47" stroke="#0f5132" stroke-width="2.5" marker-end="url(#crG)"/>
+
+      <rect x="522" y="12" width="334" height="70" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="689" y="34" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">直し 1: C_struct で振り分ける</text>
+      <text x="689" y="54" font-size="12.5" fill="#0d2b20" text-anchor="middle">先頭 128 と直近 128 の質量を足すだけ</text>
+      <text x="689" y="72" font-size="12" fill="#12211a" text-anchor="middle">JSD の matmul と KL が消える ・ 判断は 94.0% 一致</text>
+
+      <path d="M689,82 L689,116" stroke="#0f5132" stroke-width="2.5" marker-end="url(#crG)"/>
+      <text x="700" y="104" font-size="12.5" font-weight="700" fill="#0f5132">C_struct ≥ τ ?</text>
+
+      <rect x="24" y="120" width="404" height="42" rx="9" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="226" y="147" font-size="13" font-weight="700" fill="#0f5132" text-anchor="middle">No (質量が散っている) → PE 経路</text>
+      <rect x="452" y="120" width="404" height="42" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="654" y="147" font-size="13" font-weight="700" fill="#0f5132" text-anchor="middle">Yes (質量が anchor に集中) → VS 経路</text>
+
+      <path d="M226,162 L226,196" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#crA)"/>
+      <path d="M654,162 L654,196" stroke="#0f5132" stroke-width="2.5" marker-end="url(#crG)"/>
+
+      <rect x="24" y="200" width="404" height="120" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="226" y="224" font-size="14" font-weight="700" fill="#3f4c55" text-anchor="middle">PE 経路 — FlexPrefill のまま変えない</text>
+      <text x="44" y="248" font-size="12.5" fill="#12211a">Q と K を両方プールして粗い attention を作る</text>
+      <text x="44" y="270" font-size="12.5" fill="#12211a">平坦化して並べ、累積質量が γ = 0.95 になるまで集める</text>
+      <text x="44" y="294" font-size="12.5" font-weight="700" fill="#3f4c55">崖が無いので累積で困らない (付録 F)。上位 50 ブロックで</text>
+      <text x="44" y="312" font-size="12.5" font-weight="700" fill="#3f4c55">質量の 15 - 80% しか集まらない、なだらかな分布</text>
+
+      <rect x="452" y="200" width="404" height="120" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="654" y="224" font-size="14" font-weight="700" fill="#0f5132" text-anchor="middle">直し 2: VS 経路の予算をノイズの床で決める</text>
+      <text x="472" y="248" font-size="12.5" fill="#12211a">縦 (列平均) と斜め (対角平均) を別々に出すのは同じ</text>
+      <text x="472" y="270" font-size="12.5" fill="#12211a">各方向で μ = (1 − 先頭 − 末尾) / (ブロック数 − 2) を計算</text>
+      <text x="472" y="294" font-size="12.5" font-weight="700" fill="#0f5132">p_j &gt; α·μ のブロックだけ選ぶ。個数 k は数え上げの</text>
+      <text x="472" y="312" font-size="12.5" font-weight="700" fill="#0f5132">結果として出てくる (カバー率の目標は無い)</text>
+
+      <path d="M226,320 L226,356" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#crA)"/>
+      <path d="M654,320 L654,356" stroke="#0f5132" stroke-width="2.5" marker-end="url(#crG)"/>
+
+      <rect x="24" y="360" width="832" height="46" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="440" y="389" font-size="14" font-weight="700" fill="#22548f" text-anchor="middle">インデックス集合 S = S_vertical ∪ S_slash ∪ {先頭ブロック, 末尾ブロック}</text>
+
+      <path d="M440,406 L440,428" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#crA)"/>
+      <rect x="240" y="432" width="400" height="34" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="440" y="454" font-size="13.5" font-weight="700" fill="#3f4c55" text-anchor="middle">S の中だけで attention を計算する</text>
+    </svg>
+    <p class="cap">図 1: 全体像。緑の 2 箱が CRISP の変更点で、灰色は FlexPrefill から変えていない部分。分岐の構造そのものは踏襲している</p>
+  </div>
+</section>
+<section id="s2">
+  <h2><span class="num">2</span>【体験】mass cliff を見る</h2>
+  <p class="lead">この論文の中心にあるのは 1 枚の絵で説明できる観察です。VS ヘッドの softmax 後の質量は<b>3 階層に分かれていて、その間に崖がある</b>。累積カバー率という規則は、この崖の存在を知らないまま質量を足していきます。</p>
+  <table>
+    <tr><th>階層</th><th>質量</th><th>中身</th></tr>
+    <tr><td>architectural sink</td><td>ときに全体の <b>9 割超</b></td><td>先頭付近のトークン。内容とは無関係に attention を吸い込む構造的な受け皿</td></tr>
+    <tr><td>task-relevant signal</td><td>中程度 (背景より明確に上)</td><td>答えを含むブロック。<b>これを取りに行くのが目的</b></td></tr>
+    <tr><td>background noise</td><td>ほぼ 0。しかも<b>$n$ が伸びるほど薄くなる</b></td><td>残りのほぼ全部。softmax の正規化が背景の質量を $n$ 個に配るので 1 個あたり $O(1/n)$</td></tr>
+  </table>
+  <p>下の図で、<b>sink の質量</b>と<b>signal のブロック数</b>を動かしてみてください。2 つの規則が同じヘッドに対して何を選ぶかが変わります。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvCliff" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">sink の質量 <input id="clS" type="range" min="20" max="97" value="93"><span id="clSv">0.93</span></div>
+    <div class="slider">signal ブロック数 <input id="clK" type="range" min="1" max="14" value="5"><span id="clKv">5</span></div>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="clG95">FlexPrefill γ = 0.95</button>
+    <button class="ghost" id="clG97">FlexPrefill γ = 0.97</button>
+    <button class="ghost" id="clA10">CRISP α = 1.0</button>
+    <button class="ghost" id="clBoth">両方を重ねる</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e0a03f"></span>sink</span>
+    <span><span class="dot" style="background:#43b581"></span>signal</span>
+    <span><span class="dot" style="background:#6b7a86"></span>background noise</span>
+    <span><span class="dot" style="background:#e07a5f"></span>γ が集めた範囲</span>
+    <span><span class="dot" style="background:#c084fc"></span>CRISP のノイズ床 μ</span>
+  </div>
+  <p class="rdout" id="clOut"></p>
+  <div class="warn">
+    <b>これは合成したヘッド上での再現です。</b>ブロックの質量そのものは説明用に作った値ですが、<b>2 つの選択規則は論文のアルゴリズム 3 と 6 をそのまま実装しています</b> (γ は降順に累積して閾値を超えたら停止、CRISP は先頭と末尾を除いた残り質量の平均 μ を超えるブロックを選ぶ)。論文の Figure 1 では実際のヘッドで、sink ブロック単体が 0.929 の質量を持ち、γ = 0.95 が 13 個のノイズブロックを集める例が示されています。
+  </div>
+  <h3>2 つの失敗は同じ規則の裏表</h3>
+  <table>
+    <tr><th>失敗モード</th><th>いつ起きるか</th><th>何が起きるか</th></tr>
+    <tr><td><b>sink-only collapse</b></td><td>$a_{\text{sink}} \ge \gamma$</td><td>sink を数えている途中で目標を達成してしまい、<b>signal ブロックを 1 つも評価せずに停止</b>する。誤差の上界は形式的には満たされているのに、選んだ集合に意味のある情報が無い</td></tr>
+    <tr><td><b>residual noise accumulation</b></td><td>$a_{\text{sink}}+a_{\text{signal}} &lt; \gamma$</td><td>signal を取り切った後も目標に届かないので、<b>崖を越えて背景ノイズを集め始める</b>。必要な個数は $\gamma_{\text{res}}/\epsilon \approx \gamma_{\text{res}}\cdot n$ で、系列長に比例して増える</td></tr>
+  </table>
+  <p>ここが論文のいちばん強い主張です。<b>この 2 つは $\gamma$ を調整して直せません</b>。$\gamma$ を上げれば collapse は避けられますが、その分だけノイズに深く踏み込みます。下げればノイズは減りますが collapse が増えます。実験でも $\gamma=0.97$ は<b>ベンチマークによって上がったり下がったりする</b>だけで、retrieval は改善しないままレイテンシが悪化します。効果が「カバー率の質」ではなく<b>「sink の質量が閾値のどちら側に落ちたか」で決まる</b>という、mass cliff の予測どおりの挙動です。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>直し 1 — router を JSD から足し算へ</h2>
+  <p class="lead">router の仕事は「このヘッドはどのくらい集中しているか」を安く読むことだけです。FlexPrefill はそれを間接的に測ります。</p>
+  <p>proxy attention $\hat{A}$ から 2 つの分布を作ります。<b>プールしてから softmax</b> をかけた $\bar{a}$ と、<b>softmax をかけてから平均</b>した $\hat{a}$ です。この 2 つは一般には一致しません。その不一致の大きさ (JSD) が閾値 $\tau$ を超えたら VS 経路へ送る、という設計です。</p>
+  <div class="key">
+    <b>なぜ不一致が集中度の代わりになるのか。</b>論文の説明が明快です。<b>縦の構造</b> (多くのクエリが同じキーを見る) では、プールしてから softmax しても、softmax してから平均しても<b>ほぼ同じ分布</b>になるので不一致は小さい。ところが<b>斜めの構造</b> (クエリごとに違うキーで尖る) では、先にプールすると $\bar{a}$ はクロスクエリ平均が最大のキーに集中し、後で平均する $\hat{a}$ は各クエリが好むキーに広がります。<b>支えが違う場所に乗るので、各行が尖っているのに不一致が大きくなる</b>。実際の VS ヘッドは両方の構造を含むので、JSD を $\tau$ 超えに押し上げているのは斜め成分だ、という読みです。論文自身も「導出ではなく観測に整合する説明」だと明記しています。
+  </div>
+  <p>問題はコストです。$\bar{a}$ を作るには $K$ のプールに $O(nd/b)$ の matmul と 2 回目の softmax が必要で、JSD 自体も対数を 2 回通して 2 回の縮約を取ります。<b>これを全ヘッドで毎回やる</b>。そしてこの $\bar{a}$ は、比較のためだけに存在します。手法の他のどの部分も使いません。</p>
+  <h3>近道 — 集中しているヘッドは、どこに集中するかが分かっている</h3>
+  <p>CRISP の指摘はこうです。これらのモデルでは、集中したヘッドは<b>構造的に決まった位置</b>に質量を置きます。attention sink と直近の窓です。ならば<b>そこにある質量そのものが集中度の読み値になる</b>。</p>
+  <div class="mj">$$ C_{\text{struct}}=\frac{1}{|\hat{Q}|}\sum_{i\in\hat{Q}}\sum_{j\in\mathcal{S}_{\text{anchor}}}\hat{A}[i,j] \tag{2} $$</div>
+  <p>$\mathcal{S}_{\text{anchor}}$ は<b>先頭 $w_{\text{sink}}=128$ トークンと直近 $w_{\text{local}}=128$ トークン</b>です。$C_{\text{struct}} \ge \tau_{\text{proxy}}$ なら VS 経路、そうでなければ PE 経路。$\hat{A}$ はインデックス選択のためにどうせ計算しているので、<b>追加コストは固定幅のスライスを足すだけ</b>で、$O(w_{\text{sink}}+w_{\text{local}})$ です。系列長に依存しません。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 340" role="img" aria-label="JSD 経路と C_struct 経路の計算グラフの比較">
+      <defs><marker id="crB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <text x="24" y="22" font-size="14.5" font-weight="700" fill="#b5401f">FlexPrefill の router (JSD) — 比較のためだけの第 2 の推定を作る</text>
+      <rect x="24" y="32" width="130" height="52" rx="8" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="89" y="54" font-size="12.5" font-weight="700" fill="#3f4c55" text-anchor="middle">proxy Â</text>
+      <text x="89" y="72" font-size="11.5" fill="#12211a" text-anchor="middle">選択にも使う</text>
+
+      <path d="M154,58 L178,58" stroke="#4a5d54" stroke-width="2.2" marker-end="url(#crB)"/>
+      <rect x="184" y="32" width="128" height="52" rx="8" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="248" y="54" font-size="12.5" font-weight="700" fill="#b5401f" text-anchor="middle">K をプール</text>
+      <text x="248" y="72" font-size="11.5" fill="#12211a" text-anchor="middle">matmul O(nd/b)</text>
+
+      <path d="M312,58 L336,58" stroke="#4a5d54" stroke-width="2.2" marker-end="url(#crB)"/>
+      <rect x="342" y="32" width="128" height="52" rx="8" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="406" y="54" font-size="12.5" font-weight="700" fill="#b5401f" text-anchor="middle">2 回目の softmax</text>
+      <text x="406" y="72" font-size="11.5" fill="#12211a" text-anchor="middle">ā を作る</text>
+
+      <path d="M470,58 L494,58" stroke="#4a5d54" stroke-width="2.2" marker-end="url(#crB)"/>
+      <rect x="500" y="32" width="150" height="52" rx="8" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="575" y="54" font-size="12.5" font-weight="700" fill="#b5401f" text-anchor="middle">JSD(ā, â)</text>
+      <text x="575" y="72" font-size="11.5" fill="#12211a" text-anchor="middle">対数 2 回 + 縮約 2 回</text>
+
+      <path d="M650,58 L674,58" stroke="#4a5d54" stroke-width="2.2" marker-end="url(#crB)"/>
+      <rect x="680" y="32" width="176" height="52" rx="8" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="768" y="54" font-size="12.5" font-weight="700" fill="#3f4c55" text-anchor="middle">JSD ≥ τ なら VS</text>
+      <text x="768" y="72" font-size="11.5" fill="#12211a" text-anchor="middle">全ヘッドで毎回</text>
+
+      <rect x="184" y="94" width="466" height="26" rx="6" fill="#fbeee8" stroke="#e07a5f" stroke-width="1.6" stroke-dasharray="5 4"/>
+      <text x="417" y="112" font-size="12" font-weight="700" fill="#b5401f" text-anchor="middle">この 3 箱は「比較する」ためだけに存在する。ā は他のどこでも使われない</text>
+
+      <text x="24" y="164" font-size="14.5" font-weight="700" fill="#0f5132">CRISP の router (C_struct) — すでにある Â の一部を足すだけ</text>
+      <rect x="24" y="174" width="130" height="52" rx="8" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="89" y="196" font-size="12.5" font-weight="700" fill="#3f4c55" text-anchor="middle">proxy Â</text>
+      <text x="89" y="214" font-size="11.5" fill="#12211a" text-anchor="middle">選択にも使う</text>
+
+      <path d="M154,200 L178,200" stroke="#0f5132" stroke-width="2.2" marker-end="url(#crB)"/>
+      <rect x="184" y="174" width="286" height="52" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="327" y="196" font-size="12.5" font-weight="700" fill="#0f5132" text-anchor="middle">先頭 128 と直近 128 の質量を足す</text>
+      <text x="327" y="214" font-size="11.5" fill="#12211a" text-anchor="middle">固定幅のスライス縮約 ・ n に依存しない</text>
+
+      <path d="M470,200 L494,200" stroke="#0f5132" stroke-width="2.2" marker-end="url(#crB)"/>
+      <rect x="500" y="174" width="356" height="52" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="678" y="196" font-size="12.5" font-weight="700" fill="#0f5132" text-anchor="middle">C_struct ≥ τ_proxy = 0.2 なら VS</text>
+      <text x="678" y="214" font-size="11.5" fill="#12211a" text-anchor="middle">JSD の判断と Llama 94.0% / Qwen 88.1% 一致</text>
+
+      <rect x="24" y="248" width="832" height="76" rx="10" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="44" y="272" font-size="13.5" font-weight="700" fill="#0f5132">なぜ低い側の枝も信用できるのか</text>
+      <text x="44" y="294" font-size="12.5" fill="#12211a">上位 1 位の質量ブロックが sink か直近ブロックである割合が Llama で 91.3%、Qwen で 98.3%。つまり anchor の質量が小さいヘッドは</text>
+      <text x="44" y="314" font-size="12.5" fill="#12211a">他の場所にも集中していない。だから「anchor が薄い = 拡散している = PE 経路」という推論が成り立つ</text>
+    </svg>
+    <p class="cap">図 2: 消えるのは 3 箱。JSD が測っていた量そのものではなく、その量を得るために作っていた中間物がまるごと不要になる</p>
+  </div>
+  <div class="warn">
+    <b>この置き換えが成り立つ範囲。</b>論文は $C_{\text{struct}}$ が<b>エントロピーを測っているのではない</b>と明言しています。両者が一致するのは、いまの sink を持つアーキテクチャで低エントロピーのヘッドが<b>ちょうどその位置に</b>質量を置くからです。softmax attention 一般の性質ではありません。sink を持たない設計に移れば、この近道の前提は消えます。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>直し 2 — 予算をノイズの床から決める</h2>
+  <p class="lead">2 節で見た崖を跨がないようにするには、<b>「どこまで集めるか」ではなく「何がノイズか」を基準にする</b>必要があります。CRISP はブロック単位で背景の期待質量を求め、それを超えるものだけを選びます。</p>
+  <p>proxy attention は $B=128$ トークンごとに $N_b=\lceil n/B \rceil$ 個のブロックに切られていて、3 節の anchor 窓 ($w_{\text{sink}}=w_{\text{local}}=128$) はちょうど<b>先頭ブロックと末尾ブロック</b>に一致します。この 2 つは常時保持なので、除いて平均を取ります。</p>
+  <div class="mj">$$ \mu=\frac{\max(1-a_{\text{first}}-a_{\text{last}},\;0)}{N_b-2} \tag{3} $$</div>
+  <div class="mj">$$ \text{ブロック } j \text{ を選ぶ} \iff p_j > \alpha\cdot\mu \tag{4} $$</div>
+  <p>$\alpha=1.0$ のとき、閾値は<b>背景の期待質量そのもの</b>になります。平均より上のブロックは平均以上の信号を持っている、という意味で、これは<b>較正のいらない既定値</b>です。そして重要なのは、予算 $k$ が<b>決め打ちではなく数え上げの結果として出てくる</b>ことです。焦点の狭いタスクでは少なく、密なタスクでは多く選ばれます。</p>
+  <div class="key">
+    <b>$\gamma$ との決定的な違い。</b>sink の質量が大きくなると、$\gamma$ は<b>目標に早く到達してしまう</b>ので signal に届かなくなります。一方 $\mu$ は分子が $1-a_{\text{first}}-a_{\text{last}}$ なので、<b>sink が大きくなるほど床が下がります</b>。sink がどれだけ質量を吸っていても、残りの中での相対的な大小で signal を拾える。<b>同じ入力の変化に対して、2 つの規則は逆向きに動く</b>のがこの設計の芯です。
+  </div>
+  <h3>変えていないもの</h3>
+  <p>分解そのものは FlexPrefill のままです。縦の score $a_v$ (列平均) と斜めの score $a_s$ (対角平均) を<b>別々に計算し、別々に閾値をかけ、和集合を取る</b>。最後に先頭ブロックと末尾ブロックを足す。<b>変わったのは各方向の中の予算規則だけ</b>で、累積の $\sum a_j \ge \gamma$ がノイズ床 $\alpha\mu_d$ に置き換わります。最小予算 $k_{\min}=1024$ トークン (8 ブロック) は FlexPrefill から引き継いでいます。</p>
+  <div class="math">for d in {vertical, slash}:
+    p_d   = ブロック単位にプールした score
+    r_d   = max(1 - p_d[0] - p_d[N_b - 1], 0)
+    mu_d  = r_d / (N_b - 2)
+    k_d   = count(p_d[j] > alpha * mu_d)
+    k_d   = clip(k_d, k_min, N_b)
+    S_d   = top-k_d(p_d)
+return S_vertical | S_slash | {0, N_b - 1}</div>
+  <h3>PE 経路をなぜ変えないのか</h3>
+  <p>付録 F に測定があります。拡散したヘッドの分布は<b>なだらかに単調に減衰して、どこにも境界がありません</b>。上位 50 ブロックで集まる質量は 15% から 80% で、$\gamma=0.95$ には<b>そもそも上位 50 個の中では到達しません</b>。比較のために挙げられている VS ヘッドは、上位 50 で 99%、sink ブロック単体で 0.929 です。</p>
+  <p>つまり PE ヘッドには<b>落ちるべき near-zero の帯が無い</b>ので、累積しても不釣り合いな残りを集めることになりません。カバー率まで集めることが、そのまま「代表的な部分集合を取る」ことになる。<b>置き換えても得るものが無いから置き換えない</b>という判断で、これは minimalism として筋が通っています。</p>
+</section>
+<section id="s5">
+  <h2><span class="num">5</span>【体験】ノイズが $O(n)$ で増える</h2>
+  <p class="lead">なぜ「長くなるほど差が開く」のかを、式で押さえます。signal トークンが $k$ 個あって pre-softmax の logit が $z$、背景トークン $n-k$ 個が $z-\Delta$ だとします。softmax を通すと背景 1 個あたりの質量はこうなります。</p>
+  <div class="mj">$$ \epsilon=\frac{e^{-\Delta}}{k+(n-k)\cdot e^{-\Delta}} \;\;\xrightarrow{\;n \gg k e^{\Delta}\;}\;\; \epsilon \approx \frac{1}{n} $$</div>
+  <p>長い文脈では分母が $(n-k)e^{-\Delta}$ に支配されるので、<b>背景 1 トークンの質量はほぼ $1/n$</b> です。すると残りのカバー率 $\gamma_{\text{res}}=\gamma-a_{\text{sink}}-a_{\text{signal}}$ を埋めるのに必要なノイズトークンの数は、</p>
+  <div class="mj">$$ N_{\text{garbage}}=\frac{\gamma_{\text{res}}}{\epsilon}\approx \gamma_{\text{res}}\cdot n $$</div>
+  <p>になります。<b>系列長に比例して増える</b>。これが 7 節のレイテンシで、長い文脈ほど CRISP が引き離す理由です。下のグラフはこの式そのものです。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvOn" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="onS5">sink 0.50 (残り 0.35 を埋める)</button>
+    <button class="ghost" id="onS7">sink 0.70 (残り 0.15)</button>
+    <button class="ghost" id="onS9">sink 0.90 (残り 0.00 = collapse)</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>γ = 0.95 が集めるノイズ</span>
+    <span><span class="dot" style="background:#e0a03f"></span>γ = 0.97 が集めるノイズ</span>
+    <span><span class="dot" style="background:#43b581"></span>CRISP (ノイズ床)</span>
+  </div>
+  <p class="rdout" id="onOut"></p>
+  <div class="warn">
+    <b>これは論文の付録 C の式を描いたもので、実測値ではありません。</b>signal の質量を 0.10 と仮定して $\gamma_{\text{res}}$ を計算しています。CRISP 側が 0 なのは、選択基準がノイズ床なので<b>定義上、背景ブロックを選ばない</b>ことを示しています (境界付近のブロックは 6 節で見るとおり取りこぼしが起きます)。sink 0.90 の場合は $\gamma_{\text{res}}$ が負になり、これは残りを埋める必要すら無い状態、つまり<b>sink-only collapse</b> です。ノイズは 0 ですが、代わりに signal に届いていません。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】精度はどこまで戻るのか</h2>
+  <p class="lead">ここからは論文の実測値です。ベンチマークとモデルを切り替えて、6 手法を並べます。<b>点線が dense attention (FlashAttention) の値</b>で、sparse 手法にとっての上限だと普通は考えられているものです。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvAcc" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="acIB">InfiniteBench (131K)</button>
+    <button class="ghost" id="acRU">RULER (4K-131K)</button>
+    <button class="ghost" id="acLB">LongBench (4K-16K)</button>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="acLl">Llama-3.1-8B</button>
+    <button class="ghost" id="acQw">Qwen2.5-7B</button>
+  </div>
+  <p class="rdout" id="acOut"></p>
+  <h3>dense を超えるという結果をどう読むか</h3>
+  <p>InfiniteBench で CRISP は<b>両モデルで dense attention を上回ります</b> (Llama 48.7 対 48.6、Qwen 28.7 対 24.0)。sparse 手法が exact な計算に勝つのは直感に反しますが、論文の説明はこうです。<b>dense attention は sink のノイズも含めて全トークンを集約しなければならない</b>。CRISP の sink-aware な選択は、結果としてより<b>きれいな信号表現</b>を作る。mass cliff は FlexPrefill だけでなく dense attention にも等しく効いていて、CRISP はそれを明示的に扱った最初の手法だ、と。</p>
+  <p>Qwen の 24.0 対 28.7 という 4.7 pt の差はかなり大きいので、ここは慎重に読むべきところです。10 節で扱います。</p>
+  <h3>retrieval タスクの回復</h3>
+  <p>sink-only collapse の直接的な証拠が retrieval 系の差分です。すべて FlexPrefill $\gamma=0.95$ に対する差です。</p>
+  <table>
+    <tr><th>タスク</th><th>ベンチマーク</th><th class="num">Llama Δ</th><th class="num">Qwen Δ</th></tr>
+    <tr class="hl"><td>Passkey</td><td>InfiniteBench</td><td class="num">0.0 pp</td><td class="num">+28.0 pp</td></tr>
+    <tr><td>KV Retrieval</td><td>InfiniteBench</td><td class="num">+17.8 pp</td><td class="num">測定不能</td></tr>
+    <tr><td>Passage Retrieval (En)</td><td>LongBench</td><td class="num">+12.50 pp</td><td class="num">+13.50 pp</td></tr>
+    <tr><td>Passage Retrieval (Zh)</td><td>LongBench</td><td class="num">+3.16 pp</td><td class="num">+4.50 pp</td></tr>
+    <tr><td>RULER 65K</td><td>RULER</td><td class="num">+2.65 pp</td><td class="num">+1.45 pp</td></tr>
+  </table>
+  <p>Qwen の passkey が +28.0 pp というのは、<b>そのアーキテクチャで sink 集中がとくに激しい</b>ことを示しています。逆に Llama の passkey は 0.0 pp で、こちらはもともと collapse していなかった、と読めます。<b>同じ手法の効き幅がモデルによって 0 から 28 まで振れる</b>という事実自体が、この論文の診断が正しいことの証拠になっています。効くのは「sink が閾値を越えているヘッドがあるモデル」だけです。</p>
+  <h3>唯一の負け — Llama の RULER</h3>
+  <p>集計で <b>-0.40 pp</b>、FlexPrefill に負けます。論文はこれを機序まで説明しています。RULER の合成的な集約タスクは<b>中程度の attention ブロックを広く覆う必要があり</b>、$\alpha=1.0$ のノイズ床は質量が $\mu$ の近くにある境界ブロックを<b>ときどきノイズと見なして落とします</b>。retrieval でノイズを消しているのと同じ保守性が、集約タスクでは取りこぼしになる。<b>精度と網羅性のトレードオフ</b>であって、実装のバグではありません。</p>
+  <p>Qwen では逆に RULER も勝ちます (76.20 対 75.52 対 MInference 72.44)。<b>効果はアーキテクチャ依存で、系統的な限界ではない</b>という主張の根拠です。付録 G では、この RULER の結果を平均の中に隠さずベンチマーク別に出しています。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】レイテンシと損益分岐</h2>
+  <p class="lead">レイテンシは H100 1 枚での <b>attention 単体の時間</b>で測られています。CRISP が変えている部分だけを切り出すための設計です。64k から 512k まで、5 つの設定を並べます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvLat" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="ltAbs">絶対時間 (ms)</button>
+    <button class="ghost" id="ltRel">FlexPrefill γ=0.95 比 (%)</button>
+    <button class="ghost" id="ltSpd">512k での FlashAttention 比</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>FP γ=0.95</span>
+    <span><span class="dot" style="background:#e0a03f"></span>FP γ=0.97</span>
+    <span><span class="dot" style="background:#43b581"></span>CRISP α=1.5</span>
+    <span><span class="dot" style="background:#60a5fa"></span>CRISP α=1.25</span>
+    <span><span class="dot" style="background:#c084fc"></span>CRISP α=1.0</span>
+  </div>
+  <p class="rdout" id="ltOut"></p>
+  <p>形を見てください。<b>短い側ではほぼ並んでいて、長くなるほど開きます</b>。$\alpha=1.25$ は 64k では FlexPrefill より 3% 遅いのに、512k では 17% 速くなります。$\alpha=1.0$ は $\gamma=0.97$ と 64k では同等で、512k では 25% 速い。これが 5 節の $O(n)$ をそのまま目で見ている状態です。<b>ノイズの蓄積が $O(n)$ で、それを消したので、優位は系列長とともに複利で効いてきます</b>。</p>
+  <div class="key">
+    <b>短い文脈では sparse 化そのものが損。</b>論文が正直に書いている点です。routing はヘッドごとの固定費で、attention の計算量は二乗で伸びます。だから短い入力では<b>固定費が節約分を食い潰します</b>。Llama-3.1-8B の 8K では FlexPrefill が 225.9 ms、CRISP が 209.9 ms で、これは dense のそれぞれ <b>4.4 倍と 4.1 倍</b>のコストです。64k では CRISP が dense より 1.76 倍速いので、<b>損益分岐はこの 2 点の間</b>にあります。短いプロンプトが主体のサービスは、文脈長で sparse prefill を出し入れするゲートを持つべきだと明記されています。
+  </div>
+  <p>もう 1 つ、この 8K の順序が示唆的です。<b>CRISP が FlexPrefill より 7% 速いのは、まさにこの短い側です</b>。attention ではなく routing が支配的なところでこそ、matmul と KL を定数時間の縮約に置き換えた効果が出ます。長い側の差はノイズ削減が主因で、短い側の差は router の軽さが主因という、原因の切り分けができています。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>2 つの直しは独立ではない</h2>
+  <p class="lead">アブレーションが面白い形をしています。片方だけ入れると、Llama では<b>むしろ悪化する</b>のです。</p>
+  <table>
+    <tr><th>設定</th><th class="num">Llama IB</th><th class="num">Llama LB</th><th class="num">Llama RULER</th><th class="num">Qwen IB</th><th class="num">Qwen LB</th><th class="num">Qwen RULER</th></tr>
+    <tr><td>FlexPrefill ($\gamma=0.95$)</td><td class="num">47.4</td><td class="num">46.92</td><td class="num">89.22</td><td class="num">25.5</td><td class="num">45.57</td><td class="num">75.52</td></tr>
+    <tr><td>Abl. 1: $C_{\text{struct}}$ だけ</td><td class="num">45.2</td><td class="num">47.14</td><td class="num">87.82</td><td class="num">29.7</td><td class="num">45.93</td><td class="num">74.92</td></tr>
+    <tr><td>Abl. 2: sink-aware だけ</td><td class="num">48.7</td><td class="num">47.70</td><td class="num">89.10</td><td class="num">25.7</td><td class="num">47.10</td><td class="num">77.08</td></tr>
+    <tr class="hl"><td>CRISP (両方)</td><td class="num">48.7</td><td class="num">47.77</td><td class="num">88.82</td><td class="num">28.7</td><td class="num">47.23</td><td class="num">76.20</td></tr>
+  </table>
+  <p>Abl. 1 ($C_{\text{struct}}$ を入れるが予算は $\gamma$ のまま) は Llama で InfiniteBench <b>-2.2 pp</b>、RULER <b>-1.4 pp</b> です。理由は明快で、$C_{\text{struct}}$ は JSD より<b>多くのヘッドを VS 経路に送る</b>ので、その追加分のヘッドが<b>mass cliff に負ける $\gamma$-累積にさらされる</b>。router を良くしたことが、壊れている予算規則の被害を広げてしまうわけです。</p>
+  <p>Abl. 2 (予算だけ直す) は単独でおおむね有益で、Llama IB は 48.7、Qwen RULER は 77.08 と<b>全体でいちばん高い値</b>すら出しています。そして両方入れた CRISP が、Abl. 1 が持ち込んだ後退を回収します。</p>
+  <div class="key">
+    <b>この表が示していること。</b>2 つの欠陥は<b>互いに支え合って表面化していなかった</b>だけです。router を軽くすれば経路の振り分けが変わり、変わった先の予算規則が壊れていれば損が出る。<b>どちらか一方の修正では、両アーキテクチャで安定した長文脈の挙動は得られません</b>。逆に言えば、CRISP は 2 つの独立した改善の足し算ではなく、<b>1 つの整合した設計</b>として読むべきものです。
+  </div>
+  <p>ただし Qwen IB では Abl. 1 単独 (29.7) が CRISP (28.7) より高い、という逆転もあります。個別の最大値を狙うなら組み合わせは最適ではない、という事実は表に残っています。</p>
+</section>
+<section id="s9">
+  <h2><span class="num">9</span>頑健性の検査</h2>
+  <p class="lead">「較正がいらない」という主張は、ハイパーパラメータを動かして初めて確かめられます。付録に 4 つの検査があります。</p>
+  <h3>$\alpha$ の感度 — 床は刃の上ではなく安定な領域</h3>
+  <table>
+    <tr><th class="num">$\alpha$</th><th class="num">Llama IB</th><th class="num">Llama LB</th><th class="num">Llama RULER</th><th class="num">Qwen IB</th><th class="num">Qwen LB</th><th class="num">Qwen RULER</th></tr>
+    <tr><td class="num">0.75</td><td class="num">48.65</td><td class="num">47.71</td><td class="num">88.54</td><td class="num">28.96</td><td class="num">47.76</td><td class="num">75.96</td></tr>
+    <tr class="hl"><td class="num">1.0</td><td class="num">48.65</td><td class="num">47.77</td><td class="num">88.82</td><td class="num">28.73</td><td class="num">47.23</td><td class="num">76.20</td></tr>
+    <tr><td class="num">1.25</td><td class="num">48.03</td><td class="num">46.92</td><td class="num">88.62</td><td class="num">28.35</td><td class="num">46.76</td><td class="num">75.80</td></tr>
+    <tr><td class="num">1.5</td><td class="num">47.41</td><td class="num">46.03</td><td class="num">87.94</td><td class="num">28.92</td><td class="num">46.18</td><td class="num">75.48</td></tr>
+  </table>
+  <p>1.0 を超えると<b>単調に劣化します</b>。床より上に閾値を上げれば signal を捨てていくので、予測どおりです。面白いのは $\alpha=0.75$ が 1.0 と同等で、Qwen の LongBench では上回ることです。低い $\alpha$ は<b>より多くのブロックを残す</b>ので、広い網羅が要るタスクでは有利になり、代わりに境界付近のノイズを少し飲みます。</p>
+  <p>論文の結論は「ノイズ床は<b>刃の上ではなく安定な領域</b>として理解すべき」で、$[0.75, 1.0]$ はどれも信号と深い背景を正しく分離し、違うのは境界ブロックの扱いの厳しさだけです。$\alpha=1.0$ を既定に選ぶ理由は最高性能だからではなく、<b>「残余質量の平均より上」という較正不要の解釈を持つ唯一の値だから</b>だと明記されています。この理由付けの仕方は誠実です。</p>
+  <h3>$\tau_{\text{proxy}}$ の感度 — router 側はさらに鈍い</h3>
+  <p>$\tau_{\text{proxy}} \in \{0.15, 0.2, 0.25\}$ で振れ幅は InfiniteBench で 0.7 pp 未満、LongBench で 1.2 pp 未満。<b>どの値も一様には支配しません</b>。$C_{\text{struct}}$ が閾値の選び方に対して安定した信号だという主張の裏付けになっています。</p>
+  <h3>平均ではなく中央値を床にしたら</h3>
+  <p>$\mu$ は平均なので、<b>1 つの強いブロックが床を持ち上げて、弱いが本物の信号を沈めてしまう</b>可能性があります。当然の代案が中央値です。比較すると両モデル・全ベンチマークで<b>差は $\pm0.7$ pp 以内</b>で、どちらも支配しません。論文の結論は「塊状のノイズという失敗モードは原理的には実在するが、これらのワークロードでは最終精度を動かさない。平均を使うのは $\alpha=1.0$ の解釈を保つため」。<b>代案を試して、勝たなかったことを書いている</b>のは良い作りです。</p>
+  <h3>新しいアーキテクチャへの転移</h3>
+  <table>
+    <tr><th>ベンチマーク (Qwen3-4B-Instruct-2507)</th><th class="num">FlashAttn</th><th class="num">FlexPrefill</th><th class="num">CRISP</th></tr>
+    <tr class="hl"><td>InfiniteBench</td><td class="num">28.67</td><td class="num">29.34</td><td class="num">31.28</td></tr>
+    <tr><td>LongBench</td><td class="num">46.64</td><td class="num">44.99</td><td class="num">46.34</td></tr>
+    <tr><td>RULER (4K-131K)</td><td class="num">87.50</td><td class="num">87.14</td><td class="num">86.82</td></tr>
+  </table>
+  <p>同じ設定のまま Qwen3-4B で回すと、InfiniteBench で dense を <b>+2.6 pp</b> 上回り (牽引は kv_retrieval 0.220 対 0.128、passkey 0.542 対 0.468)、LongBench は dense との差 0.30 pp で sparse 手法中最小、RULER は 6 つの文脈長すべてで $\pm1.7$ pp 以内。<b>結果の形が Qwen2.5-7B と一致</b>します。論文は「単一スケールの確認であって、網羅的な掃引の代わりではない」と自分で範囲を切っています。</p>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>批判的に読む</h2>
+  <p class="lead">どこが確かで、どこが確かでないかを分けます。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>dense を超えるという結果</td><td>Llama の 48.7 対 48.6 は誤差の範囲と見るべきです。<b>Qwen の 28.7 対 24.0 は 4.7 pt もあり、こちらは説明が要ります</b>。論文の説明 (dense は sink のノイズも集約せざるを得ない) は筋が通っていますが、<b>直接の検証はありません</b>。dense 側の sink 質量を落として測るような対照実験があれば主張は強くなります</td></tr>
+    <tr><td>ベースラインの数字の低さ</td><td>Qwen2.5-7B の InfiniteBench で dense が 24.0 というのは絶対値として低く、<b>タスク集合や truncation (131K) の影響を受けている</b>可能性があります。比較は同条件なので相対差は読めますが、<b>絶対値を他論文と比べるのは危険</b>です</td></tr>
+    <tr><td>$C_{\text{struct}}$ の前提</td><td>論文自身が範囲を明示しています。<b>sink を持つ現行アーキテクチャに固有の近道</b>で、softmax attention 一般の性質ではありません。sink を持たない設計や、anchor の外に集中するヘッドが増えた設計では前提が崩れます</td></tr>
+    <tr><td>routing 一致率の意味</td><td>94.0% / 88.1% は「JSD と同じ判断をする」という一致率です。<b>Qwen の 11.9% の不一致がどちら向きなのか、その分がどこで効いたのか</b>は示されていません。8 節のアブレーションが「$C_{\text{struct}}$ は JSD より多くのヘッドを VS に送る」と述べているので、不一致は偏っているはずです</td></tr>
+    <tr><td>RULER の後退</td><td>-0.40 pp を機序まで説明して残しているのは誠実ですが、<b>境界ブロックを救う仕組みは提案されていません</b>。$\alpha$ を下げるという手はありますが、それは較正不要という売りを崩します。<b>タスク種別で $\alpha$ を変えたい誘惑が残っている</b>のが正直な状態です</td></tr>
+    <tr><td>合成データでの崖の一般性</td><td>Figure 1 と付録 D は<b>固定した入力に対する複数ヘッド</b>の図です。論文自身が「1 つのヘッドの崖が入力によって動くことは主張しない」と注記しています。<b>崖の位置の入力依存性は測られていません</b></td></tr>
+    <tr><td>PE 経路の根拠</td><td>付録 F の測定は<b>1 モデル・1 入力の dump</b>で、しかも上位 50 ブロックしか保存されていません。論文は「PE ヘッド分布の形は示せるが、そのばらつきは示せない」と自分で書いています。ヘッドを「拡散している」と同定する方法も、routing 判断の再計算ではなく上位 1 位の質量に基づく代理です</td></tr>
+    <tr><td>レイテンシの測り方</td><td><b>attention 単体の時間</b>で、prefill 全体でも end-to-end でもありません。変更箇所を切り出す設計として妥当ですが、<b>実際のサービスで見える改善幅はこれより小さくなります</b>。5.30 倍という数字は attention の中だけの話です</td></tr>
+    <tr><td>短い文脈の扱い</td><td>8K では dense の 4.1 倍のコストで、損益分岐は 8K と 64K の間としか書かれていません。<b>正確な分岐点も、それを自動で判定する仕組みも示されていません</b>。運用では文脈長ゲートを自分で持つ必要があります</td></tr>
+    <tr><td>再現性</td><td>本文にリポジトリの記載がありません。ただしアルゴリズムは擬似コードで完全に書かれていて、<b>変更点が既存実装の 2 箇所に局所化されている</b>ので、FlexPrefill の実装があれば移植は現実的です</td></tr>
+    <tr><td>この論文の良い点</td><td>負けた結果 (Llama RULER) を平均に隠さず付録でベンチマーク別に出し、代案 (中央値の床) を試して勝たなかったと書き、$\alpha=1.0$ を「最高だから」ではなく「解釈できるから」と正当化し、$C_{\text{struct}}$ の説明を「導出ではなく観測」と断っている。<b>主張の強さと申告の丁寧さが釣り合っています</b></td></tr>
+  </table>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <div class="key">
+    CRISP の芯は 1 つの気づきです。<b>softmax 後の attention 質量は等価ではない</b>。sink と signal と背景ノイズという階層があり、その間に崖がある。だから「質量の 95% を覆う」という目標は、sink が厚ければ<b>signal に届く前に達成され</b>、sink が薄ければ<b>崖を越えてノイズを $O(n)$ 個飲み込む</b>。$\gamma$ をどう調整しても、この 2 つの失敗の間を移動するだけです。CRISP はカバー率を捨てて<b>残余質量の平均というノイズの床</b>を基準にし、router 側では JSD の中間物を<b>すでに計算済みの anchor 質量の足し算</b>に置き換えました。retrieval で最大 +28.0 pp、512k で 5.30 倍。<b>そして 2 つの直しは片方だけでは効きません</b>。
+  </div>
+  <h3>実務に持ち帰れるもの</h3>
+  <p>3 つあります。1 つ目は<b>閾値の置き場所</b>で、「どこまで集めるか」ではなく「何が背景か」を基準にすると、較正が要らなくなり、入力の変化に対して正しい向きに動きます。2 つ目は<b>間接指標の棚卸し</b>で、ある量を測るために作った中間物が他で使われていないなら、その量の代理が既存の計算の中に無いかを探す価値があります。3 つ目は<b>文脈長ゲート</b>で、動的 sparse attention は短い入力では純粋な損失です。</p>
+  <h3>どこがまだ空いているのか</h3>
+  <p>いちばん大きいのは<b>境界ブロックの扱い</b>で、床の近くにある本物の signal を救う仕組みがあれば RULER の後退は消えるはずです。次に<b>崖の位置の入力依存性</b>。同じヘッドの崖が入力によって動くのかは測られていません。そして<b>sink を持たないアーキテクチャでの $C_{\text{struct}}$ の代替</b>です。この近道は現行の設計に依存しているので、前提が変わったときに何を anchor にするのかは開いた問題として残ります。</p>
+  <p class="fn">出典: Huy Huu Nguyen, Chien Van Nguyen, Franck Dernoncourt, Ryan A. Rossi, Linh Ngo Van, Jieyang Chen, Thien Huu Nguyen. "CRISP: Cliff-awaRe Input-adaptive Sparse Prefilling with Structural-Mass-Motivated Routing." arXiv:2609.01925v1 [cs.LG], 2026-09-01. License CC BY 4.0.<br>
+  本ページの表と数値は論文の Table 1 から Table 9、および本文・付録 A から H の記述に基づきます。<b>第 6 節と第 7 節のグラフは Table 2 と Table 4 の実測値</b>、第 8 節と第 9 節の表は Table 5 から Table 8 の実測値です。<b>第 2 節のグラフは合成したヘッド上での再現</b>で、ブロック質量は説明用の値、選択規則はアルゴリズム 3 と 6 の実装です。<b>第 5 節のグラフは付録 C の式を描いた理論値</b>で、実測ではありません (signal 質量 0.10 を仮定)。関連する解説として<a href="./attn-swa.html">Sliding Window Attention</a>、<a href="./03-flash-attention.html">FlashAttention</a>、<a href="./softmax-attention-explainer.html">softmax attention</a> があります。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./paper-index.html" style="color:var(--g2)">← 論文理解シリーズの目次へ</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* ============ デモ1: mass cliff ============ */
+(function(){
+  const cv=document.getElementById('cvCliff'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,NB=40;
+  let view='g95';
+  function build(sink,ksig){
+    /* ブロック 0 = sink, 最後 = 直近ブロック, その間に signal と noise */
+    const p=new Array(NB).fill(0);
+    p[0]=sink;
+    const last=Math.min(0.05,(1-sink)*0.25);
+    p[NB-1]=last;
+    let rest=Math.max(1-sink-last,0);
+    const sigShare=0.85, sigTotal=rest*sigShare, noiseTotal=rest*(1-sigShare);
+    /* signal は 8 番以降に等間隔で置き、指数的に減衰させる */
+    const idx=[];
+    for(let i=0;i<ksig;i++) idx.push(3+Math.floor(i*(NB-6)/Math.max(ksig,1)));
+    let wsum=0; const wts=idx.map(function(_,i){return Math.pow(0.72,i);});
+    wts.forEach(function(w){wsum+=w;});
+    idx.forEach(function(b,i){ p[b]+=sigTotal*wts[i]/wsum; });
+    const nNoise=NB-2-ksig;
+    for(let b=1;b<NB-1;b++) if(idx.indexOf(b)<0) p[b]+=noiseTotal/Math.max(nNoise,1);
+    return {p:p,sig:idx};
+  }
+  function draw(){
+    const sink=(+document.getElementById('clS').value)/100;
+    const ksig=+document.getElementById('clK').value;
+    document.getElementById('clSv').textContent=sink.toFixed(2);
+    document.getElementById('clKv').textContent=ksig;
+    const B=build(sink,ksig), p=B.p, sig=B.sig;
+    const gamma=(view==='g97')?0.97:0.95;
+    /* γ 規則: 降順に累積して閾値に達したら停止 */
+    const order=p.map(function(v,i){return [v,i];}).sort(function(a,b){return b[0]-a[0];});
+    let acc=0, gsel=[], stopped=false;
+    for(let i=0;i<order.length;i++){
+      if(acc>=gamma){stopped=true;break;}
+      gsel.push(order[i][1]); acc+=order[i][0];
+    }
+    const gnoise=gsel.filter(function(b){return b!==0&&b!==NB-1&&sig.indexOf(b)<0;}).length;
+    const greachSig=gsel.filter(function(b){return sig.indexOf(b)>=0;}).length;
+    /* CRISP: μ = (1 - first - last)/(NB-2)、μ 超えを選ぶ */
+    const mu=Math.max(1-p[0]-p[NB-1],0)/(NB-2);
+    const csel=[]; for(let b=1;b<NB-1;b++) if(p[b]>mu) csel.push(b);
+    const cnoise=csel.filter(function(b){return sig.indexOf(b)<0;}).length;
+    const csig=csel.filter(function(b){return sig.indexOf(b)>=0;}).length;
+
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 つの VS ヘッドのブロック質量 (縦軸は平方根スケール)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('合成ヘッド ・ 規則は論文どおり',W-24,24);
+    const x0=54,y0=52,gw=W-24-x0,gh=H-190,bw=gw/NB;
+    function py(v){return y0+gh-Math.sqrt(Math.min(v,1))*gh;}
+    [0.001,0.01,0.05,0.2,0.5,1.0].forEach(function(v){
+      const y=py(v);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10px sans-serif';ct.textAlign='right';ct.fillText(v,x0-6,y+4);
+    });
+    /* ノイズ床 */
+    if(view!=='g95'&&view!=='g97'){}
+    p.forEach(function(v,b){
+      const x=x0+b*bw+1.5, w=bw-3, y=py(v), h=y0+gh-y;
+      let c=MUT;
+      if(b===0) c=ALT; else if(sig.indexOf(b)>=0) c=POS; else if(b===NB-1) c='#8fd6b4';
+      ct.fillStyle=c;ct.globalAlpha=0.9;ct.fillRect(x,y,w,Math.max(h,1.5));ct.globalAlpha=1;
+      if((view==='g95'||view==='g97'||view==='both')&&gsel.indexOf(b)>=0){
+        ct.strokeStyle=NEG;ct.lineWidth=2;ct.strokeRect(x-1,y-3,w+2,h+3);
+      }
+      if((view==='a10'||view==='both')&&csel.indexOf(b)>=0){
+        ct.strokeStyle=PUR;ct.lineWidth=2;ct.setLineDash([3,2]);
+        ct.strokeRect(x-2.5,y-6,w+5,h+6);ct.setLineDash([]);
+      }
+    });
+    if(view==='a10'||view==='both'){
+      const y=py(mu);
+      ct.strokeStyle=PUR;ct.lineWidth=2;ct.setLineDash([7,5]);
+      ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle=PUR;ct.font='bold 11.5px sans-serif';ct.textAlign='left';
+      ct.fillText('ノイズ床 μ = '+mu.toFixed(5),x0+8,y-7);
+    }
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('ブロック番号 (0 = sink、右端 = 直近ブロック)',x0+gw/2,y0+gh+20);
+
+    /* 判定パネル */
+    const by=H-118;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,96);
+    ct.textAlign='left';
+    const collapse=(p[0]>=gamma);
+    ct.fillStyle=NEG;ct.font='bold 13px sans-serif';
+    ct.fillText('γ = '+gamma+' の規則',40,by+22);
+    ct.fillStyle=INK;ct.font='12.5px sans-serif';
+    if(collapse){
+      ct.fillStyle=NEG;ct.font='bold 12.5px sans-serif';
+      ct.fillText('sink-only collapse — sink を数える途中で目標に到達し、signal ブロックを 1 つも評価せずに停止',40,by+42);
+    } else {
+      ct.fillText('選んだ '+gsel.length+' ブロック = sink/直近 + signal '+greachSig+' 個 + ノイズ '+gnoise+' 個',40,by+42);
+    }
+    ct.fillStyle=PUR;ct.font='bold 13px sans-serif';
+    ct.fillText('CRISP α = 1.0 の規則',40,by+66);
+    ct.fillStyle=INK;ct.font='12.5px sans-serif';
+    ct.fillText('選んだ '+csel.length+' ブロック = signal '+csig+' 個 + ノイズ '+cnoise+' 個 (先頭と末尾は常時保持)',40,by+86);
+    ct.fillStyle=ALT;ct.font='11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('試す: sink を 0.96 に上げると collapse、0.50 に下げるとノイズ蓄積',W-40,by+22);
+
+    document.getElementById('clOut').textContent=
+      (collapse
+        ? 'γ は signal に到達できず 0 個 / CRISP は signal '+csig+' 個を拾う'
+        : 'γ は signal '+greachSig+' 個 + ノイズ '+gnoise+' 個 / CRISP は signal '+csig+' 個 + ノイズ '+cnoise+' 個');
+  }
+  bindBtns({g95:'clG95',g97:'clG97',a10:'clA10',both:'clBoth'},function(k){view=k;draw();});
+  ['clS','clK'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+
+/* ============ デモ2: O(n) のノイズ ============ */
+(function(){
+  const cv=document.getElementById('cvOn'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const LEN=[4096,8192,16384,32768,65536,131072,262144,524288];
+  let sink=0.50;
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const sigMass=0.10;
+    const res95=Math.max(0.95-sink-sigMass,0), res97=Math.max(0.97-sink-sigMass,0);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('カバー率を満たすために集めるノイズトークン数 (縦軸は対数)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('付録 C の式による理論値',W-24,24);
+    const x0=64,y0=52,gw=W-30-x0,gh=H-140;
+    const ymax=Math.ceil(Math.log10(Math.max(res95*524288,10)));
+    function px(i){return x0+i/(LEN.length-1)*gw;}
+    function py(v){return v<=0?y0+gh:y0+gh-Math.min(Math.log10(v)/ymax,1)*gh;}
+    for(let e=0;e<=Math.ceil(ymax);e++){
+      const y=py(Math.pow(10,e));
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';
+      ct.fillText(Math.pow(10,e).toLocaleString(),x0-8,y+4);
+    }
+    LEN.forEach(function(n,i){
+      const x=px(i);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText((n/1024)+'k',x,y0+gh+16);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('系列長 n',x0+gw/2,y0+gh+34);
+    function line(res,color,label){
+      ct.strokeStyle=color;ct.lineWidth=2.8;ct.beginPath();
+      LEN.forEach(function(n,i){
+        const v=res*n, x=px(i), y=py(v);
+        if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+      });
+      ct.stroke();
+      LEN.forEach(function(n,i){
+        ct.fillStyle=color;ct.beginPath();ct.arc(px(i),py(res*n),3.4,0,Math.PI*2);ct.fill();
+      });
+      const yEnd=Math.max(py(res*LEN[LEN.length-1]),y0+16);
+      ct.fillStyle=color;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+      ct.fillText(label,x0+gw-4,yEnd+(color===ALT?-9:16));
+    }
+    if(res97>0) line(res97,ALT,'γ = 0.97 ・ 残り '+res97.toFixed(2));
+    if(res95>0) line(res95,NEG,'γ = 0.95 ・ 残り '+res95.toFixed(2));
+    /* CRISP */
+    ct.strokeStyle=POS;ct.lineWidth=2.8;ct.setLineDash([7,5]);
+    ct.beginPath();ct.moveTo(x0,y0+gh-2);ct.lineTo(x0+gw,y0+gh-2);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=POS;ct.font='bold 11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('CRISP: 床を超えないブロックは選ばない',x0+8,y0+gh-10);
+
+    const by=H-72;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    if(res95<=0){
+      ct.fillStyle=NEG;ct.font='bold 12.5px sans-serif';
+      ct.fillText('sink 0.90 + signal 0.10 = 1.00 なので残余はゼロ。ノイズは集めないが、その手前で目標に達するため signal に届かない',24,by+20);
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';
+      ct.fillText('これが sink-only collapse の側。ノイズ 0 という数字だけを見ると健全に見えてしまう',24,by+40);
+    } else {
+      ct.fillText('ε ≈ 1/n なので、残余カバー率 γ_res を埋めるのに必要なノイズトークン数は γ_res × n。系列長に比例して増える',24,by+20);
+      ct.fillText('512k では γ = 0.95 で約 '+Math.round(res95*524288).toLocaleString()+' トークン、ブロック換算で約 '+
+        Math.round(res95*524288/128).toLocaleString()+' 個のノイズブロックを選ぶことになる',24,by+40);
+    }
+    document.getElementById('onOut').textContent=
+      (res95<=0? 'sink が閾値を覆うので γ は signal に到達しない (collapse 側の失敗)'
+               : '512k での γ=0.95 のノイズは約 '+Math.round(res95*524288).toLocaleString()+' トークン ・ 64k の '+
+                 Math.round(524288/65536)+' 倍');
+  }
+  bindBtns({s5:'onS5',s7:'onS7',s9:'onS9'},function(k){
+    sink=(k==='s5')?0.50:(k==='s7')?0.70:0.90; draw();});
+  draw();
+})();
+/* ============ デモ3: 精度 (実測) ============ */
+(function(){
+  const cv=document.getElementById('cvAcc'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const ACC={
+    ib:{n:'InfiniteBench (131K)',lo:20,hi:52,
+        ll:{fa:48.6,mi:36.5,fp95:47.4,fp97:47.3,c125:48.0,c10:48.7},
+        qw:{fa:24.0,mi:25.1,fp95:25.5,fp97:26.7,c125:28.4,c10:28.7}},
+    ru:{n:'RULER (4K-131K)',lo:70,hi:92,
+        ll:{fa:89.02,mi:86.14,fp95:89.22,fp97:89.14,c125:88.62,c10:88.82},
+        qw:{fa:75.84,mi:72.44,fp95:75.52,fp97:75.80,c125:75.80,c10:76.20}},
+    lb:{n:'LongBench (4K-16K)',lo:36,hi:51,
+        ll:{fa:48.82,mi:41.40,fp95:46.92,fp97:47.12,c125:46.92,c10:47.77},
+        qw:{fa:48.80,mi:38.95,fp95:45.57,fp97:46.45,c125:46.76,c10:47.23}}
+  };
+  const ROWS=[['FlashAttention (dense)','fa',MUT],['MInference','mi',BLUE],
+              ['FlexPrefill γ=0.95','fp95',NEG],['FlexPrefill γ=0.97','fp97',ALT],
+              ['CRISP α=1.25','c125','#8fd6b4'],['CRISP α=1.0','c10',POS]];
+  let bm='ib', mdl='ll';
+  function draw(){
+    const S=ACC[bm], D=S[mdl];
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(S.n+' ・ '+(mdl==='ll'?'Llama-3.1-8B':'Qwen2.5-7B'),24,24);
+    const x0=210,y0=48,rowh=(H-118)/ROWS.length,bh=Math.min(30,rowh-10);
+    const lo=S.lo,hi=S.hi,gw=W-40-x0;
+    function px(v){return x0+(v-lo)/(hi-lo)*gw;}
+    for(let v=lo;v<=hi;v+=(hi-lo)/8){
+      const x=px(v);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x,y0-4);ct.lineTo(x,y0+ROWS.length*rowh);ct.stroke();
+    }
+    [lo,(lo+hi)/2,hi].forEach(function(v){
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(v.toFixed(0),px(v),y0+ROWS.length*rowh+16);
+    });
+    /* dense の基準線 */
+    ct.strokeStyle='rgba(255,255,255,0.45)';ct.lineWidth=1.8;ct.setLineDash([6,4]);
+    ct.beginPath();ct.moveTo(px(D.fa),y0-6);ct.lineTo(px(D.fa),y0+ROWS.length*rowh+2);ct.stroke();ct.setLineDash([]);
+    ROWS.forEach(function(r,i){
+      const y=y0+i*rowh+(rowh-bh)/2, v=D[r[1]];
+      const w=Math.max(2,px(v)-x0);
+      ct.fillStyle=r[2];ct.globalAlpha=(r[1]==='c10')?0.95:0.62;
+      ct.fillRect(x0,y,w,bh);ct.globalAlpha=1;
+      ct.fillStyle=(r[1]==='c10')?POS:SUBI;
+      ct.font=((r[1]==='c10')?'bold ':'')+'12.5px sans-serif';ct.textAlign='right';
+      ct.fillText(r[0],x0-10,y+bh/2+4);
+      ct.fillStyle='#0d2b20';ct.font='bold 12.5px "SF Mono",Menlo,monospace';ct.textAlign='right';
+      ct.fillText(v.toFixed(2),x0+w-8,y+bh/2+4);
+      if(r[1]!=='fa'){
+        const d=v-D.fa;
+        ct.fillStyle=d>=0?POS:NEG;ct.font='bold 11px sans-serif';ct.textAlign='left';
+        ct.fillText((d>=0?'+':'')+d.toFixed(2),x0+w+8,y+bh/2+4);
+      }
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('点線 = dense attention (FlashAttention) ・ バー右の数字は dense との差 (pt)',24,H-18);
+    document.getElementById('acOut').textContent=
+      'CRISP α=1.0 は dense 比 '+((D.c10-D.fa)>=0?'+':'')+(D.c10-D.fa).toFixed(2)+
+      ' pt ・ FlexPrefill γ=0.95 比 '+((D.c10-D.fp95)>=0?'+':'')+(D.c10-D.fp95).toFixed(2)+
+      ' pt ・ MInference 比 '+((D.c10-D.mi)>=0?'+':'')+(D.c10-D.mi).toFixed(2)+' pt';
+  }
+  bindBtns({ib:'acIB',ru:'acRU',lb:'acLB'},function(k){bm=k;draw();});
+  bindBtns({ll:'acLl',qw:'acQw'},function(k){mdl=k;draw();});
+  draw();
+})();
+
+/* ============ デモ4: レイテンシ (実測) ============ */
+(function(){
+  const cv=document.getElementById('cvLat'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const LEN=['64k','131k','262k','512k'];
+  const M=[
+    {n:'FP γ=0.95',c:NEG,v:[1547,4118,13428,40949],sp:4.41},
+    {n:'FP γ=0.97',c:ALT,v:[1690,5001,13413,46369],sp:3.90},
+    {n:'CRISP α=1.5',c:POS,v:[1441,3940,10982,33454],sp:5.40},
+    {n:'CRISP α=1.25',c:BLUE,v:[1589,4314,11714,34111],sp:5.30},
+    {n:'CRISP α=1.0',c:PUR,v:[1776,4801,12740,34983],sp:5.17}
+  ];
+  let view='abs';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(view==='abs'?'attention 単体のレイテンシ (H100 1 枚、縦軸は対数)':
+                view==='rel'?'FlexPrefill γ=0.95 を 100% としたときの相対時間':
+                             '512k トークンでの FlashAttention に対する高速化倍率',24,24);
+    const x0=70,y0=52,gh=H-140;
+    let gw=W-40-x0;
+    if(view==='spd'){
+      const rows=M.slice().sort(function(a,b){return b.sp-a.sp;});
+      const rowh=gh/rows.length, bh=Math.min(34,rowh-12), mx=6.0;
+      rows.forEach(function(m,i){
+        const y=y0+i*rowh+(rowh-bh)/2, w=m.sp/mx*(gw-90);
+        ct.fillStyle=m.c;ct.globalAlpha=(m.n.indexOf('CRISP')===0)?0.95:0.6;
+        ct.fillRect(x0+80,y,w,bh);ct.globalAlpha=1;
+        ct.fillStyle=m.c;ct.font='bold 12.5px sans-serif';ct.textAlign='right';
+        ct.fillText(m.n,x0+70,y+bh/2+4);
+        ct.fillStyle=INK;ct.font='bold 13px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(m.sp.toFixed(2)+'x',x0+86+w,y+bh/2+4);
+      });
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+      ct.fillText('CRISP の 3 設定がいずれも FlexPrefill の 2 設定を上回る。α=1.0 は最も遅い CRISP 設定でありながら FP γ=0.97 の 3.90x を大きく超える',24,H-46);
+      ct.fillText('参考: dense (FlashAttention) の 512k は各行の実測時間と倍率から約 180 秒に相当する',24,H-26);
+      document.getElementById('ltOut').textContent='最速は CRISP α=1.5 の 5.40x ・ 最高精度の α=1.0 でも 5.17x で FP γ=0.97 の 3.90x を上回る';
+      return;
+    }
+    gw=W-160-x0;
+    let lo,hi;
+    if(view==='abs'){ lo=1000; hi=50000; } else { lo=70; hi=125; }
+    function px(i){return x0+i/(LEN.length-1)*gw;}
+    function py(v){
+      if(view==='abs') return y0+gh-(Math.log10(v)-Math.log10(lo))/(Math.log10(hi)-Math.log10(lo))*gh;
+      return y0+gh-(v-lo)/(hi-lo)*gh;
+    }
+    if(view==='abs'){
+      [1000,2000,5000,10000,20000,50000].forEach(function(v){
+        const y=py(v);
+        ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+        ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';
+        ct.fillText((v/1000)+'s',x0-8,y+4);
+      });
+    } else {
+      [70,80,90,100,110,120].forEach(function(v){
+        const y=py(v);
+        ct.strokeStyle=(v===100)?'rgba(224,122,95,0.55)':GRID;ct.lineWidth=(v===100)?1.8:1;
+        ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+        ct.fillStyle=(v===100)?NEG:MUT;ct.font='10.5px sans-serif';ct.textAlign='right';
+        ct.fillText(v+'%',x0-8,y+4);
+      });
+    }
+    LEN.forEach(function(l,i){
+      const x=px(i);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='11px sans-serif';ct.textAlign='center';
+      ct.fillText(l,x,y0+gh+18);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('文脈長',x0+gw/2,y0+gh+36);
+    const lab=[];
+    M.forEach(function(m){
+      if(view==='rel'&&m.n==='FP γ=0.95') return;
+      lab.push({n:m.n,c:m.c,y:py(view==='abs'?m.v[3]:m.v[3]/M[0].v[3]*100)});
+    });
+    lab.sort(function(a,b){return a.y-b.y;});
+    lab.forEach(function(L,i){ if(i>0&&L.y-lab[i-1].y<15) L.y=lab[i-1].y+15; });
+    M.forEach(function(m){
+      if(view==='rel'&&m.n==='FP γ=0.95') return;
+      ct.strokeStyle=m.c;ct.lineWidth=2.8;
+      if(m.n.indexOf('CRISP')<0) ct.setLineDash([6,4]);
+      ct.beginPath();
+      m.v.forEach(function(v,i){
+        const y=py(view==='abs'?v:v/M[0].v[i]*100), x=px(i);
+        if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+      });
+      ct.stroke();ct.setLineDash([]);
+      m.v.forEach(function(v,i){
+        ct.fillStyle=m.c;ct.beginPath();
+        ct.arc(px(i),py(view==='abs'?v:v/M[0].v[i]*100),3.6,0,Math.PI*2);ct.fill();
+      });
+      let yl=null;
+      lab.forEach(function(L){ if(L.n===m.n) yl=L.y; });
+      const xe=px(3), ye=py(view==='abs'?m.v[3]:m.v[3]/M[0].v[3]*100);
+      ct.strokeStyle=m.c;ct.lineWidth=1;
+      ct.beginPath();ct.moveTo(xe,ye);ct.lineTo(xe+10,yl-4);ct.stroke();
+      ct.fillStyle=m.c;ct.font='bold 11.5px sans-serif';ct.textAlign='left';
+      ct.fillText(m.n,xe+13,yl);
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    if(view==='abs')
+      ct.fillText('短い側ではほぼ並び、長くなるほど CRISP が引き離す。これが O(n) のノイズ削減が効いている形',24,H-26);
+    else
+      ct.fillText('100% の線が FlexPrefill γ=0.95。CRISP α=1.25 は 64k で +3% 遅く、512k で -17% 速い',24,H-26);
+    document.getElementById('ltOut').textContent=
+      (view==='abs'
+        ? '512k で CRISP α=1.25 は 34,111ms、FP γ=0.95 は 40,949ms (-17%)'
+        : 'CRISP α=1.0 は FP γ=0.97 比で 512k に -25%。相対曲線が右下がりなのが O(n) 削減の署名');
+  }
+  bindBtns({abs:'ltAbs',rel:'ltRel',spd:'ltSpd'},function(k){view=k;draw();});
+  draw();
+})();
+</script>
+</body>
+</html>
