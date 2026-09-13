@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFT が簡単な問題を片付けた後、予算は間違いだけに使う — Wnuan の 3 段 post-training</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7;
+    white-space:pre-wrap}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 10 回</p>
+  <h1>SFT が簡単な問題を片付けた後、予算は間違いだけに使う</h1>
+  <p>社内文書 QA の 3 段 post-training と、残存誤りに絞る GRPO を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「Wnuan: Staged Post-Training for Question Answering over Proprietary Enterprise Knowledge」(Xiaofeng Shi ほか、BAAI ・ 北京市熱力集団 ・ BUPT、arXiv:2608.01862v1, 2026-08-03) は、公開データに存在しない<b>社内文書の知識をモデルに覚えさせる</b>ための 3 段の post-training を、実際の企業で回して測った報告です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    社内 QA の適応には 3 つの要求が同時にかかります。専有知識を覚える、汎用の指示追従を失わない、限られた post-training 予算で済ませる。この論文は文書を QA に変換して SFT し、汎用データを混ぜて忘却を抑え、最後に<b>SFT 後もまだ間違える問題だけを集めて RL</b> します。707 問の社内ベンチで正答率は 52.76% → 80.06% → <b>91.51%</b>。同じ更新回数の対照実験で、<b>残存誤りだけに絞る選び方が全プール無作為より 3.11 ポイント勝ちます</b>。同時にこの論文は代償も測っていて、汎用ベンチは 5.17 ポイント落ち、<b>その落ちはほぼ指示追従に集中</b>します。そして専門化した後は<b>RAG が足を引っ張り始めます</b>。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>解く問題</td><td>社内の規程 ・ 技術標準 ・ 運用手順は公開の事前学習データに無い。それを<b>closed-book で答えられるモデル</b>に仕上げつつ、汎用能力を保ち、予算内で収める</td></tr>
+    <tr><td>Stage I</td><td>文書を<b>自己完結した QA</b> に変換 (OCR 正規化 → 意味と段落の境界で分割 → 固有のアンカーを抽出 → 6 つのタスク型のいずれかで質問生成 → 根拠チャンクから回答 → 5 種のフィルタ)。SFT 用に <b>221,294 例</b></td></tr>
+    <tr><td>Stage II</td><td>Qwen3-32B から<b>全パラメータ SFT</b>。汎用データを 106,950 例 (実比率 <b>48.3%</b>) 混ぜる。混ぜる量は 5 水準の grid から<b>汎用ベンチ平均が最大の点</b>を選ぶ</td></tr>
+    <tr><td>Stage III</td><td>SFT 後のモデルが<b>まだ間違える 56,147 例</b>だけを選び、意味報酬で GRPO。報酬は $0.6 r_{\text{acc}} + 0.3 r_{\text{quality}} + 0.1 r_{\text{format}}$</td></tr>
+    <tr><td>主要結果</td><td>WnuanBench (707 問) の AAR が <b>52.76 → 80.06 → 91.51</b>。幻覚率は 65.91 → 33.66 → <b>15.70</b></td></tr>
+    <tr><td>統制された主張</td><td>100 更新を揃えた 3 群比較で、残存誤り <b>89.39</b> 対 全プール 86.28 対 サイズを揃えた無作為 86.42。差は <b>+3.11</b> と <b>+2.97</b> ポイントで、<b>source 単位の bootstrap 区間も 0 より上</b></td></tr>
+    <tr><td>代償</td><td>汎用平均 88.61 → 84.64 → 83.44。SFT では 3 指標すべて下がるが、<b>RL では MMLU +0.61 / C-Eval +2.29 なのに IFEval が -6.52</b>。指示追従に集中した損失</td></tr>
+    <tr><td>意外な結果</td><td>固定の RAG を足すと、素のモデルは 52.76 → <b>72.98</b> と大きく改善するのに、SFT 後は 80.06 → 76.24、RL 後は 91.51 → <b>81.75</b> と<b>悪化</b>する</td></tr>
+    <tr><td>評価の作り</td><td>2 つの judge が $\{0, 0.5, 1\}$ で採点し、不一致時に 3 つ目が投票して順序中央値を取る。<b>147 件を社内の権威ある専門家がラベル付けして 90.5% 一致</b> ($\kappa=0.796$)</td></tr>
+    <tr><td>この論文の姿勢</td><td>段ごとに<b>証拠の強さが違うことを自分で明示</b>している。Stage I は計算量を揃えていない構成比較、Stage II は有限な operating point 探索、<b>Stage III だけが統制された実験</b></td></tr>
+    <tr><td>公開物</td><td>社内文書とベンチマーク全体は公開不可。評価プロンプト ・ 合成フィクスチャ ・ 参照統計は補足で提供。License CC BY 4.0</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 3 段と、段ごとの証拠の強さ</a>
+    <a href="#s2">2. Stage I — 文書を QA に変える</a>
+    <a href="#s3">3. 【体験】Stage II — replay の operating point</a>
+    <a href="#s4">4. Stage III — 残った誤りだけを選ぶ</a>
+    <a href="#s5">5. 【体験】3 群の対照実験</a>
+    <a href="#s6">6. 【体験】どこで止めるか</a>
+    <a href="#s7">7. 【体験】専門化の収支</a>
+    <a href="#s8">8. 【体験】RAG が足を引っ張る</a>
+    <a href="#s9">9. 評価を信じられるようにする</a>
+    <a href="#s10">10. 批判的に読む</a>
+    <a href="#s11">11. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>3 段と、段ごとの証拠の強さ</h2>
+  <p class="lead">まず全体像です。この論文の読み方で重要なのは、<b>3 つの段が同じ強さの証拠で支えられていない</b>ことを著者自身が明示している点です。そこを混ぜて読むと、主張を過大に受け取ります。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 560" role="img" aria-label="Wnuan の 3 段パイプラインと段ごとの証拠の強さ">
+      <defs>
+        <marker id="wnA" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+        <marker id="wnG" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#0f5132"/></marker>
+      </defs>
+
+      <rect x="24" y="16" width="600" height="56" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="44" y="40" font-size="15" font-weight="700" fill="#3f4c55">社内文書 — 規程 ・ 技術標準 ・ 運用手順</text>
+      <text x="44" y="60" font-size="12.5" fill="#12211a">217 の source 文書 ・ 5,648 の source path ・ 38,467 の source chunk。公開の事前学習データには無い</text>
+
+      <rect x="640" y="16" width="216" height="56" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="748" y="40" font-size="14" font-weight="700" fill="#3f4c55" text-anchor="middle">Qwen3-32B</text>
+      <text x="748" y="60" font-size="12.5" fill="#12211a" text-anchor="middle">= Wnuan-Base ・ AAR 52.76</text>
+
+      <path d="M300,72 L300,100" stroke="#4a5d54" stroke-width="3" marker-end="url(#wnA)"/>
+
+      <rect x="24" y="104" width="600" height="92" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="44" y="128" font-size="15" font-weight="700" fill="#0f5132">Stage I — 文書を自己完結した QA に変える</text>
+      <text x="44" y="150" font-size="12.5" fill="#12211a">分割 → アンカー抽出 → 6 タスク型で質問生成 → 根拠チャンクから回答 → 5 種のフィルタ</text>
+      <text x="44" y="170" font-size="12.5" fill="#12211a">対象モデルに合わせた回答の書き換え (類似度ゲートと書式フィルタを通ったものだけ置換)</text>
+      <text x="44" y="190" font-size="12.5" font-weight="700" fill="#0f5132">出力: SFT 用 221,294 例 (書き換え 164,744 + 原文のまま 56,550)</text>
+
+      <rect x="640" y="104" width="216" height="92" rx="9" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="748" y="128" font-size="13" font-weight="700" fill="#8a5a06" text-anchor="middle">証拠の強さ: 弱</text>
+      <text x="748" y="150" font-size="12" fill="#12211a" text-anchor="middle">計算量を揃えていない</text>
+      <text x="748" y="168" font-size="12" fill="#12211a" text-anchor="middle">構成比較 (FLOPs +27.8%)</text>
+      <text x="748" y="188" font-size="12" fill="#12211a" text-anchor="middle">因果の切り分けは不可</text>
+
+      <path d="M300,196 L300,224" stroke="#4a5d54" stroke-width="3" marker-end="url(#wnA)"/>
+
+      <rect x="24" y="228" width="600" height="92" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="44" y="252" font-size="15" font-weight="700" fill="#0f5132">Stage II — 全パラメータ SFT + 汎用データの replay</text>
+      <text x="44" y="274" font-size="12.5" fill="#12211a">domain 221,294 例 + 公開の汎用 106,950 例 (実比率 48.3%) + 補助的な指示 / 同一性データ</text>
+      <text x="44" y="294" font-size="12.5" fill="#12211a">bf16 ・ ZeRO-3 ・ 32 アクセラレータ ・ lr 1e-5 ・ 3 epoch ・ 11,976 更新</text>
+      <text x="44" y="314" font-size="12.5" font-weight="700" fill="#0f5132">出力: Wnuan-Inst ・ AAR 80.06 (Base から +27.30)</text>
+
+      <rect x="640" y="228" width="216" height="92" rx="9" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="748" y="252" font-size="13" font-weight="700" fill="#8a5a06" text-anchor="middle">証拠の強さ: 中</text>
+      <text x="748" y="274" font-size="12" fill="#12211a" text-anchor="middle">5 水準の有限な grid から</text>
+      <text x="748" y="292" font-size="12" fill="#12211a" text-anchor="middle">operating point を選んだだけ</text>
+      <text x="748" y="312" font-size="12" fill="#12211a" text-anchor="middle">最適性の主張はしていない</text>
+
+      <path d="M300,320 L300,348" stroke="#4a5d54" stroke-width="3" marker-end="url(#wnA)"/>
+
+      <rect x="24" y="352" width="600" height="96" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="44" y="376" font-size="15" font-weight="700" fill="#0f5132">Stage III — 残存誤りだけを選んで GRPO</text>
+      <text x="44" y="398" font-size="12.5" fill="#12211a">230,183 行のプールから、Wnuan-Inst が今も間違える 56,147 例を選ぶ (判定は記録された judge)</text>
+      <text x="44" y="418" font-size="12.5" fill="#12211a">1 問 5 rollout ・ 意味報酬 ・ H100 80GB x 16 ・ global batch 128 ・ lr 1e-6</text>
+      <text x="44" y="440" font-size="12.5" font-weight="700" fill="#0f5132">出力: Wnuan-RL ・ AAR 91.51 (Inst から +11.45)</text>
+
+      <rect x="640" y="352" width="216" height="96" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="748" y="376" font-size="13" font-weight="700" fill="#0f5132" text-anchor="middle">証拠の強さ: 強</text>
+      <text x="748" y="398" font-size="12" fill="#12211a" text-anchor="middle">100 更新を揃えた 3 群比較</text>
+      <text x="748" y="416" font-size="12" fill="#12211a" text-anchor="middle">Holm 補正 ・ source 単位の</text>
+      <text x="748" y="436" font-size="12" fill="#12211a" text-anchor="middle">bootstrap 感度分析つき</text>
+
+      <path d="M300,448 L300,476" stroke="#0f5132" stroke-width="3" marker-end="url(#wnG)"/>
+      <rect x="24" y="480" width="832" height="64" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="44" y="504" font-size="14" font-weight="700" fill="#22548f">この構造が意味すること</text>
+      <text x="44" y="526" font-size="12.5" fill="#12211a">論文が支持するのは「end-to-end のレシピ」と「残存誤り選択という 1 つの統制された主張」で、3 段の計算量を揃えた加法的な分解ではない</text>
+    </svg>
+    <p class="cap">図 1: 3 段のパイプラインと、それぞれを支える証拠の強さ。右の列を無視して読むと、この論文は言っていないことを言っているように見える</p>
+  </div>
+  <h3>主要指標 AAR の定義に注意</h3>
+  <div class="mj">$$ \mathrm{AAR}=\frac{N_{\text{correct}}+N_{\text{partially correct}}}{N} \tag{1} $$</div>
+  <p>AAR (acceptable-answer rate) は<b>完全正解と部分正解を合算</b>した率です。厳密な全問正解率ではありません。論文もこれを明記していて、しかも<b>保存されている評価フィールドの名前が Accuracy になっている</b>ことまで断っています。91.51% という数字を「9 割が完全に正しい」と読むのは誤りで、正しくは<b>「9 割が受け入れ可能」</b>です。完全正解だけを見る correctness は同じ地点で 78.43% です。</p>
+  <div class="key">
+    <b>closed-book であることの意味。</b>このモデルは<b>推論時に文書を渡されません</b>。質問だけを受けて、重みの中に入った知識で答えます。だから RAG との比較が単なるベースライン比較ではなく、<b>「知識をどこに置くか」という設計の選択</b>の比較になります。8 節で見るとおり、この選択は排他的ではないどころか、<b>両方やると悪くなる</b>という結果が出ています。
+  </div>
+</section>
+<section id="s2">
+  <h2><span class="num">2</span>Stage I — 文書を QA に変える</h2>
+  <p class="lead">社内文書をそのまま学習データにすると何が起きるか。この段の実験がそれに答えます。比較対象は<b>固定窓のテキスト</b>、つまり文書を一定長で切って言語モデリングさせるやり方です。</p>
+  <table>
+    <tr><th>SFT データ</th><th class="num">AAR</th><th class="num">正確さ</th><th class="num">網羅性</th><th class="num">忠実性</th><th class="num">幻覚率</th><th class="num">汎用平均</th></tr>
+    <tr><td>固定窓のテキスト</td><td class="num">52.33</td><td class="num">33.73</td><td class="num">22.70</td><td class="num">43.21</td><td class="num">57.14</td><td class="num">82.13</td></tr>
+    <tr class="hl"><td>Document-to-QA</td><td class="num">83.45</td><td class="num">68.81</td><td class="num">61.88</td><td class="num">67.96</td><td class="num">29.56</td><td class="num">79.21</td></tr>
+    <tr><td>Document-to-QA + 回答の書き換え</td><td class="num">82.04</td><td class="num">64.71</td><td class="num">56.01</td><td class="num">63.44</td><td class="num">32.11</td><td class="num">82.15</td></tr>
+  </table>
+  <p>差は <b>31.12 ポイント</b> (95% CI 27.30 - 34.94) で、これは同じ文書から作ったデータの<b>組み立て方だけ</b>の違いです。ただし公平な比較ではありません。更新回数が 3,974 対 5,082、推定 FLOPs が $5.29\times10^{14}$ 対 $6.76\times10^{14}$ で、<b>Document-to-QA 側が 27.8% 多く計算を使っています</b>。論文はこれを構成レベルの証拠と呼び、因果推定だとは主張しません。それでも 31 ポイントという差を 28% の計算量差で説明するのは無理があります。</p>
+  <h3>回答の書き換えが効いている場所</h3>
+  <p>Stage I にはもう 1 つ操作があります。生成された回答を<b>対象モデル自身の書き方に合わせて書き直す</b>もので、書き換え後が元の回答と意味的に十分近く (類似度ゲート) 書式チェックも通ったときだけ置き換えます。結果として 164,744 例が書き換えられ、56,550 例は元のまま残りました。書式フィルタが <code>&lt;think&gt;</code> という文字列を含む 49 件を落としています。</p>
+  <p>表を見ると、この操作は<b>domain の AAR をわずかに下げます</b> (83.45 → 82.04)。論文も「独立した domain の利得は示していない」と正直に書いています。ところが<b>汎用平均は 79.21 → 82.15 と 2.94 ポイント戻ります</b>。つまりこの書き換えは domain のための操作ではなく、<b>忘却を減らすための操作</b>だと読めます。学習データの文体が対象モデルから遠いほど、汎用能力が削られるという解釈ができます。</p>
+  <div class="key">
+    <b>実務的な含意。</b>社内文書の適応で最初に考えるべきなのは、モデルでも報酬でもなく<b>データの組み立て方</b>です。同じ文書から、固定窓のまま食わせるか、自己完結した QA に組み替えるかで <b>52.33 対 83.45</b> という差が出ます。そして<b>「答えの書き方を対象モデルに寄せる」だけで汎用能力の損失が 3 ポイント戻ります</b>。どちらも新しいアルゴリズムを必要としません。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【体験】Stage II — replay の operating point</h2>
+  <p class="lead">専有知識を入れると汎用能力が落ちます。定石の緩和策は<b>汎用データを混ぜ戻す (replay) </b>ことで、この論文もそれを使います。新しさは手法ではなく、<b>混ぜる量を 5 水準で実測して、どこを選ぶかを明示した</b>ところです。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvReplay" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="rpBoth">domain と汎用の両方</button>
+    <button class="ghost" id="rpComp">汎用の内訳 (MMLU / IFEval / C-Eval)</button>
+    <button class="ghost" id="rpVal">同一ドメイン検証セット</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>WnuanBench AAR (domain)</span>
+    <span><span class="dot" style="background:#60a5fa"></span>汎用ベンチ平均</span>
+    <span><span class="dot" style="background:#e0a03f"></span>選ばれた 48.3%</span>
+  </div>
+  <p class="rdout" id="rpOut"></p>
+  <p>グラフの形が説明しているのは 2 つです。1 つ目、<b>domain と汎用は綺麗にトレードオフしません</b>。汎用平均は 82.15 → 84.64 と単調に近い形で上がりますが (96.7% で下がる)、domain の AAR は 82.04 から 80.06 の狭い範囲で上下します。2 つ目、<b>選ばれた 48.3% は domain が最も低い点です</b>。論文の選択規則は「汎用ベンチ平均が最大の水準を選ぶ」で、domain の最大値を選んでいません。</p>
+  <p>この選び方を明示しているのは重要です。<b>もし domain 最大で選んでいたら replay 0% が選ばれ、その後の Stage III は違う初期値から始まっていました</b>。論文は「1.98 AAR ポイントを支払って汎用平均 2.49 ポイントを買った」と収支の形で書いています。どちらを買うかは論文の主張ではなく<b>運用の判断</b>だという整理です。</p>
+  <div class="warn">
+    <b>この grid は 5 点の実測で、最適化ではありません。</b>汎用データは公開の蒸留データセット 1 つ (Apache-2.0) で、混ぜる比率以外は動かしていません。<b>どの汎用データを混ぜるかは探索されていません</b>。9 節と 10 節で見るとおり、後で失われるのは主に指示追従なので、指示追従に特化したデータを混ぜる選択肢は残っています。論文自身も「明示的な instruction replay」を今後の方向として挙げています。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>Stage III — 残った誤りだけを選ぶ</h2>
+  <p class="lead">ここがこの論文の中心です。SFT が終わった時点で、簡単な問題はもう解けています。残りの予算をどこに使うか。答えは<b>「まだ間違える問題」</b>です。</p>
+  <div class="mj">$$ \mathcal{P}_{\text{err}}=\{(x_i,y_i)\in\mathcal{P} : J_{\text{sel}}(f_{\text{inst}}(x_i),\,y_i)=\text{incorrect}\} \tag{2} $$</div>
+  <p>$\mathcal{P}$ が 230,183 行の選択プール、$f_{\text{inst}}$ が Wnuan-Inst、$J_{\text{sel}}$ が選択用の judge です。<b>SFT 済みモデルに全問解かせて、judge が不正解と判定したものだけを残す</b>。これで 56,147 例になります。プールの約 24% です。</p>
+  <p>やっていることは驚くほど単純で、新しいデータ選択アルゴリズムではありません。論文もそう書いています。<b>LESS のような影響度ベースの選択でも、DAPO のようなオンラインの zero-advantage 除去でもなく、オフラインで 1 回判定するだけ</b>です。</p>
+  <h3>報酬の作り</h3>
+  <div class="mj">$$ r=0.6\,r_{\text{acc}}+0.3\,r_{\text{quality}}+0.1\,r_{\text{format}}, \qquad r_{\text{quality}}=\frac{r_{\text{logic}}+r_{\text{prof}}+r_{\text{concise}}}{3} \tag{3} $$</div>
+  <table>
+    <tr><th>成分</th><th>重み</th><th>何を見るか</th></tr>
+    <tr><td>$r_{\text{acc}}$</td><td>0.6</td><td>回答の正しさ。正規化した完全一致は<b>決定的な近道</b>で満点を返す (judge を呼ばない)</td></tr>
+    <tr><td>$r_{\text{logic}}$ / $r_{\text{prof}}$ / $r_{\text{concise}}$</td><td>合わせて 0.3</td><td>論理の妥当さ ・ 専門的な表現 ・ 簡潔さ。3 つの平均。ローカルに立てた Qwen3.5-35B が採点</td></tr>
+    <tr><td>$r_{\text{format}}$</td><td>0.1</td><td>要求された回答タグへの準拠</td></tr>
+  </table>
+  <p>GRPO の設定は 1 問 5 rollout、グループ内で報酬を標準化し、token 単位の PPO 型目的をクリップ $\epsilon=0.2$、dual-clip 係数 $C=3$、参照方策への罰則 $\beta=10^{-2}$ で最適化します。judge を<b>ローカルに立てている</b>のは、社内文書を外部 API に出せないという制約からくる設計です。</p>
+  <div class="key">
+    <b>なぜ「残存誤り」が自然な選択になるのか。</b>GRPO はグループ内の報酬のばらつきから学習します。<b>5 回とも正解する問題はグループ内の差が消えて、勾配がほぼ 0 になります</b>。SFT 後のプールにはそういう問題が大量にあり、それを引くたびに更新予算が空回りします。残存誤りに絞るのは、<b>「勾配が立つ問題を事前に選んでおく」</b>ことに相当します。DAPO がオンラインでやっていることを、オフラインで 1 回やる形です。
+  </div>
+  <div class="warn">
+    <b>選択の基準は judge です。</b>つまり「本当に間違っている問題」ではなく<b>「judge が間違いだと言った問題」</b>が選ばれます。judge の誤りはそのまま選択の誤りになります。論文は別の角度からこの安定性を検査していて、書き換え後のターゲットに差し替えた監査では、<b>91.69% の例が同じ「不正解 / 受け入れ可能」の所属を保ちました</b>。不正解率の変化は -0.86 ポイントですが、その内側では 4,928 例が抜けて 4,001 例が入っています。<b>集合として安定しているだけで、1 行ごとに不変ではありません</b>。
+  </div>
+</section>
+<section id="s5">
+  <h2><span class="num">5</span>【体験】3 群の対照実験</h2>
+  <p class="lead">この論文で唯一、条件を揃えて比較しているのがここです。3 つの群は初期値 ・ プロンプト ・ 採点手順 ・ rollout 数 ・ 最適化設定 ・ <b>100 更新という予算</b>をすべて共有し、違うのは<b>どこから問題を引くか</b>だけです。</p>
+  <table>
+    <tr><th>群</th><th>プールの中身</th><th>行数</th><th>何を検証するか</th></tr>
+    <tr class="hl"><td>残存誤り</td><td>Wnuan-Inst が今も間違える例だけ</td><td class="num">56,147</td><td>—</td></tr>
+    <tr><td>サイズを揃えた無作為</td><td>全プールから無作為に同数 (seed 42)</td><td class="num">56,147</td><td><b>プールの大きさを揃えた</b>比較。差は「選び方」だけから来る</td></tr>
+    <tr><td>全プール</td><td>選択プール全体</td><td class="num">230,183</td><td>同じ更新予算を<b>広く薄く使う</b>のと<b>誤りに集める</b>のとの比較</td></tr>
+  </table>
+  <div class="canvas-wrap">
+    <canvas id="cvArms" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="amWB">WnuanBench (707 問)</button>
+    <button class="ghost" id="amVal">同一ドメイン検証セット</button>
+    <button class="ghost" id="amCI">差と信頼区間</button>
+  </div>
+  <p class="rdout" id="amOut"></p>
+  <p>結果は 3 点です。1 つ目、<b>残存誤りが両方に勝ちます</b>。無作為に +2.97 (95% CI 0.85 - 5.09、Holm 補正後 $p=0.035$)、全プールに +3.11 (0.71 - 5.66、$p=0.035$)。2 つ目、<b>全プールと無作為は区別できません</b> (-0.14 ポイント、$p=1$)。つまり効いているのは<b>プールの大きさではなく難しさ</b>です。3 つ目、<b>順序は別のデータセットでも保たれます</b>。同一ドメインの検証セットでも 81.33 / 78.67 / 77.78 の順です。</p>
+  <div class="key">
+    <b>source 単位の bootstrap という配慮。</b>同じ社内文書から作られた問題は互いに相関します。だから問題単位で resample すると区間が狭く出すぎる可能性があります。この論文は <b>217 の source 文書を replacement つきで resample し、選ばれた文書の全問を保持する</b>という感度分析を追加していて、そこでも両方の区間が 0 より上に残ります (0.81 - 5.08 と 0.83 - 5.70)。<b>効果が数個の文書に依存していない</b>ことの確認で、社内データを扱う実験ではこの検査が要ります。
+  </div>
+  <p>訓練中のログも整合しています。更新 51 - 100 の集計で、残存誤り群は<b>on-policy の正解報酬が低く、PPO-KL と勾配ノルムの平均絶対値が大きい</b>。<b>引いている問題が実際に難しい</b>ことの署名です。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】どこで止めるか</h2>
+  <p class="lead">RL をいつ止めるかは実務的な問題です。この論文は訓練側の検証信号を追跡していて、その形が停止の判断に使われています。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvStop" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="stTraj">検証の正解報酬の推移</button>
+    <button class="ghost" id="stDec">報酬の伸びの分解</button>
+  </div>
+  <p class="rdout" id="stOut"></p>
+  <p>形は明快です。<b>更新 100 までで +17.03、そこから 200 までで +2.01、327 までで +0.60</b>。増分が桁で落ちていくので、計算予算と合わせて実務的な停止点が決まります。論文はこれを「diminishing increments and compute budget determine the practical stop」と書いていて、収束の証明はしていません。</p>
+  <p>もう 1 つ有用な数字があります。4 つの統制された群について、<b>更新 100 時点の検証報酬と最終的な WnuanBench 正確さの平均絶対差が 1.19 ポイント</b>で、検証の伸びは最終 AAR の伸びの順序を保ちました。<b>訓練側の安い信号で、高いベンチマーク評価の順位をおおよそ予測できる</b>という観察です。ただし論文は「retraining のばらつきに対する推定ではなく記述的」と限定しています。</p>
+  <div class="key">
+    <b>報酬の合計を成果と読んではいけない。</b>2 つ目のビューが示すのがこの罠です。総合報酬は 0.5952 から 0.8332 へ <b>+0.2380</b> 伸びました。ところが分解すると、<b>正確さの寄与は 0.1179、意味品質は 0.0415、そして書式が 0.0787</b> です。書式報酬は<b>最終的に 1.0 に張り付きます</b>。つまり伸びの 3 分の 1 は「タグを正しく書けるようになった」ぶんで、<b>報酬の総和の伸びは正解率の伸びと交換できません</b>。RL の進捗を総合報酬で報告する運用は、この分だけ実力を過大に見せます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】専門化の収支</h2>
+  <p class="lead">3 段を通して何が上がり、何が下がったのか。指標を切り替えて見ます。<b>幻覚率だけは下が良い指標</b>です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRoute" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="roDom">社内 QA の 5 指標</button>
+    <button class="ghost" id="roGen">汎用ベンチの内訳</button>
+    <button class="ghost" id="roApi">API モデルとの位置関係</button>
+  </div>
+  <p class="rdout" id="roOut"></p>
+  <h3>上がったもの</h3>
+  <p>AAR は 52.76 → 80.06 → 91.51。SFT で +27.30 (95% CI 23.20 - 31.54)、RL でさらに +11.45。<b>幻覚率は 65.91 から 15.70 へ 50 ポイント落ちます</b>。忠実性が 30.20 → 72.14 なので、<b>根拠に基づいて答える度合いが本質的に変わっています</b>。素の Qwen3-32B が社内文書について語るとき、3 分の 2 が裏付けのない話だったという出発点も、それ自体が読む価値のある数字です。</p>
+  <h3>下がったもの</h3>
+  <p>汎用平均は 88.61 → 84.64 → 83.44 で、合計 -5.17。ここで重要なのは<b>内訳の形</b>です。</p>
+  <table>
+    <tr><th>指標</th><th class="num">Base</th><th class="num">Inst</th><th class="num">RL</th><th>Inst → RL の動き</th></tr>
+    <tr><td>MMLU</td><td class="num">89.19</td><td class="num">85.53</td><td class="num">86.14</td><td><b>+0.61 で回復</b></td></tr>
+    <tr><td>C-Eval</td><td class="num">87.89</td><td class="num">81.88</td><td class="num">84.17</td><td><b>+2.29 で回復</b></td></tr>
+    <tr class="hl"><td>IFEval</td><td class="num">88.76</td><td class="num">86.52</td><td class="num">80.00</td><td><b>-6.52 で悪化</b></td></tr>
+  </table>
+  <p><b>SFT では 3 つとも下がりますが、RL では知識系が戻って指示追従だけが落ちます</b>。損失は一様ではなく、<b>1 つの能力に集中しています</b>。原因の候補は報酬の作りにあります。$r_{\text{format}}$ は「要求されたタグへの準拠」しか見ていないので、<b>それ以外の指示への追従を守る力が報酬のどこにもありません</b>。</p>
+  <h3>問題単位で見ると</h3>
+  <p>707 問の内訳が出ています。Wnuan-Inst から Wnuan-RL で、<b>101 問が直り、20 問が壊れました</b>。546 問は受け入れ可能なまま、40 問は失敗のままです。純減は 81 問。<b>直った数の 5 分の 1 が壊れている</b>という比率は、集計値の +11.45 ポイントだけを見ていると見えません。</p>
+  <p>残る失敗の中身も記述されています。<b>正確な数値と日付、責任部署、文書の正式名称、閉じた列挙、そして正しい規則を限定する条件</b>。judge の理由づけからは、事実の置き換え、必要な点の欠落、根拠のない補足が挙がっています。頻度は報告されていません。ベンチマークに相互排他的な誤りラベルが無いためです。</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【体験】RAG が足を引っ張る</h2>
+  <p class="lead">この論文でいちばん実務の判断を変える結果です。3 つのチェックポイントすべてに<b>同一の固定 RAG</b> (BM25 + BGE-M3 の top-5 を連結) を適用して、前後を比べます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRag" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="rgAll">全 707 問</button>
+    <button class="ghost" id="rgHit">同一ドメインの chunk あり (433 問)</button>
+    <button class="ghost" id="rgMiss">同一ドメインの chunk なし (274 問)</button>
+    <button class="ghost" id="rgCnt">改善した問題と壊れた問題の数</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#6b7a86"></span>RAG なし</span>
+    <span><span class="dot" style="background:#60a5fa"></span>RAG あり</span>
+  </div>
+  <p class="rdout" id="rgOut"></p>
+  <p>全体では、素のモデルが <b>52.76 → 72.98 (+20.22)</b> と大きく伸びるのに対して、SFT 後は 80.06 → 76.24 (-3.82)、RL 後は <b>91.51 → 81.75 (-9.76)</b> と下がります。問題単位では、素のモデルで 198 問が改善して 55 問が壊れるのに対し、RL 後は<b>29 問しか改善せず 98 問が壊れます</b>。</p>
+  <p>スライスを見ると原因の方向が分かります。取ってきた chunk のどれかが質問と同じ業務ドメインだった 433 問では、変化が <b>+35.80 / +6.47 / -2.54</b>。1 つも一致しなかった 274 問では <b>-4.38 / -20.07 / -21.17</b>。つまり<b>関係ない文脈を渡されたときの被害が、専門化したモデルほど大きい</b>。</p>
+  <div class="key">
+    <b>読み取れる設計判断。</b>知識が重みに入った後の RAG は<b>無条件に足す第 4 段ではありません</b>。渡した文脈が的を外していると、モデルは自分が知っていることより<b>目の前の無関係なテキストを優先します</b>。だから論文の結論は「retrieval は訓練レシピと独立に<b>ゲートすべき</b>」で、検索の確信度が低いときは<b>渡さない</b>という運用になります。素のモデルで RAG を評価して「効く」と判断した設定を、適応後にそのまま引き継ぐと損をします。
+  </div>
+  <div class="warn">
+    <b>この診断の限界は論文自身が並べています。</b>retriever は 1 つだけ、gold の Recall@5 ラベルは無く、<b>RAG なし側の生成は同じ復号 seed で作り直していません</b>。ドメイン一致は関連性の代理であって答えを含む保証はなく、質問の難しさと相関している可能性もあります。<b>「訓練と検索の相互作用」を一般に示したものではなく、1 つの検索系での段階依存のパターン</b>です。それでも -9.76 という大きさと、198/55 対 29/98 という非対称は無視できません。
+  </div>
+</section>
+<section id="s9">
+  <h2><span class="num">9</span>評価を信じられるようにする</h2>
+  <p class="lead">社内 QA の開放形式の回答は完全一致で採点できません。だから judge に頼りますが、<b>judge を信じる根拠</b>を別に作らないと、報告された 91.51% は judge の癖の記録にすぎません。この論文はそこに一節を割いています。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 430" role="img" aria-label="Wnuan の評価パイプラインと専門家較正">
+      <defs><marker id="wnB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <rect x="24" y="16" width="240" height="54" rx="9" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="144" y="40" font-size="13.5" font-weight="700" fill="#3f4c55" text-anchor="middle">1 問への回答</text>
+      <text x="144" y="59" font-size="12" fill="#12211a" text-anchor="middle">質問 ・ 参照解答 ・ 出典 ・ ドメイン</text>
+
+      <path d="M264,43 L296,43" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#wnB)"/>
+
+      <rect x="302" y="10" width="262" height="32" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="433" y="31" font-size="12.5" font-weight="700" fill="#0f5132" text-anchor="middle">judge 1: gpt-oss-120b</text>
+      <rect x="302" y="46" width="262" height="32" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="433" y="67" font-size="12.5" font-weight="700" fill="#0f5132" text-anchor="middle">judge 2: MiniMax-M2.5</text>
+      <text x="433" y="96" font-size="12" fill="#12211a" text-anchor="middle">それぞれ {0, 0.5, 1} の順序ラベルを付ける</text>
+
+      <path d="M564,43 L596,43" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#wnB)"/>
+
+      <rect x="602" y="10" width="254" height="68" rx="9" fill="#fff6e6" stroke="#e0a03f" stroke-width="2"/>
+      <text x="729" y="32" font-size="12.5" font-weight="700" fill="#8a5a06" text-anchor="middle">不一致なら judge 3 が投票</text>
+      <text x="729" y="51" font-size="12" fill="#12211a" text-anchor="middle">DeepSeek-V3.2</text>
+      <text x="729" y="70" font-size="12" fill="#12211a" text-anchor="middle">順序中央値を採用</text>
+
+      <path d="M729,78 L729,108" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#wnB)"/>
+
+      <rect x="602" y="112" width="254" height="54" rx="9" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="729" y="134" font-size="13" font-weight="700" fill="#22548f" text-anchor="middle">最終ラベル → AAR</text>
+      <text x="729" y="154" font-size="12" fill="#12211a" text-anchor="middle">1 と 0.5 を合算して受け入れ可能</text>
+
+      <rect x="24" y="130" width="540" height="120" rx="9" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="44" y="154" font-size="14" font-weight="700" fill="#0f5132">この自動判定を、人が検算する</text>
+      <text x="44" y="176" font-size="12.5" fill="#12211a">対象文書に権限を持つ社内の専門家 1 名が、Wnuan-Inst の回答から</text>
+      <text x="44" y="195" font-size="12.5" fill="#12211a">層化抽出した 147 件にラベルを付ける</text>
+      <text x="44" y="218" font-size="12.5" font-weight="700" fill="#0f5132">二値判定の一致率 90.5% (95% CI 85.7 - 94.6、κ = 0.796)</text>
+      <text x="44" y="238" font-size="12.5" fill="#12211a">層化を戻した推定値は 90.4%</text>
+
+      <rect x="24" y="262" width="832" height="76" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="44" y="286" font-size="14" font-weight="700" fill="#0f5132">不一致の中身まで開いている</text>
+      <text x="44" y="308" font-size="12.5" fill="#12211a">3 クラスで完全一致は 103 件。残りのうち 31 件は自動判定のほうが甘く、13 件は厳しい。</text>
+      <text x="44" y="328" font-size="12.5" font-weight="700" fill="#0f5132">正解と不正解を直接またぐ不一致は 2 件だけ</text>
+
+      <rect x="24" y="352" width="832" height="66" rx="9" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="44" y="376" font-size="14" font-weight="700" fill="#b5401f">補助ラベルは同じ水準では保証されていない</text>
+      <text x="44" y="398" font-size="12.5" fill="#12211a">幻覚の検出は precision 0.868 / recall 0.657 / F1 0.748。較正が支えているのは二値の AAR 判定で、</text>
+      <text x="44" y="414" font-size="12.5" fill="#12211a">幻覚率のような補助指標はそれより弱い</text>
+    </svg>
+    <p class="cap">図 2: 評価パイプラインと較正。judge を足すだけでなく、その判定が人と何 % 一致するか、どちら向きにずれるかまで測っている</p>
+  </div>
+  <p>設計の要点は 3 つです。1 つ目、<b>judge を複数にして順序中央値を取る</b>。2 つ目、<b>人との一致率を測る</b>。90.5% と $\kappa=0.796$ という数字があるので、報告された AAR にどれだけ幅を見ておくべきかが読者側で判断できます。3 つ目、<b>ずれの向きを開示する</b>。31 件が甘く 13 件が厳しいので、<b>自動判定は全体としてやや甘い側にバイアスがあります</b>。</p>
+  <p>そして 4 つ目に、<b>較正が支えていない部分を明示している</b>ことが誠実です。幻覚の検出は recall 0.657 で、<b>幻覚の 3 分の 1 は見逃されています</b>。65.91 → 15.70 という劇的な改善は方向としては信頼できますが、絶対値は AAR ほど堅くありません。</p>
+  <div class="key">
+    <b>WnuanBench の作り。</b>707 問は 160 問の一般知識、370 問の運用シナリオ、177 問の標準 ・ 規格からなり、8 つの業務ドメインをまたぎます。社内の担当者が<b>自動の訓練 QA 生成とは独立に</b>作問し、専門家レビューと品質保証を通しています。<b>検証セットと WnuanBench の QA レコードは訓練にも残存選択にも一切入りません</b>。ただし<b>同じ社内知識ベースから作られている</b>ので、これは in-domain の評価で、source を held-out にした評価でも他社への転移でもありません。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>批判的に読む</h2>
+  <p class="lead">この論文は限界の申告がかなり丁寧なので、批判の多くは論文自身が先に書いています。それを含めて整理します。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>in-domain 評価しかない</td><td>WnuanBench は訓練と QA レコードが重ならないものの、<b>同じ社内文書の集合から作られています</b>。source 別 ・ 時系列別 ・ 企業別の分割はありません。つまり測っているのは<b>「与えた知識ベースを習得したか」</b>で、<b>未見の文書に一般化するか</b>は分かりません。実運用では文書が更新され続けるので、ここは大きな空白です</td></tr>
+    <tr><td>91.51% と 89.39% は別条件</td><td>主要ルートの 91.51% と統制実験の残存誤り群 89.39% は、<b>回答形式 ・ バッチ ・ 系列長 ・ ハードウェア ・ スケジュールが違います</b>。論文も明記しています。統制された主張は<b>3 群の相対差だけ</b>で、91.51% という数字は 3 群比較の結論ではありません</td></tr>
+    <tr><td>Stage I と II は因果を切り分けていない</td><td>Stage I は FLOPs が 27.8% 違う比較、Stage II は 5 点の grid 探索です。<b>31.12 ポイントという大きな差は説得力がありますが、「QA に組み替えたこと」だけの効果ではありません</b>。この構造を論文は隠していません</td></tr>
+    <tr><td>選択に使う judge が単一の基準</td><td>残存選択は記録された 1 つの judge の判定です。<b>judge が間違えた例は「直すべき誤り」として学習され、judge が見逃した誤りは選ばれません</b>。書き換えターゲットでの監査 (91.69% が同じ所属) は集合の安定性を見ていますが、<b>judge の正しさそのものを検査していません</b></td></tr>
+    <tr><td>専門家が 1 名</td><td>147 件のラベルは<b>1 名の専門家</b>によるものです。対象文書に権限を持つ人物という選定理由は明示されていますが、<b>人間同士の一致率が測れない</b>ので、90.5% という一致率の上限が分かりません</td></tr>
+    <tr><td>AAR は部分正解を含む</td><td>論文は明記していますが、引用されるときに落ちやすい点です。<b>91.51% は「受け入れ可能」の率で、完全正解率は 78.43%</b> です。部分正解の扱いが甘い judge であれば AAR は押し上がります (9 節のとおり自動判定はやや甘い側)</td></tr>
+    <tr><td>指示追従の損失に対策が無い</td><td>IFEval -6.52 に対して、論文は<b>対策を試して失敗しています</b>。回帰を意識した 2 回目の RL は AAR 91.51 → 91.37 (実質不変) の一方で<b>幻覚が 15.70 → 20.93 に悪化し、IFEval は 80.00 → 76.00 とさらに落ちました</b>。しかも比較対照が無いので、その分割規則自体の評価にもなっていません。<b>「残存誤りをもう一周させても自動的には良くならない」</b>という否定的な知見だけが残ります</td></tr>
+    <tr><td>RAG 診断の弱さ</td><td>retriever 1 つ、gold ラベル無し、no-RAG 側の生成 seed 不一致。<b>-9.76 という数字の大きさは無視できませんが、機構の証明ではありません</b>。ドメイン一致という代理指標が質問の難しさと相関している可能性も論文が挙げています</td></tr>
+    <tr><td>データ選択の代替が未検証</td><td>不確実性 ・ 損失 ・ 影響度 ・ オンラインの zero-advantage 除去といった選択器は<b>試されていません</b>。主張は「試した 3 つの中で残存誤りが最良」に限定されます</td></tr>
+    <tr><td>再現性</td><td>社内文書とベンチマーク全体は公開できません。代わりに<b>評価プロンプト、合成フィクスチャ、参照統計</b>が提供されます。<b>手続きは再現できるが結果は再現できない</b>形で、社内データを扱う論文の現実的な落とし所です</td></tr>
+    <tr><td>この論文の良い点</td><td>段ごとの証拠の強さを自分で格付けし、失敗した継続実験を本文の Discussion に置き、judge の一致率とずれの向きを開示し、AAR という指標名の紛らわしさまで注記している。<b>数字を大きく見せる書き方をしていません</b></td></tr>
+  </table>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
+  <div class="key">
+    Wnuan が示したのは新しいアルゴリズムではなく、<b>社内知識の適応を 1 本のレシピとして回したときに何が起きるか</b>の記録です。文書を自己完結した QA に組み替え (固定窓のまま食わせるより <b>+31.12 ポイント</b>)、汎用データを 48.3% 混ぜて忘却の operating point を選び、最後に<b>SFT 後もまだ間違える 56,147 例だけ</b>で GRPO する。AAR は 52.76 → 80.06 → <b>91.51</b>、幻覚率は 65.91 → <b>15.70</b>。同じ 100 更新で比べると、残存誤りに絞る選び方が全プールより <b>+3.11</b>、同サイズの無作為より <b>+2.97</b> 勝ち、全プールと無作為は区別できません。<b>効くのはプールの大きさではなく難しさ</b>です。代償は汎用平均 -5.17 で、その中身は<b>ほぼ IFEval に集中</b>します。そして<b>専門化した後の RAG は -9.76 で害になります</b>。
+  </div>
+  <h3>実務に持ち帰れるもの</h3>
+  <p>4 つあります。1 つ目、<b>データの組み立て方が最大のレバー</b>で、同じ文書でも QA に組み替えるだけで 31 ポイント動きます。2 つ目、<b>SFT の後の RL は「まだ間違える問題」に絞る</b>。判定を 1 回オフラインで走らせるだけで、同じ予算から 3 ポイント多く取れます。3 つ目、<b>RAG は独立にゲートする</b>。適応前に効いた設定が適応後には害になるので、検索の確信度で出し入れする必要があります。4 つ目、<b>報酬の総和を進捗として報告しない</b>。書式報酬が 1.0 に張り付くと、伸びの 3 分の 1 が実力ではなくなります。</p>
+  <h3>どこがまだ空いているのか</h3>
+  <p>いちばん大きいのは<b>指示追従の保持</b>で、論文の試みは失敗しています。次に<b>未見の文書への一般化</b>。source を held-out にした評価が無いので、文書が更新される運用でどうなるかは分かりません。そして<b>judge を選択基準に使うことの妥当性</b>です。学習の的が judge の判定である以上、judge の系統的な癖はそのまま方策に焼き付きます。</p>
+  <p class="fn">出典: Xiaofeng Shi, Xiaosong Qiu, Wenxin Ma, Qian Kou, Yiming Pan, Longbin Yu, Ying Liu, Haiping Wang, Hua Zhou. "Wnuan: Staged Post-Training for Question Answering over Proprietary Enterprise Knowledge." arXiv:2608.01862v1 [cs.AI], 2026-08-03. License CC BY 4.0.<br>
+  本ページの表とグラフの数値は<b>すべて論文の実測値</b>です。第 3 節は Table 11 と replay の component 表、第 5 節は Figure 2(b) と本文の区間、第 6 節は Figure 3 と本文の報酬分解、第 7 節は Table 1 ・ Table 21 ・ Figure 8(b)、第 8 節は本文の 5.6 節と Appendix I.1 / I.3、第 9 節は 4.1 節と Appendix B に基づきます。模式図や仮定値によるグラフはこのページにはありません。関連する解説として<a href="./paper-icrl.html">In-Context RL</a>、<a href="./vlm-verifier-16-rl-reward-terms.html">RL の報酬項の設計</a>、<a href="./vlm-verifier-19-measuring-the-measure.html">評価そのものを測る</a> があります。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./paper-index.html" style="color:var(--g2)">← 論文理解シリーズの目次へ</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* ============ デモ1: replay grid ============ */
+(function(){
+  const cv=document.getElementById('cvReplay'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  /* 論文 Table 11 と component 表 */
+  const G=[
+    {lab:'0%',n:0,r:0.0,val:76.78,wb:82.04,corr:64.71,hal:32.11,gen:82.15,mmlu:85.58,ifev:79.00,ceval:81.87},
+    {lab:'5%',n:10000,r:4.5,val:76.56,wb:80.62,corr:65.42,hal:31.54,gen:83.27,mmlu:85.02,ifev:83.15,ceval:81.65},
+    {lab:'25%',n:50000,r:22.6,val:76.56,wb:81.05,corr:63.93,hal:31.97,gen:83.65,mmlu:86.32,ifev:82.02,ceval:82.62},
+    {lab:'50%',n:106950,r:48.3,val:76.89,wb:80.06,corr:62.87,hal:33.66,gen:84.64,mmlu:85.53,ifev:86.52,ceval:81.88},
+    {lab:'100%',n:213900,r:96.7,val:76.44,wb:80.34,corr:63.51,hal:31.12,gen:83.31,mmlu:null,ifev:null,ceval:null}
+  ];
+  let view='both';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(view==='comp'?'汎用ベンチの内訳 (%) ・ 100% 水準は内訳が論文に無い':
+                view==='val'?'同一ドメイン検証セットの AAR と WnuanBench の AAR (%)':
+                             'domain の AAR と汎用ベンチ平均 (%)',24,24);
+    const x0=64,y0=52,gw=W-40-x0,gh=H-140;
+    let lo,hi,series;
+    if(view==='comp'){ lo=76;hi=90;
+      series=[{k:'mmlu',n:'MMLU',c:POS},{k:'ifev',n:'IFEval',c:BLUE},{k:'ceval',n:'C-Eval',c:PUR}]; }
+    else if(view==='val'){ lo=74;hi=84;
+      series=[{k:'wb',n:'WnuanBench AAR',c:POS},{k:'val',n:'検証セット AAR',c:ALT}]; }
+    else { lo=78;hi=86;
+      series=[{k:'wb',n:'WnuanBench AAR (domain)',c:POS},{k:'gen',n:'汎用ベンチ平均',c:BLUE}]; }
+    function px(i){return x0+i/(G.length-1)*gw;}
+    function py(v){return y0+gh-(v-lo)/(hi-lo)*gh;}
+    for(let v=lo;v<=hi;v+=(hi-lo)/8){
+      const y=py(v);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+    }
+    [lo,(lo+hi)/2,hi].forEach(function(v){
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';ct.fillText(v.toFixed(0),x0-8,py(v)+4);
+    });
+    G.forEach(function(g,i){
+      const x=px(i);
+      ct.strokeStyle=(g.r===48.3)?'rgba(224,160,63,0.65)':GRID;ct.lineWidth=(g.r===48.3)?2:1;
+      if(g.r===48.3) ct.setLineDash([6,4]);
+      ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle=(g.r===48.3)?ALT:MUT;ct.font=((g.r===48.3)?'bold ':'')+'11px sans-serif';ct.textAlign='center';
+      ct.fillText(g.r.toFixed(1)+'%',x,y0+gh+18);
+      ct.fillStyle=MUT;ct.font='10px sans-serif';
+      ct.fillText('('+g.n.toLocaleString()+' 例)',x,y0+gh+33);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('汎用データの実比率',x0+gw/2,y0+gh+52);
+    series.forEach(function(s,si){
+      ct.strokeStyle=s.c;ct.lineWidth=2.8;ct.beginPath();
+      let started=false;
+      G.forEach(function(g,i){
+        if(g[s.k]===null) return;
+        const x=px(i),y=py(g[s.k]);
+        if(!started){ct.moveTo(x,y);started=true;} else ct.lineTo(x,y);
+      });
+      ct.stroke();
+      G.forEach(function(g,i){
+        if(g[s.k]===null) return;
+        const x=px(i),y=py(g[s.k]);
+        ct.fillStyle=s.c;ct.beginPath();ct.arc(x,y,(g.r===48.3)?6:4,0,Math.PI*2);ct.fill();
+        ct.fillStyle=INK;ct.font='11px "SF Mono",Menlo,monospace';ct.textAlign='center';
+        ct.fillText(g[s.k].toFixed(2),x,y+(si===0?-12:18));
+      });
+      ct.fillStyle=s.c;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+      ct.fillText(s.n,x0+gw-6,y0+16+si*17);
+    });
+    ct.fillStyle=ALT;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('選ばれたのは汎用平均が最大の 48.3% ・ domain の最大ではない',x0+8,y0+gh-8);
+    const sel=G[3],base=G[0];
+    document.getElementById('rpOut').textContent=
+      (view==='comp'
+        ? '48.3% で IFEval が 86.52 と最高 ・ replay を増やして最も戻るのは指示追従'
+        : view==='val'
+        ? '検証セットの AAR は 76.44 - 76.89 のほぼ平坦 ・ 選択の根拠にはならない'
+        : '48.3% は replay なしに対し domain -'+(base.wb-sel.wb).toFixed(2)+' pt / 汎用 +'+(sel.gen-base.gen).toFixed(2)+' pt');
+  }
+  bindBtns({both:'rpBoth',comp:'rpComp',val:'rpVal'},function(k){view=k;draw();});
+  draw();
+})();
+
+/* ============ デモ2: 3 群の対照実験 ============ */
+(function(){
+  const cv=document.getElementById('cvArms'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const A=[
+    {n:'残存誤り (56,147 行)',wb:89.39,val:81.33,c:POS},
+    {n:'サイズを揃えた無作為 (56,147 行)',wb:86.42,val:78.67,c:BLUE},
+    {n:'全プール (230,183 行)',wb:86.28,val:77.78,c:MUT}
+  ];
+  const CI=[
+    {n:'残存誤り − 無作為',d:2.97,lo:0.85,hi:5.09,p:'0.035',src:'0.81 - 5.08'},
+    {n:'残存誤り − 全プール',d:3.11,lo:0.71,hi:5.66,p:'0.035',src:'0.83 - 5.70'},
+    {n:'全プール − 無作為',d:-0.14,lo:null,hi:null,p:'1',src:'—'}
+  ];
+  let view='wb';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    if(view==='ci'){
+      ct.fillText('対比の差と 95% 信頼区間 (ポイント) ・ Holm 補正後の p 値つき',24,24);
+      const x0=250,y0=70,gw=W-60-x0,rowh=90;
+      const lo=-2,hi=6.5;
+      function px(v){return x0+(v-lo)/(hi-lo)*gw;}
+      for(let v=-2;v<=6;v+=1){
+        const x=px(v);
+        ct.strokeStyle=(v===0)?'rgba(224,122,95,0.7)':GRID;ct.lineWidth=(v===0)?2:1;
+        ct.beginPath();ct.moveTo(x,y0-16);ct.lineTo(x,y0+rowh*2.6);ct.stroke();
+        ct.fillStyle=(v===0)?NEG:MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+        ct.fillText(v,x,y0+rowh*2.6+18);
+      }
+      ct.fillStyle=NEG;ct.font='11.5px sans-serif';ct.textAlign='center';
+      ct.fillText('差 0',px(0),y0-24);
+      CI.forEach(function(c,i){
+        const y=y0+i*rowh+20;
+        ct.fillStyle=(c.lo!==null&&c.lo>0)?POS:MUT;ct.font='bold 13px sans-serif';ct.textAlign='right';
+        ct.fillText(c.n,x0-16,y+4);
+        if(c.lo!==null){
+          ct.strokeStyle=POS;ct.lineWidth=3;
+          ct.beginPath();ct.moveTo(px(c.lo),y);ct.lineTo(px(c.hi),y);ct.stroke();
+          [c.lo,c.hi].forEach(function(v){
+            ct.beginPath();ct.moveTo(px(v),y-7);ct.lineTo(px(v),y+7);ct.stroke();});
+          ct.fillStyle=POS;ct.beginPath();ct.arc(px(c.d),y,6,0,Math.PI*2);ct.fill();
+          ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='center';
+          ct.fillText('+'+c.d.toFixed(2),px(c.d),y-14);
+          ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='left';
+          ct.fillText('問題単位 '+c.lo.toFixed(2)+' - '+c.hi.toFixed(2)+' ・ source 単位 '+c.src+' ・ p = '+c.p,x0+6,y+26);
+        } else {
+          ct.fillStyle=MUT;ct.beginPath();ct.arc(px(c.d),y,6,0,Math.PI*2);ct.fill();
+          ct.fillStyle=MUT;ct.font='11px sans-serif';ct.textAlign='left';
+          ct.fillText(c.d.toFixed(2)+' ポイント ・ p = '+c.p+' ・ 区別できない',x0+6,y+26);
+        }
+      });
+      document.getElementById('amOut').textContent=
+        '2 つの対比はどちらも問題単位でも source 単位でも区間が 0 より上 ・ 全プールと無作為は区別できない';
+      return;
+    }
+    const key=(view==='wb')?'wb':'val';
+    ct.fillText((view==='wb'?'WnuanBench (707 問)':'同一ドメイン検証セット')+' の AAR (%) ・ 100 更新を揃えた 3 群',24,24);
+    const x0=300,y0=60,rowh=(H-150)/A.length,bh=Math.min(46,rowh-18);
+    const lo=(view==='wb')?84:74,hi=(view==='wb')?91:83;
+    function px(v){return x0+(v-lo)/(hi-lo)*(gwv());}
+    function gwv(){return W-70-x0;}
+    for(let v=lo;v<=hi;v+=1){
+      const x=px(v);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x,y0-8);ct.lineTo(x,y0+A.length*rowh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(v,x,y0+A.length*rowh+18);
+    }
+    A.forEach(function(a,i){
+      const y=y0+i*rowh+(rowh-bh)/2, v=a[key], w=Math.max(3,px(v)-x0);
+      ct.fillStyle=a.c;ct.globalAlpha=(i===0)?0.95:0.55;ct.fillRect(x0,y,w,bh);ct.globalAlpha=1;
+      ct.fillStyle=(i===0)?POS:SUBI;ct.font=((i===0)?'bold ':'')+'13px sans-serif';ct.textAlign='right';
+      ct.fillText(a.n,x0-14,y+bh/2+4);
+      ct.fillStyle=INK;ct.font='bold 14px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(v.toFixed(2),x0+w+10,y+bh/2+5);
+      if(i>0){
+        const d=A[0][key]-v;
+        ct.fillStyle=POS;ct.font='11.5px sans-serif';
+        ct.fillText('残存誤りとの差 +'+d.toFixed(2),x0+w+66,y+bh/2+5);
+      }
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('初期値 ・ プロンプト ・ 採点 ・ rollout 数 ・ 最適化設定 ・ 更新回数はすべて共通。違うのは問題をどこから引くかだけ',24,H-40);
+    ct.fillText('書式報酬は 3 群すべて 0 (直答形式) なので、比較しているのは 0.6 正確さ + 0.3 品質の信号',24,H-20);
+    document.getElementById('amOut').textContent=
+      '残存誤り '+A[0][key].toFixed(2)+' ・ 無作為 '+A[1][key].toFixed(2)+' ・ 全プール '+A[2][key].toFixed(2)+
+      ' (全プールと無作為の差は '+(A[2][key]-A[1][key]).toFixed(2)+' ポイント)';
+  }
+  bindBtns({wb:'amWB',val:'amVal',ci:'amCI'},function(k){view=k;draw();});
+  draw();
+})();
+/* ============ デモ3: 停止の判断 ============ */
+(function(){
+  const cv=document.getElementById('cvStop'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const P=[{u:0,v:58.36},{u:100,v:75.39},{u:200,v:77.40},{u:327,v:78.00}];
+  const DEC=[{n:'正確さ',v:0.1179,c:POS},{n:'意味品質 (平均)',v:0.0415,c:BLUE},{n:'書式',v:0.0787,c:ALT}];
+  let view='traj';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    if(view==='dec'){
+      ct.fillText('総合報酬の伸び +0.2380 の内訳 (重みを適用した後の寄与)',24,24);
+      const x0=40,y0=70,gw=W-80,bh=64,total=0.2380;
+      let acc=0;
+      DEC.forEach(function(d){
+        const w=d.v/total*gw;
+        ct.fillStyle=d.c;ct.fillRect(x0+acc,y0,w,bh);
+        ct.fillStyle='#0d2b20';ct.font='bold 13px sans-serif';ct.textAlign='center';
+        if(w>90) ct.fillText(d.n,x0+acc+w/2,y0+26);
+        ct.font='bold 12.5px "SF Mono",Menlo,monospace';
+        if(w>90) ct.fillText('+'+d.v.toFixed(4),x0+acc+w/2,y0+46);
+        ct.fillStyle=d.c;ct.font='11.5px sans-serif';ct.textAlign='center';
+        ct.fillText(Math.round(d.v/total*100)+'%',x0+acc+w/2,y0+bh+20);
+        acc+=w;
+      });
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='left';
+      ct.fillText('総合報酬は 0.5952 から 0.8332 へ。数字だけ見ると 40% 改善したように読める',40,y0+bh+62);
+      ct.fillStyle=ALT;ct.font='bold 13px sans-serif';
+      ct.fillText('だが伸びの 33% は書式報酬で、これは最終的に 1.0 に張り付く。上限に当たって止まる成分',40,y0+bh+92);
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+      ct.fillText('正確さの寄与は 0.1179 で全体の 50%。報酬の総和の伸びは正解率の伸びと交換できない',40,y0+bh+120);
+      ct.fillStyle=INK;ct.font='12.5px sans-serif';
+      ct.fillText('この分解は タグつき回答を使う主要ルートのもの。5 節の 3 群比較は書式報酬 0 で走っている',40,y0+bh+152);
+      document.getElementById('stOut').textContent='伸び +0.2380 のうち正確さ 0.1179 ・ 品質 0.0415 ・ 書式 0.0787';
+      return;
+    }
+    ct.fillText('主要ルートの検証における正解報酬 (%) ・ 更新回数に対する推移',24,24);
+    const x0=64,y0=56,gw=W-60-x0,gh=H-150;
+    const lo=55,hi=80,xm=340;
+    function px(u){return x0+u/xm*gw;}
+    function py(v){return y0+gh-(v-lo)/(hi-lo)*gh;}
+    for(let v=55;v<=80;v+=5){
+      const y=py(v);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';ct.fillText(v,x0-8,y+4);
+    }
+    [0,100,200,300].forEach(function(u){
+      const x=px(u);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(u,x,y0+gh+18);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('更新回数',x0+gw/2,y0+gh+36);
+    /* 後期領域 */
+    ct.fillStyle='rgba(224,160,63,0.12)';ct.fillRect(px(200),y0,px(327)-px(200),gh);
+    ct.fillStyle=ALT;ct.font='11.5px sans-serif';ct.textAlign='center';
+    ct.fillText('報告された終点はこの後期領域',(px(200)+px(327))/2,y0+gh-12);
+    ct.strokeStyle=POS;ct.lineWidth=3;ct.beginPath();
+    P.forEach(function(p,i){ const x=px(p.u),y=py(p.v); if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y); });
+    ct.stroke();
+    P.forEach(function(p,i){
+      const x=px(p.u),y=py(p.v);
+      ct.fillStyle=POS;ct.beginPath();ct.arc(x,y,5.5,0,Math.PI*2);ct.fill();
+      ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='center';
+      ct.fillText(p.v.toFixed(2),x,y-14);
+      if(i>0){
+        const d=p.v-P[i-1].v;
+        ct.fillStyle=(d>5)?POS:ALT;ct.font='bold 11.5px sans-serif';
+        ct.fillText('+'+d.toFixed(2),(x+px(P[i-1].u))/2,py((p.v+P[i-1].v)/2)+22);
+      }
+    });
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('増分が +17.03 → +2.01 → +0.60 と桁で落ちる。収束の証明ではなく、計算予算と合わせた実務的な停止点',24,H-42);
+    ct.fillText('4 群の平均で、更新 100 時点の検証報酬と最終 WnuanBench 正確さの差は 1.19 ポイント ・ 順序も保たれた',24,H-22);
+    document.getElementById('stOut').textContent=
+      '更新 100 までで +17.03 ・ 200 までで +2.01 ・ 327 までで +0.60';
+  }
+  bindBtns({traj:'stTraj',dec:'stDec'},function(k){view=k;draw();});
+  draw();
+})();
+
+/* ============ デモ4: 専門化の収支 ============ */
+(function(){
+  const cv=document.getElementById('cvRoute'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const CK=[{n:'Wnuan-Base',k:'base',c:MUT},{n:'Wnuan-Inst',k:'inst',c:BLUE},{n:'Wnuan-RL',k:'rl',c:POS}];
+  const D={
+    aar:{n:'AAR (受け入れ可能率)',base:52.76,inst:80.06,rl:91.51,lo:0,hi:100,up:true},
+    corr:{n:'正確さ',base:40.31,inst:62.87,rl:78.43,lo:0,hi:100,up:true},
+    comp:{n:'網羅性',base:36.00,inst:56.93,rl:66.76,lo:0,hi:100,up:true},
+    faith:{n:'忠実性',base:30.20,inst:63.30,rl:72.14,lo:0,hi:100,up:true},
+    hal:{n:'幻覚率 (低いほど良い)',base:65.91,inst:33.66,rl:15.70,lo:0,hi:100,up:false}
+  };
+  const GEN={
+    mmlu:{n:'MMLU',base:89.19,inst:85.53,rl:86.14},
+    ifev:{n:'IFEval',base:88.76,inst:86.52,rl:80.00},
+    ceval:{n:'C-Eval',base:87.89,inst:81.88,rl:84.17},
+    avg:{n:'汎用平均',base:88.61,inst:84.64,rl:83.44}
+  };
+  const API=[['GLM-5.1',42.86],['MiniMax-M3',52.48],['Kimi K2.6',55.45],['DeepSeek-V4-Pro',59.41],
+             ['MiMo-V2-Pro',62.94],['GPT-5.4',67.75]];
+  let view='dom';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    if(view==='api'){
+      ct.fillText('WnuanBench の AAR (%) ・ API モデルは条件が揃っていない参考値',24,24);
+      const rows=API.map(function(a){return {n:a[0],v:a[1],own:false};})
+        .concat([{n:'Wnuan-Base (Qwen3-32B)',v:52.76,own:true},
+                 {n:'Wnuan-Inst (32B SFT)',v:80.06,own:true},
+                 {n:'Wnuan-RL (32B SFT+GRPO)',v:91.51,own:true},
+                 {n:'Wnuan-Plus-Inst (671B LoRA)',v:81.19,own:true}]);
+      rows.sort(function(a,b){return b.v-a.v;});
+      const x0=260,y0=48,rowh=(H-110)/rows.length,bh=Math.min(22,rowh-6);
+      rows.forEach(function(r,i){
+        const y=y0+i*rowh+(rowh-bh)/2, w=r.v/100*(W-40-x0);
+        ct.fillStyle=r.own?POS:MUT;ct.globalAlpha=r.own?0.9:0.45;ct.fillRect(x0,y,w,bh);ct.globalAlpha=1;
+        ct.fillStyle=r.own?POS:SUBI;ct.font=(r.own?'bold ':'')+'12px sans-serif';ct.textAlign='right';
+        ct.fillText(r.n,x0-10,y+bh/2+4);
+        ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(r.v.toFixed(2),x0+w+8,y+bh/2+4);
+      });
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+      ct.fillText('復号 ・ 計算資源 ・ backbone ・ 適応手続きが揃っていないので順位は参考にとどまる。社内知識を持たない汎用モデルの上限を示す位置づけ',24,H-18);
+      document.getElementById('roOut').textContent=
+        '32B を適応させた 91.51 は、社内知識を持たない GPT-5.4 の 67.75 を 23.76 ポイント上回る (条件は非対等)';
+      return;
+    }
+    const S=(view==='dom')?D:GEN;
+    const keys=Object.keys(S);
+    ct.fillText((view==='dom')?'社内 QA の 5 指標 ・ Base → Inst → RL (%)':'公開ベンチの内訳 ・ Base → Inst → RL (%)',24,24);
+    const x0=140,y0=56,gw=W-40-x0,gh=H-120;
+    const slot=gh/keys.length;
+    const lo=(view==='dom')?0:78,hi=100;
+    function px(v){return x0+(v-lo)/(hi-lo)*gw;}
+    keys.forEach(function(k,ki){
+      const S1=S[k], cy=y0+ki*slot+slot/2;
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='right';
+      const nm=S1.n.split(' (');
+      ct.fillText(nm[0],x0-12,cy+(nm.length>1?-4:4));
+      if(nm.length>1){ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.fillText('('+nm[1],x0-12,cy+12);}
+      ct.strokeStyle='rgba(143,214,180,0.25)';ct.lineWidth=1.5;
+      ct.beginPath();ct.moveTo(px(S1.base),cy);ct.lineTo(px(S1.rl),cy);ct.stroke();
+      CK.forEach(function(c){
+        const x=px(S1[c.k]);
+        ct.fillStyle=c.c;ct.beginPath();ct.arc(x,cy,6.5,0,Math.PI*2);ct.fill();
+      });
+      const d=S1.rl-S1.base;
+      const good=(view==='dom')?((S1.up!==false)?d>0:d<0):(d>0);
+      ct.fillStyle=good?POS:NEG;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText((d>=0?'+':'')+d.toFixed(2),x0+gw-52,cy+4);
+      ct.fillStyle=INK;ct.font='11px "SF Mono",Menlo,monospace';ct.textAlign='center';
+      ct.fillText(S1.base.toFixed(1),px(S1.base),cy-14);
+      ct.fillText(S1.rl.toFixed(1),px(S1.rl),cy+22);
+    });
+    for(let v=lo;v<=hi;v+=(hi-lo)/5){
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(v.toFixed(0),px(v),y0+gh+16);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(px(v),y0);ct.lineTo(px(v),y0+gh);ct.stroke();
+    }
+    CK.forEach(function(c,i){
+      ct.fillStyle=c.c;ct.beginPath();ct.arc(x0+20+i*150,H-24,6,0,Math.PI*2);ct.fill();
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+      ct.fillText(c.n,x0+32+i*150,H-20);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='right';
+    ct.fillText('右端は Base からの差',x0+gw,H-20);
+    document.getElementById('roOut').textContent=
+      (view==='dom'
+        ? 'AAR +38.75 ・ 幻覚率 -50.21 ・ 忠実性 +41.94 (いずれも Base から RL まで)'
+        : '汎用平均 -5.17 のうち IFEval が -8.76 ・ MMLU は -3.05、C-Eval は -3.72 で、RL 段では両方が回復している');
+  }
+  bindBtns({dom:'roDom',gen:'roGen',api:'roApi'},function(k){view=k;draw();});
+  draw();
+})();
+
+/* ============ デモ5: RAG の効き ============ */
+(function(){
+  const cv=document.getElementById('cvRag'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const R={
+    all:{n:'全 707 問',rows:[['Wnuan-Base',52.76,72.98],['Wnuan-Inst',80.06,76.24],['Wnuan-RL',91.51,81.75]]},
+    hit:{n:'同一ドメインの chunk あり (433 問)',deltas:[35.80,6.47,-2.54]},
+    miss:{n:'同一ドメインの chunk なし (274 問)',deltas:[-4.38,-20.07,-21.17]},
+    cnt:{n:'RAG で改善した問題と壊れた問題',counts:[[198,55],[76,103],[29,98]]}
+  };
+  const NAMES=['Wnuan-Base','Wnuan-Inst','Wnuan-RL'];
+  let view='all';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    const x0=170,y0=64;
+    if(view==='all'){
+      ct.fillText('固定 RAG (BM25 + BGE-M3 top-5 連結) の前後の AAR (%)',24,24);
+      const rows=R.all.rows, rowh=(H-150)/rows.length, bh=24;
+      function px(v){return x0+v/100*(W-140-x0);}
+      rows.forEach(function(r,i){
+        const cy=y0+i*rowh+rowh/2;
+        ct.fillStyle=SUBI;ct.font='bold 13px sans-serif';ct.textAlign='right';
+        ct.fillText(r[0],x0-14,cy+4);
+        ct.fillStyle=MUT;ct.globalAlpha=0.55;ct.fillRect(x0,cy-bh-4,px(r[1])-x0,bh);ct.globalAlpha=1;
+        ct.fillStyle=BLUE;ct.globalAlpha=0.85;ct.fillRect(x0,cy+4,px(r[2])-x0,bh);ct.globalAlpha=1;
+        ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(r[1].toFixed(2),px(r[1])+8,cy-bh+10);
+        ct.fillText(r[2].toFixed(2),px(r[2])+8,cy+bh);
+        const d=r[2]-r[1];
+        ct.fillStyle=d>=0?POS:NEG;ct.font='bold 13px sans-serif';
+        ct.fillText((d>=0?'+':'')+d.toFixed(2),W-96,cy+4);
+      });
+      for(let v=0;v<=100;v+=20){
+        ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(px(v),y0-10);ct.lineTo(px(v),y0+(H-150));ct.stroke();
+        ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(v,px(v),H-56);
+      }
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+      ct.fillText('素のモデルには効き、専門化するほど害になる。同じ retriever ・ 同じ設定で 3 つのチェックポイントに適用した結果',24,H-26);
+      document.getElementById('rgOut').textContent='Base +20.22 / Inst -3.82 / RL -9.76 ・ 適応が進むほど RAG の符号が反転する';
+      return;
+    }
+    if(view==='cnt'){
+      ct.fillText('RAG によって改善した問題数と、壊れた問題数',24,24);
+      const rowh=(H-160)/3, mx=210;
+      const mid=W/2;
+      R.cnt.counts.forEach(function(c,i){
+        const cy=y0+i*rowh+rowh/2;
+        ct.fillStyle=SUBI;ct.font='bold 13px sans-serif';ct.textAlign='center';
+        ct.fillText(NAMES[i],mid,cy-30);
+        const wImp=c[0]/mx*(mid-140), wReg=c[1]/mx*(mid-140);
+        ct.fillStyle=POS;ct.fillRect(mid-8-wImp,cy-14,wImp,28);
+        ct.fillStyle=NEG;ct.fillRect(mid+8,cy-14,wReg,28);
+        ct.fillStyle=POS;ct.font='bold 13px "SF Mono",Menlo,monospace';ct.textAlign='right';
+        ct.fillText(c[0]+' 問 改善',mid-16-wImp,cy+5);
+        ct.fillStyle=NEG;ct.textAlign='left';
+        ct.fillText('壊れた '+c[1]+' 問',mid+16+wReg,cy+5);
+      });
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+      ct.fillText('素のモデルでは改善が壊れを大きく上回るが、RL 後は 29 問の改善に対して 98 問が壊れる',24,H-46);
+      ct.fillText('集計の AAR だけでなく、この非対称が「無条件に足す第 4 段にしない」判断の根拠になる',24,H-24);
+      document.getElementById('rgOut').textContent='改善 / 壊れ = 198/55 → 76/103 → 29/98 ・ 比が完全に逆転する';
+      return;
+    }
+    const S=R[view];
+    ct.fillText(S.n+' での RAG 適用による AAR の変化 (ポイント)',24,24);
+    const gh=H-170, rowh=gh/3, lo=-25, hi=40;
+    function px(v){return x0+(v-lo)/(hi-lo)*(W-60-x0);}
+    for(let v=-20;v<=40;v+=10){
+      const x=px(v);
+      ct.strokeStyle=(v===0)?'rgba(255,255,255,0.4)':GRID;ct.lineWidth=(v===0)?2:1;
+      ct.beginPath();ct.moveTo(x,y0-10);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(v,x,y0+gh+18);
+    }
+    S.deltas.forEach(function(d,i){
+      const cy=y0+i*rowh+rowh/2, bh=30;
+      ct.fillStyle=SUBI;ct.font='bold 13px sans-serif';ct.textAlign='right';
+      ct.fillText(NAMES[i],x0-14,cy+5);
+      const zx=px(0), dx=px(d);
+      ct.fillStyle=d>=0?POS:NEG;
+      ct.fillRect(Math.min(zx,dx),cy-bh/2,Math.abs(dx-zx),bh);
+      ct.fillStyle=d>=0?POS:NEG;ct.font='bold 13px "SF Mono",Menlo,monospace';
+      ct.textAlign=d>=0?'left':'right';
+      ct.fillText((d>=0?'+':'')+d.toFixed(2),dx+(d>=0?8:-8),cy+5);
+    });
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    if(view==='hit')
+      ct.fillText('関連する文脈が入っていた場合でも、RL 後のモデルは -2.54 でわずかに悪化する',24,H-46);
+    else
+      ct.fillText('関連しない文脈だけを渡された場合、専門化したモデルの被害が最も大きい (-21.17)',24,H-46);
+    ct.fillText('ドメイン一致は関連性の代理で、答えを含む保証はない。質問の難しさと相関している可能性も残る',24,H-24);
+    document.getElementById('rgOut').textContent=
+      S.n+': Base '+(S.deltas[0]>=0?'+':'')+S.deltas[0].toFixed(2)+
+      ' / Inst '+(S.deltas[1]>=0?'+':'')+S.deltas[1].toFixed(2)+
+      ' / RL '+(S.deltas[2]>=0?'+':'')+S.deltas[2].toFixed(2)+' ポイント';
+  }
+  bindBtns({all:'rgAll',hit:'rgHit',miss:'rgMiss',cnt:'rgCnt'},function(k){view=k;draw();});
+  draw();
+})();
+</script>
+</body>
+</html>
