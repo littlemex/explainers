@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>捨てずに、下の階層へ — vLLM の階層 KV キャッシュオフロード</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .add{background:#f3f9f6;border-left:4px solid var(--g3);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .add b{color:var(--g1)}
+  .add .badge{display:inline-block;background:var(--g4);color:var(--g1);border-radius:5px;
+    padding:1px 8px;font-size:12.5px;font-weight:700;margin-right:8px}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13.5px;overflow-x:auto;line-height:1.7;
+    white-space:pre}
+  .math .cm{color:#8fd6b4}
+  .math .st{color:#e0a03f}
+  .fig{background:#ffffff;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig img{display:block;margin:0 auto;max-width:100%;height:auto}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);margin:12px 0 0;line-height:1.7}
+  .cap a{color:var(--g2)}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:180px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .fn a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">vLLM ブログ解説シリーズ ・ 第 1 回</p>
+  <h1>捨てずに、下の階層へ</h1>
+  <p>階層 KV キャッシュのオフロード — すべてをホストメモリ経由で流すという設計</p>
+</header>
+<main>
+  <a class="back" href="./vllm-blog-index.html">← vLLM ブログ解説シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事について</h2>
+  <p class="lead">原文は vLLM 公式ブログの <a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" target="_blank" rel="noopener">Tiered KV Cache Offloading in vLLM</a> (2026-09-10、Or Ozeri ・ Danny Harnik ・ Ronen Schaffer ・ Itay Etelis ・ Varun Sundar Rabindranath)。この記事は<b>その日本語での読み解き</b>で、原文の図をそのまま参照し、理解を早めるためのデモを足しています。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    長い文脈と複数ターンの会話は巨大な KV キャッシュを生みます。HBM が埋まると、計算済みの KV は<b>捨てられます</b>。次に同じ内容が必要になったら、vLLM は<b>ゼロから計算し直します</b>。階層 KV キャッシュのオフロードは、捨てる代わりに<b>ホストメモリ ・ ストレージ ・ 別ノード</b>へ落としておき、必要になったら<b>再計算ではなく読み戻します</b>。設計の芯は 1 つの判断で、<b>すべての KV データはホストメモリ (CPU の DRAM) を経由する</b>こと。この 1 点から、アクセラレータの即時解放、I/O の統合、設定に依存しない共有可能なレイアウト、二次階層の実装の単純さが<b>同時に出てきます</b>。vLLM v0.22 から利用できます。
+  </div>
+  <table>
+    <tr><th>項目</th><th>内容</th></tr>
+    <tr><td>解く問題</td><td>HBM が埋まったときに計算済みの KV を捨てて再計算していた。再計算は<b>計算資源とレイテンシの両方を食う</b></td></tr>
+    <tr><td>中心の設計判断</td><td><b>すべての KV データはホストメモリを経由する</b> (host-centric)。二次階層はホストのコピーから読み書きし、<b>アクセラレータのメモリや API には一切触らない</b></td></tr>
+    <tr><td>階層の構成</td><td>一次階層 = ホストの DRAM (<b>単なる中継バッファではなく LRU/ARC の本物のキャッシュ</b>)。二次階層 = ファイルシステム ・ オブジェクトストレージ ・ 他ノード (P2P)</td></tr>
+    <tr><td>操作の単位</td><td><b>chunk</b>。既定ではアクセラレータの 1 ブロックに対応し、<code>blocks_per_chunk</code> で大きくできる (I/O が大きくなる)</td></tr>
+    <tr><td>リロードの判定</td><td>ホストを最初に見る。ミスなら二次階層を設定順に問い合わせ、<b>最初に持っていた階層が応える</b>。昇格は非同期で、その間スケジューラは <b>RETRY</b> を受け取って次のサイクルで再確認する</td></tr>
+    <tr><td>共有可能性</td><td>ホスト側のレイアウトが<b>設定に依存しない正規形</b>なので、TP=2 のノードと TP=4 のノードが<b>同じ chunk を直接共有できる</b>。変換も再マッピングも不要</td></tr>
+    <tr><td>性能</td><td>同時会話が 64 を超えると HBM が埋まり、オフロードなしでは<b>スループットが急落</b>。128 を超えると CPU も埋まるが、ストレージ階層は高いヒット率を維持して<b>スループットが 2 倍以上</b>になる</td></tr>
+    <tr><td>実装の入り口</td><td>二次階層のインターフェースは<b>4 メソッドだけ</b> (<code>lookup</code> / <code>submit_store</code> / <code>submit_load</code> / <code>get_finished_jobs</code>)。out-of-tree の実装も <code>module_path</code> 指定で読み込める</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 捨てるか、落としておくか</a>
+    <a href="#s2">2. host-centric という 1 つの判断</a>
+    <a href="#s3">3. 【デモ】オフロードの時間軸</a>
+    <a href="#s4">4. 【デモ】I/O の統合と正規レイアウト</a>
+    <a href="#s5">5. 【デモ】リロードと HIT / MISS / RETRY</a>
+    <a href="#s6">6. 二次階層の 3 種類</a>
+    <a href="#s7">7. hybrid モデルへの対応</a>
+    <a href="#s8">8. 可観測性と KV events</a>
+    <a href="#s9">9. 新しい階層を足す</a>
+    <a href="#s10">10. 【デモ】同時会話数と性能</a>
+    <a href="#s11">11. 【デモ】自分の構成で見積もる</a>
+    <a href="#s12">12. 読むときに気をつける点</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>捨てるか、落としておくか</h2>
+  <p class="lead">まず何が問題なのかを整理します。KV キャッシュは<b>計算した結果</b>であって、入力から決まる関数です。だから捨てても正しさは失われません。失われるのは<b>それを作るのに使った計算</b>だけです。</p>
+  <table>
+    <tr><th>状況</th><th>従来</th><th>階層オフロード</th></tr>
+    <tr><td>HBM が埋まった</td><td>古い KV を<b>evict して捨てる</b></td><td>まずホストへ<b>コピーしてから</b>解放する</td></tr>
+    <tr><td>捨てた内容が再び必要</td><td><b>prefill をやり直す</b> (計算コストと TTFT の両方を払う)</td><td>下の階層から<b>読み戻す</b> (転送コストだけを払う)</td></tr>
+    <tr><td>他のノードが同じ内容を必要とする</td><td>それぞれが独立に計算する</td><td><b>共有ストレージや P2P 経由で渡せる</b></td></tr>
+    <tr><td>新しいインスタンスを立てた</td><td>キャッシュは空から始まる</td><td>共有ストレージから<b>暖まった状態で始められる</b></td></tr>
+  </table>
+  <p>ここで重要なのは、これが<b>「再計算する」対「転送する」の取引</b>だという点です。転送が再計算より安ければ勝ちます。原文の言い方が明快です。</p>
+  <div class="key">
+    ストレージは CPU メモリよりレイテンシが高いので、ピークのスループットには届きません。<b>しかし規模が大きくなったときの選択は「ストレージからのキャッシュヒット」か「完全な再計算」かであって、その勝負ならストレージが決定的に勝ちます。</b>
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>原文にはない整理を 1 つ足します。<b>この取引が成立する条件は、同じトークン列が再び現れることです。</b>複数ターンの会話では、2 ターン目のプロンプトは 1 ターン目の全体を含むので、prefix が丸ごと再利用できます。逆に<b>毎回まったく違う入力が来るワークロードでは、オフロードは書き込みコストだけを払って読み戻しが起きません</b>。10 節のベンチマークが多ターン会話で組まれているのは、この条件を満たす代表的な形だからです。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>host-centric という 1 つの判断</h2>
+  <p class="lead">設計の中心はここです。<b>すべての KV データはホストメモリ (CPU の DRAM) を通る。</b>オフロード時はアクセラレータからまずホストへ移り、そこから二次階層 (ファイルシステム ・ オブジェクトストレージ ・ 他ノード) へ伝播します。リロードは逆向きで、二次階層がホストメモリへ昇格させ、それからアクセラレータへ載ります。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/tiered-kv-offloading/architecture.svg" alt="階層 KV キャッシュのアーキテクチャ図">
+    <p class="cap">すべての KV データはホストの一次階層を通る。二次階層はホストの DRAM に収まらない分まで容量を広げる。オフロード時は chunk が全階層へ流れ落ち、リロード時は最初に持っていた階層が応える。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" target="_blank" rel="noopener">Tiered KV Cache Offloading in vLLM</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>この判断が同時に 4 つの利点を生みます。原文はそれを個別の節に分けていますが、<b>すべて「ホストを経由する」から出てきている</b>と読むと構造が見えます。</p>
+  <table>
+    <tr><th>利点</th><th>中身</th></tr>
+    <tr class="hl"><td>アクセラレータの即時解放と<br>just-in-time な確保</td><td>アクセラレータからホストへのコピーは<b>ローカルの PCIe 転送で速い</b>。このコピーが終わった時点で、<b>二次階層への転送が始まる前に</b>アクセラレータのメモリが解放される。ストレージ書き込み ・ ネットワーク送信 ・ RDMA はすべて<b>ホストのコピーから</b>進むので、以後アクセラレータに触らない。リロード時も、アクセラレータのメモリは<b>データがホストに揃ってから</b>確保する (待っている間に予約しない)</td></tr>
+    <tr><td>I/O の統合</td><td>複数デバイスの shard を<b>1 つの共有ホスト領域に集約</b>する。二次階層から見ると<b>少数の大きな I/O</b> になる (4 節)</td></tr>
+    <tr><td>正規メモリレイアウト</td><td>ホスト側の配置が固定なので、<b>GPU 側のレイアウトが違っても正しく共有できる</b> (4 節)</td></tr>
+    <tr><td>二次階層が単純になる</td><td>vLLM インスタンスごとに<b>1 プロセス</b>。標準の CPU 側ライブラリ (POSIX I/O ・ S3 SDK ・ RDMA verbs) だけで転送し、<b>アクセラレータのメモリや API に一切触らない</b>。複数プロセスの調整も、アクセラレータ固有のメモリ配置の理解も要らない</td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>1 つ目の利点が効く理由を、原文より少し噛み砕きます。<b>アクセラレータのメモリは最も希少で、最も高い資源</b>です。もし「ストレージへの書き込みが終わるまで GPU のブロックを押さえておく」設計なら、ストレージのレイテンシが<b>そのまま GPU の占有時間になります</b>。ホストを間に挟むと、GPU の占有時間は<b>PCIe のコピー時間だけ</b>になり、遅い階層のレイテンシから切り離されます。リロード側も同じで、<b>「先に GPU を予約して待つ」をやめる</b>ことで、遅い階層を待つ間 GPU が空転しません。この非対称性 (GPU は高い / ホストは安い) を利用しているのが host-centric の本質です。
+  </div>
+  <h3>chunk という単位</h3>
+  <p>操作の単位は <b>chunk</b> で、あるトークン群をカバーする固定サイズの KV データです。既定では<b>アクセラレータの 1 ブロックが 1 chunk</b> に対応します。<code>blocks_per_chunk</code> を大きくすると chunk が大きくなり、<b>ホストと二次階層への I/O が大きくなります</b>。</p>
+  <div class="add">
+    <span class="badge">補足</span>このパラメータは<b>典型的な粒度の取引</b>です。大きくすれば I/O は効率的になりますが、<b>部分的なヒットが減ります</b> (chunk の一部だけ必要でも全体を転送する)。原文は既定値と効果だけを述べていて、最適値の指針は示していません。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>【デモ】オフロードの時間軸</h2>
+  <p class="lead">オフロードの経路を時間で追います。原文の図がまさにこれを示していて、<b>アクセラレータのメモリが解放されるのは t2</b>、つまりホストへのコピーが終わった時点です。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/tiered-kv-offloading/offload-flow.svg" alt="オフロード経路の時間軸">
+    <p class="cap">アクセラレータのメモリは t2 で解放される。ホストへのコピーが完了した時点。二次階層への書き込みは、ホストのコピーから非同期に続く。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" target="_blank" rel="noopener">Tiered KV Cache Offloading in vLLM</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>下のデモは、同じ経路を<b>「もしホストを挟まなかったら」との比較で</b>見るためのものです。二次階層のレイテンシを動かすと、GPU の占有時間が host-centric ではまったく変わらないことが見えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvOff" width="860" height="400"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">PCIe コピー <input id="ofP" type="range" min="1" max="20" value="4"><span id="ofPv">4</span> ms</div>
+    <div class="slider">二次階層への書き込み <input id="ofS" type="range" min="5" max="300" value="80"><span id="ofSv">80</span> ms</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>アクセラレータのメモリを占有</span>
+    <span><span class="dot" style="background:#43b581"></span>ホストのメモリを占有</span>
+    <span><span class="dot" style="background:#60a5fa"></span>二次階層への転送 (非同期)</span>
+  </div>
+  <p class="rdout" id="ofOut"></p>
+  <div class="warn">
+    <b>このデモの時間は仮定値です。</b>原文は t1 / t2 という順序関係を示していて、具体的なミリ秒は与えていません。スライダーの値は<b>「もし PCIe が 4 ms、ストレージ書き込みが 80 ms だったら」という読者の仮定</b>で、階層の実測値ではありません。デモが示しているのは<b>数値ではなく構造</b>、つまり「GPU の占有時間が二次階層のレイテンシから独立している」ことです。
+  </div>
+  <h3>ホストの一次階層は中継バッファではない</h3>
+  <p>ここは読み飛ばしやすい重要な点です。ホストの一次階層は<b>正真正銘の LRU/ARC キャッシュ</b>で、二次階層へ送るための一時置き場ではありません。chunk はホストメモリに残り、<b>将来のヒットを直接返します</b>。ホストの容量が尽きたときだけ、最も長く使われていない chunk が evict され、<b>そのときも、送り先だった二次階層の中では生き残ります</b>。</p>
+  <div class="add">
+    <span class="badge">補足</span>だから階層は<b>包含関係</b>になります。ホストにあるものは基本的に二次階層にもある (オフロード時に全階層へ流し落とすため)。この設計だと二次階層への書き込みが無駄になる場合がありますが、代わりに<b>ホストからの evict が「ただの解放」になる</b>という単純さを得ています。evict のときに慌てて下へ書く必要がありません。
+  </div>
+</section>
+<section id="s4">
+  <h2><span class="num">4</span>【デモ】I/O の統合と正規レイアウト</h2>
+  <p class="lead">複数アクセラレータの構成 (たとえば <code>tensor_parallel_size=8</code>) では、各デバイスが KV キャッシュの<b>一部 (shard)</b> を持ちます。この枠組みは<b>すべての shard を 1 つの共有ホストメモリ領域に集約します</b>。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/tiered-kv-offloading/consolidated-io.svg" alt="I/O の統合">
+    <p class="cap">複数のアクセラレータ shard が 1 つの共有ホスト領域へ集まる。二次階層から見える I/O は<b>より少なく、より大きく</b>なり、ストレージとネットワークのスループットが上がる。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" target="_blank" rel="noopener">Tiered KV Cache Offloading in vLLM</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>下のデモは、TP 数を動かしたときに<b>二次階層が見る I/O の個数とサイズ</b>がどう変わるかを比べるものです。総バイト数は同じでも、<b>形が変わる</b>ことが要点です。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvIO" width="860" height="410"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">TP 数 <input id="ioTP" type="range" min="1" max="8" step="1" value="8"><span id="ioTPv">8</span></div>
+    <div class="slider">1 chunk の総サイズ <input id="ioSz" type="range" min="1" max="32" value="8"><span id="ioSzv">8</span> MiB</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>統合しない場合 (rank ごとに I/O)</span>
+    <span><span class="dot" style="background:#43b581"></span>統合する場合 (1 本の I/O)</span>
+  </div>
+  <p class="rdout" id="ioOut"></p>
+  <div class="warn">
+    <b>このデモは構造の計算で、性能の測定ではありません。</b>I/O の個数とサイズは「総バイトを TP 数で割る」という単純な算術で、原文の主張 (統合すると少数の大きな I/O になる) を数で確認するためのものです。<b>それがどれだけスループットを上げるかは、階層の実装とハードウェアに依存</b>し、原文もそこを定量化していません。
+  </div>
+  <h3>正規メモリレイアウト</h3>
+  <p>ホスト領域は<b>正規のメモリレイアウト</b>を使います。原文の定義がそのまま重要です。</p>
+  <table>
+    <tr><th>性質</th><th>内容</th></tr>
+    <tr><td>1 ページの中身</td><td><b>1 層の 1 ブロック</b>。TP rank をまたいだ<b>すべての KV ヘッドが 1 つの連続領域に集められる</b></td></tr>
+    <tr><td>chunk の探し方</td><td><b>オフセットの計算だけ</b>。索引構造を引かない</td></tr>
+    <tr class="hl"><td>設定への非依存</td><td>アクセラレータの種類 ・ attention のバックエンド (FlashAttention / FlashInfer / Triton) ・ 並列化の構成が違っても、<b>同じ正規表現に写る</b></td></tr>
+    <tr><td>直接共有</td><td>レイアウトが設定に依存しないので、<b>構成の違うノードが KV データを直接共有できる</b>。再マッピングも形式変換も不要。<b>TP=2 のノードと TP=4 のノードは、同じ KV データについて同一のホスト側 chunk を作る</b></td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>この「TP=2 と TP=4 が同じ chunk を作る」という性質が、実運用でどれだけ効くかを補足します。クラスタは<b>時間とともに不均質になります</b>。GPU の世代が混ざり、attention バックエンドがモデルごとに違い、TP 数はモデルサイズで決まります。<b>ホスト側の形が構成に依存すると、共有できる相手が同一構成のノードだけになります</b>。正規レイアウトはこの制約を外していて、これは「速さ」ではなく<b>「共有の可能な範囲」</b>のための設計です。2 節の 4 つの利点のうち、性能ではなく<b>運用の自由度</b>を買っているのはここです。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【デモ】リロードと HIT / MISS / RETRY</h2>
+  <p class="lead">リロードの手順は原文に明確に書かれています。<b>スケジューラはまずホストのキャッシュを見ます。</b>あればその場でヒット。ホストがミスなら、二次階層を<b>設定された順に</b>問い合わせ、<b>最初に持っていた階層が応えます</b>。その階層は chunk を<b>非同期に</b>ホストメモリへ昇格させ、その間スケジューラは <b>RETRY</b> を受け取り、次のサイクルで再確認します。</p>
+  <p>そして重要な一文がこれです。<b>同じリクエストの中の chunk が、それぞれ違う階層から供給されることがあります</b> (1 つはファイルシステムから、別の 1 つはリモートのピアから、など)。</p>
+  <p>下のデモは、この状態機械を 1 サイクルずつ進めるものです。chunk の初期配置を変えて、<b>いつ RETRY が返り、いつ全部が揃うか</b>を追ってみてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvReload" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <button id="rlStep">1 サイクル進める</button>
+    <button class="ghost" id="rlAuto">自動で進める</button>
+    <button class="ghost" id="rlReset">配置を作り直す</button>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="rlMix">階層がばらける配置</button>
+    <button class="ghost" id="rlHost">ほぼホストにある</button>
+    <button class="ghost" id="rlCold">ほぼ冷えている</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>ホスト (即ヒット)</span>
+    <span><span class="dot" style="background:#60a5fa"></span>ファイルシステム</span>
+    <span><span class="dot" style="background:#c084fc"></span>オブジェクトストレージ</span>
+    <span><span class="dot" style="background:#e0a03f"></span>P2P</span>
+    <span><span class="dot" style="background:#6b7a86"></span>どこにも無い (再計算)</span>
+  </div>
+  <p class="rdout" id="rlOut"></p>
+  <div class="warn">
+    <b>昇格にかかるサイクル数は仮定値です。</b>原文が定めているのは<b>手順</b> (ホスト優先 ・ 設定順の問い合わせ ・ 非同期昇格 ・ RETRY で次サイクル再確認 ・ chunk ごとに別階層でよい) で、<b>各階層が何サイクルかかるかは書かれていません</b>。デモでは「速い階層は少ないサイクル、遅い階層は多いサイクル」という<b>相対関係だけ</b>を模しています。
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>RETRY という戻り値の設計意図を足します。素朴に作るなら「昇格が終わるまでスケジューラをブロックする」でも動きます。しかしそれは<b>1 つの遅い chunk が、そのサイクルの他の全リクエストを止める</b>ことを意味します。RETRY にしておくと、スケジューラは<b>待たずに次の仕事へ進み</b>、次のサイクルでもう一度聞きます。<b>非同期の昇格とポーリング型の再確認は組で意味を持つ</b>設計で、9 節のインターフェースが <code>submit_load</code> と <code>get_finished_jobs</code> に分かれているのも同じ理由です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>二次階層の 3 種類</h2>
+  <p class="lead">現在 3 つの二次階層があります。いずれも<b>ホストのコピーから読み書きする</b>だけなので、アクセラレータには触りません。</p>
+  <h3>ファイルシステム</h3>
+  <p>各 KV chunk を<b>ローカルまたはネットワークのストレージ上のファイル</b>として保存します。<b>内容アドレス方式の命名</b>を使うので、<b>同じトークン列は同じキーに写り、入力が一致すればキャッシュが自動的に共有されます</b>。複数の vLLM インスタンスが同じマウントポイントを共有していれば (ネットワークストレージや同一ノード上の複数インスタンス)、<b>追加設定なしで KV データを共有します</b>。</p>
+  <p>特徴として、非ブロッキングな lookup、アトミックな書き込み、読み書き別のスレッドプールが挙げられています。</p>
+  <div class="math">vllm serve Qwen/Qwen3.6-35B-A3B \
+    --kv-transfer-config '{
+        "kv_connector_extra_config": {
+            "spec_name": "TieringOffloadingSpec",
+            "cpu_bytes_to_use": 107374182400,
+            "secondary_tiers": [{"type": "fs", "root_dir": "/mnt/kv-cache"}]
+        }
+    }'</div>
+  <h3>オブジェクトストレージ</h3>
+  <p>NIXL 経由で <b>S3 互換のオブジェクトストア</b>に保存します。命名はファイルシステムと同じ内容アドレス方式。<b>GB あたりの単価が高性能なファイルストレージより安い</b>のが利点で、インスタンス間の共有もできます。</p>
+  <div class="math">--kv-transfer-config '{
+    "kv_connector_extra_config": {
+        "spec_name": "TieringOffloadingSpec",
+        "cpu_bytes_to_use": 107374182400,
+        "secondary_tiers": [{
+            "type": "obj",
+            "bucket": "my-kv-cache",
+            "endpoint_override": "http://minio:9000"
+        }]
+    }
+}'</div>
+  <h3>P2P (ノード間)</h3>
+  <p>ネットワーク越しに<b>インスタンス間で KV キャッシュを共有</b>します。調整に ZMQ、バルク転送に RDMA (NIXL 経由) を使います。<b>転送はすべて host-to-host</b> で、どちら側もアクセラレータのメモリを使いません。</p>
+  <p>ここに設計上の線引きがあります。<b>P2P 階層は「どのピアから引くか」を決めません</b>。それはオーケストレーション層 (llm-d のようなルーター) の仕事です。オーケストレータはリクエストの <code>kv_transfer_params</code> を通じてノード間転送を駆動します。</p>
+  <div class="math">--kv-transfer-config '{
+    "kv_connector_extra_config": {
+        "spec_name": "TieringOffloadingSpec",
+        "cpu_bytes_to_use": 107374182400,
+        "secondary_tiers": [{"type": "p2p", "host": "10.0.0.1", "port": 5710}]
+    }
+}'</div>
+  <table>
+    <tr><th>P2P の主な使い方</th><th>中身</th></tr>
+    <tr class="hl"><td>prefill / decode 分離</td><td>prefill 側が KV chunk を計算して<b>自分のホスト階層に置く</b>。decode 側が RDMA でそこから引く。<b>GPU ベースの P/D 手法に対する利点は I/O の統合</b>で、GPU ごとの小さな転送が<b>少数の大きな RDMA 操作</b>になり、ネットワークのスループットが大きく改善する。さらに chunked prefill と組むと、<b>prefill の chunk が完了するたびに即座に転送可能</b>になり、計算とデータ移動が重なって TTFT が縮む</td></tr>
+    <tr><td>負荷分散</td><td>混んでいるインスタンスから空きのあるインスタンスへ chunk を移す。<b>どのノードもどのピアからでも引ける</b></td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>3 つの階層は<b>置き換えではなく並列に設定できます</b> (<code>secondary_tiers</code> が配列である理由)。オフロード時は<b>設定された全階層へ同時に流し落とし</b>、リロード時は<b>設定順に問い合わせて最初に持っていた階層が応える</b>ので、順序は「速い順に並べる」のが自然な設定になります。原文はこの並び順の指針を明示していませんが、リロードが設定順であることから逆算できます。
+  </div>
+</section>
+<section id="s7">
+  <h2><span class="num">7</span>hybrid モデルへの対応</h2>
+  <p class="lead">この枠組みは vLLM の hybrid memory allocator と統合されています。<b>層の種類が混ざるモデル</b> (full attention ・ sliding window ・ MLA ・ Mamba) が透過的に扱われます。</p>
+  <p>鍵は 4 節の正規レイアウトで、<b>すべての KV 形式を一様なバイト列表現に正規化します</b>。だから <b>1 chunk のホスト上のバイトサイズは、中にどの層種が入っていても固定</b>です。</p>
+  <div class="key">
+    ここから面白い帰結が出ます。<b>バイトサイズが固定なので、層種によって 1 chunk に入るトークン数が変わります。</b>たとえば <b>Mamba の状態層は 1 chunk あたり full attention よりずっと多くのトークンをカバーする</b>ので、<b>オフロードされる頻度が低くなります</b>。
+  </div>
+  <table>
+    <tr><th>層の種類</th><th>この枠組みでの扱い</th></tr>
+    <tr><td>sliding window</td><td><b>窓の中のトークンだけ</b>を読み戻す。履歴全体ではない</td></tr>
+    <tr><td>状態空間 (Mamba)</td><td><b>状態を attention の KV と並んで</b>オフロードし、リロードする</td></tr>
+  </table>
+  <p>対応する最新のアーキテクチャとして DeepSeek V4 ・ GLM 5.3 ・ Nemotron 3 などが挙げられています。</p>
+  <div class="add">
+    <span class="badge">補足</span>「バイト固定 ・ トークン数可変」という正規化の方向は、実装の単純さを買っています。逆向き (トークン数固定 ・ バイト可変) にすると、<b>chunk のサイズが層種ごとに変わり、オフセット計算が索引に変わります</b>。4 節の「chunk の探し方はオフセット計算だけ」という性質を保つには、<b>バイトを固定する方が自然</b>です。層種ごとのオフロード頻度の差は、その選択の副作用として現れています。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>可観測性と KV events</h2>
+  <p class="lead">運用に必要な計測が最初から入っています。vLLM 標準の <code>/metrics</code> エンドポイントから Prometheus メトリクスが出ます。</p>
+  <table>
+    <tr><th>メトリクス</th><th>何が分かるか</th></tr>
+    <tr><td>ホストキャッシュの使用率</td><td>一次階層の現在の充填率</td></tr>
+    <tr><td>転送スループット</td><td>アクセラレータとホストの間の転送のバイト数と時間</td></tr>
+    <tr><td>階層ごとのレイテンシ</td><td>各階層で lookup とデータ転送にかかった時間</td></tr>
+    <tr class="hl"><td>階層ごとのヒット率</td><td><b>どの階層が実際に自分のワークロードを支えているか</b></td></tr>
+  </table>
+  <p>二次階層は<b>独自のメトリクス</b> (counter ・ histogram ・ gauge) を定義でき、それらは自動的に登録 ・ 公開されます。枠組み側の変更は要りません。</p>
+  <h3>KV events</h3>
+  <p>chunk が階層間を移動すると、<b>構造化された KV event</b> が発行されます。中身は「どの chunk が保存 / evict されたか」「どの階層からか」「局所性はどうか (ローカルかリモートか)」です。二次階層は<b>自前の event も出せます</b>。</p>
+  <p>この event が外部のオーケストレーションを可能にします。llm-d や Dynamo は KV event を消費して、<b>キャッシュヒットする可能性が最も高いインスタンスへリクエストを振り分けます</b>。原文は、キャッシュを考慮しないスケジューリングと比べて<b>スループットが大幅に高く、レイテンシが低い</b>と述べています。llm-d はさらに、この event を使って<b>ピア間の P2P 転送を組み立てます</b>。</p>
+  <div class="add">
+    <span class="badge">補足</span>ここは 6 節の線引きと対になっています。<b>P2P 階層は「どこから引くか」を決めない</b>と書かれていました。では誰が決めるのか。<b>KV event を購読しているオーケストレータ</b>です。つまりこの設計は<b>「機構を提供して、方策は外に出す」</b>形になっています。キャッシュの所在を event として公開し、ルーティングの判断はルーターに任せる。<b>階層の実装が単純に保たれている理由の 1 つ</b>がこの分離です。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>新しい階層を足す</h2>
+  <p class="lead">二次階層のインターフェースは<b>4 つのメソッドだけ</b>です。原文のコードをそのまま引きます。</p>
+  <div class="math">class SecondaryTierManager(ABC):
+
+    def lookup(self, key, req_context) -&gt; LookupResult:
+        <span class="cm">"""この階層は chunk を持っているか。HIT / MISS / RETRY を返す"""</span>
+
+    def submit_store(self, job_metadata: JobMetadata) -&gt; None:
+        <span class="cm">"""ホストからこの階層への非同期な保存を開始する"""</span>
+
+    def submit_load(self, job_metadata: JobMetadata) -&gt; None:
+        <span class="cm">"""この階層からホストへの非同期な読み込みを開始する"""</span>
+
+    def get_finished_jobs(self) -&gt; Iterable[JobResult]:
+        <span class="cm">"""完了した転送をポーリングする"""</span></div>
+  <p>実装が単純になる理由が明確に書かれています。<b>各階層は構築時に、共有ホスト領域への直接の memoryview を受け取ります</b>。<code>submit_store()</code> が呼ばれたら階層はその領域から<b>直接 KV データを読み</b>、<code>submit_load()</code> が呼ばれたらそこへ<b>直接書き込みます</b>。中間コピーもシリアライズも要りません。<b>階層は一次階層のメモリの上で直接動きます</b>。</p>
+  <p>各二次階層は<b>自分の eviction 方針を独立に管理します</b>。完全なインメモリの参照実装が <code>vllm/v1/kv_offload/tiering/example/</code> にあります。そして <b>out-of-tree の階層も対応済み</b>で、階層の設定に <code>module_path</code> を指定すれば、<b>vLLM 本体に一切コードを足さずに</b>自作の <code>SecondaryTierManager</code> が読み込まれます。</p>
+  <div class="add">
+    <span class="badge">補足</span>この 4 メソッドの形が 5 節の RETRY と噛み合っていることを確認しておきます。<code>lookup</code> が 3 値 (HIT / MISS / RETRY) を返し、<code>submit_*</code> が<b>戻り値を持たず</b>、完了は <code>get_finished_jobs</code> の<b>ポーリングで拾う</b>。つまり<b>インターフェースの全体がノンブロッキングを強制する形</b>になっています。ここに同期的な <code>store()</code> があったら、遅い階層が 1 つ混じるだけでスケジューラが止まります。<b>4 つという数の少なさは、機能の少なさではなく制約の強さ</b>です。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>【デモ】同時会話数と性能</h2>
+  <p class="lead">オフロードの主な利益は<b>高くつく prefill の繰り返しを避けること</b>です。原文の測定は、同時会話数を増やしていったときに<b>各階層の容量の限界がどこで現れるか</b>を示しています。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/tiered-kv-offloading/performance.svg" alt="同時会話数とスループット">
+    <p class="cap">ストレージは CPU メモリよりレイテンシが高いので、ピークのスループットには届かない。しかし規模が大きくなったときの選択は「ストレージからのキャッシュヒット」か「完全な再計算」かであり、その勝負ならストレージが決定的に勝つ。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" target="_blank" rel="noopener">Tiered KV Cache Offloading in vLLM</a> (vLLM 公式ブログ)</p>
+  </div>
+  <table>
+    <tr><th>同時会話数</th><th>何が起きるか</th></tr>
+    <tr><td>約 64 まで</td><td><b>HBM が作業集合を保持できる</b>。どのキャッシュ方式もよく機能する</td></tr>
+    <tr><td>64 - 128</td><td><b>HBM が埋まる</b>。オフロードなしではスループットが劇的に落ちる。<b>CPU へのオフロードは性能を維持する</b></td></tr>
+    <tr class="hl"><td>128 超</td><td><b>CPU キャッシュも埋まる</b>。ストレージへのオフロードは高いキャッシュヒット率を保ち続け、<b>他の方式に比べてスループットが 2 倍以上</b>になる</td></tr>
+  </table>
+  <p>下のデモは、この 3 つのレジームがなぜ現れるのかを<b>容量の観点から</b>並べたものです。ボタンで方式を切り替えると、どの方式がどこで壁に当たるかが見えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvPerf" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="pfAll">3 つの方式を重ねる</button>
+    <button class="ghost" id="pfNone">オフロードなし</button>
+    <button class="ghost" id="pfCpu">CPU まで</button>
+    <button class="ghost" id="pfSto">ストレージまで</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>オフロードなし</span>
+    <span><span class="dot" style="background:#e0a03f"></span>CPU オフロード</span>
+    <span><span class="dot" style="background:#43b581"></span>ストレージオフロード</span>
+  </div>
+  <p class="rdout" id="pfOut"></p>
+  <div class="warn">
+    <b>この曲線は模式図です。</b>原文が数値として与えているのは<b>3 つのレジームの境界 (約 64 と約 128)</b> と、<b>128 超でストレージが「2 倍以上」</b>という関係、そして「ストレージは CPU よりレイテンシが高いのでピークには届かない」という順序関係だけです。<b>曲線の形と縦軸の目盛りは、その関係を満たすように引いた説明用のもの</b>で、測定値ではありません。実際の測定値は上の原文の図を見てください。
+  </div>
+  <h3>ベンチマークの条件</h3>
+  <table>
+    <tr><th>項目</th><th>設定</th></tr>
+    <tr><td>モデル</td><td>Qwen/Qwen3.6-35B-A3B を NVIDIA H100 2 枚で (TP=2)</td></tr>
+    <tr><td>ストレージ階層</td><td>ローカル NVMe 上のファイルシステムバックエンド</td></tr>
+    <tr><td>ワークロード</td><td>多ターン会話。<b>初期プロンプト 12K トークン + 1 ラウンドあたり 4K トークン ・ 8 ラウンド</b></td></tr>
+    <tr><td>最大同時リクエスト数</td><td>64</td></tr>
+    <tr class="hl"><td>測っているもの</td><td><b>prefiller のスループットだけ</b> (prefill / decode 分離構成)</td></tr>
+  </table>
+  <p>完全な結果と再現スクリプトは <code>neuralmagic/fs-offload-experiments</code> にあると案内されています。</p>
+  <div class="add">
+    <span class="badge">補足</span>条件の読み方を 1 つ足します。<b>測っているのは prefiller のスループットだけ</b>です。この枠組みが削るのは<b>prefill の再計算</b>なので、効果が最も濃く出る場所を切り出した測定になっています。<b>エンドツーエンドの体感 (TTFT や全体のトークン毎秒) はここから直接は読めません</b>。また「初期 12K + 4K × 8 ラウンド」という形は 1 節で述べた<b>prefix が丸ごと再利用される条件</b>を満たしていて、オフロードにとって有利な (そして実運用でよくある) ワークロードです。
+  </div>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>【デモ】自分の構成で見積もる</h2>
+  <p class="lead">最後に、原文にはないデモを 1 つ足します。<b>自分のワークロードだと、どの階層まで載るのか</b>を数で確かめるものです。KV のバイト数の見積りは単純な算術なので、手元の値を入れれば形が見えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvCap" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">同時会話数 <input id="cpN" type="range" min="8" max="512" step="8" value="128"><span id="cpNv">128</span></div>
+    <div class="slider">1 会話のトークン数 <input id="cpT" type="range" min="4" max="128" step="4" value="44"><span id="cpTv">44</span>K</div>
+  </div>
+  <div class="controls">
+    <div class="slider">KV バイト / トークン <input id="cpB" type="range" min="8" max="600" step="8" value="160"><span id="cpBv">160</span> KB</div>
+  </div>
+  <div class="controls">
+    <div class="slider">HBM の空き <input id="cpH" type="range" min="4" max="256" step="4" value="40"><span id="cpHv">40</span> GB</div>
+    <div class="slider">ホスト DRAM <input id="cpD" type="range" min="16" max="2048" step="16" value="100"><span id="cpDv">100</span> GB</div>
+    <div class="slider">ストレージ <input id="cpS" type="range" min="0" max="20000" step="100" value="4000"><span id="cpSv">4000</span> GB</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>HBM に載る分</span>
+    <span><span class="dot" style="background:#e0a03f"></span>ホスト DRAM に載る分</span>
+    <span><span class="dot" style="background:#43b581"></span>ストレージに載る分</span>
+    <span><span class="dot" style="background:#6b7a86"></span>どこにも載らない = 再計算</span>
+  </div>
+  <p class="rdout" id="cpOut"></p>
+  <div class="warn">
+    <b>このデモは全部が読者の仮定値で、原文にも実測にも基づきません。</b>計算しているのは「会話数 × トークン数 × バイト / トークン」という掛け算と、それを 3 つの容量で順に埋めるだけです。<b>KV バイト / トークン はモデルの層数 ・ KV ヘッド数 ・ head_dim ・ 量子化で決まる</b>ので、自分のモデルの設定から計算して入れてください (既定値は説明用の丸い数字です)。<b>ヒット率が容量比で決まるわけではない</b> (実際には局所性に依存する) 点も、このデモの単純化です。
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>それでもこの掛け算に意味があるのは、<b>階層の容量差が桁で違う</b>ことが見えるからです。HBM の空きは数十 GB、ホスト DRAM は 100 GB 前後から、ストレージは TB 級。<b>1 桁ずつ広がる階層に対して、必要量は会話数に線形に増えます</b>。だから 10 節の「約 64」「約 128」という境界は、特定の設定における<b>桁の境目</b>として現れています。自分の構成では境界がどこに来るのか、この掛け算が最初の目安になります。
+  </div>
+</section>
+
+<section id="s12">
+  <h2><span class="num">12</span>読むときに気をつける点</h2>
+  <p class="lead">原文はブログなので、論文と違って主張の限定条件が箇条書きでは並んでいません。読むときに押さえておくべき点を整理します。<b>以下はこの記事の読み解きで、原文の主張ではありません</b>。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>効くワークロードの条件</td><td>利益は<b>同じトークン列が再び現れること</b>に依存します。多ターン会話や共通の system プロンプトを持つ運用では強く効きますが、<b>毎回独立な入力が来る運用では書き込みコストだけが残ります</b></td></tr>
+    <tr><td>測定の範囲</td><td>ベンチマークは <b>prefiller のスループットだけ</b>を測っています。モデル 1 種類 ・ GPU 2 枚 ・ ローカル NVMe という単一構成で、<b>ネットワークストレージやオブジェクトストレージでの数字はありません</b></td></tr>
+    <tr><td>「2 倍以上」の前提</td><td>128 会話を超えた領域での比較です。<b>64 以下では全方式が同等</b>と原文自身が書いているので、<b>規模が小さいうちは導入の利益がありません</b> (書き込みのコストだけを払う)</td></tr>
+    <tr><td>ストレージのレイテンシ</td><td>原文が明言しているとおり<b>ストレージはピークのスループットに届きません</b>。階層を足すほど速くなるのではなく、<b>容量の壁を後ろへずらす</b>のが効果です</td></tr>
+    <tr><td>P2P の方策は含まれない</td><td><b>どのピアから引くかは階層の仕事ではありません</b>。llm-d のようなオーケストレータが必要で、<b>P2P 階層だけ有効にしても自動では動きません</b></td></tr>
+    <tr><td>chunk サイズの指針</td><td><code>blocks_per_chunk</code> を大きくすると I/O が大きくなる、という方向は書かれていますが、<b>推奨値やワークロードごとの選び方は示されていません</b></td></tr>
+    <tr><td>包含による書き込み増</td><td>オフロード時に<b>設定した全階層へ同時に流し落とす</b>ので、階層を増やすと<b>書き込み量が増えます</b>。読み戻しが起きない chunk については、その書き込みは無駄になります</td></tr>
+    <tr class="hl"><td>この記事の追加部分</td><td><b>1 節の後半 ・ 2 節の補足 ・ 3 節のデモ ・ 4 節の補足とデモ ・ 5 節のデモと補足 ・ 6 節の補足 ・ 7 節の補足 ・ 8 節の補足 ・ 9 節の補足 ・ 10 節のデモと補足 ・ 11 節の全体 ・ 12 節</b>は原文にありません。原文の内容は各節の本文と表、および 4 枚の図です</td></tr>
+  </table>
+  <div class="key">
+    <b>この設計から持ち帰れる一般的な形。</b>階層 KV オフロードの中心にあるのは<b>「最も希少な資源の占有時間を、最も遅い階層のレイテンシから切り離す」</b>という発想です。GPU メモリを PCIe コピーの時間だけ占有し、あとは安いホストメモリに任せる。同じ形は KV キャッシュ以外にも当てはまります。<b>高い資源と遅い経路が直結している場所を探して、間に安い層を挟む</b>。そして正規レイアウトのように<b>形を構成から独立させると、共有できる相手が増えます</b>。速さのための設計と、共有のための設計は別だということが、この記事の 4 つの利点の並びに現れています。
+  </div>
+  <p class="fn">原文: Or Ozeri, Danny Harnik, Ronen Schaffer, Itay Etelis, Varun Sundar Rabindranath. "<a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" target="_blank" rel="noopener">Tiered KV Cache Offloading in vLLM</a>", vLLM 公式ブログ, 2026-09-10。図 4 枚はいずれも原文のものを直接参照しています (<code>vllm.ai/blog-assets/figures/tiered-kv-offloading/</code>)。<br>
+  この記事の数値のうち、<b>約 64 / 約 128 という境界 ・ 2 倍以上 ・ ベンチマークの条件 ・ 設定例 ・ インターフェースの 4 メソッド</b>は原文由来です。<b>3 節 ・ 5 節 ・ 10 節のデモは模式図</b>、<b>4 節のデモは構造の算術</b>、<b>11 節のデモは読者が入れる仮定値の計算</b>で、いずれも実測ではありません。各デモの中にもその旨を表示しています。<br>
+  関連する解説として<a href="./paper-declarative-attention.html">Declarative Attention</a>、<a href="./paper-crisp.html">CRISP の sparse prefill</a>、<a href="./attn-mla.html">MLA</a>、<a href="./attn-mamba.html">Mamba</a> があります。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./vllm-blog-index.html" style="color:var(--g2)">← vLLM ブログ解説シリーズの目次へ</a> ・
+  <a href="https://vllm.ai/blog/2026-09-10-tiered-kv-offloading" style="color:var(--g2)" target="_blank" rel="noopener">原文を読む</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* ============ デモ1: オフロードの時間軸 ============ */
+(function(){
+  const cv=document.getElementById('cvOff'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  function draw(){
+    const p=+document.getElementById('ofP').value, s=+document.getElementById('ofS').value;
+    document.getElementById('ofPv').textContent=p;
+    document.getElementById('ofSv').textContent=s;
+    const total=p+s+6;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 つの chunk をオフロードするときの資源の占有',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('時間は仮定値 ・ 構造を見る図',W-24,24);
+    const x0=150,gw=W-60-x0;
+    function px(t){return x0+t/total*gw;}
+    /* 目盛り */
+    for(let t=0;t<=total;t+=Math.max(10,Math.round(total/8/10)*10)){
+      const x=px(t);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x,60);ct.lineTo(x,300);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(t+' ms',x,318);
+    }
+    function row(y,label,segs){
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='right';
+      ct.fillText(label,x0-12,y+20);
+      segs.forEach(function(g){
+        ct.fillStyle=g[2];ct.globalAlpha=g[3]||0.9;
+        ct.fillRect(px(g[0]),y,Math.max(2,px(g[1])-px(g[0])),28);ct.globalAlpha=1;
+        if(px(g[1])-px(g[0])>66){
+          ct.fillStyle='#0d2b20';ct.font='bold 11px sans-serif';ct.textAlign='center';
+          ct.fillText(g[4]||'',(px(g[0])+px(g[1]))/2,y+18);
+        }
+      });
+    }
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('host-centric (この枠組み)',x0,52);
+    row(66,'アクセラレータ',[[0,p,NEG,0.9,'PCIe コピー']]);
+    row(106,'ホストメモリ',[[0,p,POS,0.5,''],[p,total,POS,0.9,'キャッシュとして保持し続ける']]);
+    row(146,'二次階層',[[p,p+s,BLUE,0.85,'非同期に書き込み']]);
+    /* t2 マーカー */
+    ct.strokeStyle=NEG;ct.lineWidth=2;ct.setLineDash([5,4]);
+    ct.beginPath();ct.moveTo(px(p),60);ct.lineTo(px(p),186);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=NEG;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('赤い破線 = t2 (ここでアクセラレータを解放)',W-40,52);
+
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('もしホストを挟まず、二次階層へ直接書いたら (比較用の仮想)',x0,208);
+    row(222,'アクセラレータ',[[0,p+s,NEG,0.9,'書き込みが終わるまで押さえたまま']]);
+    row(262,'二次階層',[[0,p+s,BLUE,0.85,'アクセラレータから直接']]);
+
+    const by=336;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,52);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 13px sans-serif';
+    ct.fillText('アクセラレータの占有時間: host-centric は '+p+' ms、直接書き込みなら '+(p+s)+' ms',40,by+22);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('二次階層のレイテンシをどれだけ動かしても、上の段の赤い帯は伸びない。これが「遅い階層から切り離す」ということ',40,by+42);
+    document.getElementById('ofOut').textContent=
+      'アクセラレータの占有は '+p+' ms のまま ・ 直接書き込みに比べて '+((1-p/(p+s))*100).toFixed(1)+'% 短い';
+  }
+  ['ofP','ofS'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+
+/* ============ デモ2: I/O の統合 ============ */
+(function(){
+  const cv=document.getElementById('cvIO'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  function draw(){
+    const tp=+document.getElementById('ioTP').value, sz=+document.getElementById('ioSz').value;
+    document.getElementById('ioTPv').textContent=tp;
+    document.getElementById('ioSzv').textContent=sz;
+    const per=sz/tp;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 chunk 分を二次階層へ書くときの I/O の形 (TP='+tp+'、chunk 全体 '+sz+' MiB)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('構造の算術 ・ 性能の測定ではない',W-24,24);
+    /* 上段: アクセラレータの shard */
+    const sx=60,sw=(W-120)/8;
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('アクセラレータ '+tp+' 台の shard',24,54);
+    for(let i=0;i<tp;i++){
+      const x=sx+i*((W-120)/tp);
+      const w=(W-120)/tp-8;
+      ct.fillStyle=PUR;ct.globalAlpha=0.8;ct.fillRect(x,62,w,34);ct.globalAlpha=1;
+      ct.fillStyle='#0d2b20';ct.font='bold 11px sans-serif';ct.textAlign='center';
+      if(w>52) ct.fillText(per.toFixed(2)+' MiB',x+w/2,84);
+    }
+    /* 中段: ホストの共有領域 */
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('ホストの共有領域 (正規レイアウト)',24,132);
+    ct.fillStyle=POS;ct.globalAlpha=0.85;ct.fillRect(60,140,W-120,34);ct.globalAlpha=1;
+    ct.fillStyle='#0d2b20';ct.font='bold 12px sans-serif';ct.textAlign='center';
+    ct.fillText('1 つの連続領域 '+sz+' MiB (TP rank をまたいだ KV ヘッドが集約される)',W/2,162);
+    for(let i=1;i<tp;i++){
+      const x=60+i*(W-120)/tp;
+      ct.strokeStyle='rgba(13,43,32,0.45)';ct.lineWidth=1;ct.setLineDash([3,3]);
+      ct.beginPath();ct.moveTo(x,140);ct.lineTo(x,174);ct.stroke();ct.setLineDash([]);
+    }
+    /* 下段: 比較 */
+    const y0=210,rowh=64;
+    function bar(y,label,count,each,color){
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='right';
+      ct.fillText(label,168,y+20);
+      const gw=W-220;
+      for(let i=0;i<count;i++){
+        const w=each/sz*gw, x=180+i*(w+3);
+        ct.fillStyle=color;ct.globalAlpha=0.85;ct.fillRect(x,y,Math.max(2,w-1),28);ct.globalAlpha=1;
+      }
+      ct.fillStyle=color;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(count+' 本 x '+each.toFixed(2)+' MiB',180,y+46);
+    }
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('二次階層から見える I/O',24,y0-12);
+    bar(y0,'統合しない場合',tp,per,NEG);
+    bar(y0+rowh+10,'統合する場合',1,sz,POS);
+    const by=H-52;
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('総バイト数は同じ '+sz+' MiB。変わるのは I/O の本数と 1 本のサイズだけ',24,by);
+    ct.fillStyle=POS;ct.font='bold 12px sans-serif';
+    ct.fillText('統合すると I/O の本数が '+tp+' 分の 1、1 本のサイズが '+tp+' 倍になる',24,by+22);
+    document.getElementById('ioOut').textContent=
+      'TP='+tp+' なら '+tp+' 本 x '+per.toFixed(2)+' MiB が 1 本 x '+sz+' MiB になる';
+  }
+  ['ioTP','ioSz'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+/* ============ デモ3: リロードと HIT / MISS / RETRY ============ */
+(function(){
+  const cv=document.getElementById('cvReload'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NC=12;
+  /* 階層: 名前 ・ 色 ・ 昇格にかかるサイクル数 (仮定値) */
+  const TIERS=[
+    {n:'ホスト',c:POS,cyc:0},
+    {n:'ファイルシステム',c:BLUE,cyc:1},
+    {n:'オブジェクトストレージ',c:PUR,cyc:3},
+    {n:'P2P',c:ALT,cyc:2},
+    {n:'どこにも無い',c:MUT,cyc:-1}
+  ];
+  let mode='mix', chunks=[], cycle=0, timer=null;
+  function build(){
+    cycle=0;
+    chunks=[];
+    const w=(mode==='host')?[62,18,6,6,8]:(mode==='cold')?[6,16,22,10,46]:[26,26,18,16,14];
+    for(let i=0;i<NC;i++){
+      let r=Math.random()*100, t=0, acc=0;
+      for(let j=0;j<w.length;j++){acc+=w[j]; if(r<=acc){t=j;break;} t=w.length-1;}
+      chunks.push({tier:t,state:(t===0?'HIT':(t===4?'RECOMPUTE':'PENDING')),left:TIERS[t].cyc,servedBy:t});
+    }
+    draw();
+  }
+  function step(){
+    cycle++;
+    chunks.forEach(function(c){
+      if(c.state==='PENDING'){
+        if(c.left<=0){c.state='HIT';}
+        else {c.left--; c.state=(c.left<=0)?'HIT':'RETRY';}
+      } else if(c.state==='RETRY'){
+        if(c.left<=0) c.state='HIT'; else c.left--;
+        if(c.left<=0) c.state='HIT';
+      }
+    });
+    draw();
+  }
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 リクエストが必要とする '+NC+' 個の chunk ・ スケジューラのサイクル '+cycle,24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('昇格のサイクル数は仮定値',W-24,24);
+    /* chunk 行 */
+    const x0=40,cw=(W-80)/NC,y0=54;
+    chunks.forEach(function(c,i){
+      const x=x0+i*cw;
+      const T=TIERS[c.tier];
+      ct.fillStyle=T.c;ct.globalAlpha=(c.state==='HIT')?0.95:0.4;
+      ct.fillRect(x+3,y0,cw-6,44);ct.globalAlpha=1;
+      ct.fillStyle='#0d2b20';ct.font='bold 11px sans-serif';ct.textAlign='center';
+      ct.fillText('c'+i,x+cw/2,y0+18);
+      ct.fillStyle=(c.state==='HIT')?'#0d2b20':INK;ct.font='bold 10px sans-serif';
+      ct.fillText(c.state==='RECOMPUTE'?'再計算':c.state,x+cw/2,y0+36);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='left';
+    ct.fillText('色 = その chunk を持っている階層 ・ 濃い = ホストに揃った (HIT)',x0,y0+62);
+    /* 階層ごとの内訳 */
+    const ty=150;
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('階層ごとの状況 (リロードは設定順に問い合わせ、最初に持っていた階層が応える)',24,ty);
+    TIERS.forEach(function(T,ti){
+      const y=ty+16+ti*46;
+      const mine=chunks.filter(function(c){return c.tier===ti;});
+      const done=mine.filter(function(c){return c.state==='HIT';}).length;
+      ct.fillStyle=T.c;ct.fillRect(28,y+6,10,10);
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='left';
+      ct.fillText(T.n+(T.cyc>0?(' (昇格に '+T.cyc+' サイクル)'):(T.cyc===0?' (即ヒット)':' (階層に無い)')),46,y+16);
+      const bx=372,bw=W-60-bx;
+      ct.fillStyle='rgba(255,255,255,0.06)';ct.fillRect(bx,y+2,bw,18);
+      if(mine.length){
+        ct.fillStyle=T.c;ct.globalAlpha=0.85;
+        ct.fillRect(bx,y+2,bw*mine.length/NC,18);ct.globalAlpha=1;
+        ct.fillStyle=INK;ct.font='11.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+        ct.fillText(mine.length+' 個'+(T.cyc>0?(' / うち揃った '+done):''),bx+bw*mine.length/NC+8,y+16);
+      } else {
+        ct.fillStyle=MUT;ct.font='11.5px sans-serif';ct.textAlign='left';
+        ct.fillText('0 個',bx+8,y+16);
+      }
+    });
+    /* 集計 */
+    const hit=chunks.filter(function(c){return c.state==='HIT';}).length;
+    const rec=chunks.filter(function(c){return c.state==='RECOMPUTE';}).length;
+    const wait=NC-hit-rec;
+    const by=H-72;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,60);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 13px sans-serif';
+    ct.fillText('揃った '+hit+' 個 ・ 待ち (RETRY) '+wait+' 個 ・ 再計算になる '+rec+' 個',40,by+22);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText(wait>0
+      ? 'スケジューラは待たずに次の仕事へ進み、次のサイクルでもう一度聞く。1 つの遅い chunk が他を止めない'
+      : (rec>0 ? '揃わなかった chunk は再計算に回る。階層を増やすほどこの数が減る'
+               : 'すべての chunk がホストに揃った。同じリクエストの中で、chunk ごとに供給元の階層が違っていてよい'),40,by+44);
+    document.getElementById('rlOut').textContent=
+      'サイクル '+cycle+': 揃った '+hit+' / '+NC+' ・ 待ち '+wait+' ・ 再計算 '+rec;
+  }
+  document.getElementById('rlStep').onclick=step;
+  document.getElementById('rlReset').onclick=build;
+  document.getElementById('rlAuto').onclick=function(){
+    const b=document.getElementById('rlAuto');
+    if(timer){clearInterval(timer);timer=null;b.classList.remove('active');return;}
+    b.classList.add('active');
+    timer=setInterval(function(){
+      const wait=chunks.filter(function(c){return c.state==='PENDING'||c.state==='RETRY';}).length;
+      if(wait===0){clearInterval(timer);timer=null;b.classList.remove('active');return;}
+      step();
+    },700);
+  };
+  bindBtns({mix:'rlMix',host:'rlHost',cold:'rlCold'},function(k){mode=k;build();});
+  build();
+})();
+/* ============ デモ4: 同時会話数と性能 (模式図) ============ */
+(function(){
+  const cv=document.getElementById('cvPerf'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const MAXN=256;
+  /* 3 つの方式の相対スループット (模式的な形。境界 64 / 128 と「2 倍以上」を満たす) */
+  function f(kind,n){
+    if(kind==='none'){
+      if(n<=64) return 1.0;
+      return Math.max(0.30,1.0-0.62*Math.min(1,(n-64)/48));
+    }
+    if(kind==='cpu'){
+      if(n<=64) return 1.0;
+      if(n<=128) return 0.97;
+      return Math.max(0.38,0.97-0.55*Math.min(1,(n-128)/72));
+    }
+    if(n<=64) return 0.97;
+    if(n<=128) return 0.93;
+    return Math.max(0.80,0.93-0.11*Math.min(1,(n-128)/128));
+  }
+  let view='all';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('同時会話数と prefiller スループットの関係 (縦軸は相対値)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('模式図 ・ 実測値は原文の図を参照',W-24,24);
+    const x0=64,y0=52,gw=W-40-x0,gh=H-190;
+    function px(n){return x0+n/MAXN*gw;}
+    function py(v){return y0+gh-v/1.05*gh;}
+    /* レジームの帯 */
+    ct.fillStyle='rgba(67,181,129,0.07)';ct.fillRect(px(0),y0,px(64)-px(0),gh);
+    ct.fillStyle='rgba(224,160,63,0.08)';ct.fillRect(px(64),y0,px(128)-px(64),gh);
+    ct.fillStyle='rgba(224,122,95,0.08)';ct.fillRect(px(128),y0,px(MAXN)-px(128),gh);
+    [[32,'HBM に収まる'],[96,'HBM が埋まる'],[192,'CPU も埋まる']].forEach(function(l){
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='center';
+      ct.fillText(l[1],px(l[0]),y0+gh-12);
+    });
+    [64,128].forEach(function(n){
+      ct.strokeStyle='rgba(255,255,255,0.35)';ct.lineWidth=1.5;ct.setLineDash([5,4]);
+      ct.beginPath();ct.moveTo(px(n),y0);ct.lineTo(px(n),y0+gh);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle=INK;ct.font='bold 11px sans-serif';ct.textAlign='center';
+      ct.fillText('約 '+n,px(n),y0+gh+30);
+    });
+    for(let n=0;n<=MAXN;n+=64){
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(n,px(n),y0+gh+16);
+    }
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('同時会話数',x0+gw/2,y0+gh+48);
+    const KS=[['none','オフロードなし',NEG],['cpu','CPU オフロード',ALT],['sto','ストレージオフロード',POS]];
+    const lab=[];
+    KS.forEach(function(k){
+      if(view!=='all'&&view!==k[0]) return;
+      lab.push({n:k[1],y:py(f(k[0],MAXN))-10});
+    });
+    lab.sort(function(a,b){return a.y-b.y;});
+    lab.forEach(function(L,i){ if(i>0&&L.y-lab[i-1].y<15) L.y=lab[i-1].y+15; });
+    KS.forEach(function(k){
+      if(view!=='all'&&view!==k[0]) return;
+      ct.strokeStyle=k[2];ct.lineWidth=3;ct.beginPath();
+      for(let n=0;n<=MAXN;n+=2){
+        const x=px(n),y=py(f(k[0],n));
+        if(n===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+      }
+      ct.stroke();
+      let ly=py(f(k[0],MAXN))-10;
+      lab.forEach(function(L){ if(L.n===k[1]) ly=L.y; });
+      ct.fillStyle=k[2];ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+      ct.fillText(k[1],px(MAXN)-6,ly);
+    });
+    const r=f('sto',MAXN)/f('none',MAXN);
+    const by=H-74;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,62);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('原文が数値で述べているのは 3 つのレジームの境界 (約 64 / 約 128) と、128 を超えた領域で「2 倍以上」という関係だけ',40,by+22);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('ストレージは CPU よりレイテンシが高いのでピークには届かない。効くのは「速くする」ことではなく「容量の壁を後ろへずらす」こと',40,by+44);
+    document.getElementById('pfOut').textContent=
+      (view==='all'?'256 会話の地点でストレージはオフロードなしの約 '+r.toFixed(1)+' 倍 (模式図での比)'
+       :view==='none'?'64 を超えると急落する。HBM から溢れた分が毎回再計算になる'
+       :view==='cpu'?'128 までは維持できる。CPU の容量が尽きると落ち始める'
+       :'ピークには届かないが、規模が大きくなっても高いヒット率を保つ');
+  }
+  bindBtns({all:'pfAll',none:'pfNone',cpu:'pfCpu',sto:'pfSto'},function(k){view=k;draw();});
+  draw();
+})();
+
+/* ============ デモ5: 容量の見積り (すべて仮定値) ============ */
+(function(){
+  const cv=document.getElementById('cvCap'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const ids=['cpN','cpT','cpB','cpH','cpD','cpS'];
+  function draw(){
+    const n=+document.getElementById('cpN').value;
+    const tk=+document.getElementById('cpT').value;
+    const bpt=+document.getElementById('cpB').value;
+    const hbm=+document.getElementById('cpH').value;
+    const dram=+document.getElementById('cpD').value;
+    const sto=+document.getElementById('cpS').value;
+    document.getElementById('cpNv').textContent=n;
+    document.getElementById('cpTv').textContent=tk;
+    document.getElementById('cpBv').textContent=bpt;
+    document.getElementById('cpHv').textContent=hbm;
+    document.getElementById('cpDv').textContent=dram;
+    document.getElementById('cpSv').textContent=sto;
+    /* 必要量 (GB) = 会話数 x トークン数(K) x 1000 x バイト/トークン(KB) / 1e6 */
+    const perConv=tk*1000*bpt/1e6;          /* GB per conversation */
+    const need=n*perConv;
+    const inH=Math.min(need,hbm);
+    const inD=Math.min(Math.max(need-hbm,0),dram);
+    const inS=Math.min(Math.max(need-hbm-dram,0),sto);
+    const miss=Math.max(need-hbm-dram-sto,0);
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('作業集合 '+need.toFixed(1)+' GB を 3 つの階層で順に埋める (1 会話あたり '+perConv.toFixed(2)+' GB)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('すべて読者の仮定値',W-24,24);
+    /* 積み上げ帯 */
+    const x0=40,gw=W-80,y=60,bh=54;
+    let acc=0;
+    [[inH,NEG,'HBM'],[inD,ALT,'ホスト DRAM'],[inS,POS,'ストレージ'],[miss,MUT,'再計算']].forEach(function(g){
+      if(g[0]<=0) return;
+      const w=g[0]/need*gw;
+      ct.fillStyle=g[1];ct.globalAlpha=0.9;ct.fillRect(x0+acc,y,w,bh);ct.globalAlpha=1;
+      if(w>96){
+        ct.fillStyle='#0d2b20';ct.font='bold 12px sans-serif';ct.textAlign='center';
+        ct.fillText(g[2],x0+acc+w/2,y+22);
+        ct.font='bold 12px "SF Mono",Menlo,monospace';
+        ct.fillText(g[0].toFixed(0)+' GB',x0+acc+w/2,y+42);
+      }
+      acc+=w;
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('左から順に埋まる。右端の灰色が「どの階層にも入らない = 次に必要になったとき再計算」',x0,y+bh+20);
+    /* 階層ごとの充填率 */
+    const ty=170;
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('階層ごとの充填率',24,ty);
+    [['HBM の空き',hbm,inH,NEG],['ホスト DRAM',dram,inD,ALT],['ストレージ',sto,inS,POS]].forEach(function(t,i){
+      const yy=ty+18+i*54;
+      ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='left';
+      ct.fillText(t[0]+' ('+t[1]+' GB)',30,yy+16);
+      const bx=210,bw=W-70-bx;
+      ct.fillStyle='rgba(255,255,255,0.06)';ct.fillRect(bx,yy+2,bw,20);
+      const fr=(t[1]>0)?t[2]/t[1]:0;
+      ct.fillStyle=t[3];ct.globalAlpha=0.85;ct.fillRect(bx,yy+2,bw*Math.min(fr,1),20);ct.globalAlpha=1;
+      ct.fillStyle=INK;ct.font='11.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText((fr*100).toFixed(0)+'%',bx+bw*Math.min(fr,1)+8,yy+17);
+      if(fr>=1){
+        ct.fillStyle='rgba(13,43,32,0.9)';ct.font='bold 11px sans-serif';ct.textAlign='left';
+        ct.fillText('満杯',bx+10,yy+17);
+      }
+    });
+    const by=H-76;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,64);
+    const cov=(need>0)?(1-miss/need)*100:100;
+    ct.textAlign='left';ct.fillStyle=(miss>0)?NEG:POS;ct.font='bold 13.5px sans-serif';
+    ct.fillText(miss>0
+      ? ('作業集合の '+(miss/need*100).toFixed(0)+'% ('+miss.toFixed(0)+' GB) がどの階層にも入らない')
+      : '作業集合はすべて階層内に収まる (再計算はゼロ)',40,by+24);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('この 3 階層で覆えるのは最大 '+Math.floor((hbm+dram+sto)/perConv)+' 会話 ・ HBM だけなら '+
+      Math.floor(hbm/perConv)+' 会話 ・ HBM + DRAM なら '+Math.floor((hbm+dram)/perConv)+' 会話',40,by+46);
+    document.getElementById('cpOut').textContent=
+      '必要 '+need.toFixed(0)+' GB / 階層で覆えるのは '+cov.toFixed(0)+'% ・ HBM だけなら '+
+      Math.floor(hbm/perConv)+' 会話が上限';
+  }
+  ids.forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+</script>
+</body>
+</html>
