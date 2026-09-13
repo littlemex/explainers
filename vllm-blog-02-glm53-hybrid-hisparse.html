@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上位 K しか読まないなら、置くのもそれだけでいい — GLM 5.3 の Hybrid HiSparse</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:30px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .add{background:#f3f9f6;border-left:4px solid var(--g3);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .add b{color:var(--g1)}
+  .add .badge{display:inline-block;background:var(--g4);color:var(--g1);border-radius:5px;
+    padding:1px 8px;font-size:12.5px;font-weight:700;margin-right:8px}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;overflow-x:auto;line-height:1.7;
+    white-space:pre}
+  .math .cm{color:#8fd6b4}
+  .fig{background:#ffffff;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig img{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);margin:12px 0 0;line-height:1.7}
+  .cap a{color:var(--g2)}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:170px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .fn a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:21px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">vLLM ブログ解説シリーズ ・ 第 2 回</p>
+  <h1>上位 K しか読まないなら、置くのもそれだけでいい</h1>
+  <p>GLM 5.3 の Hybrid HiSparse — 圧力がかかったときだけ、ページ単位で常駐を手放す</p>
+</header>
+<main>
+  <a class="back" href="./vllm-blog-index.html">← vLLM ブログ解説シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事について</h2>
+  <p class="lead">原文は vLLM 公式ブログの <a href="https://vllm.ai/blog/2026-09-08-glm53-part1-hybrid-sparse-offloading" target="_blank" rel="noopener">GLM 5.3 Optimizations, Part 1: Hybrid HiSparse Offloading in vLLM</a> (2026-09-08、vLLM Team)。この記事は<b>その日本語での読み解き</b>で、原文の図をそのまま参照し、理解を早めるためのデモを足しています。<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回の階層 KV オフロード</a>を先に読むと、下敷きになる仕組みが分かります。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    agentic なワークロードでは、<b>長い文脈を持つリクエストが何十本も同時に走り、しかも文脈が伸び続けます</b>。GPU のブロックプールは固定なので、いずれ新しいブロックが取れなくなります。従来の逃げ道は 2 つで、<b>preempt</b> (KV を捨てて後で再 prefill、TTFT を丸ごと払い直す) か<b>オフロード</b> (ホストへ退避するが、dense attention は全トークンが GPU に居ることを要求するので同時実行数は GPU メモリに縛られたまま) でした。ここで sparse-MLA の性質が効きます。<b>indexer が上位 K トークンだけを選び、そこにしか attend しない</b>のなら、<b>GPU に置いておく必要があるのもそれだけ</b>です。HiSparse は選ばれたトークン以外を CPU へ落とし、<b>1 リクエストが必要とする GPU メモリに実効的な上限</b>を作ります。Hybrid HiSparse はさらに、<b>余裕があるうちは GPU に置いたまま</b>にし、<b>圧力がかかったときだけ</b>この仕組みを使います。結果として 8 枚の H200 という<b>このモデルには厳しい構成</b>で、<b>従来は不可能だった 100 万トークンの文脈</b>が動き、同時実行数が大きく伸びます。
+  </div>
+  <table>
+    <tr><th>項目</th><th>内容</th></tr>
+    <tr><td>対象</td><td>GLM 5.3 を <b>8 枚の H200 を 1 ノードに集約した構成</b> (aggregated deployment) で動かす。このサイズのモデルにはメモリが厳しい</td></tr>
+    <tr><td>効かせる性質</td><td><b>sparse-MLA</b> では indexer が上位 K トークンを選び、そこにしか attend しない。だから<b>常駐が必要なのは選ばれたトークンだけ</b></td></tr>
+    <tr><td>HiSparse</td><td>選ばれたトークン以外の KV をすべて CPU へ。<b>1 リクエストあたりの GPU メモリに実効的な上限</b>ができる</td></tr>
+    <tr><td>indexer KV は残る</td><td>indexer の KV は<b>GPU 常駐のまま文脈長とともに伸びます</b>。ただし全体としてはずっと小さく、GLM 5.3 の <b>IndexShare</b> により <b>sparse-MLA 4 層あたり indexer は 1 層</b></td></tr>
+    <tr class="hl"><td>Hybrid の意味</td><td><b>容量に余裕があるうちは GPU に置いたまま</b>。KV が圧迫されたときにだけ上記のオフロードを適用する。つまり<b>CPU-GPU 転送のコストを、混んでいるときにだけ払う</b></td></tr>
+    <tr><td>hot buffer</td><td>落としたページのうち<b>indexer が求めた行</b>を置く場所。<b>専用の確保ではなく、通常の KV ブロックをプールから借りる</b>ので、sparse MLA のカーネルからは普通のページに見える</td></tr>
+    <tr><td>hot buffer の既定サイズ</td><td>1 リクエストあたり <b>上位 K の 2 倍の行数</b>。ヒット率を高く保ちながらバッファを小さく抑える</td></tr>
+    <tr><td>3 つの居住状態</td><td><b>完全常駐 / 混在 / 非常駐</b>をページ単位で追跡し、圧力の上下でリクエストが状態間を移動する</td></tr>
+    <tr><td>実測 (同時実行)</td><td>設定同時実行 32 のとき、実際に走っていたリクエスト数の平均は <b>HiSparse で 18.9 (MTP3) / 25.5 (MTP なし)</b> に対し、<b>オフロードのベースラインは 4.9 / 6.0 で頭打ち</b></td></tr>
+    <tr><td>提供予定</td><td>vLLM <b>v0.30</b> で広く利用可能にする計画。現時点では固定 commit をビルドする。<b>NVIDIA GPU のみ</b></td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. なぜ agentic だと詰まるのか</a>
+    <a href="#s2">2. 上位 K しか読まないという性質</a>
+    <a href="#s3">3. 【デモ】2 リクエストで何が起きるか</a>
+    <a href="#s4">4. 3 つの居住状態</a>
+    <a href="#s5">5. 【デモ】圧力を上げて状態を動かす</a>
+    <a href="#s6">6. hot buffer は特別な確保ではない</a>
+    <a href="#s7">7. 圧力が来る前に備える</a>
+    <a href="#s8">8. 他の機構との合成</a>
+    <a href="#s9">9. 【デモ】実測 — Pareto と占有率</a>
+    <a href="#s10">10. 【デモ】交差点はどこにあるのか</a>
+    <a href="#s11">11. 再現の手順</a>
+    <a href="#s12">12. 読むときに気をつける点</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ agentic だと詰まるのか</h2>
+  <p class="lead">agentic なワークロードの特徴は<b>「同時リクエストが多く、それぞれの文脈が長く、しかも伸び続ける」</b>ことです。GPU のブロックプールは固定なので、いずれ<b>同時に走っているリクエストが新しいブロックを取れなくなります</b>。</p>
+  <p>これまでの対処は 2 つあり、それぞれ代償がありました。</p>
+  <table>
+    <tr><th>対処</th><th>やること</th><th>代償</th></tr>
+    <tr><td><b>preempt</b></td><td>リクエストを 1 本選び、その KV を捨てて、後で再び prefill する</td><td>そのリクエストは<b>追い出されるたびに TTFT を丸ごと払い直します</b></td></tr>
+    <tr><td><b>オフロード</b></td><td>ブロックをホストメモリへ退避する</td><td><b>dense attention は全トークンが GPU 上に居ることを要求する</b>ので、同時実行数は結局 GPU メモリに縛られたままです</td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>ここが<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>との違いです。第 1 回の階層オフロードは<b>「捨てて再計算する」より「下の階層から読み戻す」ほうが安い</b>という取引でした。ただしその枠組みでも、<b>実際に attend する瞬間には全トークンが GPU に戻っている必要があります</b>。だから「同時に何本走らせられるか」の上限は動きません。今回の話は<b>その前提そのもの</b>、つまり「全トークンが GPU に居る必要があるか」を問い直します。
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>上位 K しか読まないという性質</h2>
+  <p class="lead">sparse-MLA の KV キャッシュでは、<b>indexer が上位 K トークンを選び、そこにしか attend しません</b>。HiSparse はこの振る舞いを利用して、<b>選ばれたトークン以外の KV をすべて CPU へ落とします</b>。</p>
+  <div class="key">
+    これで何が変わるか。<b>1 リクエストが必要とする GPU メモリに実効的な上限ができます。</b>文脈が 10 万トークンでも 100 万トークンでも、attend するのは上位 K 個です。<b>常駐量が文脈長から切り離される</b>のが、この手法の核心です。
+  </div>
+  <p>ただし正確に言うと、<b>GPU に残り続けるものもあります</b>。indexer の KV です。原文の記述をそのまま押さえます。</p>
+  <table>
+    <tr><th>データ</th><th>どこに置くか</th><th>文脈長とともに伸びるか</th></tr>
+    <tr><td>sparse-MLA の KV (本体)</td><td>圧力次第で CPU へ落とせる。GPU 側は<b>上位 K に相当する分だけ</b></td><td><b>伸びない</b> (上限がつく)</td></tr>
+    <tr class="hl"><td>indexer の KV</td><td><b>GPU 常駐のまま</b></td><td><b>伸びる</b>。ただし全体としてはずっと小さく、<b>IndexShare により sparse-MLA 4 層あたり indexer は 1 層</b></td></tr>
+  </table>
+  <h3>hybrid が付く理由</h3>
+  <p>HiSparse をいつでも効かせると、余裕があるときでも CPU-GPU 転送を払うことになります。そこで <b>Hybrid HiSparse</b> は<b>容量があるうちは KV を GPU に置いたままにし、圧迫されたときにだけ</b>上記の仕組みを適用します。</p>
+  <p>そしてもう 1 つ、原文が強調している性質があります。<b>hot buffer のページはトークン単位で索引される</b>ので、<b>1 ページが多数の異なる CPU ブロックから引いたトークンを保持できます</b>。結果として<b>文脈の広い範囲にまたがる削減</b>になります。</p>
+  <div class="add">
+    <span class="badge">補足</span>この「1 ページに別々の CPU ブロック由来のトークンが混ざる」という点が、素朴なページ単位のキャッシュとの決定的な違いです。ページ単位で入れ替えると、<b>1 つのトークンが欲しいだけでも 1 ページ分を運ぶ</b>ことになります。トークン単位で詰められるなら、<b>上位 K が文脈全体に散らばっていても、必要な行だけを集めた密なページ</b>が作れます。sparse attention は「散らばった少数」を読むので、この粒度でなければ節約が成立しません。
+  </div>
+</section>
+<section id="s3">
+  <h2><span class="num">3</span>【デモ】2 リクエストで何が起きるか</h2>
+  <p class="lead">原文の 1 枚目の図が、この手法の価値をいちばん短く示しています。<b>1 つのプールと、伸び続ける 2 本のリクエスト</b>。3 つの方式で何が起きるかを並べたものです。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-glm53-part1-hybrid-sparse-offloading/hisparse-two-requests.svg" alt="1 つのプールと 2 本のリクエスト: preempt とオフロードの比較">
+    <p class="cap"><b>preempt</b>: B のスロットは解放され、B の KV は消える。<b>従来のオフロード</b>: B の KV はホスト上に生き残るので再 prefill は要らないが、<b>その全部が再び GPU に収まるまで B は走れない</b>ので、A が単独で decode する。<b>hybrid sparse offload</b>: 各リクエストが<b>その場で最も冷たいページを手放し</b>、同じスロットが新しい末尾と hot ページとして貸し出され、<b>両方が decode を続ける</b>。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-glm53-part1-hybrid-sparse-offloading" target="_blank" rel="noopener">GLM 5.3 Optimizations, Part 1</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>下のデモは同じ状況を動かすものです。<b>プールの大きさ</b>と<b>2 本のリクエストの文脈長</b>を変えて、どの方式でどちらが止まるかを見てください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvTwo" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="twPre">preempt</button>
+    <button class="ghost" id="twOff">従来のオフロード</button>
+    <button class="ghost" id="twHyb">hybrid sparse offload</button>
+  </div>
+  <div class="controls">
+    <div class="slider">プールのページ数 <input id="twP" type="range" min="8" max="40" value="16"><span id="twPv">16</span></div>
+    <div class="slider">A の文脈 <input id="twA" type="range" min="2" max="24" value="11"><span id="twAv">11</span> ページ</div>
+    <div class="slider">B の文脈 <input id="twB" type="range" min="2" max="24" value="10"><span id="twBv">10</span> ページ</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>GPU 常駐のページ</span>
+    <span><span class="dot" style="background:#60a5fa"></span>hot ページ (上位 K の行を集めたもの)</span>
+    <span><span class="dot" style="background:#6b7a86"></span>CPU にだけあるページ</span>
+    <span><span class="dot" style="background:#e07a5f"></span>消えたページ (再 prefill が必要)</span>
+  </div>
+  <p class="rdout" id="twOut"></p>
+  <div class="warn">
+    <b>このデモはページ数を単位にした模式です。</b>原文の図と同じ状況 (1 つのプール ・ 2 本の伸びるリクエスト ・ 3 方式) を、<b>ページ数の算術だけ</b>で再現しています。<b>ページの大きさ ・ 上位 K の値 ・ 実際の転送時間は入っていません</b>。示しているのは「どの方式で誰が decode を続けられるか」という<b>可否の構造</b>だけです。
+  </div>
+  <p>原文の言い方が的確です。<b>hot ページは KV ページと同じブロックプールから貸し出され、しかも同じ KV キャッシュのテンソルの中に住むので、sparse MLA のカーネルからは普通のページに見えます。</b>そして hybrid sparse に固有の性質として、<b>一部のトークンが hot バッファにあり、別の一部がまだ GPU 常駐のページにある</b>という状態が許され、CPU から読み戻す量が減ります。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>3 つの居住状態</h2>
+  <p class="lead">居住 (residency) は<b>ページ単位で追跡されます</b>。圧力が上下するにつれて、リクエストは 3 つの状態の間を移動します。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-glm53-part1-hybrid-sparse-offloading/hisparse-residency.svg" alt="1 つの共有 GPU ブロックプール上の 3 つの居住状態">
+    <p class="cap">どのパネルでも<b>同じ 6 個の上位 K トークンに輪が付いています</b>。変わるのはその居住場所だけ。実線の矢印は<b>ミス</b>で、1 行を hot ページへコピーしている。破線の矢印は<b>hot ヒット</b>で、コピーなしで再利用されている。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-glm53-part1-hybrid-sparse-offloading" target="_blank" rel="noopener">GLM 5.3 Optimizations, Part 1</a> (vLLM 公式ブログ)</p>
+  </div>
+  <table>
+    <tr><th>状態</th><th>何が起きているか</th></tr>
+    <tr><td><b>完全常駐</b><br>full residency</td><td>sparse-MLA の KV は<b>すべて GPU 常駐</b>のまま。同時に、完了した prefix のページは<b>先回りしてホストメモリに実体化されます</b></td></tr>
+    <tr class="hl"><td><b>混在</b><br>mixed residency</td><td>リクエストの<b>末尾は GPU に留まり</b>、古いページは CPU にだけ存在し、<b>indexer がそれらのページから欲しがった行は hot バッファに座ります</b>。ブロックテーブルには<b>実ブロックと null のプレースホルダが並んで入り</b>、<b>末尾は決して evict されません</b></td></tr>
+    <tr><td><b>非常駐</b><br>no residency</td><td>CPU にしか存在しない prefix を再利用する新しいリクエストは、<b>プレースホルダと 1 枚の hot ページから始まります</b>。行は indexer が選ぶにつれて到着するので、<b>履歴全体ではなくモデルが実際に attend する分だけを払います</b></td></tr>
+  </table>
+  <h3>混在状態を解く 1 つの融合カーネル</h3>
+  <p>ここが実装の要点です。<b>1 つの融合カーネルが上位 K を解決します</b>。</p>
+  <table>
+    <tr><th>行の居場所</th><th>やること</th></tr>
+    <tr><td>GPU 常駐のページにある</td><td><b>その場で読む</b></td></tr>
+    <tr><td>hot バッファにある</td><td>読んで、<b>LRU のエントリを更新する</b></td></tr>
+    <tr><td>どちらにも無い (ミス)</td><td><b>pinned なホストメモリから 1 行だけ</b> LRU のスロットへコピーする</td></tr>
+  </table>
+  <div class="key">
+    そしてこの一文が重要です。<b>decode の経路上で CPU の判断を待つものは何もないので、CUDA グラフとして capture できる状態が保たれます。</b>
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>なぜこれが重要かを足します。decode は<b>1 トークンごとにカーネルを何十回も起動する</b>処理で、起動のオーバーヘッドが支配的になりやすい領域です。だから vLLM は decode の 1 ステップを CUDA グラフに焼いて起動コストを消します。ところが<b>「CPU が次に何をコピーするか決める」処理がグラフの中に入ると、グラフに焼けません</b>。この設計はミスの処理を「pinned ホストメモリから 1 行を LRU スロットへ」という<b>データ依存だが制御依存でない形</b>に押し込めていて、それによって CUDA グラフとの両立を保っています。<b>「速い仕組みを作った」ではなく「既にある速さを壊さない形で作った」</b>というのが、この節の読みどころです。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>【デモ】圧力を上げて状態を動かす</h2>
+  <p class="lead">3 つの状態を 1 本のリクエストで追います。<b>圧力</b>を上げると古いページが CPU へ落ち、ブロックテーブルに null のプレースホルダが並び、indexer が選んだ行が hot バッファへ入ります。<b>末尾は決して落ちません</b>。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvRes" width="860" height="460"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">KV の圧力 <input id="reP" type="range" min="0" max="100" value="0"><span id="rePv">0</span>%</div>
+    <button id="reStep">indexer を 1 回動かす</button>
+    <button class="ghost" id="reNew">CPU の prefix を再利用する新規リクエスト</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>GPU 常駐</span>
+    <span><span class="dot" style="background:#60a5fa"></span>hot バッファに乗っている行</span>
+    <span><span class="dot" style="background:#6b7a86"></span>CPU にだけある (テーブルは null)</span>
+    <span><span class="dot" style="background:#e0a03f"></span>末尾 (evict しない)</span>
+  </div>
+  <p class="rdout" id="reOut"></p>
+  <div class="warn">
+    <b>このデモは状態遷移の模式です。</b>ページ数 ・ 上位 K の個数 ・ hot バッファの行数は<b>説明のための小さな値</b>で、GLM 5.3 の実際の設定ではありません (原文は上位 K の具体値を書いていません)。<b>「圧力」も 0 から 100% の抽象量</b>で、実際には GPU ブロックプールの空き具合から決まります。デモが再現しているのは<b>規則</b>だけです。末尾は落ちない、落ちたページはテーブルで null になる、indexer が求めた行だけが hot に入る、hot にある行はコピーなしで読める。
+  </div>
+  <p>「indexer を 1 回動かす」を何度か押すと、<b>hot バッファのヒット率が上がっていく</b>のが見えます。原文が hot バッファの既定を<b>上位 K の 2 倍の行数</b>にしている理由がここにあります。<b>ヒット率を高く保ちながら、バッファ自体は小さく抑える</b>という設計です。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>hot buffer は特別な確保ではない</h2>
+  <p class="lead">3 つの状態がすべて成立する理由は 1 つです。<b>hot バッファが別枠の確保ではないこと。</b></p>
+  <div class="key">
+    hot バッファのページは<b>普通の KV キャッシュブロック</b>です。常駐ページと<b>同じプールから</b>、vLLM の <b>Hybrid Memory Allocator (HMA)</b> を通して貸し出され、<b>リクエストが最初に必要としたときに取り、必要でなくなったら返します</b>。常駐ページ上の行でも hot バッファ上の行でも、resolver は <b>HMA の行 ID</b> を渡し、<b>HMA が 1 つの stride でまとめて gather します</b>。そして<b>あるリクエストが解放したブロックが、別のリクエストの hot バッファ容量になれます</b>。
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>この設計判断の意味を、<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>の「正規レイアウト」と並べて読むと構造が見えます。第 1 回は<b>ホスト側の形を構成から独立させて、共有できる相手を増やす</b>話でした。今回は<b>hot バッファの形を通常のページと同じにして、カーネルを変えずに済ませる</b>話です。どちらも<b>「新しい種類のメモリを作らない」</b>という同じ方針です。もし hot バッファが別テンソルだったら、sparse MLA のカーネルは 2 種類のメモリを見分けて別々に読む必要があり、<b>gather を 1 つの stride で済ませられません</b>。容量の融通も効きません。「同じプール ・ 同じテンソル」という制約が、性能と運用の両方を買っています。
+  </div>
+</section>
+<section id="s7">
+  <h2><span class="num">7</span>圧力が来る前に備える</h2>
+  <p class="lead">HiSparse は<b>圧力が来る前に準備します</b>。ここも設計が細かい。</p>
+  <table>
+    <tr><th>タイミング</th><th>やること</th></tr>
+    <tr><td>キャッシュ可能な prefix ページが<b>完成したとき</b></td><td>CPU メモリへのコピーを<b>キューに入れつつ、GPU からの提供は続けます</b></td></tr>
+    <tr class="hl"><td>後で GPU キャッシュが埋まったとき</td><td>そのページは<b>もう一度コピーせずに</b> GPU のスロットを手放せます</td></tr>
+    <tr><td>圧力がもっと新しいページに先に届いたとき</td><td>その GPU スロットは<b>コピーがキューに入った時点で</b>再利用可能になります</td></tr>
+    <tr><td>転送が完了したとき</td><td>その CPU 上のコピーが<b>prefix 再利用に使えるようになります</b></td></tr>
+  </table>
+  <p>実装の軽さも書かれています。<code>hisparse-glm</code> ブランチは、<b>forward パスの後に、すべての sparse-MLA 層をまとめて 1 回の launch でコピーします</b>。コピーは<b>モデルの GPU ストリーム上で順序づけられる</b>ので、同期が単純で安全に保たれます。</p>
+  <div class="add">
+    <span class="badge">補足</span>「コピーをキューに入れた時点でスロットが再利用可能になる」という一文は、<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>の <b>t2 で解放する</b>話と同じ形です。<b>遅い経路の完了を待たずに、希少な資源を先に返す</b>。第 1 回はホストへのコピー完了で GPU を返し、ここでは<b>コピーのキュー投入</b>で返しています。より踏み込んでいるのは、順序づけをストリームに任せているからです。<b>「いつ安全に返せるか」を時刻ではなくストリームの順序で保証する</b>のは、GPU プログラミングで繰り返し出てくる型です。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>他の機構との合成</h2>
+  <p class="lead">Hybrid HiSparse は<b>共有 HMA プール上の居住方策</b>であり、vLLM の他の KV 機構と<b>並ぶ connector</b> です。だからスタックの残りはこれまでどおり動きます。</p>
+  <table>
+    <tr><th>相手</th><th>どう噛み合うか</th></tr>
+    <tr><td>他のキャッシュグループ</td><td>通常の prefix キャッシュ ・ 転送 ・ オフロードをそのまま使う</td></tr>
+    <tr class="hl"><td>indexer の KV</td><td><b>HiSparse は触りません</b>。標準の <code>OffloadingConnector</code> が<b>通常のブロック粒度のストレージ</b>で独立にオフロードできます</td></tr>
+    <tr><td>P/D 分離からの取り込み</td><td>prefix が常駐に収まらないとき、<b>ホスト側に着地できます</b></td></tr>
+    <tr><td>speculative decoding</td><td><b>ステップごとに再生できる resolver のプラン</b>を通して動き、リクエストの hot 状態を共有します</td></tr>
+    <tr><td>TP 間の共有</td><td>MLA の KV は<b>TP rank をまたいで同一</b>なので、pinned なホストプールは <b>DP レプリカごとに確保して、そのローカルな TP rank 間で共有</b>します。<b>TP rank 0 が共有コピーを書き、どの rank も読める</b>。<b>CUDA event がストリームの順序を保つ</b></td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>最後の行は地味ですが効きます。MLA は KV を低ランクの潜在表現に圧縮するので、<b>TP で分割されず全 rank が同じものを持ちます</b>。ということは、ホスト側に<b>8 枚分のコピーを持つ必要がない</b>。1 枚が書いて 7 枚が読むだけです。<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>の consolidated I/O が「8 本の小さな I/O を 1 本にまとめる」話だったのに対し、こちらは<b>そもそも重複が存在しない</b>という MLA 固有の性質を使っています。<b>アーキテクチャの性質が、そのままメモリ予算の 8 分の 1 になる</b>例です。
+  </div>
+  <div class="warn">
+    <b>MTP との干渉が明記されています。</b>MTP (speculative decoding) は<b>同時実行をさらに制限しうる</b>と原文は書いています。理由は<b>hot バッファが検証トークンを一度に全部収める必要がある</b>ことで、公開時点では 1 つの hot バッファを <b>(num_speculative_tokens + 2) × 上位 K</b> に見積もる必要があります。これは<b>バッファを縮める作業を進めているので変わりうる</b>とされ、公式の計算機もこの分をまだ織り込んでいません。9 節の実測で <b>MTP3 の方が MTP なしより同時実行数が少ない</b>のは、この制約が数字に出たものと読めます。
+  </div>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>【デモ】実測 — Pareto と占有率</h2>
+  <p class="lead">測定は <b>8 枚の H200</b> で、OpenHands の多ターン agentic ワークロード (13 ターンの会話、<b>初回ターン 74,160 トークン</b>、以降 753 トークン、出力は 220 トークン固定) です。</p>
+  <table>
+    <tr><th>項目</th><th>設定</th></tr>
+    <tr><td>共通</td><td>TP8 ・ <b>MTP3</b> ・ <b>FP8 KV キャッシュ</b> ・ 142K の受け入れ上限 ・ <code>max_num_batched_tokens=32768</code> ・ <code>max_num_seqs=256</code> ・ <code>gpu_memory_utilization=0.92</code></td></tr>
+    <tr><td>ベースライン</td><td>オフロードのプールを <b>512 GiB</b></td></tr>
+    <tr class="hl"><td>Hybrid HiSparse</td><td><b>同じホスト予算</b>を <b>384 GiB の HiSparse プール + 128 GiB のオフロード</b>に分けた</td></tr>
+  </table>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-glm53-part1-hybrid-sparse-offloading/openhands-pareto-occupancy.svg" alt="GLM 5.3 の interactivity-throughput Pareto と実際に走っていたリクエスト数">
+    <p class="cap">上: interactivity と throughput の掃引。<b>interactivity は 1000 を平均 TPOT で割った値</b>で、<b>論理的な総トークンスループットは prefix キャッシュにヒットしたプロンプトトークンも含み、8 で割って GPU 1 枚あたりにしている</b>。下: 各ベンチマーク点で収集した <code>vllm:num_requests_running</code> の<b>非ゼロサンプルの平均</b>。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-glm53-part1-hybrid-sparse-offloading" target="_blank" rel="noopener">GLM 5.3 Optimizations, Part 1</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>下のデモは<b>この図から読み取った実測値</b>をプロットしたものです。4 つの構成を切り替えて、Pareto と占有率のどちらでも同じ話が出ていることを確かめてください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvPar" width="860" height="480"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="prPareto">Pareto (interactivity 対 throughput)</button>
+    <button class="ghost" id="prOcc">実際に走っていたリクエスト数</button>
+    <button class="ghost" id="prBoth">同時実行の設定値に対する throughput</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>HiSparse 384 GiB + offload 128 GiB ・ MTP3</span>
+    <span><span class="dot" style="background:#8fd6b4"></span>同 ・ MTP なし</span>
+    <span><span class="dot" style="background:#e07a5f"></span>Offloading 512 GiB ・ MTP3</span>
+    <span><span class="dot" style="background:#e0a03f"></span>同 ・ MTP なし</span>
+  </div>
+  <p class="rdout" id="prOut"></p>
+  <div class="key">
+    <b>いちばん雄弁なのは下の段です。</b>設定同時実行を 8 → 16 → 24 → 32 と上げていったとき、実際に走っていたリクエスト数の平均は、<b>オフロードのベースラインでは 4.8 → 4.8 → 4.9 → 4.9 (MTP3) と完全に頭打ち</b>になります。<b>設定をいくら上げても、走れる本数が増えません。</b>一方 HiSparse は <b>7.1 → 11.9 → 18.1 → 18.9</b>、MTP なしなら <b>6.8 → 13.7 → 19.7 → 25.5</b> まで伸びます。1 節で述べた「dense attention は全トークンの常駐を要求するので同時実行数が GPU メモリに縛られる」という制約が、そのまま数字になっています。
+  </div>
+  <p>上の段で throughput が伸びるのも同じ理由です。同時に走れる本数が増えるので、GPU 1 枚あたりの論理トークンスループットが上がります。逆にベースラインは<b>設定を上げると throughput が落ちます</b> (MTP3 で c8 の 7,410 から c16 で 2,577、c24/c32 では 1,000 前後まで)。走れない本数を積んだぶん、待ち行列と再 prefill のコストが増えている形です。</p>
+  <div class="warn">
+    <b>数値の出どころ。</b>デモの数値は<b>原文の図に描かれている値をそのまま読み取ったもの</b>です。下の段の占有率は図に数字が直接書かれています。上の段の座標は<b>図の目盛りから復元した値なので、末尾の桁には読み取り誤差が入ります</b> (傾向と大小関係は保たれます)。正確な数字は原文の図を見てください。<b>また 4 つの構成は commit が異なります</b> (HiSparse MTP3: e8ef1e07bd、HiSparse no-MTP: 8fc4636fb6、offloading MTP3: 80cb71c9ff、offloading no-MTP: e8ef1e07bd)。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>【デモ】交差点はどこにあるのか</h2>
+  <p class="lead">原文には<b>公式の同時実行数の計算機</b>が埋め込まれていて、自分の構成での見積りができます (<a href="https://vllm.ai/blog-assets/interactive_pages/hisparse_concurrency_calculator.html" target="_blank" rel="noopener">全画面で開く</a>)。ここではそれと重複しないように、<b>1 つの問いだけ</b>に絞ったデモを置きます。<b>なぜ短い文脈では通常常駐の方が多く詰め込めるのか。</b></p>
+  <p>原文の説明がこうです。<b>hot バッファはリクエストごとに固定の GPU コストを足すので、短い文脈では通常の常駐の方が多くのリクエストを収められます。文脈が長くなると、sparse-MLA の常駐に上限をつけることで HiSparse の方が多くの同時実行を維持できます。</b>つまり<b>どこかで必ず交差します</b>。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvCross" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">HBM の空き <input id="crH" type="range" min="20" max="600" step="10" value="200"><span id="crHv">200</span> GB</div>
+    <div class="slider">sparse-MLA KV <input id="crK" type="range" min="4" max="200" step="4" value="60"><span id="crKv">60</span> KB/tok</div>
+  </div>
+  <div class="controls">
+    <div class="slider">indexer KV <input id="crI" type="range" min="1" max="40" step="1" value="6"><span id="crIv">6</span> KB/tok</div>
+    <div class="slider">hot バッファ <input id="crB" type="range" min="20" max="800" step="20" value="200"><span id="crBv">200</span> MB/req</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>通常の GPU 常駐</span>
+    <span><span class="dot" style="background:#43b581"></span>Hybrid HiSparse</span>
+    <span><span class="dot" style="background:#e0a03f"></span>交差点</span>
+  </div>
+  <p class="rdout" id="crOut"></p>
+  <div class="warn">
+    <b>これは読者が入れる仮定値による計画上の目安で、原文の計算機の代わりではありません。</b>計算しているのは 2 本の式だけです。<b>通常常駐</b>は「1 リクエストあたり (sparse-MLA KV + indexer KV) × 文脈長」、<b>HiSparse</b> は「1 リクエストあたり indexer KV × 文脈長 + hot バッファの固定費」。<b>実行時のワークスペース ・ 長さの偏り ・ スケジューリングの挙動は入っていません</b>。原文も自分の計算機について「これは計画のための見積りで、保証されるサービング上限ではない」と明記しています。<b>MTP による hot バッファの増加も入れていません</b> (8 節の (num_spec + 2) × 上位 K)。
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>この 2 本の式を並べると、交差点の位置が何で決まるかが読めます。通常常駐は<b>傾きが (sparse-MLA + indexer)</b> の直線、HiSparse は<b>切片が hot バッファ ・ 傾きが indexer だけ</b>の直線です。だから交差点は<b>hot バッファの固定費を、sparse-MLA の傾きで割った長さ</b>のあたりに来ます。<b>hot バッファを大きくすると交差点は右へ動き</b> (短い文脈での不利が増え)、<b>sparse-MLA の 1 トークンあたりが重いモデルほど交差点は左へ動きます</b> (長文脈での利得が早く来る)。原文が「hot バッファを増やすと容量の一部を hot キャッシュの被覆率に替えることになる」と書いているのは、この直線の切片を動かす話です。
+  </div>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>再現の手順</h2>
+  <p class="lead">原文の付録に、そのまま動かせる起動コマンドがあります。要点だけ抜き出します。</p>
+  <div class="math">vllm serve zai-org/GLM-5.3 \
+  --tensor-parallel-size 8 \
+  --kv-cache-dtype fp8 \
+  --gpu-memory-utilization 0.92 \
+  --max-model-len 142000 \
+  --max-num-batched-tokens 32768 \
+  --max-num-seqs 256 \
+  --enable-prefix-caching \
+  --attention-config '{"hisparse_config":{"host_pool_gib":384}}' \        <span class="cm">← HiSparse のプール</span>
+  --kv-transfer-config '{"kv_connector":"OffloadingConnector",
+      "kv_role":"kv_both",
+      "kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec",
+        "cpu_bytes_to_use":137438953472}}' \                             <span class="cm">← 128 GiB。第 1 回の枠組み</span>
+  --speculative-config '{"method":"mtp","num_speculative_tokens":3}'</div>
+  <table>
+    <tr><th>押さえるべき点</th><th>内容</th></tr>
+    <tr><td><code>host_pool_gib</code></td><td><b>DP レプリカごと</b>の値で、<b>ホストブロックの整数個に丸められます</b></td></tr>
+    <tr class="hl"><td>128 GiB のオフロードプールの役割</td><td><b>HiSparse が管理しないキャッシュグループ</b>を保持します。<b>indexer の KV もここ</b>です</td></tr>
+    <tr><td>MTP なしの HiSparse</td><td><code>--speculative-config</code> を省く</td></tr>
+    <tr><td>HiSparse なしの MTP3 ベースライン</td><td><code>--speculative-config</code> は残し、<code>--attention-config</code> を省き、<code>cpu_bytes_to_use</code> を <b>512 GiB</b> に変える</td></tr>
+    <tr><td>制約</td><td>HiSparse は<b>現在 NVIDIA GPU のみ</b>の実装</td></tr>
+  </table>
+  <p>ベンチマーク側も自己完結していて、<b>13 ターン ・ 初回 74,160 トークン ・ 以降 753 トークン ・ 128 会話</b>の決定的なデータセットを作るスクリプトと、<b>EvalScope を固定 commit で</b>入れる手順が案内されています。掃引は <code>--parallel 1 8 16 24 32</code> で、各点ごとに新しい会話を使います。指標の定義も明記されています。</p>
+  <table>
+    <tr><th>指標</th><th>定義</th></tr>
+    <tr><td>interactivity</td><td><b>1000 / 平均 TPOT (ms)</b></td></tr>
+    <tr><td>GPU 1 枚あたりの論理総トークンスループット</td><td>EvalScope の総トークンスループットを <b>8 で割る</b></td></tr>
+    <tr><td>リクエスト占有率</td><td><code>vllm:num_requests_running</code> の<b>非ゼロサンプルの平均</b> (30 秒ごとに <code>/metrics</code> を取得)</td></tr>
+    <tr><td>MTP の受理長</td><td><b>1 + Δ(受理トークン数) / Δ(draft 数)</b></td></tr>
+  </table>
+</section>
+
+<section id="s12">
+  <h2><span class="num">12</span>読むときに気をつける点</h2>
+  <p class="lead">以下はこの記事の読み解きで、原文の主張ではありません。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>効く前提はモデル側にある</td><td>この手法が成立するのは<b>sparse-MLA という「上位 K しか読まない」構造</b>があるからです。dense attention のモデルには<b>そのまま適用できません</b>。GLM 5.3 の <b>IndexShare</b> (4 層あたり indexer 1 層) も、GPU に残る側を小さくする条件として効いています</td></tr>
+    <tr><td>indexer KV は伸び続ける</td><td>原文が明記しているとおり、<b>indexer の KV は GPU 常駐のまま文脈長とともに伸びます</b>。だから「文脈長から完全に切り離される」わけではなく、<b>切り離されるのは sparse-MLA の本体だけ</b>です。10 節のデモで HiSparse 側の直線に傾きが残るのはこのためです</td></tr>
+    <tr class="hl"><td>MTP との取引</td><td>実測で <b>MTP3 の同時実行 (18.9) が MTP なし (25.5) より低い</b>のは、hot バッファが検証トークンを全部収める必要があるためです。<b>interactivity は MTP3 の方が高い</b> (c1 で約 257 対 約 90) ので、<b>1 ユーザーの速さと同時実行数を交換している</b>形です。どちらを取るかは運用の判断になります</td></tr>
+    <tr><td>単一の測定条件</td><td>モデル 1 つ ・ ハードウェア 1 構成 ・ ワークロード 1 種類 (OpenHands の多ターン) です。<b>初回 74,160 トークン + 以降 753 トークン</b>という形は prefix 再利用が強く効く条件で、<b>agentic の代表ではありますが一般の形ではありません</b></td></tr>
+    <tr><td>100 万トークンの主張</td><td>「従来このハードウェアでは不可能だった 100 万トークンの文脈で動く」は<b>可否の主張</b>で、その長さでの性能の数字は示されていません。掲載されている測定は <b>142K の受け入れ上限</b>の下で行われています</td></tr>
+    <tr><td>commit が構成ごとに違う</td><td>4 つの系列で<b>ビルドが 3 種類</b>あります (HiSparse no-MTP だけ別 commit)。<b>厳密な A/B ではありません</b>。原文は commit を全部開示しているので、そこは追跡可能です</td></tr>
+    <tr><td>まだ広く使えない</td><td><b>v0.30 で広く提供する計画</b>で、現時点では固定 commit のビルドが必要です。<b>NVIDIA GPU 限定</b>で、hot バッファのサイズ規則も<b>変わる予定</b>と書かれています</td></tr>
+    <tr><td>計算機の限界</td><td>原文の計算機自身が「<b>計画のための見積りで、保証されるサービング上限ではない</b>」と述べ、実行時ワークスペース ・ リクエスト長の偏り ・ スケジューリングで実際の同時実行数は下がりうるとしています。<b>MTP の hot バッファ増もまだ織り込まれていません</b></td></tr>
+    <tr><td>この記事の追加部分</td><td><b>1 節の補足 ・ 2 節の補足 ・ 3 節のデモ ・ 4 節の補足 ・ 5 節のデモ ・ 6 節の補足 ・ 7 節の補足 ・ 8 節の補足 ・ 9 節のデモ ・ 10 節のデモと補足 ・ 12 節</b>は原文にありません</td></tr>
+  </table>
+  <div class="key">
+    <b>この設計から持ち帰れる形。</b><a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>が<b>「希少な資源の占有を、遅い経路のレイテンシから切り離す」</b>話だったのに対し、今回は<b>「モデルが実際に読む量まで、常駐の要求を落とす」</b>話です。<b>attention が疎なら、常駐も疎でよい。</b>そのうえで hybrid が付くのは、<b>疎にする操作それ自体にコスト (CPU-GPU 転送) があるので、必要になるまで払わない</b>という判断です。この 2 つ、<b>「上限を作る」と「必要になるまで払わない」</b>は独立した設計判断で、組み合わせて初めて「短い文脈でも損しないし、長い文脈では勝つ」という形になります。
+  </div>
+  <p class="fn">原文: vLLM Team. "<a href="https://vllm.ai/blog/2026-09-08-glm53-part1-hybrid-sparse-offloading" target="_blank" rel="noopener">GLM 5.3 Optimizations, Part 1: Hybrid HiSparse Offloading in vLLM</a>", vLLM 公式ブログ, 2026-09-08。実装は Matthew Bonanni (Red Hat) ・ Lucas Wilkinson (Red Hat) ・ Fares Obeid (Prime Intellect) による開発で、設計は Chao Lei (Ant Group) と Nicolò Lucchesi (Mistral) との協働で形になったと記載されています。図 3 枚はいずれも原文のものを直接参照しています (<code>vllm.ai/blog-assets/figures/2026-09-08-glm53-part1-hybrid-sparse-offloading/</code>)。<br>
+  <b>9 節のデモの数値は原文の図から読み取った実測値</b>です (占有率は図に数字が明記、Pareto の座標は目盛りから復元したため末尾の桁に読み取り誤差)。<b>3 節と 5 節のデモは規則の模式</b>、<b>10 節のデモは読者が入れる仮定値の計算</b>です。公式の同時実行計算機は<a href="https://vllm.ai/blog-assets/interactive_pages/hisparse_concurrency_calculator.html" target="_blank" rel="noopener">こちら</a>。<br>
+  関連する解説として<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回 階層 KV オフロード</a>、<a href="./attn-mla.html">MLA</a>、<a href="./attn-dsa.html">DeepSeek Sparse Attention</a>、<a href="./paper-declarative-attention.html">Declarative Attention</a> があります。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./vllm-blog-index.html" style="color:var(--g2)">← vLLM ブログ解説シリーズの目次へ</a> ・
+  <a href="https://vllm.ai/blog/2026-09-08-glm53-part1-hybrid-sparse-offloading" style="color:var(--g2)" target="_blank" rel="noopener">原文を読む</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* ============ デモ1: 2 リクエストと 1 つのプール ============ */
+(function(){
+  const cv=document.getElementById('cvTwo'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let mode='pre';
+  function draw(){
+    const P=+document.getElementById('twP').value;
+    const A=+document.getElementById('twA').value;
+    const B=+document.getElementById('twB').value;
+    document.getElementById('twPv').textContent=P;
+    document.getElementById('twAv').textContent=A;
+    document.getElementById('twBv').textContent=B;
+    const need=A+B, over=need-P;
+    /* 各方式の結果 */
+    let a={res:A,hot:0,cpu:0,lost:0,run:true}, b={res:B,hot:0,cpu:0,lost:0,run:true}, note='';
+    if(over<=0){
+      note='プールに余裕がある。どの方式でも両方が decode を続ける (Hybrid HiSparse はこの間オフロードのコストを払わない)';
+    } else if(mode==='pre'){
+      b={res:0,hot:0,cpu:0,lost:B,run:false};
+      note='B が選ばれて KV が捨てられる。B は後で走るときに TTFT を丸ごと払い直す';
+    } else if(mode==='off'){
+      b={res:0,hot:0,cpu:B,lost:0,run:false};
+      note='B の KV はホストに生き残るので再 prefill は不要。だが全部が GPU に戻るまで B は走れず、A が単独で decode する';
+    } else {
+      /* hybrid: 各リクエストが最も冷たいページを手放し、hot ページ 1 枚を借りる */
+      const shedA=Math.min(Math.max(Math.ceil(over/2),0),Math.max(A-2,0));
+      const shedB=Math.min(Math.max(over-shedA,0),Math.max(B-2,0));
+      a={res:A-shedA,hot:1,cpu:shedA,lost:0,run:true};
+      b={res:B-shedB,hot:1,cpu:shedB,lost:0,run:true};
+      note='両方が最も冷たいページをその場で手放し、空いたスロットが新しい末尾と hot ページとして貸し出される。両方が decode を続ける';
+    }
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('プール '+P+' ページ ・ A が '+A+' ページ ・ B が '+B+' ページ 必要 ('+(over>0?('超過 '+over+' ページ'):'余裕あり')+')',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('ページ数の模式 ・ 転送時間は含まない',W-24,24);
+    /* プールの絵 */
+    const x0=40,gw=W-80,py=52,ph=40;
+    const cell=gw/P;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(x0,py,gw,ph);
+    let used=0;
+    function fill(cnt,color,alpha){
+      for(let i=0;i<cnt&&used<P;i++,used++){
+        ct.fillStyle=color;ct.globalAlpha=alpha;
+        ct.fillRect(x0+used*cell+1,py+2,cell-2,ph-4);ct.globalAlpha=1;
+      }
+    }
+    fill(a.res,POS,0.9); fill(a.hot,BLUE,0.9); fill(b.res,POS,0.55); fill(b.hot,BLUE,0.55);
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('GPU ブロックプール ('+used+' / '+P+' ページ使用中 ・ 濃い = A、薄い = B)',x0,py+ph+18);
+    /* 2 リクエストの内訳 */
+    const ry=124,rowh=104;
+    [['リクエスト A',a],['リクエスト B',b]].forEach(function(r,ri){
+      const y=ry+ri*rowh;
+      ct.fillStyle=r[1].run?POS:NEG;ct.font='bold 13.5px sans-serif';ct.textAlign='left';
+      ct.fillText(r[0]+(r[1].run?' — decode を続けられる':' — 止まる'),24,y);
+      const bx=24,bw=W-48,bh=30, tot=Math.max(A,B);
+      let acc=0;
+      [[r[1].res,POS,'GPU 常駐'],[r[1].hot,BLUE,'hot'],[r[1].cpu,MUT,'CPU のみ'],[r[1].lost,NEG,'消えた']].forEach(function(g){
+        if(g[0]<=0) return;
+        const w=g[0]/tot*bw;
+        ct.fillStyle=g[1];ct.globalAlpha=0.9;ct.fillRect(bx+acc,y+10,w,bh);ct.globalAlpha=1;
+        if(w>72){
+          ct.fillStyle='#0d2b20';ct.font='bold 11.5px sans-serif';ct.textAlign='center';
+          ct.fillText(g[2]+' '+g[0],bx+acc+w/2,y+30);
+        }
+        acc+=w;
+      });
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+      ct.fillText(r[1].lost>0?'再 prefill が必要 ('+r[1].lost+' ページ分)':
+        (r[1].cpu>0?(r[1].hot>0?'古いページは CPU、必要な行は hot ページ経由で読む':'全部が CPU にある。GPU に戻るまで走れない')
+                   :'すべて GPU 上にある'),bx,y+58);
+    });
+    const by=H-72;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,60);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText((mode==='pre'?'preempt':mode==='off'?'従来のオフロード':'hybrid sparse offload')+
+      ': decode を続けられるのは '+((a.run?1:0)+(b.run?1:0))+' / 2 本',40,by+22);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText(note,40,by+44);
+    document.getElementById('twOut').textContent=
+      (over<=0?'超過なし。3 方式に差は出ない':'decode を続けられるのは '+((a.run?1:0)+(b.run?1:0))+' / 2 本');
+  }
+  bindBtns({pre:'twPre',off:'twOff',hyb:'twHyb'},function(k){mode=k;draw();});
+  ['twP','twA','twB'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+
+/* ============ デモ2: 3 つの居住状態 ============ */
+(function(){
+  const cv=document.getElementById('cvRes'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NP=10, TOPK=6, HOT=4;   /* ページ数 ・ 上位 K ・ hot バッファの行数 (説明用の小さな値) */
+  let hot=[], picks=[], stats={hit:0,miss:0,resident:0}, isNew=false, rounds=0;
+  function pressure(){return +document.getElementById('reP').value;}
+  function residentCount(){
+    if(isNew) return 1;                       /* 非常駐: 末尾 1 ページだけ */
+    const p=pressure();
+    return Math.max(1,Math.round(NP*(1-p/100)));
+  }
+  function stepIndexer(){
+    const rc=residentCount();
+    picks=[];
+    for(let i=0;i<TOPK;i++){
+      /* 上位 K は文脈全体に散らばる */
+      const page=Math.floor(Math.random()*NP);
+      const row=Math.floor(Math.random()*4);
+      picks.push({page:page,row:row});
+    }
+    picks.forEach(function(k){
+      const residentFrom=NP-rc;               /* 先頭側が CPU に落ちる */
+      if(k.page>=residentFrom){ stats.resident++; k.kind='resident'; return; }
+      const key=k.page+':'+k.row;
+      const at=hot.indexOf(key);
+      if(at>=0){ hot.splice(at,1); hot.push(key); stats.hit++; k.kind='hot'; }
+      else { hot.push(key); if(hot.length>HOT) hot.shift(); stats.miss++; k.kind='miss'; }
+    });
+    rounds++;
+    draw();
+  }
+  function draw(){
+    const p=pressure();
+    document.getElementById('rePv').textContent=p;
+    const rc=residentCount(), residentFrom=NP-rc;
+    const state=isNew?'非常駐 (no residency)':(rc>=NP?'完全常駐 (full residency)':'混在 (mixed residency)');
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 本のリクエスト ・ '+NP+' ページ ・ 上位 K = '+TOPK+' ・ hot バッファ '+HOT+' 行',24,24);
+    ct.fillStyle=(state.indexOf('完全')===0)?POS:(state.indexOf('混在')===0?BLUE:ALT);
+    ct.font='bold 13px sans-serif';ct.textAlign='right';
+    ct.fillText('状態: '+state,W-24,24);
+    /* ブロックテーブル */
+    const x0=40,gw=W-80,cell=gw/NP,ty=56,th=52;
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('ブロックテーブル (左が古い ・ 右端が末尾)',x0,ty-6);
+    for(let i=0;i<NP;i++){
+      const x=x0+i*cell, isTail=(i===NP-1), res=(i>=residentFrom);
+      let col=res?(isTail?ALT:POS):MUT;
+      ct.fillStyle=col;ct.globalAlpha=res?0.9:0.35;
+      ct.fillRect(x+2,ty+4,cell-4,th);ct.globalAlpha=1;
+      ct.fillStyle=res?'#0d2b20':SUBI;ct.font='bold 11px sans-serif';ct.textAlign='center';
+      ct.fillText(res?('p'+i):'null',x+cell/2,ty+26);
+      ct.font='10px sans-serif';
+      ct.fillText(res?(isTail?'末尾':'常駐'):'CPU のみ',x+cell/2,ty+44);
+      /* 上位 K の輪 */
+      picks.forEach(function(k){
+        if(k.page!==i) return;
+        ct.strokeStyle=(k.kind==='resident')?POS:(k.kind==='hot'?BLUE:NEG);
+        ct.lineWidth=2;ct.beginPath();
+        ct.arc(x+cell/2+(k.row-1.5)*9,ty+th-4,3.6,0,Math.PI*2);ct.stroke();
+      });
+    }
+    /* hot バッファ */
+    const hy=150;
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('hot バッファ (通常の KV ブロックをプールから借りたもの ・ LRU)',x0,hy);
+    for(let i=0;i<HOT;i++){
+      const x=x0+i*((gw)/HOT), w=gw/HOT-8;
+      const has=hot[i]!==undefined;
+      ct.fillStyle=has?BLUE:'rgba(255,255,255,0.06)';ct.globalAlpha=has?0.85:1;
+      ct.fillRect(x,hy+10,w,38);ct.globalAlpha=1;
+      ct.fillStyle=has?'#0d2b20':MUT;ct.font='bold 11.5px sans-serif';ct.textAlign='center';
+      ct.fillText(has?('p'+hot[i].split(':')[0]+' の行 '+hot[i].split(':')[1]):'空き',x+w/2,hy+34);
+    }
+    ct.fillStyle=MUT;ct.font='11px sans-serif';ct.textAlign='left';
+    ct.fillText('1 ページに別々の CPU ブロック由来の行が混ざる (トークン単位で索引される)',x0,hy+64);
+    /* 直近の解決 */
+    const sy=240;
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('直近の indexer 1 回で、上位 K の '+TOPK+' 行はどう解決されたか',24,sy);
+    if(!picks.length){
+      ct.fillStyle=MUT;ct.font='12px sans-serif';
+      ct.fillText('「indexer を 1 回動かす」を押してください',40,sy+26);
+    } else {
+      const kinds=[['resident','GPU 常駐のページからその場で読む',POS],
+                   ['hot','hot バッファでヒット (コピー不要 ・ LRU を更新)',BLUE],
+                   ['miss','ミス。pinned ホストから 1 行だけ hot へコピー',NEG]];
+      kinds.forEach(function(kk,i){
+        const c=picks.filter(function(x){return x.kind===kk[0];}).length;
+        const y=sy+22+i*30;
+        ct.fillStyle=kk[2];ct.fillRect(40,y-9,11,11);
+        ct.fillStyle=SUBI;ct.font='12.5px sans-serif';ct.textAlign='left';
+        ct.fillText(kk[1],58,y);
+        ct.fillStyle=kk[2];ct.font='bold 13px "SF Mono",Menlo,monospace';ct.textAlign='right';
+        ct.fillText(c+' 行',W-40,y);
+      });
+    }
+    /* 累積 */
+    const by=H-116;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,104);
+    const tot=stats.hit+stats.miss;
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('累積 ('+rounds+' 回): 常駐から '+stats.resident+' 行 ・ hot ヒット '+stats.hit+' 行 ・ ミス '+stats.miss+' 行'+
+      (tot>0?(' → CPU に落ちた分の hot ヒット率 '+(stats.hit/tot*100).toFixed(0)+'%'):''),40,by+22);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText(isNew
+      ? '非常駐: プレースホルダと hot ページ 1 枚から始まる。行は indexer が選ぶにつれて到着するので、履歴全体ではなく attend する分だけを払う'
+      : (rc>=NP
+        ? '完全常駐: sparse-MLA の KV はすべて GPU 上。完了した prefix ページは先回りしてホストに実体化されている'
+        : '混在: 末尾は決して evict されない。落ちたページはテーブルで null になり、必要な行だけが hot に乗る'),40,by+44);
+    ct.fillStyle=ALT;ct.font='12px sans-serif';
+    ct.fillText('この解決は 1 つの融合カーネルで行われ、decode 経路で CPU の判断を待たないので CUDA グラフに焼ける',40,by+66);
+    ct.fillStyle=MUT;ct.font='11.5px sans-serif';
+    ct.fillText('圧力を上げるとページが左から CPU へ落ちる ・ 上位 K は文脈全体に散らばるので、落ちた側からの要求が hot に集まる',40,by+88);
+    document.getElementById('reOut').textContent=
+      state+' ・ GPU 常駐 '+rc+' / '+NP+' ページ'+(tot>0?(' ・ hot ヒット率 '+(stats.hit/tot*100).toFixed(0)+'%'):'');
+  }
+  document.getElementById('reStep').onclick=stepIndexer;
+  document.getElementById('reNew').onclick=function(){
+    isNew=!isNew; hot=[]; picks=[]; stats={hit:0,miss:0,resident:0}; rounds=0;
+    document.getElementById('reNew').classList.toggle('active',isNew);
+    draw();
+  };
+  document.getElementById('reP').oninput=function(){
+    hot=[];picks=[];stats={hit:0,miss:0,resident:0};rounds=0;draw();};
+  draw();
+})();
+/* ============ デモ3: 実測 Pareto と占有率 (原文の図から読み取った値) ============ */
+(function(){
+  const cv=document.getElementById('cvPar'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const CFG=['c1','c8','c16','c24','c32'], CN=[1,8,16,24,32];
+  const S=[
+    {n:'HiSparse 384 + offload 128 ・ MTP3',c:POS,
+     inter:[257.1,31.8,17.9,12.7,14.4], thr:[4892,8300,9623,9716,11682], occ:[1.0,7.1,11.9,18.1,18.9]},
+    {n:'HiSparse 384 + offload 128 ・ MTP なし',c:'#8fd6b4',
+     inter:[89.6,27.9,15.6,10.5,9.9],  thr:[2740,6939,8481,8982,10958], occ:[1.0,6.8,13.7,19.7,25.5]},
+    {n:'Offloading 512 GiB ・ MTP3',c:NEG,
+     inter:[265.2,47.2,14.8,5.6,5.6],  thr:[4809,7410,2577,997,995],    occ:[1.0,4.8,4.8,4.9,4.9]},
+    {n:'Offloading 512 GiB ・ MTP なし',c:ALT,
+     inter:[92.0,34.7,18.3,4.4,4.4],   thr:[2650,6126,3675,987,987],    occ:[1.0,4.9,4.9,6.0,6.0]}
+  ];
+  let view='pareto';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(view==='pareto'?'interactivity (tokens/s/user) 対 GPU 1 枚あたりの論理総トークンスループット':
+                view==='occ'?'各点で実際に走っていたリクエスト数の平均 (vllm:num_requests_running の非ゼロ平均)':
+                             '設定同時実行に対する GPU 1 枚あたりのスループット',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('原文の図から読み取った実測値',W-24,24);
+    if(view==='occ'){
+      const x0=170,y0=60,gw=W-90-x0,rowh=(H-150)/5;
+      [0,5,10,15,20,25].forEach(function(v){
+        const x=x0+v/28*gw;
+        ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0-6);ct.lineTo(x,y0+5*rowh);ct.stroke();
+        ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(v,x,y0+5*rowh+18);
+      });
+      CFG.forEach(function(cf,ci){
+        const y=y0+ci*rowh;
+        ct.fillStyle=SUBI;ct.font='bold 12.5px sans-serif';ct.textAlign='right';
+        ct.fillText('設定 '+CN[ci],x0-12,y+rowh/2+4);
+        const bh=Math.min(9,rowh/5);
+        S.forEach(function(s,si){
+          const w=s.occ[ci]/28*gw;
+          ct.fillStyle=s.c;ct.globalAlpha=0.88;
+          ct.fillRect(x0,y+6+si*(bh+2),Math.max(2,w),bh);ct.globalAlpha=1;
+          ct.fillStyle=s.c;ct.font='10.5px "SF Mono",Menlo,monospace';ct.textAlign='left';
+          ct.fillText(s.occ[ci].toFixed(1),x0+w+6,y+6+si*(bh+2)+bh);
+        });
+      });
+      ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+      ct.fillText('実際に走っていたリクエスト数の平均',x0+gw/2,y0+5*rowh+36);
+      const by=H-70;
+      ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,58);
+      ct.textAlign='left';ct.fillStyle=NEG;ct.font='bold 12.5px sans-serif';
+      ct.fillText('オフロードのベースラインは 4.8 → 4.8 → 4.9 → 4.9 で完全に頭打ち。設定を上げても走れる本数が増えない',40,by+22);
+      ct.fillStyle=POS;ct.font='bold 12.5px sans-serif';
+      ct.fillText('HiSparse は 7.1 → 11.9 → 18.1 → 18.9 (MTP3)、MTP なしなら 25.5 まで伸びる',40,by+44);
+      document.getElementById('prOut').textContent=
+        '設定 32 での実測: HiSparse 18.9 (MTP3) / 25.5 (MTP なし) 対 ベースライン 4.9 / 6.0';
+      return;
+    }
+    const x0=64,y0=52,gw=W-150-x0,gh=H-180;
+    const xmax=(view==='pareto')?280:34, ymax=12500;
+    function px(v){return x0+v/xmax*gw;}
+    function py(v){return y0+gh-v/ymax*gh;}
+    for(let v=0;v<=ymax;v+=2500){
+      const y=py(v);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';ct.fillText(v/1000+'k',x0-8,y+4);
+    }
+    const xt=(view==='pareto')?[0,50,100,150,200,250]:[1,8,16,24,32];
+    xt.forEach(function(v){
+      const x=px(v);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText(v,x,y0+gh+18);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText(view==='pareto'?'interactivity (tokens/s/user) →':'設定した同時実行数',x0+gw/2,y0+gh+36);
+    ct.save();ct.translate(20,y0+gh/2);ct.rotate(-Math.PI/2);
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('GPU 1 枚あたりの論理総トークンスループット (tokens/s)',0,0);ct.restore();
+    const lab=[];
+    S.forEach(function(s){
+      const xs=(view==='pareto')?s.inter:CN;
+      ct.strokeStyle=s.c;ct.lineWidth=2.6;ct.beginPath();
+      xs.forEach(function(xv,i){
+        const x=px(xv),y=py(s.thr[i]);
+        if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+      });
+      ct.stroke();
+      xs.forEach(function(xv,i){
+        ct.fillStyle=s.c;ct.beginPath();ct.arc(px(xv),py(s.thr[i]),4,0,Math.PI*2);ct.fill();
+      });
+      lab.push({n:s.n,c:s.c,y:py(s.thr[view==='pareto'?4:4])});
+    });
+    lab.sort(function(a,b){return a.y-b.y;});
+    lab.forEach(function(L,i){ if(i>0&&L.y-lab[i-1].y<15) L.y=lab[i-1].y+15; });
+    lab.forEach(function(L){
+      ct.fillStyle=L.c;ct.font='bold 10.5px sans-serif';ct.textAlign='left';
+      ct.fillText(L.n.replace('HiSparse 384 + offload 128','HiSparse').replace('Offloading 512 GiB','Offload 512'),x0+gw+8,L.y);
+    });
+    /* c ラベル */
+    if(view==='pareto'){
+      S.slice(0,1).forEach(function(s){
+        s.inter.forEach(function(xv,i){
+          ct.fillStyle=SUBI;ct.font='10px sans-serif';ct.textAlign='center';
+          ct.fillText(CFG[i],px(xv),py(s.thr[i])-10);
+        });
+      });
+    }
+    const by=H-64;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,54);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText(view==='pareto'
+      ? 'HiSparse は右上に向かって伸び続ける。ベースラインは c8 を過ぎると左下へ折り返す'
+      : '設定を上げるとベースラインは throughput が落ちる (c8 の 7,410 から c24/c32 では 1,000 前後)',40,by+22);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('interactivity は 1000 / 平均 TPOT。throughput は prefix キャッシュにヒットしたプロンプトトークンも含み、8 で割った値',40,by+42);
+    document.getElementById('prOut').textContent=
+      (view==='pareto'
+        ? 'c32 での throughput: HiSparse 11,682 / 10,958 対 ベースライン 995 / 987 (GPU 1 枚あたり)'
+        : '設定 24 以降、ベースラインは throughput が 1,000 前後まで落ちる');
+  }
+  bindBtns({pareto:'prPareto',occ:'prOcc',both:'prBoth'},function(k){view=k;draw();});
+  draw();
+})();
+
+/* ============ デモ4: 交差点 (すべて仮定値) ============ */
+(function(){
+  const cv=document.getElementById('cvCross'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const LENS=[1,2,4,8,16,32,64,128,256,512,1024];   /* K トークン */
+  function draw(){
+    const hbm=+document.getElementById('crH').value;      /* GB */
+    const kv=+document.getElementById('crK').value;       /* KB/token */
+    const idx=+document.getElementById('crI').value;      /* KB/token */
+    const buf=+document.getElementById('crB').value;      /* MB/req */
+    document.getElementById('crHv').textContent=hbm;
+    document.getElementById('crKv').textContent=kv;
+    document.getElementById('crIv').textContent=idx;
+    document.getElementById('crBv').textContent=buf;
+    function dense(nK){ return hbm*1e6/(nK*1000*(kv+idx)); }          /* 会話数 */
+    function hisp(nK){ return hbm*1e6/(nK*1000*idx + buf*1000); }
+    /* 交差点: nK*(kv) = buf*1000/1000 → nK = buf*1000/(kv*1000) [Ktok] */
+    const crossK=buf*1000/(kv*1000);
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('同じ HBM で何本の同時リクエストを収められるか (縦軸は対数)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('すべて読者の仮定値 ・ 計画上の目安',W-24,24);
+    const x0=64,y0=52,gw=W-40-x0,gh=H-170;
+    function px(i){return x0+i/(LENS.length-1)*gw;}
+    const ymax=3.2;
+    function py(v){return y0+gh-Math.min(Math.max(Math.log10(Math.max(v,1)),0),ymax)/ymax*gh;}
+    [1,10,100,1000].forEach(function(v){
+      const y=py(v);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';ct.fillText(v,x0-8,y+4);
+    });
+    LENS.forEach(function(l,i){
+      const x=px(i);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';ct.fillText((l<1000?l+'K':'1M'),x,y0+gh+18);
+    });
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('1 リクエストの文脈長 (トークン)',x0+gw/2,y0+gh+36);
+    [['通常の GPU 常駐',dense,NEG],['Hybrid HiSparse',hisp,POS]].forEach(function(s,si){
+      ct.strokeStyle=s[2];ct.lineWidth=2.8;ct.beginPath();
+      LENS.forEach(function(l,i){
+        const x=px(i),y=py(s[1](l));
+        if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+      });
+      ct.stroke();
+      LENS.forEach(function(l,i){
+        ct.fillStyle=s[2];ct.beginPath();ct.arc(px(i),py(s[1](l)),3.6,0,Math.PI*2);ct.fill();
+      });
+      ct.fillStyle=s[2];ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+      ct.fillText(s[0],x0+gw-6,py(s[1](LENS[LENS.length-1]))+(si===0?16:-10));
+    });
+    /* 交差点の縦線 */
+    if(crossK>=LENS[0]&&crossK<=LENS[LENS.length-1]){
+      let i=0;
+      for(let j=0;j<LENS.length-1;j++) if(crossK>=LENS[j]&&crossK<=LENS[j+1]) i=j+(crossK-LENS[j])/(LENS[j+1]-LENS[j]);
+      const x=x0+i/(LENS.length-1)*gw;
+      ct.strokeStyle=ALT;ct.lineWidth=2;ct.setLineDash([6,4]);
+      ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='left';
+      ct.fillText('交差 '+(crossK<1?(crossK*1000).toFixed(0)+' トークン':crossK.toFixed(1)+'K トークン'),x+8,y0+16);
+    }
+    const by=H-104;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,92);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('通常常駐 = HBM / ((sparse-MLA + indexer) x 文脈長) ・ HiSparse = HBM / (indexer x 文脈長 + hot バッファ)',40,by+22);
+    ct.fillStyle=ALT;ct.font='bold 12px sans-serif';
+    ct.fillText('交差点は「hot バッファの固定費 ÷ sparse-MLA の 1 トークンあたり」で決まる = '+
+      (crossK<1?((crossK*1000).toFixed(0)+' トークン'):(crossK.toFixed(1)+'K トークン')),40,by+44);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('128K の文脈だと 通常常駐 '+dense(128).toFixed(1)+' 本 対 HiSparse '+hisp(128).toFixed(1)+
+      ' 本 ・ 1M なら '+dense(1024).toFixed(2)+' 本 対 '+hisp(1024).toFixed(1)+' 本',40,by+66);
+    ct.fillStyle=MUT;ct.font='11.5px sans-serif';
+    ct.fillText('indexer KV は GPU 常駐のままなので HiSparse 側にも傾きが残る ・ MTP の hot バッファ増は含めていない',40,by+86);
+    document.getElementById('crOut').textContent=
+      '交差点 '+(crossK<1?((crossK*1000).toFixed(0)+' トークン'):(crossK.toFixed(1)+'K トークン'))+
+      ' ・ 128K で '+dense(128).toFixed(1)+' 本 対 '+hisp(128).toFixed(1)+' 本 ・ 1M で '+
+      dense(1024).toFixed(2)+' 本 対 '+hisp(1024).toFixed(1)+' 本';
+  }
+  ['crH','crK','crI','crB'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+</script>
+</body>
+</html>
