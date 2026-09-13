@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>96% が使い回しなら、スタック全体をそれに合わせる — vLLM x AgentX</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:30px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  h4{color:var(--g1);font-size:16.5px;margin:20px 0 4px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .add{background:#f3f9f6;border-left:4px solid var(--g3);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .add b{color:var(--g1)}
+  .add .badge{display:inline-block;background:var(--g4);color:var(--g1);border-radius:5px;
+    padding:1px 8px;font-size:12.5px;font-weight:700;margin-right:8px}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;overflow-x:auto;line-height:1.7;
+    white-space:pre}
+  .math .cm{color:#8fd6b4}
+  .fig{background:#ffffff;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig img{display:block;margin:0 auto;max-width:100%;height:auto;border-radius:8px}
+  .cap{font-size:13.5px;color:var(--sub);margin:12px 0 0;line-height:1.7}
+  .cap a{color:var(--g2)}
+  .ext{background:#e7f0fb;border:1px solid #a9c9ee;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15px}
+  .ext b{color:#22548f}
+  .ext a{color:#22548f;font-weight:700}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:170px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .fn a{color:var(--g2)}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:21px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">vLLM ブログ解説シリーズ ・ 第 3 回</p>
+  <h1>96% が使い回しなら、スタック全体をそれに合わせる</h1>
+  <p>AgentX で測る agentic serving — 3 つの plane の最適化と、効かなかった 3 つ</p>
+</header>
+<main>
+  <a class="back" href="./vllm-blog-index.html">← vLLM ブログ解説シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事について</h2>
+  <p class="lead">原文は vLLM 公式ブログの <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX: Optimizing for Real-World Agentic Serving</a> (2026-09-08、vLLM Team と Inferact)。この記事は<b>その日本語での読み解き</b>で、原文の図をそのまま参照し、理解を早めるためのデモを足しています。<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>と<a href="./vllm-blog-02-glm53-hybrid-hisparse.html">第 2 回</a>で扱った KV キャッシュの仕組みが、ここでは<b>スタック全体の一部</b>として出てきます。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    agentic なトラフィックには<b>はっきりした形</b>があります。SemiAnalysis が公開した <b>AgentX</b> (実際の agentic コーディングのトレースから作られたベンチマーク) で測ると、<b>1 セッションあたり中央値 43 ターン</b>、<b>入力の中央値 142K トークンに対して出力は 444 トークン</b>、そして<b>prefix キャッシュのヒット率は 96% を超えます</b>。つまり<b>リクエストのほとんどは、エンジンが既に見たことのある文脈</b>です。この形に合わせてスタック全体を最適化する、という報告です。データ面 (KV キャッシュの管理と階層化)、実行面 (モデルごとの並列化 ・ カーネル ・ スケジューリング)、制御面 (P/D の比率と routing) の 3 層に分けて具体策が並び、最後に<b>効かなかった 3 つ</b>が書かれています。測定は公開ベンチマーク上で、<b>DeepSeek V4 Pro で 1 GPU 秒あたり最大 130K トークン</b>、<b>MiniMax M3 で最大 376 tok/s の interactivity</b>、そして Opus 5 の API 価格に対して <b>14.6 倍から 106 倍のコスト優位</b>です。
+  </div>
+  <table>
+    <tr><th>項目</th><th>内容</th></tr>
+    <tr><td>ワークロードの形</td><td>中央値 <b>43 ターン</b> / セッション ・ 入力の中央値 <b>142K</b> トークンに対し出力 <b>444</b> トークン ・ prefix キャッシュのヒット率 <b>96% 超</b> ・ <b>44%</b> のセッションに subagent が 1 つ以上 (該当セッションでは中央値 4 rollout)</td></tr>
+    <tr><td>3 つの課題</td><td><b>prefix キャッシュへの圧力</b> ・ <b>実行効率</b> (長文脈と厳しいレイテンシ) ・ <b>P/D 比の決定</b> (文脈長とヒット率がセッションごとに大きく違う)</td></tr>
+    <tr><td>データ面</td><td>hybrid KV cache manager (<b>1 つのページサイズ ・ 1 つの共有ブロックプール</b>) ・ DeepSeek V4 の <b>packed layout</b> (92 個の断片化テンソルを 1 つの連続確保へ) ・ Mooncake Store による<b>分散 KV プールと階層化</b> ・ <b>セッションを意識した保持方策</b></td></tr>
+    <tr><td>実行面</td><td>モデルごとの並列化。Kimi K3 は <b>DCP</b> (symmetric memory で 1 層あたり約 <b>13%</b> 短縮) と、大きな scale-up ドメインでの <b>DEP</b>。DeepSeek V4 は長い prefill に <b>PCP</b> (32K で TP8 比 <b>2.65 倍</b>)、広い条件では <b>DEP</b></td></tr>
+    <tr class="hl"><td>スケジューリング</td><td><code>--long-prefill-token-threshold 512</code> で head-of-line blocking を解くと <b>TPGS 最大 +93%</b> ・ <b>P90 interactivity 約 2.3 倍</b>。<code>--prefill-schedule-interval</code> で DEP の prefill を<b>同じステップに揃える</b></td></tr>
+    <tr><td>制御面</td><td>P/D の <b>2 段階の rate-matching</b> (飽和プロファイリング → P/D 掃引)。エージェント的なワークフローで自動化できる形</td></tr>
+    <tr><td>実測 (P90 > 50 tok/s)</td><td>DeepSeek V4 Pro: <b>12 GB300 / 同時 256 で 83K TPGS ・ 58.3 tok/s</b>。MiniMax M3: <b>2 B300 / 24 で 70K TPGS ・ 74.2 tok/s</b>。Kimi K3: <b>16 GB300 / 48 で 11.8K TPGS ・ 62.7 tok/s</b></td></tr>
+    <tr><td>コスト</td><td>GPU の TCO で DeepSeek V4 Pro が時間あたり <b>$27.72</b>、同じトークン量を Opus 5 で処理すると <b>$2,926</b> 相当 = <b>106 倍</b>。M3 は <b>85 倍</b>、K3 は <b>14.6 倍</b></td></tr>
+    <tr><td>効かなかった 3 つ</td><td><b>PP</b> は暖まったターンに合わない ・ <b>DCP</b> は DeepSeek V4 へ素直に移らない ・ <b>負荷分散</b>はセッション固定の routing に負けた</td></tr>
+  </table>
+  <div class="ext">
+    <b>原文には 3 つの対話ページが埋め込まれています。</b>この記事では重複を避けてリンクだけ置きます。<a href="https://vllm.ai/blog-assets/interactive_pages/vllm-agentx-pareto.html" target="_blank" rel="noopener">Pareto の探索</a> ・ <a href="https://vllm.ai/blog-assets/interactive_pages/agentic-workload-explorer.html" target="_blank" rel="noopener">セッションを 1 ターンずつ辿る</a> ・ <a href="https://vllm.ai/blog-assets/interactive_pages/dsv4-kv-cache-layout.html" target="_blank" rel="noopener">DeepSeek V4 の KV レイアウト</a>。この記事のデモは<b>それらが扱っていない切り口</b>を選んでいます。
+  </div>
+  <div class="toc">
+    <a href="#s1">1. AgentX が示すワークロードの形</a>
+    <a href="#s2">2. 【デモ】セッション全体のトークン会計</a>
+    <a href="#s3">3. 3 つの課題と 3 つの plane</a>
+    <a href="#s4">4. データ面 — 1 つのページ、1 つのプール</a>
+    <a href="#s5">5. データ面 — 階層化と保持方策</a>
+    <a href="#s6">6. 実行面 — 並列化はモデルに従う</a>
+    <a href="#s7">7. 【デモ】head-of-line blocking を解く</a>
+    <a href="#s8">8. 【デモ】DEP の prefill を揃える</a>
+    <a href="#s9">9. 制御面 — P/D の rate matching</a>
+    <a href="#s10">10. カーネルとコミュニティ</a>
+    <a href="#s11">11. 【デモ】実測の性能とコスト</a>
+    <a href="#s12">12. 効かなかった 3 つ</a>
+    <a href="#s13">13. これから</a>
+    <a href="#s14">14. 読むときに気をつける点</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>AgentX が示すワークロードの形</h2>
+  <p class="lead">まず数字から入ります。<b>AgentX</b> は SemiAnalysis が公開したベンチマークで、<b>実際の agentic コーディングのトレース</b>から作られています。原文が挙げる 4 つの統計が、この記事の全体を規定します。</p>
+  <table>
+    <tr><th>統計</th><th>値</th><th>何を意味するか</th></tr>
+    <tr><td>セッションの長さ</td><td>中央値 <b>43 ターン</b></td><td>1 回の会話ではなく<b>長く続く往復</b>が単位</td></tr>
+    <tr class="hl"><td>入力と出力の非対称</td><td>入力の中央値 <b>142K トークン</b>に対し出力は <b>444 トークン</b></td><td><b>読む量が書く量の 300 倍以上</b>。attention と KV が支配的になる</td></tr>
+    <tr><td>prefix の再利用</td><td>キャッシュのヒット率 <b>96% 超</b></td><td>リクエストの<b>ほとんどは既に見た文脈</b>。計算し直す価値がない</td></tr>
+    <tr><td>subagent</td><td><b>44%</b> のセッションに 1 つ以上。該当セッションでは中央値 <b>4 rollout</b></td><td>文脈が<b>分岐して合流する</b>。単純な直線ではない</td></tr>
+  </table>
+  <p>なぜこの形になるのか、原文の説明が明快です。<b>各ターンは最新のツール結果を積み上げた文脈の末尾に足して、全体をまたモデルに送ります。</b>だから入力は伸び続け、<b>1 ターンが足す新しい prefill は短く</b>、リクエストのほとんどは<b>エンジンが既に見た prefix</b> になります。subagent はその文脈から fork するか、新規に始まり、結果は最終回答の前に親へ合流します。</p>
+  <div class="add">
+    <span class="badge">補足</span>この 4 つの統計が、後の節すべての理由になっていることを先に押さえておくと読みやすくなります。<b>96% の再利用</b>があるから KV キャッシュを捨てずに階層化する価値があり (4 節 ・ 5 節)、<b>入力が出力の 300 倍</b>だから attention の並列化が効き (6 節)、<b>短い append と長い新規 prefill が混ざる</b>から head-of-line blocking が起きます (7 節)。そして<b>セッションが長く続く</b>から、次のターンが来たときにキャッシュがどの GPU にあるかが routing の決め手になります (12 節)。<b>スタック全体の最適化に見えて、実は 4 つの統計への応答</b>です。
+  </div>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/agentx-pareto-summary.png" alt="AgentX 上の vLLM の Pareto 曲線">
+    <p class="cap">図 1: SemiAnalysis AgentX 上の vLLM。<b>$1 の TCO あたりの総トークン数</b>を <b>P90 interactivity</b> に対してプロットしたもので、DeepSeek V4 Pro ・ MiniMax M3 ・ Kimi K3 それぞれの最良構成と、GB300 NVL72 上の DeepSeek V4 Pro をケーススタディとして示している。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ) ・ データ元: SemiAnalysis AgentX</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>【デモ】セッション全体のトークン会計</h2>
+  <p class="lead">「ヒット率 96%」という数字が実際にどれだけの計算を消しているのかを、<b>セッション 1 本の合計</b>で数えます。原文の対話ページは<b>ターンごとの内訳</b>を見せるので、ここでは<b>合計と倍率</b>という別の切り口にします。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvAcct" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">ターン数 <input id="acT" type="range" min="4" max="80" value="43"><span id="acTv">43</span></div>
+    <div class="slider">最終的な入力長 <input id="acL" type="range" min="16" max="400" step="2" value="142"><span id="acLv">142</span>K</div>
+  </div>
+  <div class="controls">
+    <div class="slider">1 ターンの出力 <input id="acO" type="range" min="100" max="4000" step="50" value="444"><span id="acOv">444</span> トークン</div>
+    <div class="slider">キャッシュのヒット率 <input id="acH" type="range" min="0" max="99" value="96"><span id="acHv">96</span>%</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>キャッシュから再利用 (計算しない)</span>
+    <span><span class="dot" style="background:#e07a5f"></span>実際に prefill する</span>
+    <span><span class="dot" style="background:#60a5fa"></span>decode で生成する</span>
+  </div>
+  <p class="rdout" id="acOut"></p>
+  <div class="warn">
+    <b>スライダーの既定値は AgentX の中央値ですが、計算はこの記事の単純な会計です。</b>ターンごとに入力が線形に伸びると仮定して合計を出しています (実際の伸び方はセッションによって違います)。<b>ヒット率はエンジンが達成した実測値で、ここでは「その割合が再計算されなかった」という意味に読み替えて使っています</b>。原文の 96% はキャッシュヒット率そのもので、この会計式は原文にはありません。
+  </div>
+  <div class="key">
+    既定値で見ると分かるのは、<b>セッション 1 本で読まれる入力の合計が、最終的な文脈長の何十倍にもなる</b>ことです。43 ターンで文脈が 142K まで伸びるなら、単純な合計は<b>約 300 万トークン</b>。ここで 96% がキャッシュから来るなら、<b>実際に prefill するのは 10 万トークン台</b>まで落ちます。<b>agentic serving のコストがキャッシュの効き方でほぼ決まる</b>のは、この桁の違いからです。11 節のコスト比較が「理論上のキャッシュヒット率を仮定している」と注記されているのも、同じ理由で数字が大きく動くからです。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>3 つの課題と 3 つの plane</h2>
+  <p class="lead">ワークロードの形から、3 つの課題が出てきます。原文の整理をそのまま押さえます。</p>
+  <table>
+    <tr><th>課題</th><th>中身</th></tr>
+    <tr><td><b>prefix キャッシュへの圧力</b></td><td>多ターンのセッションは<b>毎ターン、それまでの会話全体を再生します</b>。多数のセッションを同時に走らせるには、<b>ターンの間に KV をオフロードする</b>必要がある。しかも大規模になると、KV の管理 ・ prefix キャッシュ ・ オフロードが<b>GPU をまたぎ、P/D 分離されたインスタンスをまたぎ、レプリカをまたいで</b>効率よく動かないといけない</td></tr>
+    <tr><td><b>実行効率</b></td><td>長文脈と厳しいレイテンシ要求。<b>より多くのトークンを、1 トークンあたりより多くの仕事をして、より短い時間で</b>処理する必要がある。並列化 ・ カーネル ・ スケジューリング ・ speculative decoding を<b>新しいリクエストの形に合わせて作り直す</b></td></tr>
+    <tr class="hl"><td><b>P/D 比の決定</b></td><td>文脈長とキャッシュヒット率が<b>セッションと subagent の間で大きくばらつき</b>、routing はキャッシュ親和性と負荷を両立させる必要がある。<b>スループット最適な P/D 比を見つけるのが難しく、しかも同時実行数によって動く</b></td></tr>
+  </table>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/full-stack-overview.png" alt="agentic serving のためのスタック全体の最適化">
+    <p class="cap">図 3: agentic serving のためのフルスタック最適化。<b>データ面</b>が分散共有 KV キャッシュを管理し、<b>実行面</b>が各モデルを適切な並列化とカーネルに対応づけ、<b>制御面</b>が適切な P/D 比とリクエストのスケジューリングを調整する。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>3 つの plane という分け方は、<b>「何を最適化の単位にするか」</b>の違いで読むと整理しやすいです。データ面は<b>バイト</b>を扱い、キャッシュがどこにあるかを決める。実行面は<b>1 ステップの時間</b>を扱い、そのステップの中でどう並列化するかを決める。制御面は<b>リクエストの流れ</b>を扱い、どのインスタンスにいくつ流すかを決める。<b>この 3 つは互いに独立ではなく</b>、12 節の「負荷分散がセッション固定の routing に負けた」という失敗は、<b>制御面の判断がデータ面の状態を知らずに下されたときに起きる</b>という例になっています。
+  </div>
+</section>
+<section id="s4">
+  <h2><span class="num">4</span>データ面 — 1 つのページ、1 つのプール</h2>
+  <p class="lead">KV キャッシュの管理は PagedAttention 以来 vLLM の中心にあります。agentic な長文脈はその容量をさらに圧迫し、<b>hybrid なモデル</b>が確保をさらに複雑にします。sliding window や線形 attention と full attention が混ざると、<b>キャッシュブロックのサイズも寿命も違う</b>からです。</p>
+  <div class="key">
+    vLLM の hybrid KV cache manager が採る芯は単純です。<b>一様なメモリページを確保の基本単位にして、1 つの共有ブロックプールで管理する。</b>
+  </div>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/hybrid-kv-cache-manager.png" alt="vLLM の hybrid KV cache manager">
+    <p class="cap">図 4: vLLM の hybrid KV cache manager。<b>1 つのページサイズがすべての attention 型に対応し、1 つのブロックプールがそれらの間で共有される</b>。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>共有プールにすると、<b>attention 型ごとに容量を静的に分割するのではなく、必要に応じて動的に再割り当てできます</b>。これが効くのは、<b>full attention の KV は系列長とともに伸びるのに、sliding window や再帰状態は寿命もスケーリング規則も違う</b>からです。だから<b>最適な分割は、同時実行数 ・ 文脈長 ・ prefix 再利用のパターンによって変わります</b>。</p>
+  <h3>DeepSeek V4 で見えた断片化</h3>
+  <p>抽象は新しいアーキテクチャに当たるたびに更新されます。原文が挙げる具体例が分かりやすい。<b>DeepSeek V4 の初期の KV レイアウトは、種類の違うキャッシュを 3 つのサイズのバケットに断片化し、92 個の別々のテンソルを確保していました。</b></p>
+  <table>
+    <tr><th>問題</th><th>新しい packed layout</th></tr>
+    <tr><td>断片化が<b>パディングでメモリを無駄にする</b></td><td><b>1 ブロックあたり 1 つの連続した確保</b>に、全キャッシュグループと全層を格納する (92 個の断片ではなく)</td></tr>
+    <tr><td>P/D 転送と KV オフロードに<b>非効率</b></td><td><b>ディスクリプタと P/D 転送のオーバーヘッドが減る</b></td></tr>
+    <tr class="hl"><td>—</td><td>FP4 indexer を有効にしたとき<b>より小さい確保単位が使える</b>ようになり、<b>KV キャッシュのメモリを約 10% 節約</b></td></tr>
+  </table>
+  <div class="ext">
+    <b>原文にはこのレイアウトを見るための対話ページがあります。</b><a href="https://vllm.ai/blog-assets/interactive_pages/dsv4-kv-cache-layout.html" target="_blank" rel="noopener">DeepSeek V4 の KV キャッシュレイアウト</a> で、断片化した 92 テンソルと packed layout の対比が見られます。
+  </div>
+  <div class="add">
+    <span class="badge">補足</span><a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回</a>の「正規レイアウト」と<a href="./vllm-blog-02-glm53-hybrid-hisparse.html">第 2 回</a>の「hot バッファは通常のブロック」に続いて、ここでも<b>同じ方針</b>が出てきます。<b>形を 1 つに揃えると、下流の全部が単純になる。</b>92 個のテンソルは「モデルの構造をそのままメモリに写した」形で、素直ではありますが、<b>転送 ・ オフロード ・ ディスクリプタという下流の仕組みが全部その複雑さを引き受ける</b>ことになります。1 ブロック 1 確保に畳むと、下流は「ブロック」だけを知っていればよくなります。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>データ面 — 階層化と保持方策</h2>
+  <p class="lead">GPU メモリの容量を超えて、しかも<b>エンジンをまたいで</b> prefix キャッシュを残すために、vLLM は <b>Mooncake Store</b> を分散 KV キャッシュプールとして統合しています。ここでは agentic 向けに足された機能が並びます。</p>
+  <table>
+    <tr><th>項目</th><th>内容</th></tr>
+    <tr><td>アーキテクチャの網羅</td><td>KV オフロードは<b>一級市民</b>のまま。sparse attention ・ compressed attention ・ 線形 attention を含む新しいアーキテクチャを完全にサポートし、<b>非同期スケジューリング ・ P/D 分離 ・ speculative decoding ・ 並列化</b>も機能と性能を保つ</td></tr>
+    <tr class="hl"><td>階層化</td><td>分散 KV プールを<b>ディスクと CPU 専用ノード</b>まで広げる。Mooncake Store の <b>standalone-store モード</b>で、<b>外部の Mooncake クライアントが CPU プールとディスク階層を所有し、vLLM のワーカーは純粋な要求者になる</b>。各ノードで standalone クライアントを立てれば、CPU メモリとディスクでプールを自由に拡張できる</td></tr>
+    <tr><td>router との統合</td><td>Dynamo や llm-d と統合済み。<b>どのインスタンスでもキャッシュヒットが得られるので、routing の方策が単純になる</b></td></tr>
+    <tr><td>性能最適化</td><td>hybrid モデルは<b>attention 型ごとにキーを作って別々に lookup する</b>ので CPU のオーバーヘッドが増える。より効率的なデータ構造 ・ 非同期 lookup ・ <b>スケジューラのクリティカルパスから仕事を外す</b> ・ 送受信の並列化で削減した</td></tr>
+  </table>
+  <h3>セッションを意識した prefix キャッシュの保持</h3>
+  <p>ここが agentic 固有の工夫です。線形層や sliding window 層を full attention と併せ持つ hybrid モデルでは、<b>prefix を再利用するために、再利用の境界で線形状態や sliding window のキャッシュを保存しておく必要があります</b>。ところが<b>全トークンでこのスナップショットを取るのは高すぎます</b>。そこで 2 つの方策を組み合わせます。</p>
+  <table>
+    <tr><th>方策</th><th>いつ保存するか</th><th>何を捕まえるか</th></tr>
+    <tr><td><b>interval-based retention</b></td><td><b>各ターンのプロンプト末尾</b>のキャッシュと線形状態を自動で保存する</td><td>後続のターンと fork した subagent。これらは<b>典型的に、以前のターンの文脈を再生して延長する</b></td></tr>
+    <tr class="hl"><td><b>Marconi 風の選択的保持</b></td><td><b>ある prefix が 2 回目に観測されたとき</b>にチェックポイントを残す。保持済みチェックポイントの無い既知の prefix に出会ったら、<b>足りない状態を再計算してその境界で保存する</b></td><td><b>共有される prefix はターンの内側で終わることが多い</b>ので、interval 方式では捕まらない再利用</td></tr>
+  </table>
+  <p>この 2 つで、<b>大規模な agentic ワークロードで、過大なストレージを使わずに高いヒット率を保ちます</b>。</p>
+  <div class="add">
+    <span class="badge">補足</span>2 つ目の方策が面白いのは、<b>「1 回目は諦める」</b>という判断です。全境界で保存すればヒット率は最大になりますが、コストが爆発します。<b>2 回目に観測されたものだけを保存する</b>のは、再利用の有無をデータに答えさせる形です。しかも 2 回目の時点では<b>再計算が必要</b>で、そのコストを払ってでもチェックポイントを作る価値がある、という判断が入っています。<b>「使われるかどうか分からないものを保存しない」という規律</b>で、キャッシュ設計として一般に応用できる形です。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>実行面 — 並列化はモデルに従う</h2>
+  <p class="lead">並列化の軸は複数あります (TP ・ DP ・ EP ・ PP ・ CP)。原文の主張はこうです。<b>最適な並列化はモデルのアーキテクチャ、ハードウェアのトポロジ、ワークロードのパターン、レイテンシ SLO によって決まる。</b>代表的な 2 モデルで具体例が示されます。</p>
+  <h3>Kimi K3 — MLA には DCP が効く</h3>
+  <p>Kimi K3 は <b>MLA</b> (multi-head latent attention) と <b>KDA</b> (Kimi Delta Attention) を持ちます。<b>MLA は KV を 1 つのヘッドの潜在空間に圧縮するので、素の TP はその潜在キャッシュを全 rank に複製してしまい効率が悪い</b>。代わりに効くのが <b>DCP</b> (decode context parallelism) で、<b>キャッシュを系列方向に分割し、各 rank が KV 状態の 1/N を持ちます</b>。</p>
+  <table>
+    <tr><th>DCP の利点</th><th>理由</th></tr>
+    <tr><td>decode レイテンシが下がる</td><td>MLA の attention は memory-bound で、<b>コストが文脈長とともに伸びます</b>。agentic な prefix が伸びるほど attention が decode ステップの中で占める割合が大きくなるので、<b>それを rank 間で分割するとステップが短くなる</b></td></tr>
+    <tr class="hl"><td>スループットと KV 容量が上がる</td><td><b>KV の複製を避けられる</b>ので、KV の受け入れで詰まらずに<b>より多くの系列を同時に走らせられる</b></td></tr>
+  </table>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/k3-tp8-vs-dcp8.png" alt="Kimi K3 の TP8 と DCP8 の比較">
+    <p class="cap">図 6: Kimi K3 では <b>DCP8 が TP8 より低い decode レイテンシ</b>を達成し、より高い同時実行数までスケールする。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <h4>DCP の代償と、その削り方</h4>
+  <p>DCP の代償は<b>通信の増加</b>です。KV が系列で分割されるので、<b>MLA の decode 層ごとに、attention の前に query の gather、後に部分出力の reduction が必要</b>になります。原文はここを踏み込んで削っています。</p>
+  <table>
+    <tr><th>やったこと</th><th>効果</th></tr>
+    <tr><td><b>NCCL の操作を迂回する</b>。peer GPU が直接 load/store できる <b>symmetric-memory バッファ</b>を使う。query は attention カーネルが消費するバッファへ<b>直接 multicast</b> し、各 GPU は部分出力と LSE 統計を<b>peer の受信スロットへ直接書き込み</b>、各 rank が online softmax でローカルに統合する</td><td>これらの GPU 間書き込みを<b>計算と同じカーネルに融合</b>し、既定の DCP8 実装に比べて<b>1 層あたり約 13% のレイテンシ削減</b></td></tr>
+  </table>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/k3-dcp-symmem.gif" alt="symmetric memory を使った DCP4 の MLA decode 経路">
+    <p class="cap">図 7: symmetric memory を使った DCP4 での MLA decode 経路。<b>各ステップが 1 つのカーネルに融合され</b>、既定の NCCL all-gather ・ staging コピー ・ all-to-all ・ unpack の各段を置き換えている。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <h4>scale-up ドメインが広いと答えが変わる</h4>
+  <p>NVL72 級のシステムでは、<b>データ並列を伴う広い EP (DEP) が DCP より良くスケールし、同じ decode レイテンシ SLO でより高いスループットを出せます</b>。理由は明快で、<b>マルチノードの大きな DCP では、分割した attention の通信コストが、節約した計算を上回る</b>からです。DEP はリクエストとその KV を<b>異なるデータ並列 rank に割り当てる</b>ので、<b>DCP の attention collective を回避しつつ MoE の expert を rank 間で分割します</b>。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/k3-dcp8-vs-dep16.png" alt="Kimi K3 の DCP8 と DEP16 の比較">
+    <p class="cap">図 8: Kimi K3 では、<b>rank あたりのバッチサイズが 3 を超えると DEP16 が DCP8 より良くスケールする</b>。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <h3>DeepSeek V4 — TP が効かない 3 つの理由</h3>
+  <p>DeepSeek V4 も MLA 型の KV を持つので TP では複製されます。加えて<b>compressed sparse attention のせいで、TP のヘッド分割が計算として非効率</b>になります。原文の 3 つの理由をそのまま押さえます。</p>
+  <table>
+    <tr><th>理由</th><th>中身</th></tr>
+    <tr><td>compressor</td><td>compressor 経路は<b>圧縮された位置ごとに 1 つの共有 KV 表現しか作らず</b>、ヘッドごとの独立な状態を作らない。だから <b>TP は KV ヘッド方向に計算を分割できず、全 rank が compressor の仕事を繰り返します</b></td></tr>
+    <tr><td>indexer</td><td>indexer は 64 ヘッドを持つが、<b>トークンごとに 1 つの大域的な top-k 選択しか作らない</b>。現在の TP 経路は<b>全 rank に indexer 全体を複製する</b>ので、top-k の前の密なスコア reduction は避けられるが<b>仕事は重複します</b></td></tr>
+    <tr class="hl"><td>sparse MLA</td><td>sparse MLA を支配しているのは<b>attention の算術ではなく、top-k の KV エントリの走査と gather</b>。<b>TP はこの memory-bound な仕事の多くを全 rank で繰り返し、分割されるのは安いヘッド方向の計算だけ</b></td></tr>
+  </table>
+  <table>
+    <tr><th>では何を使うか</th><th>内容</th></tr>
+    <tr><td><b>PCP</b> (prefill context parallelism)</td><td>長い prefill に最良。<b>プロンプト系列 (query テンソル) を分割</b>して compressor と indexer の仕事を rank 間に配り、sparse MLA には<b>より広く効率的な head-local な形</b>を与える。<b>32K のプロンプトで PCP8 が TP8 に対し 2.65 倍の prefill 高速化</b>で TTFT を大きく縮める。ただし<b>decode 側の状態は複製したままなので、専用の prefill ワーカー向き</b></td></tr>
+    <tr class="hl"><td><b>DEP</b></td><td>リクエストと decode したトークンをデータ並列 rank に分散し、<b>attention 経路を完全にローカルに保つ</b>。<b>ほとんどの DeepSeek V4 構成で既定</b></td></tr>
+    <tr><td>DCP</td><td>V4 では K3 ほど効かない。理由は 12 節の「効かなかった 3 つ」で</td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>この節の教訓を 1 行にすると<b>「並列化はモデルの構造に従う」</b>で、原文自身が 12 節でそう書いています。同じ MLA 系でも、K3 では DCP が勝ち、V4 では DEP が勝つ。<b>違いを作っているのは「分割したい仕事が本当に分割できる形をしているか」</b>です。K3 の MLA は系列方向に素直に切れるのに、V4 は compressor と indexer が<b>系列やヘッドで切れない共有物</b>を作るので、切っても全員が同じ仕事を繰り返します。<b>並列化の設計は、モデルのどの軸が独立かを先に見つける作業</b>だと読めます。
+  </div>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【デモ】head-of-line blocking を解く</h2>
+  <p class="lead">agentic なトラフィックは<b>2 種類のリクエストが混ざります</b>。長い prefix を再利用して短い prefill だけを足す<b>頻繁な append 型</b>と、数万トークンにわたる<b>たまに来る新規の長い prefill</b> です。ここから 2 つのスケジューリング問題が出ます。</p>
+  <p>1 つ目。<b>vLLM の chunked-prefill スケジューラは既定で FIFO</b> なので、<b>1 本の長い prefill がトークン予算を毎ステップ丸ごと取り続け、同じ rank に並んだ短いターンはその prefill が終わるまで 1 度もスケジュールされません</b>。これが head-of-line blocking です。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/hol-blocking.gif" alt="prefill キューの head-of-line blocking">
+    <p class="cap">図 9: prefill キューでの head-of-line blocking (1 rank のキューのセッション表示)。<b>左</b>: chunk の上限が無いと、長い prefill が予算を丸ごと取り、キャッシュ済みの短いターンが待たされる。<b>右</b>: <b>512 トークンの上限</b>があると、短いターンが毎ステップ加われて、より早く decode を始められる。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <p>対処は 1 つのスケジューリング方策です。<b><code>--long-prefill-token-threshold</code> で、1 リクエストが 1 ステップに積めるトークン数に上限をかけます。</b>512 トークンにすると、<b>長い prefill が同じバッチに短いターンの席を残します</b>。</p>
+  <div class="key">
+    <b>効果は大きい。</b>B300 上の DeepSeek V4 Pro で、<b>1 GPU 秒あたりの総トークン数 (TPGS) が最大 93% 増え、P90 の interactivity が約 2.3 倍</b>になります。<b>代償はその長いリクエスト自身の TTFT が伸びること</b>で、TTFT に敏感な配備では上限を大きくすべきだと原文は書いています。
+  </div>
+  <p>下のデモは、この方策を 1 ステップずつ進めるものです。<b>上限をかけると、短いターンがいつ decode を始められるか</b>を見てください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvHol" width="860" height="480"></canvas>
+  </div>
+  <div class="controls">
+    <button id="hoStep">1 ステップ進める</button>
+    <button class="ghost" id="hoAuto">自動で進める</button>
+    <button class="ghost" id="hoReset">やり直す</button>
+  </div>
+  <div class="controls">
+    <div class="slider">1 ステップの予算 <input id="hoB" type="range" min="1024" max="32768" step="1024" value="8192"><span id="hoBv">8192</span></div>
+    <div class="slider">上限 (0 = なし) <input id="hoC" type="range" min="0" max="8192" step="256" value="512"><span id="hoCv">512</span></div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>長い新規 prefill (32K)</span>
+    <span><span class="dot" style="background:#43b581"></span>短い append ターン (各 700)</span>
+    <span><span class="dot" style="background:#60a5fa"></span>decode 中</span>
+  </div>
+  <p class="rdout" id="hoOut"></p>
+  <div class="warn">
+    <b>このデモはトークン予算の算術による模式です。</b>1 ステップの予算 ・ 上限 ・ リクエストの長さは操作できますが、<b>実際のステップ時間 ・ カーネルの挙動 ・ decode の速度は入っていません</b>。示しているのは<b>「上限をかけると短いターンが何ステップ目に decode を始められるか」</b>という順序の構造だけです。<b>+93% や 2.3 倍という数値は原文の実測</b>で、このデモから出るものではありません。
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="num">8</span>【デモ】DEP の prefill を揃える</h2>
+  <p class="lead">2 つ目のスケジューリング問題は DEP 固有です。<b>MoE の all-to-all 通信は rank を歩調を揃えて進ませる (lockstep)</b> ので、<b>prefill の仕事を処理している rank がグループ全体を遅くします</b>。しかも prefill が rank ごとに違うステップで到着すると、<b>この罰が繰り返し払われます</b>。</p>
+  <p>対処は <b><code>--prefill-schedule-interval</code></b> で、<b>N ステップごとにだけ prefill を受け入れる</b>ようにします。カウンタはデータ並列 rank の間で揃えられています。これで<b>prefill の仕事が rank をまたいで同じステップに集まり</b>、残りのステップは<b>まるごと decode に使える割合が増えます</b>。</p>
+  <div class="fig">
+    <img src="https://vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/prefill-schedule-interval.gif" alt="DEP8 グループでの prefill スケジュールの周期">
+    <p class="cap">図 10: DEP8 グループでの prefill スケジュールの周期。<b>左</b>: prefill が別々のステップに到着し、lockstep のグループを繰り返し止める。<b>右</b>: 間隔を 4 にすると、prefill が周期のステップに集まり、その間のステップは decode だけになる。<br>図の出典: <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX</a> (vLLM 公式ブログ)</p>
+  </div>
+  <div class="canvas-wrap">
+    <canvas id="cvCad" width="860" height="470"></canvas>
+  </div>
+  <div class="controls">
+    <div class="slider">DEP の rank 数 <input id="cdR" type="range" min="2" max="8" value="8"><span id="cdRv">8</span></div>
+    <div class="slider">prefill の間隔 (1 = 制御なし) <input id="cdI" type="range" min="1" max="8" value="4"><span id="cdIv">4</span></div>
+  </div>
+  <div class="controls">
+    <div class="slider">prefill の到着頻度 <input id="cdF" type="range" min="5" max="60" value="20"><span id="cdFv">20</span>%</div>
+    <button class="ghost" id="cdNew">到着パターンを引き直す</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#e07a5f"></span>prefill を含むステップ (グループ全体が遅くなる)</span>
+    <span><span class="dot" style="background:#43b581"></span>decode だけのステップ</span>
+  </div>
+  <p class="rdout" id="cdOut"></p>
+  <div class="warn">
+    <b>このデモは到着の模式です。</b>prefill の到着をランダムに生成し、<b>間隔の制御があるときは次の周期ステップまで待たせる</b>という規則だけを実装しています。<b>ステップ時間の差 ・ all-to-all の実際のコスト ・ 待たせたことによる TTFT の増加は入っていません</b>。数えているのは<b>「decode だけのステップが全体の何割になるか」</b>だけです。原文はこの方策の効果を数値で示していないので、<b>ここでも数値の主張はしていません</b>。
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>この 2 つの方策 (7 節と 8 節) は<b>逆方向を向いている</b>ことに注意すると理解が深まります。7 節は<b>長い prefill を細かく刻んで、他の仕事に席を譲らせる</b>。8 節は<b>prefill をまとめて同じステップに集める</b>。前者はインスタンスの内側で<b>混ぜる</b>ための操作、後者は rank をまたいで<b>揃える</b>ための操作です。<b>「混ぜる」と「揃える」が同時に成立するのは、粒度が違うから</b>です。1 ステップの中では混ぜ、ステップの並びとしては揃える。この 2 段の見方が、この節の設計の要点です。
+  </div>
+</section>
+<section id="s9">
+  <h2><span class="num">9</span>制御面 — P/D の rate matching</h2>
+  <p class="lead">原文の言い方が厳しくて良いところです。<b>1 つのエンジンを最適化するだけでは、分散配備の最良のレイテンシ-コスト点は見つからない。GPU を増やしても、分離しても、自動的にフロンティアは改善しない。</b>prefill と decode の<b>処理速度が釣り合っている (rate-matched) </b>必要があります。</p>
+  <table>
+    <tr><th>段</th><th>やること</th><th>出てくるもの</th></tr>
+    <tr><td><b>第 1 段: 飽和プロファイリング</b></td><td>prefill だけ / decode だけの配備を<b>別々に</b>ベンチマークし、<b>並列化の戦略</b> (TP か広い EP か) と<b>配備の規模</b> (8 / 16 / 32 GPU) を掃引しながら、<b>スループットが飽和するまで同時実行数を上げる</b></td><td><b>飽和表</b>: (並列化, 規模) の各構成での最大 prefill / decode req/s</td></tr>
+    <tr class="hl"><td><b>第 2 段: P/D 掃引</b></td><td>各構成の第 1 段の飽和点から <b>P/D 比を導出</b>し、<b>組み合わせた分離配備で同時実行数を掃引</b>して動作範囲全体の指標を集める</td><td>実際の運用点の候補</td></tr>
+  </table>
+  <p>そして原文はこの手順を<b>「エージェント的なワークフローで自動化できる標準化された 2 段階の方法」</b>だと書いています。</p>
+  <div class="add">
+    <span class="badge">補足</span>この手順の要点は<b>「比率を先に決めない」</b>ことです。P/D 比を勘で決めて掃引すると、探索空間が (比率 × 同時実行数 × 並列化 × 規模) に膨らみます。<b>先に prefill と decode を別々に飽和させておけば、比率は割り算で出ます</b>。しかも原文は「<b>最適な P/D 比は同時実行数によって動く</b>」と 3 節で述べているので、1 点で決めた比率が別の負荷で最適とは限りません。第 2 段で同時実行数を掃引するのは、<b>その動きを表として持っておく</b>ためです。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>カーネルとコミュニティ</h2>
+  <p class="lead">agentic なワークロードはカーネルのボトルネックも動かします。<b>長文脈の attention ・ speculative decoding ・ 通信</b>の側へ寄ります。原文が挙げる、end-to-end で効果が測れた変更を並べます。</p>
+  <table>
+    <tr><th>モデル</th><th>変更</th><th>測られた効果</th></tr>
+    <tr><td rowspan="3">MiniMax M3</td><td>CuteDSL の長文脈 indexer</td><td>GB300 での indexer レイテンシが<b>形状によって約 3% から 31% 改善</b></td></tr>
+    <tr><td>upstream された MSA top-k 経路</td><td><b>最悪ケースのカーネル性能が最大 4 倍</b>、AgentX の end-to-end スループットが<b>約 7% 改善</b></td></tr>
+    <tr><td>speculative-verification 経路</td><td><b>中バッチの decode 性能が約 20% 改善</b> (報告されたテストで)</td></tr>
+    <tr><td rowspan="2">Kimi K3</td><td>GEMM と reduce-scatter の融合</td><td>sequence-parallel な通信が改善</td></tr>
+    <tr class="hl"><td>latent-tail MoE の融合</td><td><b>end-to-end のレイテンシが約 5% 削減</b></td></tr>
+    <tr><td>DeepSeek V4</td><td>コミュニティ貢献による MXFP4 MoE と HCA 圧縮の改善、multi-stream C4A の追加、クラスタベース top-k の改善</td><td>—</td></tr>
+  </table>
+  <p>原文は<b>すべてのカーネルが完全にオープンソースで、いくつかは既に他のオープンソースエンジンに採用されている</b>と書いています。</p>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>【デモ】実測の性能とコスト</h2>
+  <p class="lead">測定は <b>SemiAnalysis AgentX</b> による独立した検証です。<b>実世界の agentic コーディングのトレース 300 万ドル分</b>から作られ、<b>1M の文脈</b>を持ち、<b>1,000 チップ超 ・ 約 2 MW</b> の公開ベンチマーク基盤で走ります。</p>
+  <p>各モデルについて、<b>P90 の interactivity が 1 ユーザーあたり 50 tok/s を上回る中で最もスループットの高い vLLM 構成</b>が報告されています。</p>
+  <table>
+    <tr><th>モデル</th><th>GPU / 同時実行</th><th class="num">TPGS (P90 > 50 tok/s)</th><th class="num">P90 interactivity</th></tr>
+    <tr class="hl"><td>DeepSeek V4 Pro 1.6T</td><td>12 GB300 / 256</td><td class="num">83K</td><td class="num">58.3 tok/s</td></tr>
+    <tr><td>MiniMax M3 428B</td><td>2 B300 / 24</td><td class="num">70K</td><td class="num">74.2 tok/s</td></tr>
+    <tr><td>Kimi K3 2.8T</td><td>16 GB300 / 48</td><td class="num">11.8K</td><td class="num">62.7 tok/s</td></tr>
+  </table>
+  <p><b>TPGS (total tokens per GPU-second) は入力 ・ 出力 ・ キャッシュされたトークンを合わせて数えます</b>。3 つの位置づけも原文が書き分けています。DeepSeek V4 Pro は<b>高スループットで低コストな場合</b>、MiniMax M3 は<b>interactivity をさらに押し上げる場合</b> (2 枚の B300 だけで 74.2 tok/s)、Kimi K3 は<b>frontier の知能</b>のための場合 (2.8 兆パラメータで従来型の単一サーバには大きすぎるが、16 枚の GB300 で 62.7 tok/s を維持)。</p>
+  <h3>コストの比較と、その前提</h3>
+  <table>
+    <tr><th>モデル</th><th class="num">GPU の TCO / 時間</th><th class="num">Opus 5 相当のコスト / 時間</th><th class="num">コスト優位</th></tr>
+    <tr class="hl"><td>DeepSeek V4 Pro 1.6T</td><td class="num">$27.72</td><td class="num">$2,926</td><td class="num">106 倍</td></tr>
+    <tr><td>MiniMax M3 428B</td><td class="num">$4.52</td><td class="num">$384</td><td class="num">85 倍</td></tr>
+    <tr><td>Kimi K3 2.8T</td><td class="num">$36.96</td><td class="num">$538</td><td class="num">14.6 倍</td></tr>
+  </table>
+  <div class="warn">
+    <b>Opus 5 側の計算の前提が明記されています。</b>「キャッシュされた入力 × $0.50/M + キャッシュされていない入力 × $5/M + 出力 × $25/M」で、<b>理論上の完璧なキャッシュヒット率を仮定し、キャッシュ書き込みの課金と長文脈の価格上乗せを除いています</b>。原文はこれを<b>「保守的で Opus に有利な仮定」</b>と述べ、さらに<b>「これはサービングコストの比較で、モデルの品質の比較ではない」</b>と明記しています。
+  </div>
+  <p>下のデモは、この<b>前提を動かせるようにしたもの</b>です。キャッシュヒット率を下げると Opus 5 側のコストは上がり (キャッシュ読みの単価から通常の入力単価へ移るため)、優位の倍率が動きます。<b>どの前提が結論をどれだけ動かすか</b>を見てください。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvCost" width="860" height="500"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="csDS">DeepSeek V4 Pro</button>
+    <button class="ghost" id="csMM">MiniMax M3</button>
+    <button class="ghost" id="csK3">Kimi K3</button>
+  </div>
+  <div class="controls">
+    <div class="slider">仮定するキャッシュヒット率 <input id="csH" type="range" min="0" max="100" value="100"><span id="csHv">100</span>%</div>
+    <div class="slider">出力の割合 <input id="csO" type="range" min="1" max="30" step="1" value="13"><span id="csOv">13</span>‰</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>vLLM の GPU TCO</span>
+    <span><span class="dot" style="background:#e07a5f"></span>Opus 5 相当のコスト</span>
+    <span><span class="dot" style="background:#e0a03f"></span>原文が報告した点</span>
+  </div>
+  <p class="rdout" id="csOut"></p>
+  <div class="warn">
+    <b>このデモは原文の 2 つの表と、原文が明記した価格式だけを使った再計算です。</b>原文の報告値 (ヒット率 100% を仮定した点) を基準に、<b>TPGS の内訳を「入力 : 出力」の比で分解し、キャッシュヒット率を動かして Opus 5 側を計算し直しています</b>。<b>TPGS の正確な内訳は原文に載っていないので、出力の割合はスライダーで仮定します</b> (既定の 13‰ は<b>原文の報告値を再現する割合</b>で、AgentX の中央値 444 出力 / 142K 入力 の比は約 3‰ です。つまり原文のコスト計算は、中央値のセッションより<b>出力の割合が高い前提</b>になっています。出力は キャッシュ読みの 50 倍の単価なので、この差は結果を大きく動かします)。したがって<b>基準点 (ヒット率 100%) では原文の倍率に一致し、そこから離れるほどこの記事の仮定に依存します</b>。
+  </div>
+</section>
+
+<section id="s12">
+  <h2><span class="num">12</span>効かなかった 3 つ</h2>
+  <p class="lead">原文の中でいちばん価値のある節です。<b>「失敗した考えはすべて探索空間を狭める」</b>という書き出しで、<b>もっともらしい直感が end-to-end の測定を生き延びなかった</b>ケースが 3 つ並びます。</p>
+  <h3>1. パイプライン並列 (PP) は暖まったターンに合わない</h3>
+  <table>
+    <tr><th>効く場合</th><th>効かない場合</th></tr>
+    <tr><td><b>長くて新規のプロンプト</b>。大きな prefill が<b>パイプラインの各段を埋めるだけの仕事</b>を供給するので、通信コストが小さくスループットがほぼ線形にスケールする</td><td><b>agentic なターンの大半</b>。system プロンプトと過去のターンは既にキャッシュされていて、<b>新しいリクエストが足すのは数百から数千トークンだけ</b>。<b>パイプラインを効率よく埋めるだけの新規計算が無く、バブルが利得の多くを食う</b></td></tr>
+  </table>
+  <p>原文の結論の書き方が丁寧です。<b>「PP が効かないという教訓ではない。冷たく計算の重い prefill には効く。ただし agentic セッションを支配する、暖かく prefix の多いターンでは既定にすべきではない。」</b></p>
+  <h3>2. DCP は DeepSeek V4 へ素直に移らない</h3>
+  <p>DCP は<b>純粋な MLA のモデル</b> (DeepSeek R1 ・ Kimi K2.5 ・ K2.7) と<b>hybrid MLA のモデル</b> (Kimi K3) では効きます。ところが DeepSeek V4 で同じ利得を実現するのは<b>ずっと難しい</b>。理由は attention スタックの複雑さで、<b>compressed sparse attention と highly compressed attention には indexer ・ 追加の compressor ・ 主 attention が含まれ、context parallelism はこれら全部の副層を分割して調整しなければなりません</b>。</p>
+  <div class="key">
+    <b>そして結果が正直です。</b>通信と計算の重ね合わせに大きく投資し、対応するカーネルも最適化したうえで、<b>DCP は DEP を超えるのではなく、ようやく並んだ</b>。原文の結論は<b>「並列化はモデルのアーキテクチャに従わなければならない。ある潜在 attention モデルで成功した戦略が、別のモデルに一般化するとは限らない」</b>です。
+  </div>
+  <h3>3. 負荷分散は性能を保証しない</h3>
+  <p>集約された DEP 配備で、<b>rank 間の KV キャッシュ使用量に大きな偏り</b>が観測されました。自然な対応は、<b>キューの深さ ・ 実行中のトークン数 ・ 現在の KV 使用率</b>でリクエストを分散させることです。ところが AgentX での実験では、<b>これらの方策はすべて、単純なセッション固定の routing に負けました</b>。</p>
+  <table>
+    <tr><th>なぜ負けたのか</th><th>中身</th></tr>
+    <tr><td>キャッシュの局所性</td><td>agentic セッションは<b>ターン間の間隔が短い</b>ものが多く、<b>次のターンは prefix がまだ前の GPU に常駐しているうちに次のターンが来る</b></td></tr>
+    <tr class="hl"><td>移動のコストは 0 ではない</td><td>セッションを空いている rank に移すと、<b>prefix が分散 KV プールに保存されていても、KV キャッシュを取り直すことになります</b>。転送は非同期で計算と重なるが<b>無料ではない</b></td></tr>
+    <tr><td>容量を食う</td><td><b>prefetch されたブロックは一時的に GPU の KV 容量を占め、行き先の rank が受け入れられる系列数を減らします</b></td></tr>
+  </table>
+  <div class="key">
+    <b>結論。</b>「システムは<b>より均衡したキューを達成しながら、より少ない同時リクエストしか処理しない</b>ことになりうる。ターン間の間隔が短いワークロードでは、<b>瞬間的な負荷を完璧に均衡させることより、セッションの局所性を保つことの方が価値がある</b>。routing の判断は、<b>キューにある仕事の量だけでなく、各ワーカーに既に常駐している状態</b>を考慮しなければならない。」
+  </div>
+  <div class="add">
+    <span class="badge">補足</span>3 つの失敗は<b>同じ形</b>をしています。<b>「一般に良いとされる手法を、このワークロードの形を見ずに適用した」</b>。PP は仕事が十分にあることを前提にし、DCP は分割できる軸があることを前提にし、負荷分散は<b>リクエストが状態を持たないことを前提</b>にしています。agentic なトラフィックは 1 節の 4 つの統計のとおり、<b>仕事が少なく (append が短い) ・ 軸が単純でなく (compressor が共有) ・ 状態を持つ (prefix が特定の GPU にある)</b>。<b>前提が全部外れているので、3 つとも外れた</b>という読み方ができます。
+  </div>
+</section>
+
+<section id="s13">
+  <h2><span class="num">13</span>これから</h2>
+  <p class="lead">次の一手は<b>「agentic な構造をスタック全体で明示的にする」</b>ことだと原文は書いています。各層の例が挙げられています。</p>
+  <table>
+    <tr><th>層</th><th>やろうとしていること</th></tr>
+    <tr><td>制御面</td><td><b>1 ターン目のリクエスト</b> (prefix キャッシュを埋めるための長い新規 prefill が必要) と <b>2 ターン目以降</b> (高いキャッシュ再利用と比較的短い append prefill) で routing を明示的に分ける。<b>head-of-line blocking を避けられ、両側でエンジンの構成と並列化を別々にできる</b> (たとえば PCP と CPP を使い分ける)</td></tr>
+    <tr class="hl"><td>実行面 ・ データ面: <b>agent hints</b></td><td>agentic なフレームワークやハーネスが、リクエストと一緒に<b>ヒントを運ぶ</b>。セッションの構造 ・ 分岐しうる点とキャッシュの位置 ・ ツール呼び出しのレイテンシ ・ セッションのライフサイクル。<b>まず標準化された API でこれを受け取り、次にスケジューリングやキャッシュの追い出し方策に使う</b></td></tr>
+    <tr><td><b>programmable KV cache</b></td><td>配置 ・ 保持 ・ 複製 ・ 追い出しの方策はワークロードごとに違う。<b>prefetch ・ eviction ・ soft-pinning をユーザーが制御できるインターフェース</b></td></tr>
+    <tr><td><b>session-based KV cache management</b></td><td><b>ターン間の空き時間</b>を使って、次のターンを処理しそうなワーカーへ保持した KV 状態を<b>先に移しておく</b>。転送レイテンシを隠し、冷たい再開を減らす</td></tr>
+  </table>
+  <div class="add">
+    <span class="badge">補足</span>この 4 つは全部<b>「エンジンが知らない情報を、外から渡す」</b>方向を向いています。12 節の 3 つ目の失敗と対になっていて、<b>routing がデータ面の状態を知らないと判断を間違える</b>のなら、解は 2 つあります。<b>知らせるか、判断する場所を移すか</b>。agent hints と programmable KV cache は前者 (アプリの知識をエンジンへ)、session-based な管理は後者 (エンジンが先に動いて状態を寄せる) です。<b>どちらも「暗黙の構造を明示にする」</b>という同じ方針です。
+  </div>
+</section>
+
+<section id="s14">
+  <h2><span class="num">14</span>読むときに気をつける点</h2>
+  <p class="lead">以下はこの記事の読み解きで、原文の主張ではありません。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>ベンチマークの位置づけ</td><td>AgentX は<b>SemiAnalysis が運営する公開ベンチマーク</b>で、原文もそこを強調しています (ハーネスは公開、結果はダッシュボードで追跡可能)。一方で<b>ワークロードは「agentic コーディング」1 種類</b>です。他の agentic な形 (対話型のツール利用、長期のバッチ処理など) で同じ統計になるとは限りません</td></tr>
+    <tr class="hl"><td>コスト比較の前提</td><td>106 倍という数字は、<b>Opus 5 側に理論上完璧なキャッシュヒット率を仮定し、キャッシュ書き込み料金と長文脈の割増を除いた</b>うえでの比較です。原文はこれを「Opus に有利で保守的」と明示しています。ただし<b>比べているのは「自前で GPU を持つ TCO」と「API の定価」</b>で、<b>運用の人手 ・ 可用性 ・ 稼働率 ・ モデル品質は含まれません</b>。原文も「サービングコストの比較で、品質の比較ではない」と書いています</td></tr>
+    <tr><td>TPGS という指標</td><td><b>入力 ・ 出力 ・ キャッシュされたトークンを全部数えます</b>。1 節のとおり入力が出力の 300 倍あるワークロードなので、<b>TPGS の大半はキャッシュヒットした入力</b>です。「1 GPU 秒あたり 83K トークン」を<b>生成速度と読むと桁を間違えます</b> (生成側は P90 で 58.3 tok/s/user)</td></tr>
+    <tr><td>構成ごとの最良点の切り出し</td><td>表の値は<b>「P90 > 50 tok/s を満たす中で最もスループットの高い構成」</b>です。<b>別の SLO を選べば別の構成が最良になります</b>。原文が Pareto を強調し、対話ページで探索させているのは、<b>単一の数字で語れないことを示すため</b>です</td></tr>
+    <tr><td>スケジューリングの効果の範囲</td><td>+93% と 2.3 倍は<b>B300 上の DeepSeek V4 Pro での測定</b>です。<b>代償として長いリクエストの TTFT が伸びる</b>ことも明記されています。TTFT に敏感な用途では閾値を上げる必要があり、<b>その場合の効果は小さくなります</b></td></tr>
+    <tr><td>並列化の一般化は禁止</td><td>12 節の 2 つ目がそのままの警告です。<b>K3 で DCP が勝ったから V4 でも勝つ、とは言えません</b>。この記事の 6 節を「モデルごとの結論」として読み、<b>自分のモデルで測り直す前提</b>で扱うのが安全です</td></tr>
+    <tr><td>数値の出どころが混ざる</td><td>原文には<b>実測 ・ 報告値 ・ 「reported tests」という表現</b>が混ざります (たとえばカーネルの 20% 改善は "in reported tests")。<b>end-to-end の効果と、カーネル単体の効果を区別</b>して読む必要があります</td></tr>
+    <tr><td>失敗の申告が丁寧</td><td>3 つの失敗を「まだ改善中」と添えて公開しているのは誠実です。とくに<b>DCP に大きく投資して DEP に並んだだけ</b>という報告は、普通なら書かない類の情報です。<b>この節があることで、6 節の推奨の信頼度が上がります</b></td></tr>
+    <tr><td>この記事の追加部分</td><td><b>1 節の補足 ・ 2 節のデモ ・ 3 節の補足 ・ 4 節の補足 ・ 5 節の補足 ・ 6 節の補足 ・ 7 節のデモ ・ 8 節のデモと補足 ・ 9 節の補足 ・ 11 節のデモ ・ 12 節の補足 ・ 13 節の補足 ・ 14 節</b>は原文にありません</td></tr>
+  </table>
+  <div class="key">
+    <b>この記事から持ち帰れる形。</b>3 回に分けて読んできた vLLM のブログは、どれも<b>同じ順番</b>で書かれています。<b>まずワークロードの形を数字で押さえ、次にその形に合わない既存の前提を特定し、最後にその 1 点を外す</b>。第 1 回は「捨てるか読み戻すか」、第 2 回は「全トークンが常駐する必要があるか」、そして今回は<b>「並列化 ・ スケジューリング ・ routing の既定が、96% が再利用されるトラフィックを想定しているか」</b>です。そして今回いちばん学びが多いのは 12 節で、<b>一般に良いとされる 3 つの手法が、ワークロードの形を見ずに適用したために外れた</b>という記録です。<b>最適化の前に、まず形を測る。</b>
+  </div>
+  <p class="fn">原文: vLLM Team and Inferact. "<a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" target="_blank" rel="noopener">vLLM x AgentX: Optimizing for Real-World Agentic Serving</a>", vLLM 公式ブログ, 2026-09-08。この取り組みは Inferact が主導し、vLLM コミュニティが広く支援したと記載されています。ベンチマークは SemiAnalysis が開発 ・ 運営する AgentX で、ハーネスは <code>SemiAnalysisAI/agentx-harness</code> で公開されています。図 7 枚はいずれも原文のものを直接参照しています (<code>vllm.ai/blog-assets/figures/2026-09-08-vllm-agentx/</code>)。<br>
+  <b>数値はすべて原文の実測値または報告値</b>です。<b>2 節 ・ 7 節 ・ 8 節のデモは規則と算術の模式</b>で、<b>11 節のデモは原文の 2 つの表と原文が明記した価格式に基づく再計算</b>です (ヒット率 100% の基準点では原文の倍率に一致し、そこから離れると出力割合の仮定に依存します)。原文の対話ページは <a href="https://vllm.ai/blog-assets/interactive_pages/vllm-agentx-pareto.html" target="_blank" rel="noopener">Pareto</a> ・ <a href="https://vllm.ai/blog-assets/interactive_pages/agentic-workload-explorer.html" target="_blank" rel="noopener">セッション探索</a> ・ <a href="https://vllm.ai/blog-assets/interactive_pages/dsv4-kv-cache-layout.html" target="_blank" rel="noopener">KV レイアウト</a>。<br>
+  関連する解説として<a href="./vllm-blog-01-tiered-kv-offloading.html">第 1 回 階層 KV オフロード</a>、<a href="./vllm-blog-02-glm53-hybrid-hisparse.html">第 2 回 Hybrid HiSparse</a>、<a href="./attn-mla.html">MLA</a>、<a href="./ffn-moe-explainer.html">MoE</a>、<a href="./06-layout-and-parallelism.html">レイアウトと並列化</a> があります。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./vllm-blog-index.html" style="color:var(--g2)">← vLLM ブログ解説シリーズの目次へ</a> ・
+  <a href="https://vllm.ai/blog/2026-09-08-vllm-agentx" style="color:var(--g2)" target="_blank" rel="noopener">原文を読む</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* ============ デモ1: セッション全体のトークン会計 ============ */
+(function(){
+  const cv=document.getElementById('cvAcct'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  function draw(){
+    const T=+document.getElementById('acT').value;
+    const L=+document.getElementById('acL').value*1000;   /* 最終入力長 */
+    const O=+document.getElementById('acO').value;
+    const hit=+document.getElementById('acH').value/100;
+    document.getElementById('acTv').textContent=T;
+    document.getElementById('acLv').textContent=L/1000;
+    document.getElementById('acOv').textContent=O;
+    document.getElementById('acHv').textContent=Math.round(hit*100);
+    /* ターン i の入力長は線形に伸びると仮定 */
+    let totalIn=0;
+    for(let i=1;i<=T;i++) totalIn+=L*i/T;
+    const reuse=totalIn*hit, prefill=totalIn-reuse, dec=O*T;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('セッション 1 本 ('+T+' ターン) で読み書きされるトークンの合計',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('既定値は AgentX の中央値 ・ 会計はこの記事の単純化',W-24,24);
+    /* 積み上げ帯 */
+    const x0=40,gw=W-80,by=54,bh=46;
+    let acc=0;
+    [[reuse,POS,'キャッシュから再利用'],[prefill,NEG,'実際に prefill'],[dec,BLUE,'decode で生成']].forEach(function(g){
+      const w=g[0]/(totalIn+dec)*gw;
+      ct.fillStyle=g[1];ct.globalAlpha=0.9;ct.fillRect(x0+acc,by,Math.max(1,w),bh);ct.globalAlpha=1;
+      if(w>120){
+        ct.fillStyle='#0d2b20';ct.font='bold 12px sans-serif';ct.textAlign='center';
+        ct.fillText(g[2],x0+acc+w/2,by+20);
+        ct.font='bold 12.5px "SF Mono",Menlo,monospace';
+        ct.fillText((g[0]/1e6).toFixed(2)+'M',x0+acc+w/2,by+38);
+      }
+      acc+=w;
+    });
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('合計 '+((totalIn+dec)/1e6).toFixed(2)+'M トークン (入力の合計 '+(totalIn/1e6).toFixed(2)+'M + 生成 '+(dec/1000).toFixed(1)+'K)',x0,by+bh+20);
+    /* ターンごとの棒 */
+    const ty=150,gh=150,cw=gw/T;
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('ターンごとの入力長 (濃い部分が実際に prefill する分)',24,ty-6);
+    for(let i=1;i<=T;i++){
+      const inLen=L*i/T, h=inLen/L*gh;
+      const x=x0+(i-1)*cw;
+      ct.fillStyle=POS;ct.globalAlpha=0.35;
+      ct.fillRect(x+0.5,ty+gh-h,Math.max(1,cw-1),h);ct.globalAlpha=1;
+      const ph=h*(1-hit);
+      ct.fillStyle=NEG;ct.globalAlpha=0.95;
+      ct.fillRect(x+0.5,ty+gh-ph,Math.max(1,cw-1),Math.max(0.8,ph));ct.globalAlpha=1;
+    }
+    ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x0,ty+gh);ct.lineTo(x0+gw,ty+gh);ct.stroke();
+    ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='left';
+    ct.fillText('ターン 1',x0,ty+gh+16);
+    ct.textAlign='right';ct.fillText('ターン '+T+' ('+(L/1000)+'K)',x0+gw,ty+gh+16);
+    /* 倍率 */
+    const ky=340;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,ky,W-48,H-ky-16);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 13px sans-serif';
+    ct.fillText('入力の合計は、最終的な文脈長の '+(totalIn/L).toFixed(1)+' 倍',40,ky+24);
+    ct.fillStyle=POS;ct.font='bold 13px sans-serif';
+    ct.fillText('キャッシュが '+Math.round(hit*100)+'% 効くなら、実際に prefill するのは '+(prefill/1e6).toFixed(2)+
+      'M トークン (合計の '+((prefill/(totalIn+dec))*100).toFixed(1)+'%)',40,ky+48);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('キャッシュ無しなら '+(totalIn/1e6).toFixed(2)+'M を prefill する必要があった。差は '+
+      ((totalIn-prefill)/1e6).toFixed(2)+'M トークン分の計算',40,ky+70);
+    ct.fillStyle=MUT;ct.font='11.5px sans-serif';
+    ct.fillText('生成は '+(dec/1000).toFixed(1)+'K トークンだけ。読む量と書く量の比は '+(totalIn/dec).toFixed(0)+' 対 1',40,ky+90);
+    document.getElementById('acOut').textContent=
+      '入力の合計 '+(totalIn/1e6).toFixed(2)+'M (最終文脈の '+(totalIn/L).toFixed(1)+' 倍) ・ 実際の prefill は '+
+      (prefill/1e6).toFixed(2)+'M ・ 生成は '+(dec/1000).toFixed(1)+'K';
+  }
+  ['acT','acL','acO','acH'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+
+/* ============ デモ2: head-of-line blocking ============ */
+(function(){
+  const cv=document.getElementById('cvHol'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const LONG=32000, SHORT=700, NSHORT=6;
+  let reqs=[], step=0, timer=null, log=[];
+  function reset(){
+    step=0; log=[];
+    reqs=[{n:'長い新規 prefill',need:LONG,done:0,kind:'long',first:null}];
+    for(let i=0;i<NSHORT;i++) reqs.push({n:'短いターン '+(i+1),need:SHORT,done:0,kind:'short',first:null});
+    draw();
+  }
+  function advance(){
+    const B=+document.getElementById('hoB').value;
+    const cap=+document.getElementById('hoC').value;
+    step++;
+    let left=B;
+    reqs.forEach(function(r){
+      if(r.done>=r.need||left<=0) return;
+      const lim=(cap>0)?Math.min(cap,r.need-r.done):(r.need-r.done);
+      const take=Math.min(lim,left);
+      r.done+=take; left-=take;
+      if(r.done>=r.need&&r.first===null) r.first=step;
+    });
+    draw();
+  }
+  function draw(){
+    const B=+document.getElementById('hoB').value;
+    const cap=+document.getElementById('hoC').value;
+    document.getElementById('hoBv').textContent=B;
+    document.getElementById('hoCv').textContent=cap;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('1 rank のキュー ・ ステップ '+step+' ・ 1 ステップの予算 '+B+' トークン'+
+      (cap>0?(' ・ 1 リクエストの上限 '+cap):' ・ 上限なし'),24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('トークン予算の算術による模式',W-24,24);
+    const x0=180,gw=W-70-x0,rowh=(H-160)/reqs.length;
+    reqs.forEach(function(r,i){
+      const y=0+52+i*rowh, bh=Math.min(26,rowh-10);
+      const doneDec=(r.done>=r.need);
+      ct.fillStyle=doneDec?BLUE:(r.kind==='long'?NEG:POS);
+      ct.font=(r.kind==='long'?'bold ':'')+'12.5px sans-serif';ct.textAlign='right';
+      ct.fillText(r.n,x0-12,y+bh/2+4);
+      ct.fillStyle='rgba(255,255,255,0.06)';ct.fillRect(x0,y,gw,bh);
+      const w=r.done/LONG*gw;
+      ct.fillStyle=doneDec?BLUE:(r.kind==='long'?NEG:POS);ct.globalAlpha=0.9;
+      ct.fillRect(x0,y,Math.max(1,Math.min(w,gw)),bh);ct.globalAlpha=1;
+      ct.fillStyle=INK;ct.font='11px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(r.done.toLocaleString()+' / '+r.need.toLocaleString()+
+        (doneDec?('  → ステップ '+r.first+' で decode 開始'):''),x0+Math.min(w,gw)+8,y+bh/2+4);
+    });
+    const shortDone=reqs.filter(function(r){return r.kind==='short'&&r.done>=r.need;});
+    const firstShort=shortDone.length?Math.min.apply(null,shortDone.map(function(r){return r.first;})):null;
+    const allShort=(shortDone.length===NSHORT)?Math.max.apply(null,shortDone.map(function(r){return r.first;})):null;
+    const longDone=reqs[0].first;
+    const by=H-96;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,84);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText('短いターンが decode を始めたステップ: 最初 '+(firstShort||'—')+' ・ 全部 '+(allShort||'—')+
+      ' ・ 長い prefill の完了 '+(longDone||'—'),40,by+24);
+    ct.fillStyle=(cap>0)?POS:NEG;ct.font='bold 12.5px sans-serif';
+    ct.fillText(cap>0
+      ? '上限があると、長い prefill が予算を使い切らないので短いターンが同じバッチに入れる'
+      : '上限が無いと、長い prefill が毎ステップ予算を丸ごと取り、短いターンは 1 度もスケジュールされない',40,by+48);
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+    ct.fillText('原文の実測: B300 上の DeepSeek V4 Pro で TPGS 最大 +93% ・ P90 interactivity 約 2.3 倍。代償は長いリクエスト自身の TTFT',40,by+70);
+    document.getElementById('hoOut').textContent=
+      'ステップ '+step+': 短いターンの完了 '+shortDone.length+' / '+NSHORT+
+      (firstShort?(' ・ 最初の decode 開始はステップ '+firstShort):'') ;
+  }
+  document.getElementById('hoStep').onclick=advance;
+  document.getElementById('hoReset').onclick=reset;
+  document.getElementById('hoAuto').onclick=function(){
+    const b=document.getElementById('hoAuto');
+    if(timer){clearInterval(timer);timer=null;b.classList.remove('active');return;}
+    b.classList.add('active');
+    timer=setInterval(function(){
+      if(reqs.every(function(r){return r.done>=r.need;})){clearInterval(timer);timer=null;b.classList.remove('active');return;}
+      advance();
+    },420);
+  };
+  ['hoB','hoC'].forEach(function(id){document.getElementById(id).oninput=reset;});
+  reset();
+})();
+/* ============ デモ3: DEP の prefill cadence ============ */
+(function(){
+  const cv=document.getElementById('cvCad'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const NSTEP=24;
+  let arrivals=[];
+  function gen(){
+    const R=+document.getElementById('cdR').value;
+    const f=+document.getElementById('cdF').value/100;
+    arrivals=[];
+    for(let r=0;r<R;r++){
+      const row=[];
+      for(let s=0;s<NSTEP;s++) row.push(Math.random()<f);
+      arrivals.push(row);
+    }
+    draw();
+  }
+  function draw(){
+    const R=+document.getElementById('cdR').value;
+    const I=+document.getElementById('cdI').value;
+    const f=+document.getElementById('cdF').value;
+    document.getElementById('cdRv').textContent=R;
+    document.getElementById('cdIv').textContent=I;
+    document.getElementById('cdFv').textContent=f;
+    while(arrivals.length<R) arrivals.push(new Array(NSTEP).fill(false).map(function(){return Math.random()<f/100;}));
+    /* 間隔の制御: 到着した prefill は次の cadence ステップまで待つ */
+    function schedule(row){
+      const out=new Array(NSTEP).fill(false);
+      let pending=0;
+      for(let s=0;s<NSTEP;s++){
+        if(row[s]) pending++;
+        const isCadence=(I<=1)||((s+1)%I===0);
+        if(pending>0&&isCadence){ out[s]=true; pending=0; }
+        else if(pending>0&&I<=1){ out[s]=true; pending=0; }
+      }
+      return out;
+    }
+    const sched=arrivals.slice(0,R).map(function(row){ return (I<=1)?row.slice():schedule(row); });
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText('DEP'+R+' の '+NSTEP+' ステップ ・ prefill の間隔 = '+(I<=1?'制御なし':I),24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('到着の模式 ・ ステップ時間は含まない',W-24,24);
+    const x0=110,gw=W-60-x0,cw=gw/NSTEP;
+    /* lockstep の判定: あるステップでどれかの rank が prefill を持つとグループ全体が遅い */
+    const groupSlow=[];
+    for(let s=0;s<NSTEP;s++){
+      let any=false;
+      for(let r=0;r<R;r++) if(sched[r][s]) any=true;
+      groupSlow.push(any);
+    }
+    const rowh=Math.min(26,(H-190)/(R+1));
+    for(let r=0;r<R;r++){
+      const y=52+r*rowh;
+      ct.fillStyle=SUBI;ct.font='11.5px sans-serif';ct.textAlign='right';
+      ct.fillText('rank '+r,x0-10,y+rowh*0.7);
+      for(let s=0;s<NSTEP;s++){
+        const x=x0+s*cw;
+        ct.fillStyle=sched[r][s]?NEG:POS;ct.globalAlpha=sched[r][s]?0.9:0.35;
+        ct.fillRect(x+1,y+2,cw-2,rowh-6);ct.globalAlpha=1;
+      }
+    }
+    /* グループ行 */
+    const gy=52+R*rowh+10;
+    ct.fillStyle=INK;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('グループ全体',x0-10,gy+rowh*0.7);
+    for(let s=0;s<NSTEP;s++){
+      const x=x0+s*cw;
+      ct.fillStyle=groupSlow[s]?NEG:POS;ct.globalAlpha=groupSlow[s]?0.95:0.8;
+      ct.fillRect(x+1,gy+2,cw-2,rowh-6);ct.globalAlpha=1;
+      if(I>1&&(s+1)%I===0){
+        ct.strokeStyle=ALT;ct.lineWidth=1.4;ct.setLineDash([3,2]);
+        ct.strokeRect(x+1,gy+2,cw-2,rowh-6);ct.setLineDash([]);
+      }
+    }
+    ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+    for(let s=0;s<NSTEP;s+=4) ct.fillText(s+1,x0+s*cw+cw/2,gy+rowh+14);
+    const slow=groupSlow.filter(Boolean).length;
+    const by=H-96;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,84);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 13px sans-serif';
+    ct.fillText('decode だけのステップ: '+(NSTEP-slow)+' / '+NSTEP+' ('+Math.round((NSTEP-slow)/NSTEP*100)+'%)',40,by+24);
+    ct.fillStyle=(I>1)?POS:NEG;ct.font='bold 12.5px sans-serif';
+    ct.fillText(I>1
+      ? '間隔を '+I+' にすると prefill が周期のステップ (橙の枠) に集まり、その間のステップは decode だけになる'
+      : '制御が無いと prefill が別々のステップに散り、lockstep のグループが繰り返し遅くなる',40,by+48);
+    ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+    ct.fillText('代償として、待たされた prefill の TTFT は伸びる。原文はこの方策の効果を数値で示していない',40,by+70);
+    document.getElementById('cdOut').textContent=
+      'decode だけのステップ '+(NSTEP-slow)+' / '+NSTEP+' ・ prefill を含むステップ '+slow;
+  }
+  document.getElementById('cdNew').onclick=gen;
+  ['cdR','cdI','cdF'].forEach(function(id){document.getElementById(id).oninput=function(){
+    if(id==='cdF'||id==='cdR') gen(); else draw();};});
+  gen();
+})();
+
+/* ============ デモ4: コストの再計算 ============ */
+(function(){
+  const cv=document.getElementById('cvCost'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  /* 原文の 2 表: TPGS ・ GPU 数 ・ TCO ・ Opus 5 相当 (ヒット率 100% 仮定) */
+  const M={
+    ds:{n:'DeepSeek V4 Pro 1.6T',gpu:12,conc:256,tpgs:83000,p90:58.3,tco:27.72,opus:2926,adv:106},
+    mm:{n:'MiniMax M3 428B',gpu:2,conc:24,tpgs:70000,p90:74.2,tco:4.52,opus:384,adv:85},
+    k3:{n:'Kimi K3 2.8T',gpu:16,conc:48,tpgs:11800,p90:62.7,tco:36.96,opus:538,adv:14.6}
+  };
+  const PRICE={cached:0.50,uncached:5.00,out:25.00};   /* $ / 1M tokens (原文の式) */
+  let cur='ds';
+  function draw(){
+    const m=M[cur];
+    const hit=+document.getElementById('csH').value/100;
+    const outPerMille=+document.getElementById('csO').value;
+    document.getElementById('csHv').textContent=Math.round(hit*100);
+    document.getElementById('csOv').textContent=outPerMille;
+    /* 1 時間あたりの総トークン = TPGS × GPU 数 × 3600 */
+    const totalPerHour=m.tpgs*m.gpu*3600;
+    const outTok=totalPerHour*outPerMille/1000;
+    const inTok=totalPerHour-outTok;
+    const cost=(inTok*hit*PRICE.cached + inTok*(1-hit)*PRICE.uncached + outTok*PRICE.out)/1e6;
+    const adv=cost/m.tco;
+    /* 基準点 (ヒット率 100%) での再現値 */
+    const base=(inTok*PRICE.cached + outTok*PRICE.out)/1e6;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(m.n+' ・ '+m.gpu+' GPU ・ 同時 '+m.conc+' ・ '+(m.tpgs/1000)+'K TPGS ・ P90 '+m.p90+' tok/s',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('原文の表 + 原文の価格式による再計算',W-24,24);
+    /* 2 本の棒 (対数) */
+    const x0=170,gw=W-215-x0,y0=60;
+    const mx=Math.max(cost,m.opus)*1.15;
+    function bw(v){return Math.max(3,Math.log10(Math.max(v,1))/Math.log10(mx)*gw);}
+    [['vLLM の GPU TCO',m.tco,POS],['Opus 5 相当 (この仮定)',cost,NEG]].forEach(function(r,i){
+      const y=y0+i*70;
+      ct.fillStyle=r[2];ct.font='bold 13px sans-serif';ct.textAlign='right';
+      ct.fillText(r[0],x0-12,y+26);
+      ct.fillStyle=r[2];ct.globalAlpha=0.9;ct.fillRect(x0,y,bw(r[1]),40);ct.globalAlpha=1;
+      ct.fillStyle=INK;ct.font='bold 15px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText('$'+r[1].toFixed(2)+' / 時',x0+bw(r[1])+10,y+26);
+    });
+    /* 原文の報告点 */
+    ct.strokeStyle=ALT;ct.lineWidth=2;ct.setLineDash([5,4]);
+    ct.beginPath();ct.moveTo(x0+bw(m.opus),y0+62);ct.lineTo(x0+bw(m.opus),y0+118);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';
+    if(x0+bw(m.opus)>W-260){ct.textAlign='right';ct.fillText('原文の報告値 $'+m.opus,x0+bw(m.opus)-8,y0+128);}
+    else {ct.textAlign='left';ct.fillText('原文の報告値 $'+m.opus,x0+bw(m.opus)+8,y0+128);}
+    /* 倍率 */
+    const ay=y0+160;
+    ct.fillStyle=INK;ct.font='bold 13px sans-serif';ct.textAlign='left';
+    ct.fillText('コスト優位',40,ay);
+    ct.fillStyle=(adv>=m.adv*0.9)?POS:ALT;ct.font='bold 34px "SF Mono",Menlo,monospace';
+    ct.fillText(adv.toFixed(1)+' 倍',40,ay+42);
+    ct.fillStyle=SUBI;ct.font='12.5px sans-serif';
+    ct.fillText('原文の報告は '+m.adv+' 倍 (ヒット率 100% を仮定した場合)',40,ay+66);
+    /* 内訳 */
+    const bx=330;
+    ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';ct.textAlign='left';
+    ct.fillText('Opus 5 側の内訳 (1 時間あたり)',bx,ay);
+    const items=[['キャッシュ読み ($0.50/M)',inTok*hit*PRICE.cached/1e6,POS],
+                 ['通常の入力 ($5/M)',inTok*(1-hit)*PRICE.uncached/1e6,NEG],
+                 ['出力 ($25/M)',outTok*PRICE.out/1e6,BLUE]];
+    items.forEach(function(it,i){
+      const y=ay+22+i*26;
+      ct.fillStyle=it[2];ct.fillRect(bx,y-9,10,10);
+      ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+      ct.fillText(it[0],bx+18,y);
+      ct.fillStyle=it[2];ct.font='bold 12.5px "SF Mono",Menlo,monospace';ct.textAlign='right';
+      ct.fillText('$'+it[1].toFixed(0),W-40,y);
+    });
+    ct.fillStyle=MUT;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('総トークン '+(totalPerHour/1e9).toFixed(2)+'B / 時 (TPGS × GPU 数 × 3600)',bx,ay+104);
+    ct.fillText('うち出力 '+(outTok/1e6).toFixed(1)+'M ・ 入力 '+(inTok/1e9).toFixed(2)+'B',bx,ay+124);
+    const by=H-70;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,58);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText('ヒット率 100% での再現値は $'+base.toFixed(0)+' (原文は $'+m.opus+')。出力割合 13‰ 前後で原文の値に一致する',40,by+22);
+    ct.fillStyle=(hit>=0.96)?SUBI:NEG;ct.font='bold 12px sans-serif';
+    ct.fillText(hit>=0.96
+      ? 'ヒット率を 96% 未満に下げると、入力の単価が $0.50 から $5 へ移り、優位の倍率が急に伸びる'
+      : 'ヒット率 '+Math.round(hit*100)+'% だと入力の多くが $5/M で課金され、Opus 5 側のコストは報告値の '+(cost/m.opus).toFixed(1)+' 倍になる',40,by+44);
+    document.getElementById('csOut').textContent=
+      'ヒット率 '+Math.round(hit*100)+'% ・ 出力割合 '+outPerMille+'‰ のとき、コスト優位は '+adv.toFixed(1)+
+      ' 倍 (原文の報告は '+m.adv+' 倍)';
+  }
+  bindBtns({ds:'csDS',mm:'csMM',k3:'csK3'},function(k){cur=k;draw();});
+  ['csH','csO'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+</script>
+</body>
+</html>
