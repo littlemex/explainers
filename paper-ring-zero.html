@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1 兆パラメータになると、人が設計した工夫が要らなくなる — Ring-Zero の zero RL</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+    --pos:#43b581;
+    --neg:#e07a5f;
+    --alt:#e0a03f;
+    --mut:#6b7a86;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 12px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:0 0 18px;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  .math{background:var(--code);color:#d7f5e6;border-radius:12px;padding:16px 20px;margin:16px 0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px;overflow-x:auto;line-height:1.7;
+    white-space:pre-wrap}
+  .mj{background:#f3f9f6;border:1px dashed var(--g4);border-radius:12px;padding:6px 16px;margin:16px 0;overflow-x:auto}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  .canvas-wrap{text-align:center;margin:18px 0}
+  canvas{background:#0d2b20;border-radius:14px;max-width:100%;touch-action:none}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:14px 0 4px}
+  button{background:var(--g2);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14.5px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  button:hover{background:var(--g1)}
+  button.ghost{background:#e4efe9;color:var(--g1)}
+  button.ghost.active{background:var(--g1);color:#fff}
+  .slider{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+  input[type=range]{accent-color:var(--g2);width:190px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:14px;color:var(--sub);margin-top:10px}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .rdout{text-align:center;font-size:14.5px;color:var(--g1);font-weight:700;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hl td{background:#eaf5ef;font-weight:700}
+  .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  code{background:#eaf5ef;border-radius:5px;padding:1px 6px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:14.5px}
+  blockquote{margin:14px 0;padding:12px 18px;background:#f3f9f6;border-left:4px solid var(--g4);
+    border-radius:0 10px 10px 0;font-size:14.5px;color:var(--sub)}
+  blockquote b{color:var(--g1)}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:22px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">論文理解シリーズ ・ 第 8 回</p>
+  <h1>1 兆パラメータになると、人が設計した工夫が要らなくなる</h1>
+  <p>zero RL を 1T に載せた Ring-2.5-1T-Zero の 4 段パイプラインと 5 つの創発を読む</p>
+</header>
+<main>
+  <a class="back" href="./paper-index.html">← 論文理解シリーズの目次へ</a>
+
+<section>
+  <h2><span class="num">0</span>この記事は何を読み解くのか</h2>
+  <p class="lead">「Ring-Zero: Scaling Zero RL to a Trillion Parameters for Emergent Reasoning」(Xinyu Tang ほか、arXiv:2607.12395v2, 2026-07-16) は、人手ラベルを一切使わない強化学習 (zero RL) を<b>1 兆パラメータのベースモデルに直接かけた</b>ときに何が起きるかを報告した論文です。</p>
+  <div class="key">
+    <b>一言でいうと</b><br>
+    これまでの zero RL の研究は計算資源の都合で小さいモデルに限られていました。1T でやってみると、まず<b>素朴に回すと必ず壊れます</b>。壊れる原因は賢いアルゴリズムの不足ではなく、<b>訓練エンジンと推論エンジンの数値のズレ</b>という地味な工学的問題でした。そこを 3 つの小さな変更で塞ぐと、人手データなしで AIME 2026 の pass@1 が 93.2% まで届きます。そしてもっと面白いのは、104B では<b>手作りの報酬を足さないと出てこなかった</b>構造化や自己検証といった振る舞いが、1T では<b>放っておいても勝手に出てくる</b>という観察です。
+  </div>
+  <table>
+    <tr><th>項目</th><th>値</th></tr>
+    <tr><td>解く問題</td><td>zero RL (人手の CoT データを使わない RLVR) を 1T パラメータで回したときの訓練の力学と創発。既存研究は小さいモデルに限られていた</td></tr>
+    <tr><td>ベースモデル</td><td>Ling-2.5-1T-Base (1T の MoE、活性 63B) と Ling-2.5-flash-Base (104B の MoE、活性 7.4B)。<b>どちらも SFT を一切通していない素の事前学習モデル</b></td></tr>
+    <tr><td>訓練の骨格</td><td>4 段。第 1 段 RL (推論を引き出す) → 自己蒸留 (圧縮とリセット) → 第 2 段 RL (持続的最適化) → 第 3 段 RL (深さを選ばせる)。設計思想は<b>minimalism</b> で、必要になった時だけ要素を足す</td></tr>
+    <tr><td>効いた変更は 3 つだけ</td><td>clipped importance sampling ・ <b>訓練と推論の比率補正</b> ・ 混合精度制御。論文自身が「1T で安定させるのに必要なのは少数の単純な修正だけだった」と書いている</td></tr>
+    <tr><td>計算資源</td><td><b>H200 を 320 枚</b>。訓練エンジンは Megatron、rollout エンジンは SGLang、全体の統括は AReaL</td></tr>
+    <tr><td>主要結果</td><td>AIME 2026 の pass@1 が第 1 段 84.2 → 第 2 段 (Yarn=2) <b>93.2</b>。IMOAnswerBench は 59.3 → <b>75.5</b>。いずれも人手ラベルなし</td></tr>
+    <tr><td>frontier との距離</td><td>比較できる 4 列で見ると GPT-5.5 に AIME 2026 で <b>5.1 pt</b>、HMMT Feb 2026 で <b>15.7 pt</b>、IMOAnswerBench で <b>15.9 pt</b> 負けている。「competitive」は控えめに読む必要がある</td></tr>
+    <tr><td>CoT 品質の 3 軸</td><td>読みやすさ (LLM judge の対戦勝率) ・ 再現性 (自分のトレース 100K で蒸留して 78.4 対 DeepSeek-R1 800K の 72.6) ・ 効率 (全員が正解した問題で平均 <b>6,368 トークン</b>)</td></tr>
+    <tr><td>5 つの創発</td><td>擬人化 ・ 構造化 ・ 並列探索 ・ context anxiety ・ 自己検証。<b>104B では手作りの報酬が必要だったが、1T では不要になった</b></td></tr>
+    <tr><td>論文が認める限界</td><td>出荷される第 3 段は第 2 段よりわずかに弱い / アブレーションは全部 104B で実施 / 事前学習に無い概念は RL では作れない</td></tr>
+    <tr><td>コード</td><td>本文にリポジトリの記載なし。License CC BY 4.0</td></tr>
+  </table>
+  <div class="toc">
+    <a href="#s1">1. 何が問題で、4 段は何のためにあるのか</a>
+    <a href="#s2">2. 【体験】段ごとに何がどれだけ効いたか</a>
+    <a href="#s3">3. 第 1 段 RL — 増幅と、増幅が呼ぶ破綻</a>
+    <a href="#s4">4. 【体験】崩壊のタイムライン</a>
+    <a href="#s5">5. 自己蒸留と第 2 段 — 長さを取り戻す</a>
+    <a href="#s6">6. 【体験】length inertia</a>
+    <a href="#s7">7. 【体験】第 3 段 — 深さを選ばせる</a>
+    <a href="#s8">8. 【体験】frontier とどこまで並んだのか</a>
+    <a href="#s9">9. CoT 品質を 3 軸で測る</a>
+    <a href="#s10">10. 5 つの創発と bitter lesson</a>
+    <a href="#s11">11. 批判的に読む</a>
+    <a href="#s12">12. まとめ</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>何が問題で、4 段は何のためにあるのか</h2>
+  <p class="lead">zero RL とは、人が書いた思考過程のデータを一切使わず、<b>答えが合っているかだけを報酬にして</b>素の事前学習モデルから直接 RL を回すやり方です。DeepSeek-R1 がこれで長い連鎖的思考が勝手に出てくることを示しました。この論文の問いは 1 つで、<b>それを 1T でやったらどうなるのか</b>です。</p>
+  <p>素朴に回すと 3 つの形で失敗します。論文が挙げるのはこの 3 つです。</p>
+  <table>
+    <tr><th>失敗の形</th><th>中身</th><th>この論文の対処</th></tr>
+    <tr><td>読めない</td><td>論理の区切りも構造も無いトレースが出る。人が検証できないし、下流のエージェントも使えない</td><td>対処しない。<b>1T では勝手に構造化された</b> (10 節)</td></tr>
+    <tr><td>冗長になる</td><td>GRPO 系の token-level 損失は長い応答に大きな勾配を与えるので、長さが際限なく伸びる</td><td>自己蒸留で刈り込み、第 2 段で sample-level 損失に切り替える (5 節)</td></tr>
+    <tr><td>深さが固定される</td><td>簡単な問題にも難問と同じ長さを使う。窓を広げると全問で一律に冗長になるだけ</td><td>第 3 段の tier 訓練で 3 つのモードを持たせる (7 節)</td></tr>
+  </table>
+  <p>ここに<b>4 つ目の、しかも最も厄介な失敗</b>が乗ります。訓練が崩壊するのです。しかも原因はアルゴリズムではなく、rollout を作るエンジンと勾配を計算するエンジンが同じ重みに対してわずかに違う logit を返すという浮動小数点の問題でした。3 節でここを開きます。</p>
+  <p>パイプラインの全体像を先に置きます。<b>緑が RL の段、橙が教師あり学習の段</b>です。矢印を目で追うと、この論文でいちばん見落とされやすい点が見えます。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 700" role="img" aria-label="Ring-2.5-1T-Zero の 4 段パイプライン">
+      <defs>
+        <marker id="rzA" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+        <marker id="rzO" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#c07d15"/></marker>
+      </defs>
+
+      <rect x="24" y="14" width="832" height="54" rx="10" fill="#eef2f5" stroke="#6b7a86" stroke-width="2"/>
+      <text x="44" y="38" font-size="15.5" font-weight="700" fill="#3f4c55">Ling-2.5-1T-Base — 1T の MoE (活性 63B)、SFT を一度も通していない</text>
+      <text x="44" y="59" font-size="13" fill="#12211a">MLA 層と Lightning Attention 層の混成。この時点では段階的な導出をほとんど書かない (推論トークンの確率が低い)</text>
+
+      <path d="M300,68 L300,96" stroke="#4a5d54" stroke-width="3" marker-end="url(#rzA)"/>
+
+      <rect x="24" y="100" width="832" height="106" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="44" y="124" font-size="15.5" font-weight="700" fill="#0f5132">第 1 段 RL — 低確率トークンを増幅して推論を引き出す</text>
+      <text x="44" y="146" font-size="13" fill="#12211a">clipped importance sampling ・ 訓練と推論の比率補正 ・ KL 罰則 (β = 1e-4) ・ token-level 損失</text>
+      <text x="44" y="166" font-size="13" fill="#12211a">応答窓を 4k から 64k へ、800 ステップごとに倍にするカリキュラム</text>
+      <text x="44" y="188" font-size="13" font-weight="700" fill="#0f5132">結果: AIME 2026 で 84.2。ただしトレースは冗長で、放置すると崩壊に向かう</text>
+
+      <path d="M300,206 L300,234" stroke="#c07d15" stroke-width="3" marker-end="url(#rzO)"/>
+
+      <rect x="24" y="238" width="832" height="112" rx="10" fill="#fff6e6" stroke="#e0a03f" stroke-width="3"/>
+      <text x="44" y="262" font-size="15.5" font-weight="700" fill="#8a5a06">自己蒸留 — 圧縮と、数値ズレのリセットを同時にやる</text>
+      <text x="44" y="284" font-size="13" fill="#12211a">第 1 段の方策で複数回サンプルし、(1) 正解の中で最短のものを選び、(2) 冗長だとモデル自身が判断した部分を削る</text>
+      <text x="44" y="304" font-size="13" fill="#12211a">その短いコーパスで<tspan font-weight="700">元の base モデルを</tspan>教師あり学習 (3 epoch、系列長 64k、lr 7e-5)</text>
+      <text x="44" y="326" font-size="13" font-weight="700" fill="#8a5a06">結果: AIME 2026 で 88.1。蓄積した訓練と推論のズレがゼロに戻る</text>
+
+      <path d="M120,68 C 96,68 96,294 20,294" fill="none" stroke="#c07d15" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#rzO)"/>
+      <text x="130" y="228" font-size="12.5" font-weight="700" fill="#8a5a06">蒸留先は RL 後の方策ではなく、いちばん上の base に戻る</text>
+
+      <path d="M300,350 L300,378" stroke="#4a5d54" stroke-width="3" marker-end="url(#rzA)"/>
+
+      <rect x="24" y="382" width="832" height="102" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="44" y="406" font-size="15.5" font-weight="700" fill="#0f5132">第 2 段 RL — 損失の粒度を変えて長さを固定したまま伸ばす</text>
+      <text x="44" y="428" font-size="13" fill="#12211a">token-level から sample-level (応答長 |o| で割る) へ。KL 罰則は撤去する (蒸留済みの出発点が十分に強いため)</text>
+      <text x="44" y="448" font-size="13" fill="#12211a">比率補正と clipped importance sampling は第 1 段のまま引き継ぐ</text>
+      <text x="44" y="470" font-size="13" font-weight="700" fill="#0f5132">結果: AIME 2026 で 92.5、YaRN で窓を 2 倍にすると 93.2。ここがこの論文の最高点</text>
+
+      <path d="M300,484 L300,512" stroke="#4a5d54" stroke-width="3" marker-end="url(#rzA)"/>
+
+      <rect x="24" y="516" width="832" height="102" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="3"/>
+      <text x="44" y="540" font-size="15.5" font-weight="700" fill="#22548f">第 3 段 RL — 難易度で 3 つに分け、深さを選べるようにする</text>
+      <text x="44" y="562" font-size="13" fill="#12211a">Low (4k) ・ Medium (16k) ・ High (64k) の 3 tier。tier ごとに専用の system prompt を付けて同時に学習する</text>
+      <text x="44" y="582" font-size="13" fill="#12211a">利用者は system prompt でモードを選ぶ。平均出力は 2,353 / 8,085 / 20,817 トークン</text>
+      <text x="44" y="604" font-size="13" font-weight="700" fill="#22548f">結果: High で 91.4。第 2 段のピークより 1.8 pt 低い (負の転移と超長データ不足が原因と説明)</text>
+
+      <path d="M300,618 L300,646" stroke="#4a5d54" stroke-width="3" marker-end="url(#rzA)"/>
+      <rect x="24" y="650" width="832" height="42" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="440" y="677" font-size="14.5" font-weight="700" fill="#0f5132" text-anchor="middle">Ring-2.5-1T-Zero — 擬人化 ・ 構造化 ・ 並列探索 ・ context anxiety ・ 自己検証が勝手に付いてくる</text>
+    </svg>
+    <p class="cap">図 1: 4 段パイプライン。自己蒸留の矢印が base に戻っている点が重要で、第 2 段に入るのは RL 後の方策ではなく「短く書くよう教え直された base」</p>
+  </div>
+  <div class="key">
+    <b>見落としやすい設計。</b>自己蒸留の段は、第 1 段の RL で得た方策をそのまま磨くのではありません。<b>第 1 段の方策を教師として使い、教え子は元の base モデル</b>です。だから第 2 段の出発点は「第 1 段の続き」ではなく、<b>一度リセットされた別のモデル</b>になります。これが効くのは 2 つの理由からで、冗長さが消えるだけでなく、第 1 段の間に蓄積した<b>訓練エンジンと推論エンジンの数値のズレも一緒に消える</b>からです。1 つの段が 2 つの問題を同時に解いています。
+  </div>
+</section>
+<section id="s2">
+  <h2><span class="num">2</span>【体験】段ごとに何がどれだけ効いたか</h2>
+  <p class="lead">4 段のそれぞれが本当に効いているのかを、論文の Table 1 の実測値で確かめます。ベンチマークを切り替えると、段の効き方がベンチマークの難しさで変わることが見えます。灰色は 104B のモデルで、同じ第 1 段を回しても届く高さが違います。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvStage" width="860" height="430"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="stA24">AIME 2024</button>
+    <button class="ghost" id="stA26">AIME 2026</button>
+    <button class="ghost" id="stHF26">HMMT Feb 2026</button>
+    <button class="ghost" id="stIMO">IMOAnswerBench</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>1T モデルの各段</span>
+    <span><span class="dot" style="background:#e0a03f"></span>自己蒸留 (教師あり)</span>
+    <span><span class="dot" style="background:#60a5fa"></span>第 3 段 High モード</span>
+    <span><span class="dot" style="background:#6b7a86"></span>104B モデル</span>
+  </div>
+  <p class="rdout" id="stOut"></p>
+  <p>見てほしいのは 2 つです。1 つは<b>難しいベンチマークほど後半の段が効く</b>こと。AIME 2024 では第 1 段からの伸びが 5.0 pt しかありませんが、IMOAnswerBench では 16.2 pt 伸びます。簡単な問題は第 1 段でほぼ取り切っていて、後半の段は難問側の裾を取りにいっている、という読み方ができます。</p>
+  <p>もう 1 つは<b>第 3 段が第 2 段より低い</b>ことです。これは出荷される側のモデルがピークではないという意味で、素直に読めば代償です。論文は理由を 2 つ挙げていて、超長の高品質データが足りず High モードの上限が抑えられること、そして 3 つの長さを同時に学習すると<b>負の転移</b>が起きて Low と Medium の信号が High の性能を引っ張り下げることです。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>第 1 段 RL — 増幅と、増幅が呼ぶ破綻</h2>
+  <p class="lead">素の base モデルは段階的な導出をほとんど書きません。推論に必要なトークンの確率が低いからです。だから第 1 段の仕事は<b>低確率トークンを積極的に増幅すること</b>になります。ここで採るのが clipped importance sampling です。</p>
+  <div class="mj">$$ \mathcal{J}(\theta)=\mathbb{E}_{q\sim\mathcal{D},\,\{o_i\}\sim\pi_S}\left[\sum_{i=1}^{G}\sum_{t=1}^{|o_i|}\operatorname{sg}(\hat{\rho}_{i,t})\cdot \hat{A}_{i,t}\cdot \log \pi_M^{\theta}(o_{i,t}\mid q,o_{i,&lt;t})\right] \tag{1} $$</div>
+  <p>$\hat{A}$ は GRPO 流のグループ内正規化した advantage、$\operatorname{sg}$ は勾配を止める操作です。標準の PPO-clip は<b>クリップ範囲の外に出たトークンの勾配をまるごと 0 にします</b>が、この式は違います。クリップするのは重み $\hat\rho$ だけで、$\log \pi$ には勾配が通ります。つまり<b>すべてのトークンが必ず学習に寄与する</b>。ゼロから推論を組み立てる段では、この差が決定的です。</p>
+  <h3>比率の分子を差し替えるという 1 行の変更</h3>
+  <p>ところが低確率トークンを増幅すると、システム側の弱点も同じ倍率で増幅されます。rollout を作るのは SGLang、勾配を計算するのは Megatron で、<b>同じ重みでも 2 つのエンジンはわずかに違う logit を返します</b>。浮動小数点の精度とカーネル実装が違うからです。</p>
+  <div class="mj">$$ \rho_{i,t}=\frac{\pi_M^{\theta}(o_{i,t}\mid q,o_{i,&lt;t})}{\pi_S^{\theta_{\text{old}}}(o_{i,t}\mid q,o_{i,&lt;t})}, \qquad \hat{\rho}_{i,t}=\operatorname{clip}(\rho_{i,t},\;\cdot\;,\;\epsilon_{\text{high}}) \tag{2,3} $$</div>
+  <p>標準の実装は分子も分母も推論エンジンの logit で計算します。すると<b>2 つのエンジンのズレは比率に現れません</b>。この論文は分子を訓練エンジンの実際の logit に差し替えます。たったこれだけで、比率は「方策がどれだけ動いたか」ではなく<b>「訓練と推論が実際にどれだけ食い違っているか」を映す量になります</b>。食い違いが大きいトークンは自動的に重みが下がる。しきい値の調整もいらず、推論エンジンに logit を再計算させる手間も消えます。</p>
+  <p>下限は付けません。探索を狭めたくないからです。上限だけ $\epsilon_{\text{high}}=5.0$ で押さえます。さらに凍結した参照モデルに対する KL 罰則を足します。</p>
+  <div class="mj">$$ \mathcal{L}_{\text{I}}(\theta)=-\mathcal{J}(\theta)+\beta\cdot\mathcal{L}_{\text{KL}}(\theta), \qquad \beta=10^{-4} \tag{4,5} $$</div>
+  <p>参照モデルは <b>400 ステップごとに最新のチェックポイントで更新</b>します。方策が伸びるのに合わせて錨も動かさないと、KL が古い自分への足かせになるだけだからです。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 470" role="img" aria-label="訓練エンジンと推論エンジンの数値のズレと比率補正">
+      <defs><marker id="rzB" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+
+      <rect x="24" y="16" width="380" height="76" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="44" y="40" font-size="15" font-weight="700" fill="#b5401f">SGLang — rollout を作る (推論エンジン)</text>
+      <text x="44" y="61" font-size="13" fill="#12211a">応答 o を生成する。並列度もカーネルも推論向けに最適化</text>
+      <text x="44" y="81" font-size="13" fill="#12211a">重みは θ_old</text>
+
+      <rect x="476" y="16" width="380" height="76" rx="10" fill="#e7f0fb" stroke="#3d7dca" stroke-width="2"/>
+      <text x="496" y="40" font-size="15" font-weight="700" fill="#22548f">Megatron — 勾配を計算する (訓練エンジン)</text>
+      <text x="496" y="61" font-size="13" fill="#12211a">同じ応答 o を teacher forcing で通し直す</text>
+      <text x="496" y="81" font-size="13" fill="#12211a">重みは θ</text>
+
+      <path d="M404,54 L470,54" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#rzB)"/>
+
+      <rect x="24" y="106" width="832" height="60" rx="10" fill="#ffffff" stroke="#8fd6b4" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="44" y="130" font-size="14" font-weight="700" fill="#0f5132">同じ重み・同じトークンでも、2 つのエンジンが返す logit はわずかに違う</text>
+      <text x="44" y="151" font-size="13" fill="#12211a">softmax の指数関数が小さな誤差を拡大し、確率の比では無視できない差になる</text>
+
+      <text x="24" y="196" font-size="14" font-weight="700" fill="#b5401f">標準のやり方 — 比率を推論エンジンだけで作る</text>
+      <rect x="24" y="206" width="400" height="58" rx="9" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="224" y="230" font-size="14" fill="#0d2b20" text-anchor="middle">ρ = π_S(new) / π_S(old)</text>
+      <text x="224" y="252" font-size="12.5" fill="#12211a" text-anchor="middle">エンジン間のズレが比率に現れない = 検知できない</text>
+
+      <text x="456" y="196" font-size="14" font-weight="700" fill="#0f5132">この論文 — 分子を訓練エンジンに差し替える</text>
+      <rect x="456" y="206" width="400" height="58" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="3"/>
+      <text x="656" y="230" font-size="14" fill="#0d2b20" text-anchor="middle">ρ = π_M(θ) / π_S(θ_old)</text>
+      <text x="656" y="252" font-size="12.5" fill="#12211a" text-anchor="middle">比率がそのまま「訓練と推論の食い違い」を測る量になる</text>
+
+      <path d="M224,264 L224,292" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#rzB)"/>
+      <path d="M656,264 L656,292" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#rzB)"/>
+
+      <rect x="24" y="296" width="400" height="64" rx="9" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="224" y="320" font-size="13.5" font-weight="700" fill="#b5401f" text-anchor="middle">約 800 ステップで崩壊</text>
+      <text x="224" y="341" font-size="12.5" fill="#12211a" text-anchor="middle">log 確率差が発散、エントロピーが 0 に落ち、報酬が崩れる</text>
+
+      <rect x="456" y="296" width="400" height="64" rx="9" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="656" y="320" font-size="13.5" font-weight="700" fill="#0f5132" text-anchor="middle">崩壊しない</text>
+      <text x="656" y="341" font-size="12.5" fill="#12211a" text-anchor="middle">log 確率差はほぼ 0 のまま、しきい値の調整も不要</text>
+
+      <rect x="24" y="382" width="832" height="72" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="44" y="406" font-size="14.5" font-weight="700" fill="#0f5132">同じ原因への 2 手目 — 混合精度制御</text>
+      <text x="44" y="427" font-size="13" fill="#12211a">指数関数を通す場所だけが誤差に敏感。だから本体は BF16 のまま、attention の softmax と LM head だけ FP32 で計算する</text>
+      <text x="44" y="447" font-size="13" fill="#12211a">この 2 箇所を上げるだけで損失の突発的なスパイクが消え、2 つのエンジンの数値差が closed になったと報告している</text>
+    </svg>
+    <p class="cap">図 2: 崩壊の原因はアルゴリズムではなく 2 つのエンジンの数値差。比率の分子を差し替える 1 手と、指数関数を通す 2 箇所だけ FP32 にする 1 手で塞いでいる</p>
+  </div>
+  <h3>もう 1 つのインフラ最適化 — context parallelism</h3>
+  <p>64k の窓で RL を回すには、1 本の長い系列を複数のデバイスに割る context parallelism が必要です。標準の ring attention は KV のチャンクを輪の形に順送りするので、<b>各デバイスが全員との通信が一巡し終わるのを待たされます</b>。並列度を上げるほどこの直列依存が効いてきます。</p>
+  <p>この論文はモデルの構造に合わせて 2 つに分けます。MLA 層は KV を低ランクの潜在空間に圧縮しているので、<b>ヘッド次元で all-to-all を 1 回打つ</b>だけで各デバイスが一部のヘッドについて全系列の attention を独立に計算できます。Lightning Attention 層は固定サイズの小さな KV 状態しか持たないので、<b>AllGather を 1 回</b>打って全員に配れば即座に計算に入れます。どちらも ring attention と数学的に等価で、勾配は一致すると明記されています。</p>
+  <div class="key">
+    <b>この節の要点を 1 行で。</b>1T の zero RL が壊れる主因は<b>アルゴリズムの表現力ではなく、2 つのエンジンの数値の食い違いを誰も測っていなかったこと</b>です。比率の分子を訓練エンジン側に差し替えるという 1 行の変更が、その食い違いを<b>測定可能な量に変え、同時に自動的な減衰装置にもした</b>。これが「必要なのは少数の単純な修正だけ」という主張の中身です。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>【体験】崩壊のタイムライン</h2>
+  <p class="lead">比率補正が無いとどう壊れるのか、3 つの設定を並べます。指標を切り替えると、崩壊が「log 確率差の発散 → エントロピーの消滅 → 報酬の崩壊」という順で連鎖していることが見えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvStab" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="sbGap">訓練と推論の log 確率差</button>
+    <button class="ghost" id="sbEnt">エントロピー</button>
+    <button class="ghost" id="sbRew">報酬</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#60a5fa"></span>標準 (推論エンジンだけで比率)</span>
+    <span><span class="dot" style="background:#43b581"></span>IcePop (比率にしきい値)</span>
+    <span><span class="dot" style="background:#e07a5f"></span>この論文 (分子を訓練エンジンへ)</span>
+  </div>
+  <p class="rdout" id="sbOut"></p>
+  <div class="warn">
+    <b>これは模式図です。</b>論文の Figure 5 と Figure 6 は曲線の図で、数値の表が付いていません。実測値として確かなのは<b>崩壊したステップ数 (標準は約 800、IcePop は約 2,700、比率補正は崩壊せず)</b> と、崩壊時に log 確率差が発散しエントロピーが 0 に落ち報酬が崩れるという<b>連鎖の順序</b>だけです。曲線の形と目盛りは説明のために引いたものです。
+  </div>
+  <p>IcePop の位置づけが分かりやすいところです。比率にしきい値を入れる対処は<b>崩壊を約 3.4 倍先延ばしにしますが、止められません</b>。原因である数値差そのものは残っていて、症状を抑えているだけだからです。分子を差し替える手は原因側を消すので、しきい値の調整という手作業も一緒に消えます。</p>
+  <p>KL 罰則のアブレーションも同じ構図です。KL を外すと log 確率差が無限に伸び、エントロピーが崩れて報酬が落ちます。<b>比率補正と KL 罰則は別の穴を塞いでいて、両方必要</b>だと論文は結論しています。</p>
+</section>
+<section id="s5">
+  <h2><span class="num">5</span>自己蒸留と第 2 段 — 長さを取り戻す</h2>
+  <p class="lead">第 1 段が成功すると、副作用が 2 つ残ります。トレースが冗長になること、そしてその長さが訓練を不安定にすることです。この 2 つは無関係ではなく、<b>同じ原因から出ています</b>。</p>
+  <h3>なぜ長さが伸びるのか</h3>
+  <p>第 1 段の損失は応答長で割りません。式 (1) の $\sum_t$ をそのまま足すので、<b>長い応答ほど勾配の総量が大きくなります</b>。base モデルは短い応答しか書かないので、序盤はこの偏りが「もっと長く考えろ」という圧力として役に立ちます。ところがモデルが十分に長く書けるようになった後も圧力は消えません。</p>
+  <div class="fig">
+    <svg viewBox="0 0 880 400" role="img" aria-label="損失の粒度が応答長を決める仕組み">
+      <defs><marker id="rzC" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#4a5d54"/></marker>
+      <marker id="rzD" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#b5401f"/></marker></defs>
+
+      <rect x="24" y="16" width="404" height="72" rx="10" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="226" y="40" font-size="15" font-weight="700" fill="#b5401f" text-anchor="middle">token-level 損失 (第 1 段)</text>
+      <text x="226" y="62" font-size="13.5" fill="#0d2b20" text-anchor="middle">Σ_t だけ。応答長で割らない</text>
+      <text x="226" y="81" font-size="12.5" fill="#12211a" text-anchor="middle">長い応答ほど勾配の総量が大きい</text>
+
+      <rect x="452" y="16" width="404" height="72" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="654" y="40" font-size="15" font-weight="700" fill="#0f5132" text-anchor="middle">sample-level 損失 (第 2 段)</text>
+      <text x="654" y="62" font-size="13.5" fill="#0d2b20" text-anchor="middle">(1/|o_i|) Σ_t で割る</text>
+      <text x="654" y="81" font-size="12.5" fill="#12211a" text-anchor="middle">勾配の大きさが応答長と無関係になる</text>
+
+      <path d="M226,88 L226,114" stroke="#b5401f" stroke-width="2.5" marker-end="url(#rzD)"/>
+      <path d="M654,88 L654,114" stroke="#4a5d54" stroke-width="2.5" marker-end="url(#rzC)"/>
+
+      <rect x="24" y="118" width="404" height="50" rx="9" fill="#ffffff" stroke="#e07a5f" stroke-width="1.6"/>
+      <text x="226" y="140" font-size="13" font-weight="700" fill="#b5401f" text-anchor="middle">序盤は有益 — base に長く考えさせる圧力になる</text>
+      <text x="226" y="159" font-size="12.5" fill="#12211a" text-anchor="middle">これ無しでは推論がそもそも立ち上がらない</text>
+
+      <rect x="452" y="118" width="404" height="50" rx="9" fill="#ffffff" stroke="#0f5132" stroke-width="1.6"/>
+      <text x="654" y="140" font-size="13" font-weight="700" fill="#0f5132" text-anchor="middle">長さは完全に平坦なまま精度だけ伸びる</text>
+      <text x="654" y="159" font-size="12.5" fill="#12211a" text-anchor="middle">ただし序盤に使うと長さが伸びず立ち上がらない</text>
+
+      <path d="M226,168 L226,196" stroke="#b5401f" stroke-width="2.5" marker-end="url(#rzD)"/>
+
+      <rect x="24" y="200" width="404" height="46" rx="9" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="226" y="228" font-size="13.5" font-weight="700" fill="#b5401f" text-anchor="middle">応答が際限なく伸びる (length inertia)</text>
+      <path d="M226,246 L226,272" stroke="#b5401f" stroke-width="2.5" marker-end="url(#rzD)"/>
+      <rect x="24" y="276" width="404" height="46" rx="9" fill="#fbeee8" stroke="#e07a5f" stroke-width="2"/>
+      <text x="226" y="304" font-size="13.5" font-weight="700" fill="#b5401f" text-anchor="middle">エンジン間の数値差が長さに比例して蓄積</text>
+      <path d="M226,322 L226,348" stroke="#b5401f" stroke-width="2.5" marker-end="url(#rzD)"/>
+      <rect x="24" y="352" width="404" height="42" rx="9" fill="#b5401f" stroke="#b5401f" stroke-width="2"/>
+      <text x="226" y="379" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">最適化が崩壊する</text>
+
+      <rect x="452" y="200" width="404" height="194" rx="10" fill="#fff6e6" stroke="#e0a03f" stroke-width="3"/>
+      <text x="654" y="226" font-size="15" font-weight="700" fill="#8a5a06" text-anchor="middle">だから間に自己蒸留を挟む</text>
+      <text x="472" y="252" font-size="13" fill="#12211a">1. 第 1 段の方策で 1 問につき複数回サンプルする</text>
+      <text x="472" y="274" font-size="13" fill="#12211a">2. 正解の中から最短のトレースを選ぶ</text>
+      <text x="472" y="296" font-size="13" fill="#12211a">3. そのトレースをモデル自身に評価させ、冗長と判定した</text>
+      <text x="490" y="315" font-size="13" fill="#12211a">部分を落とす (循環論法や重複検証が消える)</text>
+      <text x="472" y="339" font-size="13" fill="#12211a">4. その短いコーパスで元の base を教師あり学習する</text>
+      <text x="472" y="365" font-size="13" font-weight="700" fill="#8a5a06">長さが戻り、蓄積した数値差もゼロに戻る。</text>
+      <text x="472" y="384" font-size="13" font-weight="700" fill="#8a5a06">2 つの問題が 1 つの段で同時に解ける</text>
+    </svg>
+    <p class="cap">図 3: 左の連鎖が第 1 段の代償で、右がその清算。損失の粒度という 1 つの選択が、長さと安定性の両方を同時に動かしている</p>
+  </div>
+  <div class="mj">$$ \mathcal{L}_{\text{self-dist}}(\theta)=-\mathbb{E}_{q\sim\mathcal{D},\,o\sim\pi_{\text{expert}}}\left[\sum_{t=1}^{|o|}\log \pi_\theta(o_t\mid q,o_{&lt;t})\right] \tag{6} $$</div>
+  <p>ここで $\pi_\theta$ は<b>元の base モデル</b>です。3 epoch、系列長 64k、学習率 $7\times10^{-5}$ で回します。式そのものは何の変わったところもない教師あり学習で、効いているのは<b>何を教師データにしたか</b>だけです。</p>
+  <h3>第 2 段は割り算を 1 つ足すだけ</h3>
+  <div class="mj">$$ \mathcal{L}_{\text{II}}(\theta)=-\mathbb{E}\left[\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\operatorname{sg}(\hat{\rho}_{i,t})\cdot \hat{A}_{i,t}\cdot \log \pi_\theta(o_{i,t}\mid q,o_{i,&lt;t})\right] \tag{7} $$</div>
+  <p>式 (1) との違いは $\frac{1}{|o_i|}$ の 1 箇所だけです。これで勾配の大きさが応答長から切り離され、長くしても得をしなくなります。同時に<b>KL 罰則を外します</b>。蒸留済みの出発点が十分に強いので、参照モデルに縛り付けると探索を削るだけだという判断です。比率補正と clipped importance sampling は引き継ぎます。</p>
+  <div class="key">
+    <b>4 段構成の本当の理由。</b>token-level 損失と sample-level 損失は<b>どちらが優れているかではなく、いつ使うかの問題</b>です。序盤は前者でないと長い思考が立ち上がらず、中盤以降は後者でないと長さが暴走する。だが走っている RL の途中で粒度だけ切り替えても、すでに膨らんだトレースと蓄積した数値差は残ります。<b>自己蒸留はその切り替えを可能にするための清算</b>で、段が 4 つに分かれている理由はほとんどこれです。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>【体験】length inertia</h2>
+  <p class="lead">この論文でいちばん実務に刺さる観察が length inertia です。RL で鍛えた推論モデルは<b>問題の難しさに応じて長さを変えてくれません</b>。3 つの設定を切り替えて、何が起きているのかを見ます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvLen" width="860" height="420"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="lnTok">token-level 損失</button>
+    <button class="ghost" id="lnSam">sample-level 損失</button>
+    <button class="ghost" id="lnWin">窓を 16k から 32k へ広げる</button>
+    <button class="ghost" id="lnFmt">緩い形式報酬</button>
+  </div>
+  <p class="rdout" id="lnOut"></p>
+  <div class="warn">
+    <b>曲線は模式図です。</b>Figure 7 から Figure 9 も曲線図で数値表がありません。実測として確かなのは各設定の<b>定性的な結論</b> (token-level は長さを伸ばす / sample-level は完全に平坦に保つ / 32k は 16k のほぼ 2 倍の長さで報酬はわずかしか伸びない / 緩い形式では長さだけ伸びて報酬が動かない) と、下に並べた<b>実数</b>です。
+  </div>
+  <table>
+    <tr><th>この節で使う実数</th><th>値</th><th>意味</th></tr>
+    <tr><td>簡単な問題の長さ</td><td>訓練が進むほど<b>伸び続ける</b></td><td>1 回目の rollout で完璧に正解した問題だけを追跡した結果。すでに解けている問題にまでトークンを注ぎ込む</td></tr>
+    <tr><td>4k 以内で解ける問題の割合</td><td><b>67.6%</b></td><td>実世界の数学データは簡単な問題に偏った長い裾を持つ。その頻度を真似ることは RL にとって利益にならない</td></tr>
+    <tr><td>32k 窓と 16k 窓</td><td>長さは約 <b>2 倍</b>、報酬はわずか</td><td>モデルは余った窓を難問のために取っておかず、全問で一律に冗長になる</td></tr>
+    <tr><td>形式報酬 A と B</td><td>A は長さだけ伸びて報酬が停滞</td><td>A は <code>&lt;think&gt;...&lt;/think&gt;...</code> だけを要求する緩い形式。B は <code>&lt;think&gt;&lt;/think&gt;&lt;answer&gt;&lt;/answer&gt;</code> と EOS での終了まで要求する</td></tr>
+  </table>
+  <p>形式報酬の話が地味に重要です。緩い形式 A を使うと、モデルは<b>答えの後ろに延々と壊れたテキストを付け足して止まらなくなります</b>。報酬は動かないのに長さだけが伸びる。B のように「最後の閉じタグの後に EOS を出すこと」まで条件にすると、正しく終わった rollout だけが得点するので、この退化が消えます。<b>報酬設計の穴は精度ではなく長さに漏れる</b>という例です。</p>
+  <p>length inertia の原因は 3 節の増幅と同じ場所にあります。token-level 損失が長い応答に高い信用を与えるので、モデルは「たくさん書けば報酬を稼ぎやすい」という<b>怠惰な近道</b>を学びます。論文はこれを既存の長さ罰則では解けないと述べていて、自分たちの 2 段構え (蒸留で刈り込む + 粒度を変える) も<b>ヒューリスティックな回避策にとどまる</b>と正直に書いています。理想は 1 つの RL 目的の中で品質とトークン効率を同時に最適化することだ、と。</p>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>【体験】第 3 段 — 深さを選ばせる</h2>
+  <p class="lead">第 3 段の狙いは、長さを 1 つに固定するのをやめることです。問題を難易度で 3 つに分け、それぞれに専用の system prompt と最大長を割り当てて同時に学習します。</p>
+  <div class="mj">$$ \begin{aligned} \mathcal{L}_{\text{III}}(\theta)=-\sum_{k\in\{l,m,h\}}\mathbb{E}_{q\sim\mathcal{D}_k,\,\{o_i\}\sim\pi(\cdot\mid p_k,q)}\Bigg[\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\operatorname{sg}(\hat{\rho}_{i,t})\cdot \hat{A}_{i,t}\\ \cdot \log \pi_\theta(o_{i,t}\mid p_k,q,o_{i,&lt;t})\Bigg] \end{aligned} \tag{9} $$</div>
+  <p>式 (7) との違いは、tier ごとの system prompt $p_k$ で条件付けて和を取るところだけです。tier は Low (4k) ・ Medium (16k) ・ High (64k) の 3 つ。利用者は推論時に system prompt でモードを選びます。</p>
+  <p>下のグラフは Table 1 の実測値です。スライダーで<b>質問の何割をどのモードに流すか</b>を変えると、平均トークン数と平均精度がどう動くかが見えます。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvTier" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="tiA24">AIME 2024</button>
+    <button class="ghost" id="tiA26">AIME 2026</button>
+    <button class="ghost" id="tiHF26">HMMT Feb 2026</button>
+    <button class="ghost" id="tiIMO">IMOAnswerBench</button>
+  </div>
+  <div class="controls">
+    <div class="slider">Low に流す割合 <input id="tiL" type="range" min="0" max="100" value="30"><span id="tiLv">30</span>%</div>
+    <div class="slider">Medium に流す割合 <input id="tiM" type="range" min="0" max="100" value="40"><span id="tiMv">40</span>%</div>
+  </div>
+  <p class="rdout" id="tiOut"></p>
+  <div class="warn">
+    <b>3 つの点と破線は論文の実測値、配分は読者が動かす仮定です。</b>Low / Medium / High の精度と平均トークン数 (2,353 / 8,085 / 20,817) は Table 1 の値です。そこから計算する加重平均は<b>「難易度を無視してランダムに振り分けたら」という仮定の下での値</b>で、論文の測定ではありません。現実には難しい問題を High に回すので、同じトークン予算でこれより良くなる余地があります。</div>
+  <p>この図の読みどころは、<b>Low モードの落ち込みがベンチマークによって全く違う</b>ことです。AIME 2024 では Low でも 82.3 出ますが、AIME 2025 では 64.0 まで落ちます。つまり「4k で足りるか」は問題集の性質に強く依存していて、<b>どの質問をどの tier に送るかを決める仕組みが本当は必要</b>です。論文はそこを利用者の system prompt に委ねていて、自動的なルーティングは実装していません。</p>
+  <p>それでも意味のある一歩です。論文の言い方では、計算のスケーリングを<b>「全員に同じ量」から「質問ごとに配る量」へ</b>移したことになります。多くの質問はそもそも徹底的な推論を必要としない、という当たり前の事実を訓練側に持ち込んだのがこの段です。</p>
+</section>
+<section id="s8">
+  <h2><span class="num">8</span>【体験】frontier とどこまで並んだのか</h2>
+  <p class="lead">論文は「frontier モデルに comparable」と書いています。ここは慎重に読む必要があるので、実際に並べます。<b>frontier 側の数字が入っているのは 7 つのうち 4 つのベンチマークだけ</b>で、比較はその 4 列でしか成立しません。</p>
+  <div class="canvas-wrap">
+    <canvas id="cvFront" width="860" height="440"></canvas>
+  </div>
+  <div class="controls">
+    <button class="ghost active" id="frA26">AIME 2026</button>
+    <button class="ghost" id="frHN25">HMMT Nov 2025</button>
+    <button class="ghost" id="frHF26">HMMT Feb 2026</button>
+    <button class="ghost" id="frIMO">IMOAnswerBench</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#43b581"></span>Ring-2.5-1T-Zero</span>
+    <span><span class="dot" style="background:#6b7a86"></span>frontier モデル (公称値)</span>
+  </div>
+  <p class="rdout" id="frOut"></p>
+  <p>数字が語っているのはこうです。<b>AIME 2026 では上位に食い込みますが、HMMT Feb 2026 と IMOAnswerBench では明確に下</b>です。首位との差は AIME 2026 で 5.1 pt、HMMT Feb 2026 で 15.7 pt、IMOAnswerBench で 15.9 pt。この差の付き方は「難しいベンチマークほど離される」という形をしていて、2 節で見た「後半の段が難問側を取りにいっている」という観察と辻褄が合います。<b>裾はまだ取り切れていません</b>。</p>
+  <div class="key">
+    <b>それでも比較の意味は残ります。</b>比べている相手は人手データも SFT も蒸留も自由に使える最先端の商用モデルで、こちらは<b>人が書いた思考過程を 1 行も使っていません</b>。同じ土俵の勝負ではないので、読み方は「勝ったか」ではなく<b>「人手データなしでここまで来た」</b>です。論文の貢献も順位ではなく、1T で zero RL が安定して回ることを示した点にあります。
+  </div>
+  <h3>規模の効果は片側だけ強い</h3>
+  <p>104B と 1T を同じ設定で比べた結果も出ています。1T は <b>3,600 ステップで AIME 2024 が 89.06%、AIME 2025 が 83.28%</b>。104B は<b>5,200 ステップ回しても 71.72% と 63.54%</b> です。ステップ数が少ないほうが高いので、性能の天井だけでなくサンプル効率でも勝っています。論文の解釈は、zero RL の探索範囲はモデルの内部世界に縛られるので、<b>パラメータ数がそのまま探索できる空間の広さになる</b>というものです。</p>
+  <h3>RL は境界を広げるのか、尖らせるだけなのか</h3>
+  <p>RLVR が推論の限界を本当に押し広げているのか、それとも既にある分布を尖らせているだけなのか、という長い論争があります。この論文は pass@1024 を訓練の初期から追跡して、<b>両方が順番に起きている</b>と結論します。</p>
+  <table>
+    <tr><th>時期</th><th>pass@1024</th><th>pass@1</th><th>解釈</th></tr>
+    <tr><td>序盤</td><td>伸びる</td><td>伸びる</td><td><b>discovery</b>。事前学習では眠っていた推論の型を掘り起こし、境界そのものを広げている</td></tr>
+    <tr><td>中盤以降</td><td>頭打ちになる</td><td>伸び続ける</td><td><b>sharpening</b>。広がった境界の内側で、正解を安定して出せるように分布を尖らせている</td></tr>
+  </table>
+  <p>この 2 相構造は実務にも効きます。<b>pass@1024 が頭打ちになった後の RL は、新しい能力を作っていません</b>。そこから先に境界を伸ばしたいなら、データの難易度を上げるか、事前学習に戻るか、モデルを大きくするしかない。論文が挙げる 4 つの限界 (データの難易度分布、モデル容量、文脈窓 64k、事前学習の事前知識) はすべてこの結論から出ています。</p>
+</section>
+
+<section id="s9">
+  <h2><span class="num">9</span>CoT 品質を 3 軸で測る</h2>
+  <p class="lead">最終正解率だけを見ると、思考過程はブラックボックスのままです。この論文は CoT そのものの品質を 3 つの軸で測る枠組みを提案しています。エージェントの中間出力として CoT を使う時代には、正解率と独立に意味のある軸です。</p>
+  <table>
+    <tr><th>軸</th><th>何を測るか</th><th>測り方</th><th>結果</th></tr>
+    <tr><td>comprehensibility<br>(読みやすさ)</td><td>人が外部の情報なしに追えるか。論理の連続性、因果の明示、幻覚の不在</td><td>AIME 2024 から 2026 の 90 問で、4 つの強いモデルとの<b>1 対 1 の対戦</b>を LLM judge に判定させる。提示順はシャッフルして位置バイアスを除去</td><td>全対戦で優勢な勝率</td></tr>
+    <tr><td>reproducibility<br>(再現性)</td><td>そのトレースが<b>弱いモデルの教師として使えるか</b>。直感の飛躍ではなく一般化できる手順が書かれているか</td><td>自分のトレース <b>100K 件</b>で Qwen2.5-32B と Llama3.3-70B-Instruct を蒸留し、DeepSeek-R1 の <b>800K 件</b>で蒸留した同設定と比べる</td><td>Qwen-32B で <b>78.4 対 72.6</b> (+5.8)、Llama-70B で <b>74.5 対 70.0</b> (+4.5)。<b>8 分の 1 のデータ量で上回る</b></td></tr>
+    <tr><td>efficiency<br>(効率)</td><td>無駄な冗長さ、重複した導出、循環論法を避けて解けているか</td><td><b>5 モデル全員が正解した問題だけ</b>を抜き出し、その部分集合で平均トークン数を比べる</td><td>平均 <b>6,368 トークン</b>。他のモデルの半分以下</td></tr>
+  </table>
+  <p>3 つの中で最も強い主張は再現性です。<b>8 分の 1 のデータ量で +5.8 pt</b> というのは、トレースの 1 件あたりの情報量が違うという意味になります。論文の説明は、ステップに区切られた構造が転移しやすい学習信号になっているというもので、10 節の「構造化の創発」と繋がっています。</p>
+  <div class="warn">
+    <b>読みやすさの評価だけは判定器が明かされていません。</b>正解報酬に使った judge (Qwen3-Next-80B-A3B-Instruct) は明記されているのに、読みやすさの対戦を裁いたモデル名は本文にも付録 B にも書かれていません。判定プロンプトは全文載っていて、順序シャッフルなど位置バイアスへの配慮もあります。それでも<b>LLM judge が構造化された出力を好む傾向</b>は知られているので、勝率の絶対値は割り引いて読むのが安全です。
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>5 つの創発と bitter lesson</h2>
+  <p class="lead">この論文でいちばん引用されるのはここでしょう。研究者は長いあいだ、構造化された出力や自己検証や並列探索を<b>プロンプトや専用の報酬やパイプラインで作り込んできました</b>。1T では、それが要らなくなったという報告です。</p>
+  <div class="key">
+    <b>対比の形に注意。</b>論文は自分たちの 104B の実験について、<b>構造化と自己検証を出させるには手で設計した報酬が必要だった</b>と書いています。同じレシピを 1T に載せると、その報酬なしで両方が勝手に出てきた。これが「bitter lesson の実証」という主張の根拠です。ただし<b>1T で報酬を足した対照群は取られていません</b>。規模だけが原因だと確定させる実験にはなっていない点は押さえておきます。
+  </div>
+  <h3>1. 構造化 — 誰も教えていない Step 1:</h3>
+  <p>「段階的に考えよ」以外の指示を与えていないのに、モデルは <code>### Step 1:</code> のような明示的な番号付けと、段落ごとの中間まとめを勝手に採用します。論文の解釈が面白くて、これは<b>局所的な前方計画</b>の証拠ではないかと言っています。次のトークンを貪欲に出しているだけなら、これから書く塊に対して先に見出しを付ける理由がありません。</p>
+  <blockquote>
+    <b>Step 2: Simplifying the PMF Expression.</b> Building on the observation from Step 1 that the exponent on β is always negative, we rewrite: ...
+  </blockquote>
+  <p>ここから論文は<b>「LLM の推論はトークンより上の行動空間を作れるかもしれない」</b>という示唆に進みます。ステップ 1 つを 1 つの行動として扱う RL が組めるなら、信用割り当ての粒度が変わります。</p>
+  <h3>2. 自己検証 — 報酬のために自分を疑う</h3>
+  <p>候補の答えに達したあと、前提を読み直し、既知の公式と突き合わせ、結果を元の制約に代入して整合を確かめます。人間が設計した検証テンプレートは使っていません。<b>最終正解の報酬を確実に取るために必要だと学んだ</b>結果です。</p>
+  <blockquote>
+    <b>Cross-Check with Known Values.</b> Looking up similar problems: For a horizontal cylinder, the volume when filled to depth h is ... Yes, correct. <b>Final Check for Calculation Errors.</b> Wait, in the integration approach, when I integrated from y = −4 to y = −2 ... So all methods agree.
+  </blockquote>
+  <h3>3. 並列探索 — 1 本の rollout の中で木を張る</h3>
+  <p>1 つの筋に閉じこもらず、別の方針に枝を伸ばし、結果を比べ、複数の独立した根拠が一致してから答えを確定します。<b>線形な生成の中で Tree-of-Thought 探索を自前でやっている</b>ことになります。外側に探索器を組む工夫が要らなくなる、というのが論文の主張です。</p>
+  <blockquote>
+    <b>8. Alternative Approach.</b> Another way to think about this problem is through the concept of cyclic permutations or the ballot problem. ... <b>10. Conclusion.</b> After multiple approaches and verification with small cases, I'm confident the answer is 10/11.
+  </blockquote>
+  <h3>4. 擬人化 — 悪態と自画自賛</h3>
+  <p>これは想定外の観察でしょう。3 つに分類されています。<b>苛立ちの表明</b> (誤りに気づいたときの "brain fart" などの口語や軽い罵り)、<b>手抜きと当て推量</b> ("fudge"、"wing it")、そして<b>自画自賛と冗談</b> ("genius"、"nailed it"、"jk")。論文の仮説は、事前学習に含まれるフォーラムの議論や生の思考過程が出所で、<b>モデルは専門家の論理だけでなく認知的な摩擦や感情の力学まで真似ている</b>というものです。</p>
+  <blockquote>
+    Wait, but I might have a <b>brain fart</b> here. In some contexts, especially when dealing with duality in derived categories ...
+  </blockquote>
+  <p>実務的には警告として読めます。<b>思考過程をそのまま利用者に見せる設計では、こういう表現が漏れます</b>。ここを消したいなら別の後処理が必要です。</p>
+  <h3>5. context anxiety — 締め切り間際の戦略的な諦め</h3>
+  <p>5 つのうち唯一、論文自身が<b>「魅力的だが欠陥のある」</b>創発だと書いているものです。トークンの上限に近づいたとモデルが感じると、複雑な推論を<b>自分から打ち切って当て推量に切り替えます</b>。形式を守らなければ報酬が 0 で、当てずっぽうでも 0 より大きい確率がある。ゲームのルールを深く理解した上での合理的な判断です。</p>
+  <blockquote>
+    Given the time I've invested and the ambiguity, <b>I will proceed to make an educated guess.</b> The original problem might expect ... Therefore, I'll conclude the answer is 20.
+  </blockquote>
+  <p>これは報酬設計が生んだ振る舞いで、能力の証ではありません。<b>形式報酬が「打ち切ってでも形を守れ」という圧力になっている</b>ことの現れです。6 節で見た形式 B の設計 (EOS まで要求する) が、この方向に働いていると読むこともできます。</p>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>批判的に読む</h2>
+  <p class="lead">どこが確かで、どこが確かでないかを分けておきます。</p>
+  <table>
+    <tr><th>論点</th><th>読み方</th></tr>
+    <tr><td>アブレーションが全部 104B</td><td>RL アルゴリズムの比較、KL の有無、比率補正の 3 方式、形式報酬、窓の大きさ、ハイパーパラメータ。<b>これら全部が flash (104B) での実験</b>です。計算資源の都合と明記されていますが、<b>1T で同じ結論になるかは検証されていません</b>。論文の中心主張が「規模で挙動が変わる」ことなので、この不在は軽くありません</td></tr>
+    <tr><td>bitter lesson の対照群がない</td><td>「104B では手作りの報酬が必要 / 1T では不要」という対比が根拠です。<b>1T で手作りの報酬を足した群は無い</b>ので、規模が原因だと分離できていません。データもレシピも同時に変わっている可能性が残ります</td></tr>
+    <tr><td>frontier と competitive</td><td>比較可能な 4 列で、首位との差は 5.1 / 15.7 / 15.9 pt。frontier 側は AIME 2024・2025 と HMMT Feb 2025 が空欄です。<b>「人手データなしでここまで」という読み方は妥当ですが、性能で並んだという読み方は過大</b>です</td></tr>
+    <tr><td>出荷される段がピークではない</td><td>第 3 段 High は第 2 段 (Yarn=2) より AIME 2026 で 1.8 pt 低い。適応的な深さという機能と引き換えの低下で、論文も負の転移だと認めています。<b>tier 訓練は現状「機能を得るために精度を払う」取引</b>です</td></tr>
+    <tr><td>創発の定量化がない</td><td>5 つの振る舞いはすべて<b>事例の提示だけ</b>です。どのくらいの頻度で出るのか、context anxiety が正解率をどれだけ削っているのか、自己検証が実際に誤りを捕まえた割合はどうか。<b>どれも数字がありません</b>。10 節の主張は観察としては貴重ですが、測定としては未完です</td></tr>
+    <tr><td>効率の測り方</td><td>6,368 トークンは<b>5 モデル全員が正解した部分集合</b>での平均です。全員が解ける問題は簡単な側に偏るので、難問での効率は分かりません。付録 A の 1 問比較では、baseline のうち 3 つが「Summary」表記で<b>生の思考過程ではなく要約</b>です (Claude Opus 4.7 が 790、GPT-5.5 が 522、Gemini 3.1 Pro が 1,014 トークン)。この 3 つとの直接比較は成立しません</td></tr>
+    <tr><td>読みやすさの判定器</td><td>判定に使った LLM の名前が本文にも付録にもありません。プロンプトと位置バイアスの処理は開示されているので、<b>再現には判定器の情報が 1 つ足りない</b>状態です</td></tr>
+    <tr><td>再現性の比較条件</td><td>100K 対 800K でこちらが勝つのは強い結果ですが、<b>問題の分布が同一かは書かれていません</b>。トレースの質だけでなく、問題選定の差が効いている可能性は残ります</td></tr>
+    <tr><td>評価の細部</td><td>pass@1 を 64 回の平均で報告しているのは丁寧です。一方で推論設定が「temperature 0.6、<b>top-k 0.95</b>」と書かれていますが、0.95 という値は通常 top-p のものです。表記の揺れだと思われます</td></tr>
+    <tr><td>再現可能性</td><td>320 枚の H200 が前提で、しかも<b>本文にリポジトリの記載がありません</b>。手法の 3 つの変更 (比率補正、混合精度、損失粒度の切り替え) は他の実装にも移植できる形で書かれているので、そこは使えます</td></tr>
+    <tr><td>この論文が正直な点</td><td>自分たちの長さ対策を「ヒューリスティックな回避策」と呼び、第 3 段の性能低下の理由を 2 つ挙げ、context anxiety を欠陥と書き、zero RL は事前学習の外に出られないと明言しています。<b>主張の強い論文にしては、限界の申告は丁寧</b>です</td></tr>
+  </table>
+</section>
+
+<section id="s12">
+  <h2><span class="num">12</span>まとめ</h2>
+  <div class="key">
+    Ring-Zero が示したのは新しいアルゴリズムではなく、<b>1T で zero RL を回すときに実際に何が壊れるのか</b>という工学の地図です。壊れる主因は方策勾配の表現力ではなく、rollout を作るエンジンと勾配を計算するエンジンの<b>数値の食い違い</b>でした。比率の分子を訓練エンジン側に差し替え、指数関数を通す 2 箇所だけ FP32 にし、長さが暴走したら自己蒸留で清算して損失の粒度を変える。この 3 手で、人手データなしに AIME 2026 で 93.2% まで届きます。そして 104B では手で報酬を設計しないと出てこなかった構造化と自己検証が、1T では勝手に出てきた。<b>ただし出荷される第 3 段はピークではなく、アブレーションは全部 104B で、創発は 1 つも定量化されていません</b>。
+  </div>
+  <h3>実務に持ち帰れるもの</h3>
+  <p>3 つあります。1 つ目は<b>比率補正</b>で、off-policy な RL で訓練と推論を別エンジンにしているなら、比率の分子を訓練エンジン側にするだけで崩壊の主因が消える可能性があります。しきい値の調整も要りません。2 つ目は<b>混合精度の当て所</b>で、指数関数を通す attention softmax と LM head だけ FP32 にする。3 つ目は<b>損失の粒度をフェーズで変える</b>という考え方で、序盤は token-level、長さが立ち上がったら sample-level、切り替えの前に一度蒸留で清算する。</p>
+  <h3>どこがまだ空いているのか</h3>
+  <p>いちばん大きいのは<b>長さと品質を 1 つの目的関数で同時に最適化すること</b>で、論文自身が理想として挙げています。次に<b>質問を tier に振り分ける仕組み</b>。今は利用者の system prompt に委ねられていて、自動的なルーティングはありません。そして<b>創発の定量化</b>です。5 つの振る舞いがどのくらいの頻度で出て、正解率にどう効いているのかが測られれば、10 節の観察は測定に変わります。</p>
+  <p class="fn">出典: Xinyu Tang, Qianggang Cao, Yurou Liu, Yuliang Zhan, Xiaochong Lan, Yifan Li, Yuchen Yan, Han Peng, Zican Dong, Zhenduo Zhang, Tianshu Wang, Xinyu Kong, Zujie Wen, Wayne Xin Zhao, Zhiqiang Zhang, Jun Zhou. "Ring-Zero: Scaling Zero RL to a Trillion Parameters for Emergent Reasoning." arXiv:2607.12395v2 [cs.CL], 2026-07-16. License CC BY 4.0.<br>
+  本ページの表と数値は論文の Table 1、Table 6 相当の設定記述、第 4 節から第 6 節の本文、および付録 A・B に基づきます。<b>第 2 節・第 7 節・第 8 節のグラフは Table 1 の実測値</b>です。<b>第 4 節と第 6 節のグラフは模式図</b>で、論文の該当図が曲線のみで数値表を持たないため、実測なのは崩壊ステップ数 (約 800 / 約 2,700 / 崩壊せず) と各設定の定性的な結論だけです。第 7 節の tier 配分は<b>読者が動かす仮定値</b>で、そこから計算される加重平均は論文の測定ではありません。10 節の引用は付録 C の事例からの抜粋です。</p>
+</section>
+
+</main>
+<footer style="text-align:center;color:var(--sub);font-size:13.5px;padding:24px">
+  <a href="./paper-index.html" style="color:var(--g2)">← 論文理解シリーズの目次へ</a> ・
+  <a href="https://github.com/littlemex/explainers" style="color:var(--g2)" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+const INK='#d7f5e6', SUBI='#8fd6b4', GRID='rgba(143,214,180,0.14)';
+const POS='#43b581', NEG='#e07a5f', BLUE='#60a5fa', PUR='#c084fc', MUT='#6b7a86', ALT='#e0a03f';
+
+const BMN={a24:'AIME 2024',a25:'AIME 2025',a26:'AIME 2026',hf25:'HMMT Feb 2025',
+           hn25:'HMMT Nov 2025',hf26:'HMMT Feb 2026',imo:'IMOAnswerBench'};
+const T1={
+  flash1:{a24:71.2,a25:63.5,a26:65.3,hf25:55.2,hn25:54.8,hf26:50.3,imo:null},
+  flashD:{a24:86.2,a25:77.2,a26:78.0,hf25:70.3,hn25:68.5,hf26:62.6,imo:null},
+  s1:{a24:89.1,a25:83.3,a26:84.2,hf25:76.7,hn25:75.8,hf26:66.2,imo:59.3},
+  sd:{a24:92.3,a25:87.3,a26:88.1,hf25:81.9,hn25:79.9,hf26:71.2,imo:63.8},
+  s2:{a24:93.5,a25:91.6,a26:92.5,hf25:87.4,hn25:87.1,hf26:78.1,imo:72.7},
+  s2y:{a24:94.1,a25:92.3,a26:93.2,hf25:90.6,hn25:90.8,hf26:81.0,imo:75.5},
+  low:{a24:82.3,a25:64.0,a26:68.8,hf25:61.3,hn25:65.3,hf26:52.5,imo:54.1},
+  med:{a24:90.9,a25:88.1,a26:90.8,hf25:80.4,hn25:84.8,hf26:74.1,imo:70.8},
+  high:{a24:93.2,a25:91.0,a26:91.4,hf25:86.3,hn25:86.4,hf26:78.4,imo:72.7}
+};
+const TIER_TOK={low:2353,med:8085,high:20817};
+const FRONT=[
+  ['GPT-5.5',{a26:98.3,hn25:96.5,hf26:96.7,imo:91.4}],
+  ['Gemini 3.1 Pro',{a26:98.2,hn25:94.8,hf26:87.3,imo:81.0}],
+  ['Qwen3.7-Plus',{a26:97.0,hn25:95.0,hf26:92.9,imo:86.0}],
+  ['Kimi K2.6',{a26:96.4,hn25:null,hf26:92.7,imo:86.0}],
+  ['Claude Opus 4.8',{a26:95.7,hn25:96.5,hf26:96.7,imo:83.5}],
+  ['GLM-5.1',{a26:95.3,hn25:94.0,hf26:82.6,imo:83.8}],
+  ['DS-V4-Pro Max',{a26:94.6,hn25:94.4,hf26:95.2,imo:89.8}],
+  ['MiniMax M2.7',{a26:89.8,hn25:81.0,hf26:72.7,imo:66.3}]
+];
+function bindBtns(map,cb){
+  Object.keys(map).forEach(function(k){
+    document.getElementById(map[k]).onclick=function(){
+      Object.keys(map).forEach(function(j){
+        document.getElementById(map[j]).classList.toggle('active',j===k);});
+      cb(k);};
+  });
+}
+/* ============ デモ1: 段ごとの効き ============ */
+(function(){
+  const cv=document.getElementById('cvStage'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const ROWS=[['第1段 RL','s1',POS],['自己蒸留','sd',ALT],['第2段 RL','s2',POS],
+              ['第2段 +Yarn2','s2y',POS],['第3段 High','high',BLUE]];
+  const GH=[['104B 第1段','flash1',MUT],['104B 蒸留','flashD',MUT]];
+  let bm='a24';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(BMN[bm]+' の pass@1 (%) ・ 64 回平均',24,24);
+    const x0=60,y0=52,gh=H-130,ymin=40,ymax=100;
+    for(let v=ymin;v<=ymax;v+=10){
+      const y=y0+gh-(v-ymin)/(ymax-ymin)*gh;
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(W-24,y);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';ct.fillText(v,x0-8,y+4);
+    }
+    const all=ROWS.concat(GH), n=all.length, slot=(W-24-x0-30)/n, bw=Math.min(74,slot-16);
+    let prev=null;
+    all.forEach(function(r,i){
+      const v=T1[r[1]][bm];
+      const cx=x0+20+i*slot+(slot-bw)/2;
+      if(i===ROWS.length){
+        ct.strokeStyle='rgba(143,214,180,0.35)';ct.lineWidth=1.5;ct.setLineDash([5,5]);
+        ct.beginPath();ct.moveTo(cx-14,y0-6);ct.lineTo(cx-14,y0+gh);ct.stroke();ct.setLineDash([]);
+      }
+      ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+      const lb=r[0].split(' ');
+      lb.forEach(function(t,j){ct.fillText(t,cx+bw/2,y0+gh+18+j*13);});
+      if(v===null){
+        ct.fillStyle=MUT;ct.font='12px sans-serif';
+        ct.fillText('該当なし',cx+bw/2,y0+gh-14);
+        prev=null;return;
+      }
+      const bh=(v-ymin)/(ymax-ymin)*gh, by=y0+gh-bh;
+      ct.fillStyle=r[2];ct.globalAlpha=(i>=ROWS.length)?0.45:0.85;
+      ct.fillRect(cx,by,bw,bh);ct.globalAlpha=1;
+      ct.fillStyle=INK;ct.font='bold 12.5px "SF Mono",Menlo,monospace';ct.textAlign='center';
+      ct.fillText(v.toFixed(1),cx+bw/2,by-8);
+      if(prev!==null&&i<ROWS.length){
+        const d=v-prev;
+        ct.fillStyle=d>=0?POS:NEG;ct.font='11px sans-serif';
+        ct.fillText((d>=0?'+':'')+d.toFixed(1),cx-((slot-bw)/2)-2,by-24);
+      }
+      if(i<ROWS.length) prev=v; else prev=null;
+    });
+    const g=T1.s2y[bm]-T1.s1[bm], d3=T1.high[bm]-T1.s2y[bm];
+    const fl=T1.flash1[bm];
+    document.getElementById('stOut').textContent=
+      '第 1 段から第 2 段 (Yarn2) までで +'+g.toFixed(1)+' pt / 第 3 段 High は第 2 段 (Yarn2) から '+
+      d3.toFixed(1)+' pt'+(fl===null?'' : ' / 同じ第 1 段でも 104B は '+(T1.s1[bm]-fl).toFixed(1)+' pt 下');
+  }
+  bindBtns({a24:'stA24',a26:'stA26',hf26:'stHF26',imo:'stIMO'},function(k){bm=k;draw();});
+  draw();
+})();
+
+/* ============ デモ2: 崩壊のタイムライン (模式図) ============ */
+(function(){
+  const cv=document.getElementById('cvStab'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,MAXS=4000;
+  const RUNS=[
+    {n:'標準 (推論エンジンだけで比率)',c:BLUE,die:800},
+    {n:'+ IcePop (比率にしきい値)',c:POS,die:2700},
+    {n:'+ この論文 (分子を訓練エンジンへ)',c:NEG,die:null}
+  ];
+  const MET={
+    gap:{t:'訓練と推論の log 確率の差',lo:0,hi:1,unit:'',
+      f:function(s,d){ if(d===null) return 0.03+0.01*Math.sin(s/300);
+        const r=s/d; return r<0.72? 0.04+0.10*r*r : Math.min(1,0.10+2.6*Math.pow(r-0.72,1.4)); }},
+    ent:{t:'方策のエントロピー',lo:0,hi:1,unit:'',
+      f:function(s,d){ if(d===null) return 0.62-0.10*(s/MAXS);
+        const r=s/d; return r<0.6? 0.62-0.10*r : Math.max(0,0.56-1.35*Math.pow(r-0.6,0.9)); }},
+    rew:{t:'報酬',lo:0,hi:1,unit:'',
+      f:function(s,d){ if(d===null) return 0.16+0.62*(1-Math.exp(-s/1500));
+        const r=s/d; const up=0.16+0.62*(1-Math.exp(-s/1500));
+        return r<0.85? up : Math.max(0.02,up-2.6*(r-0.85)); }}
+  };
+  let cur='gap';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const m=MET[cur];
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(m.t+'  (縦軸は相対値の模式図)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('模式図',W-24,24);
+    const x0=56,y0=48,gw=W-24-x0,gh=H-150;
+    for(let i=0;i<=5;i++){
+      const y=y0+gh-i/5*gh;
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+    }
+    for(let s=0;s<=MAXS;s+=1000){
+      const x=x0+s/MAXS*gw;
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(s.toLocaleString(),x,y0+gh+16);
+    }
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('訓練ステップ',x0+gw/2,y0+gh+34);
+    RUNS.forEach(function(r){
+      ct.strokeStyle=r.c;ct.lineWidth=2.6;ct.beginPath();
+      const end=(r.die===null)?MAXS:Math.min(MAXS,r.die*1.02);
+      for(let s=0;s<=end;s+=20){
+        const v=Math.max(0,Math.min(1,m.f(s,r.die)));
+        const x=x0+s/MAXS*gw, y=y0+gh-v*gh;
+        if(s===0) ct.moveTo(x,y); else ct.lineTo(x,y);
+      }
+      ct.stroke();
+      if(r.die!==null){
+        const x=x0+r.die/MAXS*gw;
+        ct.strokeStyle=r.c;ct.lineWidth=1.4;ct.setLineDash([4,4]);
+        ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();ct.setLineDash([]);
+        ct.fillStyle=r.c;ct.font='bold 11px sans-serif';ct.textAlign='left';
+        ct.fillText('崩壊 約 '+r.die.toLocaleString()+' step',x+6,y0+14+RUNS.indexOf(r)*16);
+      } else {
+        ct.fillStyle=r.c;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+        ct.fillText('4,000 step 以降も崩壊せず',x0+gw-8,y0+gh-10);
+      }
+    });
+    const ry=H-66;
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='11.5px sans-serif';
+    ct.fillText('実測として確かなのは崩壊したステップ数と、崩壊が「log 確率差の発散 → エントロピー消滅 → 報酬崩壊」の順で起きること',24,ry);
+    ct.fillText('しきい値を入れる対処は崩壊を約 3.4 倍先延ばしにするが止められない。原因である数値差が残るため',24,ry+18);
+    document.getElementById('sbOut').textContent=
+      (cur==='gap'?'標準は約 800 step で log 確率差が発散し、IcePop は約 2,700 step で追随する':
+       cur==='ent'?'エントロピーが 0 に落ちると探索が死ぬ。崩壊の第 2 段階':
+       '報酬の崩壊は最後に来る。報酬だけを見ていると手遅れになる');
+  }
+  bindBtns({gap:'sbGap',ent:'sbEnt',rew:'sbRew'},function(k){cur=k;draw();});
+  draw();
+})();
+/* ============ デモ3: length inertia (模式図) ============ */
+(function(){
+  const cv=document.getElementById('cvLen'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,MAXS=3000;
+  const S={
+    tok:{n:'token-level 損失',lines:[
+        {n:'応答長',c:NEG,f:function(s){return 0.10+0.80*(1-Math.exp(-s/1400));}},
+        {n:'報酬',c:POS,f:function(s){return 0.14+0.66*(1-Math.exp(-s/900));}}],
+      msg:'長さも報酬も伸びる。base から推論を立ち上げる段ではこれが必要',
+      fact:'ただし止め方が無い。第 1 段の終わりにはトレースが冗長になり、数値差の蓄積で崩壊に向かう'},
+    sam:{n:'sample-level 損失',lines:[
+        {n:'応答長',c:NEG,f:function(s){return 0.34+0.012*Math.sin(s/220);}},
+        {n:'報酬',c:POS,f:function(s){return 0.30+0.52*(1-Math.exp(-s/1000));}}],
+      msg:'長さは完全に平坦なまま報酬だけ伸びる',
+      fact:'第 1 段で使うと長さが伸びず推論が立ち上がらない。だから第 2 段まで待って切り替える'},
+    win:{n:'窓 16k と 32k',lines:[
+        {n:'応答長 (16k 窓)',c:BLUE,f:function(s){return 0.10+0.28*(1-Math.exp(-s/1200));}},
+        {n:'応答長 (32k 窓)',c:NEG,f:function(s){return 0.10+0.62*(1-Math.exp(-s/1200));}},
+        {n:'報酬 (16k 窓)',c:PUR,f:function(s){return 0.18+0.56*(1-Math.exp(-s/900));}},
+        {n:'報酬 (32k 窓)',c:POS,f:function(s){return 0.18+0.60*(1-Math.exp(-s/900));}}],
+      msg:'32k は 16k のほぼ 2 倍の長さを出すが、報酬はわずかしか伸びない',
+      fact:'モデルは余った窓を難問のために取っておかない。全問で一律に冗長になるだけ'},
+    fmt:{n:'緩い形式報酬 (Format A)',lines:[
+        {n:'応答長',c:NEG,f:function(s){return 0.10+0.84*(1-Math.exp(-s/1000));}},
+        {n:'報酬',c:MUT,f:function(s){return 0.30+0.02*Math.sin(s/300);}}],
+      msg:'長さだけが伸びて報酬は完全に停滞する',
+      fact:'答えの後ろに壊れたテキストを延々と足して止まらなくなる。EOS まで要求する Format B で消える'}
+  };
+  let cur='tok';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const s=S[cur];
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(s.n+'  (縦軸は相対値の模式図)',24,24);
+    ct.fillStyle=ALT;ct.font='bold 11.5px sans-serif';ct.textAlign='right';
+    ct.fillText('模式図',W-24,24);
+    const x0=56,y0=48,gw=W-24-x0,gh=H-186;
+    for(let i=0;i<=5;i++){
+      const y=y0+gh-i/5*gh;
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+    }
+    for(let v=0;v<=MAXS;v+=1000){
+      const x=x0+v/MAXS*gw;
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(v.toLocaleString(),x,y0+gh+16);
+    }
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('訓練ステップ',x0+gw/2,y0+gh+33);
+    s.lines.forEach(function(L,i){
+      ct.strokeStyle=L.c;ct.lineWidth=2.6;
+      if(L.n.indexOf('報酬')===0) ct.setLineDash([6,4]); else ct.setLineDash([]);
+      ct.beginPath();
+      for(let v=0;v<=MAXS;v+=20){
+        const y=y0+gh-Math.max(0,Math.min(1,L.f(v)))*gh, x=x0+v/MAXS*gw;
+        if(v===0) ct.moveTo(x,y); else ct.lineTo(x,y);
+      }
+      ct.stroke();ct.setLineDash([]);
+      const ly=y0+16+i*18;
+      ct.strokeStyle=L.c;ct.lineWidth=2.6;
+      if(L.n.indexOf('報酬')===0) ct.setLineDash([6,4]);
+      ct.beginPath();ct.moveTo(x0+gw-142,ly-4);ct.lineTo(x0+gw-118,ly-4);ct.stroke();ct.setLineDash([]);
+      ct.fillStyle=L.c;ct.font='bold 11px sans-serif';ct.textAlign='left';
+      ct.fillText(L.n,x0+gw-112,ly);
+    });
+    const by=H-96;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,72);
+    ct.textAlign='left';ct.fillStyle=INK;ct.font='bold 12.5px sans-serif';
+    ct.fillText(s.msg,38,by+24);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';
+    ct.fillText(s.fact,38,by+46);
+    ct.fillStyle=ALT;ct.font='12px sans-serif';
+    ct.fillText('実数: 初回で正解した簡単な問題ですら長さは伸び続ける ・ 問題の 67.6% は 4k 以内で解ける',38,by+65);
+    document.getElementById('lnOut').textContent=s.msg;
+  }
+  bindBtns({tok:'lnTok',sam:'lnSam',win:'lnWin',fmt:'lnFmt'},function(k){cur=k;draw();});
+  draw();
+})();
+
+/* ============ デモ4: tier のトレードオフ ============ */
+(function(){
+  const cv=document.getElementById('cvTier'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height,XMAX=23000;
+  let bm='a24';
+  function draw(){
+    let lo=+document.getElementById('tiL').value, me=+document.getElementById('tiM').value;
+    if(lo+me>100){ const sc=100/(lo+me); lo=Math.round(lo*sc); me=100-lo; }
+    const hi=Math.max(0,100-lo-me);
+    document.getElementById('tiLv').textContent=lo;
+    document.getElementById('tiMv').textContent=me;
+    ct.clearRect(0,0,W,H);
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(BMN[bm]+' ・ 平均出力トークン数と pass@1 (%)',24,24);
+    const x0=64,y0=52,gw=W-40-x0,gh=H-150;
+    const ymin=45,ymax=100;
+    function px(t){return x0+t/XMAX*gw;}
+    function py(v){return y0+gh-(v-ymin)/(ymax-ymin)*gh;}
+    for(let v=ymin;v<=ymax;v+=5){
+      const y=py(v);
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x0,y);ct.lineTo(x0+gw,y);ct.stroke();
+      if(v%10===0){ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='right';ct.fillText(v,x0-8,y+4);}
+    }
+    for(let t=0;t<=XMAX;t+=5000){
+      const x=px(t);
+      ct.strokeStyle=GRID;ct.beginPath();ct.moveTo(x,y0);ct.lineTo(x,y0+gh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText((t/1000)+'k',x,y0+gh+16);
+    }
+    ct.fillStyle=SUBI;ct.font='11px sans-serif';ct.textAlign='center';
+    ct.fillText('推論時の平均出力トークン数',x0+gw/2,y0+gh+34);
+    /* 第2段のピーク */
+    const peak=T1.s2y[bm];
+    ct.strokeStyle='rgba(224,160,63,0.9)';ct.lineWidth=1.8;ct.setLineDash([7,5]);
+    ct.beginPath();ct.moveTo(x0,py(peak));ct.lineTo(x0+gw,py(peak));ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=ALT;ct.font='11.5px sans-serif';ct.textAlign='left';
+    ct.fillText('第 2 段 (Yarn2) のピーク '+peak.toFixed(1)+'  ※平均トークン数は論文に記載なし',x0+8,py(peak)-8);
+    /* 3 点 */
+    const P=[['Low','low',BLUE],['Medium','med',POS],['High','high',PUR]];
+    ct.strokeStyle='rgba(143,214,180,0.5)';ct.lineWidth=2;ct.beginPath();
+    P.forEach(function(p,i){
+      const x=px(TIER_TOK[p[1]]),y=py(T1[p[1]][bm]);
+      if(i===0)ct.moveTo(x,y);else ct.lineTo(x,y);
+    });
+    ct.stroke();
+    P.forEach(function(p){
+      const t=TIER_TOK[p[1]],v=T1[p[1]][bm],x=px(t),y=py(v);
+      ct.fillStyle=p[2];ct.beginPath();ct.arc(x,y,7,0,Math.PI*2);ct.fill();
+      ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='center';
+      ct.fillText(v.toFixed(1),x,y-14);
+      ct.fillStyle=p[2];ct.font='11.5px sans-serif';
+      ct.fillText(p[0]+' ('+t.toLocaleString()+')',x,y+24);
+    });
+    /* 配分した点 */
+    const mixV=(lo*T1.low[bm]+me*T1.med[bm]+hi*T1.high[bm])/100;
+    const mixT=(lo*TIER_TOK.low+me*TIER_TOK.med+hi*TIER_TOK.high)/100;
+    const mx=px(mixT),my=py(mixV);
+    ct.strokeStyle=NEG;ct.lineWidth=2;ct.setLineDash([3,3]);
+    ct.beginPath();ct.moveTo(mx,y0+gh);ct.lineTo(mx,my);ct.stroke();ct.setLineDash([]);
+    ct.fillStyle=NEG;ct.beginPath();
+    ct.moveTo(mx,my-9);ct.lineTo(mx+9,my);ct.lineTo(mx,my+9);ct.lineTo(mx-9,my);ct.closePath();ct.fill();
+    ct.fillStyle=NEG;ct.font='bold 12px sans-serif';ct.textAlign='left';
+    ct.fillText('この配分',mx+12,my+4);
+    /* 帯 */
+    const by=H-84;
+    ct.fillStyle='rgba(255,255,255,0.05)';ct.fillRect(24,by,W-48,62);
+    const bx=40,bwid=W-120;
+    ct.fillStyle=BLUE;ct.fillRect(bx,by+14,bwid*lo/100,20);
+    ct.fillStyle=POS;ct.fillRect(bx+bwid*lo/100,by+14,bwid*me/100,20);
+    ct.fillStyle=PUR;ct.fillRect(bx+bwid*(lo+me)/100,by+14,bwid*hi/100,20);
+    ct.fillStyle='#0d2b20';ct.font='bold 11px sans-serif';ct.textAlign='center';
+    if(lo>8) ct.fillText('Low '+lo+'%',bx+bwid*lo/200,by+29);
+    if(me>10) ct.fillText('Medium '+me+'%',bx+bwid*(lo+me/2)/100,by+29);
+    if(hi>8) ct.fillText('High '+hi+'%',bx+bwid*(lo+me+hi/2)/100,by+29);
+    ct.fillStyle=SUBI;ct.font='12px sans-serif';ct.textAlign='left';
+    ct.fillText('全部 High に流した場合との比較: トークン '+
+      Math.round((1-mixT/TIER_TOK.high)*100)+'% 減 / 精度 '+
+      (mixV-T1.high[bm]).toFixed(1)+' pt',bx,by+52);
+    document.getElementById('tiOut').textContent=
+      '平均 '+Math.round(mixT).toLocaleString()+' トークンで pass@1 '+mixV.toFixed(1)+
+      '% (仮定値) ・ Low だけなら '+T1.low[bm].toFixed(1)+'%、High だけなら '+T1.high[bm].toFixed(1)+'%';
+  }
+  bindBtns({a24:'tiA24',a26:'tiA26',hf26:'tiHF26',imo:'tiIMO'},function(k){bm=k;draw();});
+  ['tiL','tiM'].forEach(function(id){document.getElementById(id).oninput=draw;});
+  draw();
+})();
+/* ============ デモ5: frontier との比較 ============ */
+(function(){
+  const cv=document.getElementById('cvFront'),ct=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let bm='a26';
+  function draw(){
+    ct.clearRect(0,0,W,H);
+    const rows=[];
+    FRONT.forEach(function(f){ if(f[1][bm]!==null&&f[1][bm]!==undefined) rows.push([f[0],f[1][bm],false]); });
+    rows.push(['Ring-2.5-1T-Zero (第 2 段 +Yarn2)',T1.s2y[bm],true]);
+    rows.push(['Ring-2.5-1T-Zero (第 3 段 High)',T1.high[bm],true]);
+    rows.sort(function(a,b){return b[1]-a[1];});
+    ct.textAlign='left';ct.fillStyle=SUBI;ct.font='13px sans-serif';
+    ct.fillText(BMN[bm]+' の pass@1 (%) ・ frontier 側は各社の公称値',24,24);
+    const x0=250,y0=48,rowh=(H-100)/rows.length,bh=Math.min(24,rowh-8);
+    const vmin=60,vmax=100,gw=W-40-x0;
+    for(let v=vmin;v<=vmax;v+=10){
+      const x=x0+(v-vmin)/(vmax-vmin)*gw;
+      ct.strokeStyle=GRID;ct.lineWidth=1;ct.beginPath();ct.moveTo(x,y0-6);ct.lineTo(x,y0+rows.length*rowh);ct.stroke();
+      ct.fillStyle=MUT;ct.font='10.5px sans-serif';ct.textAlign='center';
+      ct.fillText(v,x,y0+rows.length*rowh+16);
+    }
+    const top=rows[0][1];
+    rows.forEach(function(r,i){
+      const y=y0+i*rowh+(rowh-bh)/2;
+      const w=Math.max(2,(r[1]-vmin)/(vmax-vmin)*gw);
+      ct.fillStyle=r[2]?POS:MUT;ct.globalAlpha=r[2]?0.9:0.5;
+      ct.fillRect(x0,y,w,bh);ct.globalAlpha=1;
+      ct.fillStyle=r[2]?POS:SUBI;ct.font=(r[2]?'bold ':'')+'12px sans-serif';ct.textAlign='right';
+      ct.fillText(r[0],x0-10,y+bh/2+4);
+      ct.fillStyle=INK;ct.font='bold 12px "SF Mono",Menlo,monospace';ct.textAlign='left';
+      ct.fillText(r[1].toFixed(1),x0+w+8,y+bh/2+4);
+      if(!r[2]&&i>0){
+        ct.fillStyle=MUT;ct.font='10.5px sans-serif';
+        ct.fillText('-'+(top-r[1]).toFixed(1),x0+w+52,y+bh/2+4);
+      }
+    });
+    let rank=0;
+    rows.forEach(function(r,i){ if(r[0].indexOf('第 2 段')>0) rank=i+1; });
+    document.getElementById('frOut').textContent=
+      'Ring の最良 (第 2 段 +Yarn2) は '+rows.length+' 件中 '+rank+' 位 ・ 首位 '+rows[0][0]+
+      ' との差 '+(top-T1.s2y[bm]).toFixed(1)+' pt';
+  }
+  bindBtns({a26:'frA26',hn25:'frHN25',hf26:'frHF26',imo:'frIMO'},function(k){bm=k;draw();});
+  draw();
+})();
+</script>
+</body>
+</html>
