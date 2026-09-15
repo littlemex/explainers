@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 36 章 モデルに数を聞くと難易度が分かる、分解を数えても分からない</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 36 章</div>
+<h1>第 36 章 モデルに数を聞くと難易度が分かる、分解を数えても分からない</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  プロンプトを外から数えるだけの表層統計 (文字数・記号数・疑問符の数など 10 個) の基準線は AUC
+  (正答/誤答を並べ替える能力の指標、0.5 が偶然、1.0 が完全) 0.6298 だった。モデル自身に
+  「残る選択肢は何個か」と尋ねてその答えを読むと、この基準線に<b>有意に上乗せ</b>する。だが
+  「何ステップに分解できるか」を尋ねた量は難易度と相関するのに<b>まったく上乗せしない</b> —
+  <b>相関することと上乗せすることは別物</b>だと分かる、きれいな対比である。
+</div>
+
+<h2>1. 生成させずに数字だけ読む</h2>
+
+<p>モデルに問題文を見せたあと、固定の合図 (cue) で「まだ有り得る選択肢は何個か」と尋ね、
+実際に文章を生成させる代わりに <b>1 から 9 の数字トークンにかかる確率分布</b>として答えを読む。
+追加の生成コストは掛からない — 同じ前向きパス (prefill) の副産物として取り出せる量である。</p>
+
+<table>
+<tr><th>量</th><th class="n">「箱が間違っている」との相関</th></tr>
+<tr class="hl"><td><b>モデルが報告した残り選択肢の数</b></td><td class="n"><b>+0.1791</b></td></tr>
+<tr><td>その数の不確かさ (分布の広がり)</td><td class="n">+0.1143</td></tr>
+<tr><td>プロンプトのトークン数</td><td class="n">+0.0483</td></tr>
+</table>
+
+<p>+0.1791 は、この一連の実験で単独の量としては<b>最も強い相関</b>である。
+プロンプトの表面 (文字や記号) をどれだけ数えても届かなかった領域に、
+モデル自身に一言聞くだけで届いたことになる。</p>
+
+<h2>2. 基準線への上乗せを較正と test で確かめる</h2>
+
+<table>
+<tr><th>特徴</th><th class="n">held-out AUC</th><th class="n">基準線との差</th><th>判定</th></tr>
+<tr><td>驚き度 (次章で扱う) のみ</td><td class="n">0.5462</td><td class="n">−0.0836 [−0.1211, −0.0464]</td><td class="ng">FAIL</td></tr>
+<tr><td>報告された選択肢数のみ</td><td class="n">0.6614</td><td class="n">+0.0316 [−0.0096, +0.0699]</td><td class="ng">FAIL</td></tr>
+<tr class="hl"><td><b>表層統計 + 報告された選択肢数</b></td><td class="n"><b>0.6715</b></td><td class="n"><b>+0.0417 [+0.0229, +0.0610]</b></td><td class="ok">PASS</td></tr>
+<tr><td>すべて (表層統計 + 選択肢数 + 驚き度)</td><td class="n">0.6648</td><td class="n">+0.0350 [+0.0139, +0.0559]</td><td class="ok">PASS</td></tr>
+</table>
+
+<p>単独では信頼区間がゼロを跨ぐので FAIL だが、<b>表層統計に足すと</b>ゼロを跨がず PASS になる。
+モデルに残り選択肢の数を尋ねることは、<b>外から数えるだけの指標には含まれていない情報</b>を
+本当に運んでいる。ただしこの量は<b>難易度</b> (難しいかどうか) を読むだけで、<b>uplift</b>
+(長い計算に切り替えたときにどれだけ得をするか) にはどの escalation 率でも 0.003 以内の差しか
+出さない — 難易度は読めるが uplift は読めない、というこの調査全体の傾向をここでも繰り返す。</p>
+
+<h2>3. 「何ステップに分解できるか」は相関するが上乗せしない</h2>
+
+<p>隣接する問い方として「この問題は何個の小問題に分解できるか」も試した。最初の試みは
+回答の<b>文字</b>の分布 (A/B/C/D のような選択肢の文字) をチェックする sanity gate
+(不良な cue を検出する健全性チェック) に拒否された — 分解数には文字がないからである。
+<b>cue 自身の回答のばらつき</b>をチェックする gate に変えて再実行し、1,664 件で完走した。</p>
+
+<table>
+<tr><th></th><th class="n">全体の相関</th><th class="n">分野内 (subject を固定した) 相関</th></tr>
+<tr class="hl"><td><b>報告された分解数</b></td><td class="n"><b>+0.1486</b></td><td class="n"><b>+0.1303</b></td></tr>
+<tr><td>プロンプトの驚き度 (第 37 章)</td><td class="n">−0.1052</td><td class="n">+0.0061</td></tr>
+</table>
+
+<p>この相関は<b>分野を固定しても残る</b> (7 分野中 6 分野が正の相関: engineering +0.2749,
+computer science +0.2074, law +0.1848, math +0.1423, philosophy +0.1185, health +0.0438,
+economics −0.0593)。次章で見る驚き度が分野を固定すると消えるのとは対照的に、
+分解数の相関は本物である。</p>
+
+<p><b>報告される値は実質二値である。</b> 1 から 9 の範囲を提示しても、argmax
+(モデルが最も確率を割り当てた値) は 1 が 868 件、3 が 714 件で、残りの 22 件がそれ以外に散らばる。
+モデルは「1 ステップ」か「数ステップ」かをおおむね区別するだけで、9 段階の粒度は使っていない。</p>
+
+<h2>4. それでも held-out AUC には効かない</h2>
+
+<table>
+<tr><th>特徴</th><th class="n">held-out AUC</th><th class="n">表層統計 (この部分集合) との差</th><th>判定</th></tr>
+<tr><td>報告された分解数のみ</td><td class="n">0.5813</td><td class="n">−0.1145 [−0.1724, −0.0603]</td><td class="ng">FAIL</td></tr>
+<tr><td>報告された選択肢数のみ (この部分集合)</td><td class="n">0.6907</td><td class="n">−0.0051 [−0.0442, +0.0349]</td><td class="ng">FAIL</td></tr>
+<tr class="hl"><td><b>表層統計 + 選択肢数</b></td><td class="n"><b>0.7221</b></td><td class="n"><b>+0.0264 [+0.0101, +0.0425]</b></td><td class="ok">PASS</td></tr>
+<tr><td>表層統計 + 分解数</td><td class="n">0.7052</td><td class="n">+0.0095 [−0.0112, +0.0287]</td><td class="ng">FAIL</td></tr>
+<tr class="hl"><td><b>表層統計 + 両方の数</b></td><td class="n"><b>0.7267</b></td><td class="n"><b>+0.0310 [+0.0082, +0.0533]</b></td><td class="ok">PASS</td></tr>
+<tr><td>すべて (驚き度を含む)</td><td class="n">0.7293</td><td class="n">+0.0336 [+0.0092, +0.0576]</td><td class="ok">PASS</td></tr>
+</table>
+
+<p>この部分集合 (すべての測定が揃った項目) では表層統計だけの基準線が 0.6957 に上がっており、
+第 2 節の 0.6298 とは異なる。同じ基準線の上で比べると、<b>選択肢数を足すと有意に上がるのに、
+分解数を足しても上がらない</b>という非対称がそのまま出る。</p>
+
+<div class="flag">
+  <b>相関することと上乗せすることは別物</b>
+  分解数は難易度と +0.15 の相関を持ち、それは分野を固定しても消えない本物の相関である。
+  だが表層統計に足しても増えない。理由は、<b>複数ステップに分解される問題は、記号も数字も節も
+  多い問題でもある</b>ということ — 表層統計の 10 個の指標がすでにその情報を持っている。
+  一方、選択肢数が持っている情報は<b>モデル自身が「まだ何個の答えが有り得ると思っているか」</b>
+  という読みであり、これは文字数や記号数を数えるだけでは再現できない。<b>ある量が本当に情報を
+  持っていることと、その情報が既知の情報と重複していないことは、別の条件である。</b>
+</div>
+
+<h2>この章が主張しないこと</h2>
+
+<p>すべての測定が揃った部分集合では、20% escalation 率で表層統計 + 両方の数が 0.7407
+(基準線 0.7003)、30% で 0.7677 (基準線 0.7542) と、uplift 側でも良く見える数字が出ている。
+しかしこの部分集合は test 297 件中 fixable (改善する) 項目が 126 件しかなく、対の信頼区間は
+計算していない。過去の教訓 (小さい部分集合は読み違えやすい) がそのまま当てはまるため、
+これは<b>結果ではなく方向として</b>記録する。</p>
+
+<footer>
+第 35 章 &larr; <a href="gateway-35-boundary-review.html">責務分割を 3 名 + 3 巡でレビューした記録</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-37-surprisal-style.html">第 37 章 「見たことがない」は難易度を意味しなかった</a>
+</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 37 章 「見たことがない」は難易度を意味しなかった</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1020px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.fig{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin:22px 0}
+.fig h3{margin-top:0}
+.fig .cap{font-size:13.5px;color:var(--ink2);margin-top:10px}
+svg{width:100%;height:auto;display:block}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 37 章</div>
+<h1>第 37 章 「見たことがない」は難易度を意味しなかった</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  「モデルがあまり見たことがない文章は、モデルが解けない文章のはずだ」という直感を、
+  プロンプト自身のトークンへの驚き度 (負の対数確率、学習データの厚みの代理量) で測った。
+  <b>全体で見た相関は直感の逆 (−0.1052)</b> で、しかも分野を固定すると<b>ほぼ消える (+0.0061)</b>。
+  正体は Simpson のパラドックス (分野をまたぐ相関と分野内の相関の符号が逆転する現象) — 驚き度が
+  測っているのは<b>文章の書き口</b>であって、<b>知識の厚み</b>ではなかった。
+</div>
+
+<h2>1. 驚き度は前向きパスの副産物として無料で取れる</h2>
+
+<p>驚き度 (surprisal) は、モデルがプロンプト自身のトークン列にどれだけ低い確率を割り当てたかを表す
+負の対数確率で、単位は nats (自然対数の底を使った情報量の単位)。平均・90 パーセンタイル・最大値・
+5 nats を超えるトークンの割合・8 nats を超えるトークンの割合の 5 通りで測った。すべて
+prefill (プロンプトを読み込む段階) の副産物であり、追加の生成コストはゼロである。</p>
+
+<table>
+<tr><th>量</th><th class="n">「箱が間違っている」との相関</th></tr>
+<tr><td>プロンプトの平均驚き度</td><td class="n">−0.1052</td></tr>
+<tr><td>90 パーセンタイル驚き度</td><td class="n">−0.1024</td></tr>
+<tr><td>5 nats を超えるトークンの割合</td><td class="n">−0.0972</td></tr>
+</table>
+
+<p>符号は<b>負</b> — 驚き度が高い (見慣れない文章である) ほど、むしろ正答率が高いという方向に出る。
+直感の逆であり、そのまま報告する価値がある結果である。</p>
+
+<h2>2. 分野別に並べると、直感の逆の理由が見える</h2>
+
+<table>
+<tr><th>分野</th><th class="n">正答率</th><th class="n">平均驚き度 (nats)</th></tr>
+<tr class="hl"><td><b>math</b></td><td class="n"><b>0.4157</b></td><td class="n"><b>1.4133</b></td></tr>
+<tr><td>engineering</td><td class="n">0.4363</td><td class="n">1.3704</td></tr>
+<tr><td>law</td><td class="n">0.5868</td><td class="n">1.8053</td></tr>
+<tr class="hl"><td><b>philosophy</b></td><td class="n"><b>0.7277</b></td><td class="n"><b>1.9718</b></td></tr>
+<tr><td>economics</td><td class="n">0.7536</td><td class="n">1.6508</td></tr>
+</table>
+
+<p><b>数学と工学は、文章としては最も驚きが少なく (予測しやすく)、しかし問題としては最も難しい。</b>
+哲学と経済学は最も驚きが多く (予測しにくい) 文章でありながら、問題としては最も易しい。
+分野をまたいで正答率と平均驚き度を相関させると <b>+0.7840</b> という強い正の相関になる —
+これが全体で見た相関の符号を反転させている元凶である。</p>
+
+<div class="fig">
+  <h3>図 1: 分野をまたぐ相関と、分野の中の相関は逆を向く</h3>
+<svg viewBox="0 0 900 300" role="img" aria-label="Simpsonのパラドックスの図解">
+  <g font-size="12.5">
+    <text x="20" y="24" font-size="14" font-weight="700" fill="#0f4a2e">分野をまたいで見ると (between-subject)</text>
+    <line x1="60" y1="80" x2="60" y2="220" stroke="#3c5a4c"/>
+    <line x1="60" y1="220" x2="400" y2="220" stroke="#3c5a4c"/>
+    <text x="30" y="80" font-size="11" fill="#3c5a4c">正答率高</text>
+    <text x="25" y="225" font-size="11" fill="#3c5a4c">正答率低</text>
+    <text x="380" y="240" font-size="11" fill="#3c5a4c">驚き度高</text>
+    <circle cx="120" cy="200" r="6" fill="#8f2f2f"/><text x="130" y="204" font-size="11">math</text>
+    <circle cx="110" cy="195" r="6" fill="#8f2f2f"/><text x="90" y="190" font-size="11">eng</text>
+    <circle cx="230" cy="140" r="6" fill="#1f7a4d"/><text x="240" y="144" font-size="11">law</text>
+    <circle cx="300" cy="95" r="6" fill="#1f7a4d"/><text x="230" y="88" font-size="11">philosophy</text>
+    <circle cx="260" cy="90" r="6" fill="#1f7a4d"/><text x="270" y="105" font-size="11">econ</text>
+    <line x1="90" y1="205" x2="310" y2="90" stroke="#8a5a12" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="330" y="90" font-size="12" fill="#8a5a12" font-weight="700">+0.7840</text>
+
+    <text x="500" y="24" font-size="14" font-weight="700" fill="#8f2f2f">分野の中で見ると (within-subject)</text>
+    <line x1="540" y1="80" x2="540" y2="220" stroke="#3c5a4c"/>
+    <line x1="540" y1="220" x2="860" y2="220" stroke="#3c5a4c"/>
+    <text x="700" y="240" font-size="11" fill="#3c5a4c">同じ分野内での驚き度の違い</text>
+    <circle cx="600" cy="150" r="5" fill="#8f2f2f"/>
+    <circle cx="650" cy="160" r="5" fill="#8f2f2f"/>
+    <circle cx="680" cy="140" r="5" fill="#8f2f2f"/>
+    <circle cx="720" cy="155" r="5" fill="#8f2f2f"/>
+    <circle cx="760" cy="148" r="5" fill="#8f2f2f"/>
+    <line x1="590" y1="150" x2="770" y2="150" stroke="#8a5a12" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="620" y="130" font-size="12" fill="#8a5a12" font-weight="700">+0.0061 (ほぼ平ら)</text>
+  </g>
+</svg>
+  <div class="cap">分野をまたいで見ると驚き度と正答率は強く相関する (点線)。しかし同じ分野の中だけで
+  見ると、その相関はほぼ消える。この 2 つの傾きが逆を向いているのが Simpson のパラドックスである。</div>
+</div>
+
+<h2>3. 分野を固定すると、相関はほぼゼロになる</h2>
+
+<div class="flag">
+  <b>within-subject の相関は +0.0061 (プールした値) で、範囲は −0.1063 から +0.0783</b>
+  符号に一貫性がない。分野を固定した状態で驚き度と誤りを相関させると、方向すら定まらない。
+  <b>−0.105 という全体の相関は Simpson のパラドックスであり、「分野間の効果」の符号が
+  「分野内の効果 (ゼロ)」と逆を向いているだけである。</b>
+</div>
+
+<h2>4. 驚き度が測っているのは文体、知識の厚みではない</h2>
+
+<div class="good">
+  <b>驚き度は文体検出器であり、知識の厚みの計測器ではない</b>
+  数式だらけの数学の問題は<b>トークン単位では予測しやすい</b> (記号の並びに強い規則性がある) が
+  <b>解くのは難しい</b>。流暢な散文はその逆で、<b>予測しにくいが答えるのは易しい</b>ことが多い。
+  「あまり見たことがない文章 → 解けない」という直感そのものが誤っているわけではない。
+  <b>この測り方 (トークン単位の負の対数確率) がその直感を捉えていない</b>、という限定された結論
+  である。
+</div>
+
+<h2>5. すべての捕獲は thinking を無効にして行われた</h2>
+
+<div class="note">
+  <b>この一連の実験全体にかかる制約</b>
+  この調査でのすべての捕獲は、モデルの thinking モード (思考過程を出力してから答える機能) を
+  <b>無効にした状態</b> (chat template の <code>enable_thinking=False</code>) で行われた。
+  つまりここで得られた読み出しはすべて、<b>モデルが直接答えているときのもの</b>であり、
+  同じ読み出しが thinking を有効にしたときにどう振る舞うかは何も分かっていない。これは
+  この章に限らず、この調査系列の全体にかかる限界として明記しておく。
+</div>
+
+<h2>この章が主張しないこと</h2>
+
+<p>ここで否定したのは「見たことがない文章は解けない」という<b>直感そのもの</b>ではなく、
+<b>プロンプト自身のトークン単位の負の対数確率という、この特定の測り方</b>である。
+別の測り方 (たとえば文章全体の embedding が学習データのどの領域に近いか) が同じ直感を
+支持するかどうかは、この実験では測っていない。</p>
+
+<footer>
+第 36 章 &larr; <a href="gateway-36-option-count.html">モデルに数を聞くと難易度が分かる、分解を数えても分からない</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-38-thinking-price.html">第 38 章 thinking を入れると 170 倍払って 20.6 ポイント買う</a>
+</footer>
+</div>
+</body>
+</html>

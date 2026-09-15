@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 41 章 門はトークンを買い、精度を買わない</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1020px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.fig{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin:22px 0}
+.fig h3{margin-top:0}
+.fig .cap{font-size:13.5px;color:var(--ink2);margin-top:10px}
+svg{width:100%;height:auto;display:block}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 41 章</div>
+<h1>第 41 章 門はトークンを買い、精度を買わない</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  第 40 章の AUC 0.7149 は「並べ替えの良さ」であって、方策 (実際に運用する選択ルール) の
+  取り分ではない — 方策は<b>全項目に probe (64 トークンの下見) のコストを払い</b>、延長は
+  <b>選んだ項目だけ</b>に払う。完璧な選択器 (oracle) がこの遷移で稼げる精度はわずか
+  <b>0.007 ポイント</b>で、門が本当に買っているのは<b>トークンの節約</b>である。そして
+  もっと重い発見として、<b>途中で切った推論から答えるのは、まったく考えないより悪い</b>。
+</div>
+
+<h2>1. AUC は方策の取り分ではない</h2>
+
+<p>AUC (正答/誤答を並べ替える能力の指標) が高くても、それがそのまま精度に化けるとは限らない。
+理由は単純である — <b>probe (64 トークンだけ考えて様子を見る操作) は全項目に対して発生するコスト</b>
+であり、延長 (256 トークンまで続ける) は<b>選ばれた項目だけ</b>に発生するコストである。
+閾値を較正 fold で選び、test に適用して初めて、方策が実際に得るものが分かる。</p>
+
+<table>
+<tr><th>方策</th><th class="n">正答率</th><th class="n">平均トークン数</th></tr>
+<tr><td>まったく考えず答える</td><td class="n">0.5214</td><td class="n">0</td></tr>
+<tr><td>64 トークンだけ考えて答える</td><td class="n"><b>0.5071</b></td><td class="n">64</td></tr>
+<tr><td>全項目を 256 まで延長</td><td class="n">0.6857</td><td class="n">256</td></tr>
+<tr><td>全項目を 1024 まで (フル) 延長</td><td class="n">0.7286</td><td class="n">1024</td></tr>
+<tr class="hl"><td><b>門つき: 64 で probe し 52% を延長</b></td><td class="n"><b>0.6571</b></td><td class="n"><b>164</b></td></tr>
+<tr><td>門つき: 64 で probe し 29% を延長</td><td class="n">0.6286</td><td class="n">120</td></tr>
+<tr class="hl"><td><b>同じ coverage での oracle 門</b></td><td class="n"><b>0.6929</b></td><td class="n">164</td></tr>
+</table>
+
+<div class="flag">
+  <b>完璧な選択器の価値は 0.007 ポイント</b>
+  同じ coverage で比べると、oracle の門 (0.6929) と「全項目を 256 まで延長」(0.6857) の差は
+  わずか 0.007 ポイントである。門が実際に買っているのはすべて<b>トークンの軸</b>で、
+  164 トークンは 256 トークンに対して <b>36% 少ないトークンで 2.9 ポイントの精度低下</b>、
+  フル予算 (1024) に対しては <b>84% 少ないトークンで 7.2 ポイントの精度低下</b>である。
+  この交換が価値に見合うかどうかは値段の付く運用判断だが、<b>それ以外に選択器が提供できるものは
+  何もない</b>ということは確定した。AUC だけを報告して止まる記事は、それ以上の何かがあるかのように
+  読める。
+</div>
+
+<h2>2. 途中で切った推論は、考えないより悪い</h2>
+
+<div class="flag">
+  <b>0.5071 対 0.5214 — 64 トークンで止めた答えは、無思考の答えより悪い</b>
+  途中で止めた瞬間のモデルは、<b>まだ棄却していない選択肢を並べた状態</b>にある。
+  その状態から答えを読むのは、質問文からそのまま答えを読むよりも悪い結果になる。
+  これは第 39 章で見た「結論に到達した項目は単調に伸びる」という結果と矛盾しない —
+  ここで問題にしているのは<b>延長しないと決めた項目から、それでも部分的なトレースを
+  使って答えようとする</b>場合である。
+</div>
+
+<h2>3. 部分トレースを捨てるだけで、全 coverage が無料で改善する</h2>
+
+<table>
+<tr><th>coverage</th><th class="n">部分トレースを残して答える</th><th class="n">部分トレースを捨てて質問文から答える</th><th class="n">改善</th></tr>
+<tr><td>20%</td><td class="n">0.5929</td><td class="n"><b>0.6143</b></td><td class="n">+0.0214</td></tr>
+<tr><td>29%</td><td class="n">0.6000</td><td class="n"><b>0.6286</b></td><td class="n">+0.0286</td></tr>
+<tr><td>39%</td><td class="n">0.6143</td><td class="n"><b>0.6429</b></td><td class="n">+0.0286</td></tr>
+<tr><td>52%</td><td class="n">0.6500</td><td class="n"><b>0.6571</b></td><td class="n">+0.0071</td></tr>
+</table>
+
+<div class="good">
+  <b>この原理は一般化する</b>
+  推論予算に上限を設け、<b>その到達点から答えを読むシステムは、それ自体が損をしている</b>。
+  修正はコストゼロで、<b>部分トレースを捨てて質問文から答え直す</b>だけでよい。
+  第 38 章で見た thinking on の正答率 0.7278 も、この効果の分だけ<b>低く出ている</b> —
+  180 件中 62 件が上限で打ち切られ、その全件が部分トレースから答えていたからである。
+</div>
+
+<div class="fig">
+  <h3>図 1: 門が買うのはトークン軸、精度軸はほぼ動かない</h3>
+<svg viewBox="0 0 900 260" role="img" aria-label="門の価値はトークン軸に集中する">
+  <g font-size="12.5">
+    <line x1="80" y1="220" x2="850" y2="220" stroke="#3c5a4c"/>
+    <line x1="80" y1="30" x2="80" y2="220" stroke="#3c5a4c"/>
+    <text x="30" y="35" font-size="11" fill="#3c5a4c">精度</text>
+    <text x="60" y="225" font-size="11" fill="#3c5a4c">0</text>
+    <text x="810" y="240" font-size="11" fill="#3c5a4c">トークン</text>
+
+    <circle cx="120" cy="190" r="6" fill="#3c5a4c"/><text x="60" y="200" font-size="10">0本</text>
+    <circle cx="200" cy="196" r="6" fill="#8f2f2f"/><text x="150" y="212" font-size="10" fill="#8f2f2f">64本 (無思考より悪い)</text>
+    <circle cx="380" cy="100" r="7" fill="#1f7a4d"/><text x="330" y="88" font-size="11">256本 全延長</text>
+    <circle cx="380" cy="88" r="7" fill="#8a5a12" stroke="#8a5a12" stroke-width="2" fill-opacity="0"/>
+    <circle cx="330" cy="105" r="7" fill="#8a5a12"/><text x="220" y="118" font-size="11" fill="#8a5a12">164本 門つき (52%)</text>
+    <circle cx="335" cy="98" r="7" fill="none" stroke="#8a5a12" stroke-width="2" stroke-dasharray="2 2"/>
+    <text x="240" y="70" font-size="11" fill="#8a5a12">oracle も同じ位置 (差 0.007)</text>
+    <circle cx="800" cy="65" r="7" fill="#0f4a2e"/><text x="700" y="52" font-size="11">1024本 フル延長</text>
+
+    <path d="M330 105 L380 100" stroke="#8a5a12" stroke-width="2" marker-end="url(#a2)"/>
+  </g>
+  <defs><marker id="a2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#8a5a12"/></marker></defs>
+</svg>
+  <div class="cap">門つき方策 (橙) は全延長 (緑) より左 (トークンが少ない) に位置するが、
+  精度の高さはほぼ同じ帯にある。門が動かしているのは横軸 (トークン) であり、縦軸 (精度) では
+  oracle でさえ全延長からわずかしか離れられない。</div>
+</div>
+
+<h2>4. 残る問いは「良い選択器」ではなく「良い操作点」</h2>
+
+<p>信号自体は本物で早い (第 40 章)。その価値はトークンの節約であり、この遷移における
+選択器の上限は 0.007 である。金銭的な意味がまだある問いは、より良い選択器を探すことではなく、
+<b>64 → 256 以外の予算ペアに、もっと広い oracle の差があるか</b>である。oracle が
+「常に延長する」を 0.007 より大きく上回るペアがあれば、そこでは選択器が
+トークンだけでなく精度でも稼げる可能性がある。この掃引は次章 (第 42 章) の主題である。</p>
+
+<h2>この章が主張しないこと</h2>
+
+<p>ここで測ったのは 64 → 256 という単一の遷移における門の価値である。他の予算ペアで
+oracle の優位がどこまで大きくなるかは、この章の実験からは分からない — それを確かめる
+掃引が次章である。</p>
+
+<footer>
+第 40 章 &larr; <a href="gateway-40-entropy-signal.html">64 トークン考えた時点のエントロピーだけが効いた</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-42-harm-unclaimed.html">第 42 章 精度は「害」の予測に住んでいて、そこは誰も取れない</a>
+</footer>
+</div>
+</body>
+</html>

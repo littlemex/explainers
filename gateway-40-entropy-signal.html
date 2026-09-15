@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 40 章 64 トークン考えた時点のエントロピーだけが効いた</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1020px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:42px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:26px 0 8px;color:var(--gd)}
+.tldr{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--g);border-radius:0 9px 9px 0;padding:16px 20px;margin:18px 0}
+.tldr b{display:block;margin-bottom:6px;color:var(--gd)}
+table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14.5px;background:var(--card)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+th{background:var(--gp);color:var(--gd)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.hl td{background:var(--gp);font-weight:600}
+.fig{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin:22px 0}
+.fig h3{margin-top:0}
+.fig .cap{font-size:13.5px;color:var(--ink2);margin-top:10px}
+svg{width:100%;height:auto;display:block}
+.ok{color:var(--gd);font-weight:700} .ng{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--warn);background:var(--warnbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.flag{border-left:5px solid var(--bad);background:var(--badbg);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.good{border-left:5px solid var(--g2);background:var(--gp);padding:14px 18px;border-radius:0 7px 7px 0;margin:18px 0}
+.note b,.flag b,.good b{display:block;margin-bottom:5px}
+code{background:#eef4f0;padding:1px 5px;border-radius:3px;font-size:13.5px;font-family:Menlo,Consolas,monospace}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink2);font-size:13px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="gateway-index.html">シリーズ目次</a> / 第 40 章</div>
+<h1>第 40 章 64 トークン考えた時点のエントロピーだけが効いた</h1>
+
+<div class="tldr">
+  <b>この章の 3 行</b>
+  この調査系列で、モデル内部の読み出しが対照より初めて明確に勝った回である。
+  64 トークンだけ thinking させた時点の読み出しで <b>AUC 0.7149</b>、ラベルを入れ替えた
+  対照は 0.4150 — 差は <b>+0.2999</b> で有意 (PASS)。効いているのは
+  <b>エントロピー</b> (確率分布がどれだけ広がっているかを表す量) 1 つで、64→256 という
+  <b>早い段階の遷移に限って</b>効く。ただしその裏で、読み出しの実装には <b>4 特徴のうち
+  1 つが計算されていなかった</b>という訂正も混じっている。
+</div>
+
+<h2>1. まず訂正 — 読み出しは 3 特徴で動いていた</h2>
+
+<div class="flag">
+  <b>公開されていた実装には常時ゼロの特徴が 1 つ混じっていた</b>
+  サーブされていた読み出しは<b>エントロピー・最大確率・verbaliser 対数オッズ・答えの文字の順位</b>
+  の 4 特徴として書かれていたが、<b>第 4 の特徴 (答えの文字の順位) は定数ゼロとして残っており、
+  実際には計算されていなかった</b>。第 65 回以降のすべての結果 — 次節で述べる第 74 回の
+  中間読み出しゲートも含む — は<b>実際には 3 特徴だけで動いていた</b>。バグが見つかったのは、
+  この特徴に対する相関が <code>nan</code> (非数) として返ってきたからで、<b>要約統計量が
+  拾い、通過するテストは拾わなかった</b>種類のバグである。
+</div>
+
+<div class="good">
+  <b>訂正の向きは、発見を強めている</b>
+  第 74 回の PASS は<b>主張していたより少ない材料 (3 特徴) で達成されていた</b>ので、
+  発見はこの訂正の後も生き残り、もし何か変わるなら<b>過小評価されていた</b>方向である。
+  特徴は今は正しく計算されるようになり、以降の確認実験はその値を使っている。
+</div>
+
+<h2>2. 「結論に到達するか」は prefill からは予測できない</h2>
+
+<p>第 39 章で見た「結論に到達するかどうか」は 26 ポイントという、この調査のどの信号よりも
+大きい分離を生む量だった。だがそれは<b>払った後にしか分からない</b>。もし生成前の
+prefill 読み出しから予測できれば、無料のラベルを持つ第 3 の標的が手に入る。</p>
+
+<table>
+<tr><th></th><th class="n">「トレースが上限に当たる」ことの held-out AUC</th></tr>
+<tr><td>prefill の読み出し</td><td class="n">0.5977</td></tr>
+<tr><td>同じ手順をラベルシャッフルで実行した対照</td><td class="n">0.5761</td></tr>
+<tr class="hl"><td><b>差</b></td><td class="n"><b>+0.0216 [−0.0062, +0.0503]</b> <span class="ng">FAIL</span></td></tr>
+</table>
+
+<div class="note">
+  <b>対照が無ければ「弱いが予測的」と書いていた</b>
+  test 140 件・正例 46 件という規模では、<b>意味のないラベルに対して同じ手順を当てはめ直す
+  だけで 0.576 に達する</b>。これは fitting 手順が<b>何も無い状態でも稼いでしまう分</b>で、
+  0.5977 という素の数字はこの範囲の内側にある。ラベルシャッフルという「機械が雑音の上で
+  何を稼ぐか」を測る対照が無ければ、この弱い正の値は「小さいが予測的な効果」として
+  報告されていたはずである。
+</div>
+
+<p>参考までに特徴別の相関は、エントロピー <b>+0.2233</b>、verbaliser 対数オッズ +0.1126、
+最大確率 −0.0664。prompt 時点のエントロピーは答えが長引くかどうかに何かを持っているが、
+<b>この規模で fitted な予測器として使えるほどは残らない</b>。</p>
+
+<h2>3. AUC で測り直すと、細い閾値の裏に太い信号があった</h2>
+
+<p>第 39 章の中間読み出しゲートは、coverage を固定した精度の比較で
+0.0215・0.0071・0.0214 という薄い margin (差) しか出しておらず、<b>信頼できる instrument
+かどうか自体が疑わしかった</b>。coverage を固定する比較は、離散的な項目数の上に閾値を
+乗せるので、test 140 件では精度が 1/140 刻みで量子化される。<b>held-out AUC には閾値が
+無いので、この粗さは区間だけに入り、点推定自体は歪まない。</b></p>
+
+<table>
+<tr><th>遷移</th><th class="n">test 内の fixable 数</th><th class="n">AUC</th><th class="n">ラベルシャッフル対照</th><th class="n">差</th><th>判定</th></tr>
+<tr class="hl"><td><b>64 → 256</b></td><td class="n">26</td><td class="n"><b>0.7149</b></td><td class="n">0.4150</td><td class="n"><b>+0.2999 [+0.0941, +0.4922]</b></td><td class="ok">PASS</td></tr>
+<tr><td>128 → 512</td><td class="n">23</td><td class="n">0.5663</td><td class="n">0.5180</td><td class="n">+0.0483 [−0.0305, +0.1379]</td><td class="ng">FAIL</td></tr>
+<tr><td>256 → 1024</td><td class="n">15</td><td class="n">0.5477</td><td class="n">0.4731</td><td class="n">+0.0747 [−0.1763, +0.3056]</td><td class="ng">FAIL</td></tr>
+</table>
+
+<div class="good">
+  <b>0.02 の margin が、閾値を外すと 0.30 の margin になった</b>
+  これは<b>この調査系列でこれまでで最も明確な正の結果</b>である。難易度についての J-lens
+  対 logit lens、logit lens 対表層統計、残差対ランダム escalation — これまでの内部読み出しの
+  試みはすべて負けか同値だった。ここで初めて、モデル内部の読み出しがルーティングの判断で
+  対照に明確に勝った。
+</div>
+
+<h2>4. 効いているのはエントロピーだけ</h2>
+
+<p>64 → 256 の遷移で fit した係数は、<b>エントロピー +0.186</b> が支配的で、
+最大確率 +0.007、verbaliser 対数オッズ −0.048 はほぼ効いていない。読みは一文で言える —
+<b>「64 トークン考えた時点で分布がまだ広がっていれば、もっと考えると効く。すでに尖っていれば
+変わらない」</b>。</p>
+
+<h2>5. 信号は位置に固有で、跳躍の大きさには依らない</h2>
+
+<div class="flag">
+  <b>64→256 と 256→1024 はどちらも 4 倍の跳躍だが、早い方だけ効く</b>
+  もし信号が「4 倍に延長する効果」を予測しているなら、両方の遷移で同じくらい効くはずである。
+  しかし 128→512 は 0.5663 で FAIL、256→1024 は 0.5477 で FAIL。<b>信号は跳躍の倍率ではなく、
+  トレースの早い位置に固有</b>である。後者 2 遷移は fixable 数が少ない (23 件・15 件) ため
+  サンプル数不足も競合する説明になるが、<b>それだけでは 128→512 の失敗を説明できない</b> —
+  64→256 は 26 件で通っており、23 件との差はそれほど大きくない。
+</div>
+
+<h2>6. この形が理にかなう理由 (読みであり、結果ではない)</h2>
+
+<p>トレースの早い段階では、モデルはまだ問題を設定し終えただけで、その設定がどこへ向かうかは
+<b>まだ開いている</b>可能性が高い。256 トークンに達する頃には、トレースはすでに
+<b>ある筋道にコミットしており</b>、読み出しはすでに進行中の推論を記述しているに過ぎない。
+これは遷移の順序と整合する<b>読み</b>であり、この実験によって<b>確立された結果ではない</b>。</p>
+
+<h2>この章が主張しないこと</h2>
+
+<p>margin は太いが区間も広く、確認実験は 2 倍のサンプルで進行中である。予算のグリッドは粗く、
+信号が最も強いのが 64 トークンなのか、32〜128 のどこかなのかはこの 3 点だけの結果からは
+確定しない。また AUC が示すのは<b>並べ替えの良さ</b>であり、64 トークンのコストを払った上で
+閾値を切ったときに実際にどれだけ稼げるかは、次章 (第 41 章) で扱う別の問いである。</p>
+
+<footer>
+第 39 章 &larr; <a href="gateway-39-truncation-mixture.html">途中で切ると損をする、そして混合が私を騙した</a> /
+<a href="gateway-index.html">シリーズ目次</a> /
+次 → <a href="gateway-41-gate-tokens-not-accuracy.html">第 41 章 門はトークンを買い、精度を買わない</a>
+</footer>
+</div>
+</body>
+</html>
