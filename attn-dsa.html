@@ -181,11 +181,35 @@
 
 <section id="s6">
   <h2><span class="num">6</span>代表モデルと系統上の位置</h2>
-  <p class="lead">DSA は MLA の子として位置づき、GLM-5 系が採用したと報告されています。後継ノードとしての CSA/HCA にも触れます。</p>
+  <p class="lead">DSA は MLA の子として位置づき、GLM-5 系が採用したと報告されています。後継ノードとしての CSA/HCA と、その先の CSA2 (DeepSeek-V4.1-Flash) にも触れます。</p>
   <p>DSA に先行する 2025-02 には、同じく「内容依存の疎選択」を扱う先行研究として <b>NSA (Native Sparse Attention, arXiv:2502.11089)</b> と <b>MoBA (Mixture of Block Attention, Kimi, arXiv:2502.13189)</b> が公開されています。両者はトークン単位の top-k を選ぶ NSA と、ブロック単位で疎に attention する MoBA という違いを持ちつつ、いずれも「学習の段階から疎パターンを焼き込む」発想を採ります。DSA (DeepSeek Sparse Attention) の考え方は、これらに続いて DeepSeek-V3.2 で 2025-09 にモデルとして先行公開され、その後 arXiv:2512.02556 (2025-12) として論文化されたと整理されています。NSA/MoBA が from-scratch で疎を焼き込むのに対し、DSA (V3.2) は既存モデルへの継続学習で indexer を導入した点が異なります。GLM-5 は DSA を採用したと報告されており ([報告], arXiv:2602.15763)、<b>indexer と呼ぶ機構が各クエリに対して重要なトークンを上位 $k_{\text{top}}$ 個だけ選び、そこだけを参照します</b>。GLM-5.2 では、この indexer を疎注意 4 層ごとに共有する <b>IndexShare</b> を導入し、1M 文脈時のトークンあたり FLOPs を約 2.9 分の 1 にしたと報告されています ([報告])。</p>
   <p>系統上、DSA は<b>MLA の上に積まれた技術</b>です。MLA が「KV そのものを低ランク潜在に圧縮する」のに対し、DSA は「圧縮された KV の中から、クエリごとに重要な部分だけを動的に選ぶ」役割を追加します。両者は独立した目的を持ち、組み合わせて使われます。</p>
   <div class="key">
     <b>CSA / HCA (DeepSeek-V4 の後継ノード)。</b> DeepSeek-V4 "Towards Highly Efficient Million-Token Context Intelligence" (arXiv:2606.19348、2026-06) で、CSA (Compressed Sparse Attention) と HCA (Heavily Compressed Attention) と呼ばれる圧縮 Attention のハイブリッドが確定情報として提案されています。系譜上は「DSA の先、圧縮と疎選択をさらに組み合わせた後継ノード」として位置づけられます。DSA (2025-09 モデル先行公開 / 2025-12 arXiv:2512.02556) → CSA/HCA (2026-06 arXiv:2606.19348) という公開順序は確定しています。具体的な数式・圧縮率の詳細は本稿の範囲を超えるため、系統上の位置づけのみをここで扱います。
+  </div>
+
+  <h3>CSA2 — 層をまたいで KV と top-k を使い回す (DeepSeek-V4.1-Flash, 2026-09)</h3>
+  <p>CSA の後継として、<b>DeepSeek-V4.1-Flash</b> "Pushing the Limits of KV Cache Compression" (2026-09-10、<a href="https://www.alphaxiv.org/abs/2609.deepseek-v4-1-flash" target="_blank" rel="noopener">alphaXiv</a> ・ <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash" target="_blank" rel="noopener">HuggingFace</a>) が <b>CSA2 (Compressed Sparse Attention 2)</b> を提案しています。背景は agentic なワークロードで、<b>入力が重く、prefill の計算と KV キャッシュの容量 ・ 帯域が配備コストの主なボトルネックになる</b>という問題設定です。CSA2 は KV の圧縮を<b>3 つの方向</b>で同時にかけます。</p>
+  <table>
+    <tr><th>圧縮する方向</th><th>やること</th></tr>
+    <tr><td>entry size (1 エントリの大きさ)</td><td>射影でヘッド間に情報を共有する</td></tr>
+    <tr><td>系列方向</td><td><b>複数トークンを 1 つの KV エントリに圧縮</b>する</td></tr>
+    <tr class="hl"><td>層方向</td><td><b>層をまたいで KV 情報を再利用</b>する ← CSA2 で追加された軸</td></tr>
+  </table>
+  <p>層方向の再利用は、層ごとに 3 つのモードを切り替える形で実現されます。<b>ここが DSA との一番大きな違い</b>です。DSA は各層が自分の indexer で top-k を選びますが、CSA2 は<b>その選択結果そのものを層をまたいで使い回します</b>。</p>
+  <table>
+    <tr><th>モード</th><th>その層が計算するもの</th><th>前の層から受け継ぐもの</th></tr>
+    <tr><td><b>Full</b></td><td>自分の主 $K$ / $V$ を計算し、indexer key を射影し、<b>新しい top-$k$ を選ぶ</b></td><td>—</td></tr>
+    <tr><td><b>Reindex</b></td><td><b>indexer query だけ</b>を新しく計算して、別の top-$k$ を選ぶ</td><td>主 KV と indexer $K$</td></tr>
+    <tr class="hl"><td><b>Reuse</b></td><td>ほぼ何も計算しない (<b>index 関連の計算がほぼ消える</b>)</td><td>主 KV と <b>top-$k$ のインデックスまで</b></td></tr>
+  </table>
+  <p>さらに decoder 側には<b>階層的な疎 indexer</b> が入ります。疎注意では候補にスコアを付けるコスト自体が文脈長とともに伸びますが、<b>最初の Full モード層がブロック単位の候補プールを選び、後続の Reindex 層はそのプールの中だけを採点する</b>ことで、<b>文脈が 1 万でも 100 万トークンでも、クエリあたりの計算量が有界に保たれます</b>。</p>
+  <div class="key">
+    <b>数字で見た効き方。</b>CSA2 の層方向の再利用に <b>FP4 (OCP 標準の MXFP4) の KV キャッシュ</b> を組み合わせることで、常に HBM に置く <b>global KV は 1 トークンあたり 890 バイト</b>まで縮みます。これは DeepSeek-V4-Flash の<b>約 4 分の 1</b>で、初期の DeepSeek-V1 が 1 トークンあたり約 39 万バイトを要したのと比べると桁が違います。さらに配備側の工夫として <b>SWA Bounded Replay</b> (SWA の局所キャッシュを永続化せず、再開時に直近 $n_{\text{win}}$ トークンだけ replay して近似的に作り直す) により、SSD やホストメモリに置く<b>永続的な KV は V4-Flash の約 8 分の 1</b> になります。
+  </div>
+  <p>アーキテクチャ側の前提も併せて押さえておくと、この圧縮率の意味が分かりやすくなります。V4.1-Flash は <b>40 層の causal Transformer</b> を<b>前半 20 層を encoder ・ 後半 20 層を decoder</b> とする <b>CED (Causal Encoder-Decoder)</b> 構成で、decoder 層の global KV エントリは<b>encoder 最終層の隠れ状態から直接射影されます</b>。これにより prefill の計算量が標準の $O(N L)$ から $O(N \frac{L}{2} + n_{\text{win}} \frac{L}{2})$ 相当へ、<b>ほぼ半分</b>になります。モデル全体は <b>552B の MoE</b> で、<b>decode 時の活性は 16B、prefill 時は 8B</b> という非対称な設計です。文脈は最大 100 万トークンで、事前学習は 45T のマルチモーダルトークン。</p>
+  <div class="warn">
+    <b>この節の扱い。</b>CSA2 は<b>系統樹上の最新ノード</b>として位置づけ、数値と機構は上記の一次資料の記述に基づいて要点だけを載せています。<b>本章の体験デモ (4 節 ・ 5 節) は DSA の top-k 選択を対象にしたもの</b>で、CSA2 の層方向の再利用や階層 indexer をシミュレートしたものではありません。CSA2 の詳細な数式や実測は原典を参照してください。<b>この論文は arXiv 番号ではなく alphaXiv と HuggingFace で公開されています</b>。
   </div>
 </section>
 
@@ -201,7 +225,8 @@
     <tr><td>品質保証</td><td>誤差の不等式は定理だが「集中している」ことは経験則 (H2O・Quest の観測)</td></tr>
     <tr><td>系譜上の兄弟</td><td>NSA (arXiv:2502.11089, トークン単位 top-k) / MoBA (Kimi, arXiv:2502.13189, ブロック単位)。いずれも DSA に先行 (2025-02)</td></tr>
     <tr><td>代表モデル</td><td>DeepSeek-V3.2 (先行) / GLM-5・GLM-5.2 ([報告] IndexShare)</td></tr>
-    <tr><td>後継ノード</td><td>CSA/HCA (DeepSeek-V4, arXiv:2606.19348、2026-06 で確定) ― 圧縮と疎選択の複合、詳細は本稿の範囲外</td></tr>
+    <tr><td>後継ノード</td><td>CSA/HCA (DeepSeek-V4, arXiv:2606.19348、2026-06 で確定) ― 圧縮と疎選択の複合</td></tr>
+    <tr class="hl"><td>最新ノード</td><td><b>CSA2</b> (DeepSeek-V4.1-Flash, 2026-09) ― entry / 系列 / <b>層</b>の 3 方向で圧縮。Full / Reindex / <b>Reuse</b> の 3 モードで<b>top-k の選択結果まで層をまたいで再利用</b>し、階層 indexer でクエリあたりの走査を有界化。FP4 KV と合わせて global KV は <b>890 B/token</b> (V4-Flash の約 1/4)、SWA Bounded Replay で永続 KV は約 1/8</td></tr>
   </table>
   <div class="key">
     <b>結論。</b>DSA は「MLA が圧縮した KV を、さらにクエリごとの重要度で動的に絞る」という一手を加えました。SWA が位置で切る単純さを持つのに対し、DSA は内容を見て選ぶ分だけ柔軟ですが、<b>KV の容量そのものは削れない</b>という代償を負います。次章では、この「参照を減らす」路線とはまったく異なる、<b>softmax を外して状態を固定する</b>線形 Attention の系統に進みます。
@@ -211,7 +236,7 @@
     次の章 → <a href="./attn-linear.html">06. Linear Attention — softmax を外して O(N) に</a>
   </div>
   <div class="fn">
-    参考: DeepSeek-V3.2 Sparse Attention (arXiv:<a href="https://arxiv.org/abs/2512.02556" target="_blank" rel="noopener">2512.02556</a>)。GLM-5 / GLM-5.2 DSA・IndexShare (arXiv:<a href="https://arxiv.org/abs/2602.15763" target="_blank" rel="noopener">2602.15763</a>、[報告])。NSA (Native Sparse Attention, arXiv:<a href="https://arxiv.org/abs/2502.11089" target="_blank" rel="noopener">2502.11089</a>)。MoBA (Mixture of Block Attention, Kimi, arXiv:<a href="https://arxiv.org/abs/2502.13189" target="_blank" rel="noopener">2502.13189</a>)。H2O (arXiv:<a href="https://arxiv.org/abs/2306.14048" target="_blank" rel="noopener">2306.14048</a>)。Quest (arXiv:<a href="https://arxiv.org/abs/2406.10774" target="_blank" rel="noopener">2406.10774</a>)。MLA (DeepSeek-V2, arXiv:<a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener">2405.04434</a>)。CSA/HCA (DeepSeek-V4 "Towards Highly Efficient Million-Token Context Intelligence", arXiv:<a href="https://arxiv.org/abs/2606.19348" target="_blank" rel="noopener">2606.19348</a>、2026-06 で確定)。<br>
+    参考: DeepSeek-V3.2 Sparse Attention (arXiv:<a href="https://arxiv.org/abs/2512.02556" target="_blank" rel="noopener">2512.02556</a>)。GLM-5 / GLM-5.2 DSA・IndexShare (arXiv:<a href="https://arxiv.org/abs/2602.15763" target="_blank" rel="noopener">2602.15763</a>、[報告])。NSA (Native Sparse Attention, arXiv:<a href="https://arxiv.org/abs/2502.11089" target="_blank" rel="noopener">2502.11089</a>)。MoBA (Mixture of Block Attention, Kimi, arXiv:<a href="https://arxiv.org/abs/2502.13189" target="_blank" rel="noopener">2502.13189</a>)。H2O (arXiv:<a href="https://arxiv.org/abs/2306.14048" target="_blank" rel="noopener">2306.14048</a>)。Quest (arXiv:<a href="https://arxiv.org/abs/2406.10774" target="_blank" rel="noopener">2406.10774</a>)。MLA (DeepSeek-V2, arXiv:<a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener">2405.04434</a>)。CSA/HCA (DeepSeek-V4 "Towards Highly Efficient Million-Token Context Intelligence", arXiv:<a href="https://arxiv.org/abs/2606.19348" target="_blank" rel="noopener">2606.19348</a>、2026-06 で確定)。CSA2 (DeepSeek-V4.1-Flash "Pushing the Limits of KV Cache Compression", 2026-09-10、<a href="https://www.alphaxiv.org/abs/2609.deepseek-v4-1-flash" target="_blank" rel="noopener">alphaXiv</a> / <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash" target="_blank" rel="noopener">HuggingFace</a>。arXiv 番号なし)。CED の着想元は You Only Cache Once (arXiv:<a href="https://arxiv.org/abs/2405.05254" target="_blank" rel="noopener">2405.05254</a>)、SWA Bounded Replay の動機は PowerAttention (arXiv:<a href="https://arxiv.org/abs/2503.03588" target="_blank" rel="noopener">2503.03588</a>)。<br>
     注意: 本ページのアニメーションと概算値は、仕組みと大小関係を直感的に伝えるための<b>模式的な可視化</b>です。実際の数値は精度・実装・ハードウェアに依存します。
   </div>
 </section>
