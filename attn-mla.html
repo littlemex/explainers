@@ -194,6 +194,22 @@
   <div class="key">
     覚えておく系譜: <b>MQA/GQA が「ヘッドを共有して減らす」のに対し、MLA は「KV を潜在ベクトルへ低ランク圧縮する」</b>という別の軸に進みました。両者とも decode の KV 帯域を叩く系統1に属しますが、MLA の方がより深い圧縮に到達でき、かつ展開行列を Q 側へ吸収できるぶん品質劣化が小さいと報告されています。
   </div>
+
+  <h3>KV を軽くする軸は 4 つある — 層方向と精度方向</h3>
+  <p class="lead">MQA/GQA と MLA は「1 層分の KV をどう小さくするか」を争っています。しかし KV の総量は <b>1 層分の大きさ × 層数 × トークン数 × 1 要素のビット数</b> で決まるので、削れる軸は他にもあります。</p>
+  <table>
+    <tr><th>軸</th><th>何を削るか</th><th>代表</th></tr>
+    <tr><td>ヘッド方向</td><td>1 層の KV ヘッド数</td><td>MQA (arXiv:<a href="https://arxiv.org/abs/1911.02150" target="_blank" rel="noopener">1911.02150</a>) / GQA (arXiv:<a href="https://arxiv.org/abs/2305.13245" target="_blank" rel="noopener">2305.13245</a>)</td></tr>
+    <tr class="hl"><td>次元方向</td><td>1 エントリの次元 (低ランク潜在)</td><td><b>MLA</b> (本章、arXiv:<a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener">2405.04434</a>)</td></tr>
+    <tr><td>系列方向</td><td>保持するトークン数 (窓 ・ 追い出し ・ 疎選択)</td><td>SWA (04 章) / DSA (05 章)</td></tr>
+    <tr><td><b>層方向</b></td><td><b>層ごとに 1 セット持つのをやめる</b></td><td><b>CLA</b> (arXiv:<a href="https://arxiv.org/abs/2405.12981" target="_blank" rel="noopener">2405.12981</a>) / <b>YOCO</b> (arXiv:<a href="https://arxiv.org/abs/2405.05254" target="_blank" rel="noopener">2405.05254</a>)</td></tr>
+    <tr><td><b>精度方向</b></td><td><b>1 要素のビット数</b></td><td><b>KIVI</b> (arXiv:<a href="https://arxiv.org/abs/2402.02750" target="_blank" rel="noopener">2402.02750</a>) / MXFP4 の KV</td></tr>
+  </table>
+  <p><b>層方向</b>は 2024-05 に 2 本の論文がほぼ同時に示しました。<b>CLA (Cross-Layer Attention)</b> は隣接する層で KV を共有して層数ぶんの重複を削り、<b>YOCO (You Only Cache Once)</b> は「self-decoder が 1 度だけ global な KV を作り、cross-decoder はそれを参照する」という decoder-decoder 構成で、<b>global KV を実質 1 セットに畳みます</b>。どちらも計算量は $O(N^2 d)$ のまま変えず、<b>同じ KV を層数だけ持っていた無駄</b>を削る軸です。</p>
+  <p><b>精度方向</b>は 1 要素あたりのビット数を削ります。<b>KIVI</b> は追加学習なしで KV を 2bit に非対称量子化する手法を示し、その後この軸は<b>学習側 (QAT) と組み合わせて実運用へ</b>入っていきます。</p>
+  <div class="key">
+    <b>この 4 軸は独立で、掛け算で効きます。</b>そして<b>それを実際に掛け算した</b>のが DeepSeek-V4.1-Flash (2026-09) の <b>CSA2</b> です。次元方向 (エントリの共有) ・ 系列方向 (複数トークンを 1 エントリに圧縮) ・ 層方向 (KV と top-k の選択結果まで層をまたいで再利用) を同時にかけ、さらに精度方向で <b>MXFP4</b> を重ねて、HBM 常駐の global KV を <b>1 トークンあたり 890 バイト</b>まで縮めました。CED (Causal Encoder-Decoder) が<b>この YOCO を着想元として明示している</b>ので、系譜としては「層方向の軸が 2024-05 に立ち、2026-09 に疎選択の系統へ合流した」と読めます。詳細は <a href="./attn-dsa.html#s6">05 章の CSA2 節</a>で扱います。
+  </div>
 </section>
 
 <section id="s7">
