@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jev を測る - 03: RLCD と較正</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .tag{display:inline-block;border-radius:5px;padding:1px 8px;font-size:12.5px;font-weight:700}
+  .t-open{background:#fdf1ec;color:#b5401f;border:1px solid #f0b6a3}
+  .t-merged{background:#eaf5ef;color:#0f5132;border:1px solid var(--g4)}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">JEV を測る ・ 03</p>
+  <h1>RLCD と較正</h1>
+  <p>確率の正直さを報酬にする、という目的。そして較正は正答率ではない</p>
+</header>
+<main>
+<a class="back" href="./jev-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回で分かること</h2>
+  <p class="lead">RLCD は「確率の正直さ」を報酬にする強化学習だと説明されています。
+  この目的が何を意味するのか、そしてなぜ<b>私が最初に測った指標では Jev を評価できていなかったのか</b>を整理します。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    較正 (calibration) と正答率は別の性質です。そして <b>Jev は正答率で勝つと言っていません</b>。
+    ベンダー自身が公開した 711 件の評価で <b>Jev 67.8% 対 比較対象の最良 74.1%</b>。
+    独立検証でも「7 つ仕込んだ欠陥のうち Jev は 6 つ、Fable 5.1 は 7 つ」でした。
+    RLCD が狙っているのは<b>間違えそうなときに間違えそうだと申告させること</b>で、
+    売っているのは正答率ではなく<b>自動化してよい線を数字で引けること</b>です。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. 公式が書いている範囲</a>
+    <a href="#s2">2. 較正とは何か</a>
+    <a href="#s3">3. 較正が取れていると何ができるか</a>
+    <a href="#s4">4. ベンダー自身の数字が示すもの</a>
+    <a href="#s5">5. だから測るべきは正答率ではない</a>
+    <a href="#s6">6. 勘違いしやすい 3 点</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>公式が書いている範囲</h2>
+  <p>RLCD への言及は、公開文書では実質 3 か所だけです。<b>目的と位置づけまでで、アルゴリズムの中身
+  (報酬の式、データの作り方、モデル構造) は公開されていません。</b></p>
+
+  <table>
+    <tr><th>出どころ</th><th>書かれていること</th></tr>
+    <tr><td>公式ブログ</td><td>「Reinforcement Learning for Calibrated Decisions (RLCD) と呼ぶ学習手法」</td></tr>
+    <tr><td>公式ドキュメント AI Primer</td><td>「較正された決定のための強化学習は、生成された文章の代わりに、決定と較正された確率を返すよう TypeSafe を訓練する」</td></tr>
+    <tr><td>公式ブログ</td><td>「較正された決定: System One タスクにおいて、認識論的に正直な確率を伴う答え」「較正済み: 自信が高いほど正解率が高い」</td></tr>
+  </table>
+
+  <p>ドキュメントは既存手法と並べて説明しています。人の好みを学ぶ RLHF、答え合わせできる報酬を使う RLVR、
+  そして確率の正直さを狙う RLCD。この違いを一文でまとめた箇所があります。
+  <b>「人間の好みと、機械にとっての信頼性は、別の最適化目標である」。</b>
+  Jev が文章を捨てた理由はここに集約されています。</p>
+
+  <div class="warn">
+    <b>名前が衝突しています。</b>学術の世界で RLCD と言うと、ふつう
+    Reinforcement Learning from <b>Contrastive Distillation</b> (ICLR 2024, arXiv:2307.12950) を指します。
+    こちらは正負のプロンプトで対照的な選好ペアを作る<b>データ生成法</b>で、較正の手法ではありません。
+    TypeSafe は同じ略語を別の意味で使っています。<b>目的関数が確認できない以上、再現の対象にはできません。</b>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>較正とは何か</h2>
+  <p>公式ドキュメントの定義はきわめて具体的です。「確率 0.2 を割り当てた出来事は、およそ 20% の頻度で起きるべき。
+  0.8 を割り当てたものは 80%。1.0 を割り当てたものは 100%」。</p>
+
+  <p>天気予報でたとえると分かりやすいです。</p>
+  <table>
+    <tr><th>性質</th><th>何を見ているか</th></tr>
+    <tr><td><b>正答率</b></td><td>「降る」と言った日に、実際に降ったか</td></tr>
+    <tr><td><b>較正</b></td><td>「降水確率 70%」と言った日を 100 日集めたら、だいたい 70 日降ったか</td></tr>
+  </table>
+
+  <p>この 2 つは独立です。正答率が低くても較正は成り立ちますし、逆もあります。
+  極端な例として、いつも「50%」と言い続ける予報士は、当たり外れが半々の土地では完璧に較正されていますが、
+  何の役にも立ちません。<b>較正は「役に立つ」の必要条件のひとつであって、十分条件ではありません。</b></p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>較正が取れていると何ができるか</h2>
+  <p>較正が取れていると、確率が<b>「自動化してよい範囲」を決めるつまみ</b>になります。
+  公式ドキュメントも自信の値で 3 段階に分ける運用を勧めています。</p>
+
+  <ol class="steps">
+    <li>自信が高い → そのまま自動実行</li>
+    <li>中くらい → 確認を挟む</li>
+    <li>低い → 人に回す</li>
+  </ol>
+
+  <p>閾値の例として下限 0.5、重い操作には 0.9 が挙がっていますが、
+  「適切な値は領域と使い方しだい。まず保守的に始めて、自分のデータで調整すること」とも書かれています。
+  つまり<b>閾値は設定値ではなく、自分のデータから導く量</b>だという立場です。</p>
+
+  <p>ここが「較正されていること」の実用的な値打ちです。95% の正解率が必要な業務があるとき、
+  較正された確率があれば「自信 0.9 以上のものだけ自動化すれば、その部分では 95% を満たせる。
+  それは全体の 60% を占める」という言い方ができます。<b>正答率が上がるのではなく、
+  正答率を保証できる範囲が測れるようになる。</b></p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>ベンダー自身の数字が示すもの</h2>
+  <p>ここが一番大事なところです。<b>TypeSafe は正答率で勝つと言っていません。</b></p>
+
+  <table>
+    <tr><th>出どころ</th><th>数字</th></tr>
+    <tr><td>ベンダー公開の評価 711 件</td><td>Jev <b>67.8%</b>、比較対象で最良のモデル <b>74.1%</b></td></tr>
+    <tr><td>独立検証 (仕込んだ欠陥 7 つ)</td><td>Jev <b>6/7</b>、Claude Fable 5.1 <b>7/7</b>。速さは中央値 0.35 秒 対 8.83 秒、費用は約 1/580</td></tr>
+    <tr><td>独立検証 (37 文書 × 21 問)</td><td>777 判定を 0.7 秒未満、費用およそ 0.25 セント</td></tr>
+  </table>
+
+  <p>独立検証の結論は「良いが完璧ではない」でした。読み方はこうです。
+  <b>速さと安さの主張は第三者との接触に耐えた。賢さの主張は最前線より一段下。標本は小さい。</b></p>
+
+  <div class="key">
+    <b>これは弱点の暴露ではなく、設計の宣言として読むべきです。</b>
+    正答率が 6 ポイント低いことを認めたうえで、「間違えるときに間違えると言う」ことに賭けている。
+    だから第 1 章で私が批判した「お手本一致で賢さを主張するのはおかしい」は正しいのですが、
+    <b>そもそも賢さは主戦場ではなかった</b>ということになります。
+  </div>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>だから測るべきは正答率ではない</h2>
+  <p>私は最初、Jev の形を「振り分けの道具」として作り、<b>賞金をどれだけ取れたか</b>で採点しました
+  (詳細は第 4・5 章)。これは Jev の主張とずれています。</p>
+
+  <table>
+    <tr><th>測るもの</th><th>何に答えるか</th><th>Jev の主張との関係</th></tr>
+    <tr><td>正答率</td><td>どれだけ当たるか</td><td><b>主張していない。</b>自分で 67.8% 対 74.1% を公開している</td></tr>
+    <tr><td>賞金の回収率</td><td>1 問ごとに最適な振り分けにどれだけ近いか</td><td>間接的。振り分けは応用のひとつ</td></tr>
+    <tr><td><b>被覆と危険度の曲線</b></td><td>ある正解率を保つとき、全体の何割を自動化できるか</td><td><b>これが主張そのもの</b></td></tr>
+    <tr><td>較正の指標 (Brier・ECE・信頼性曲線)</td><td>確率が正直か</td><td>RLCD の目的そのもの</td></tr>
+    <tr><td>自信が高いほど正解率が高いか</td><td>公式が明言している単調性</td><td>直接検証できる</td></tr>
+  </table>
+
+  <p>言い換えると、正しい問いは「Jev は賢いか」ではなく
+  <b>「Jev に任せると、決めた正解率を保ったまま、人手をどれだけ減らせるか」</b>です。
+  そしてその問いには、値段と速さが自動的に入ってきます。同じ被覆を得るのにいくらかかるか、という形になるからです。</p>
+
+  <div class="warn">
+    <b>私の実験の一番大きな設計ミスはここでした。</b>賞金の回収率という 1 本の指標で採点し、
+    「タダの手法に勝てない」で不合格を出しました。それは振り分けという応用については正しい判定ですが、
+    <b>Jev が売っているものを測っていません</b>。第 6 章で設計をやり直します。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>勘違いしやすい 3 点</h2>
+
+  <h3>較正が取れても正答率は上がらない</h3>
+  <p>確率の正直さと、判断の正しさは別です。RLCD が狙っているのは、間違えそうなときに間違えそうだと
+  申告させることです。「較正されているから精度が高いはず」は成り立ちません。</p>
+
+  <h3>型が壊れないことと、答えが合っていることも別</h3>
+  <p>候補を事前に定義するので、存在しない値や壊れた JSON は返りません。
+  それでも「billing と答えて実は technical だった」という誤りは起こります。
+  防げるのは<b>形式の破綻</b>で、<b>意味の誤り</b>ではありません。</p>
+
+  <h3>較正は入力の分布が変われば崩れる</h3>
+  <p>学習時と違う文体・業種・言語のデータを流せば、確率のずれ方も変わります。
+  本番投入後も、同じ測り方で定期的に追いかける必要があります。
+  これは Jev 固有の弱点ではなく、較正という性質そのものの性質です
+  (分布がずれると較正が壊れることは、機械学習の較正研究が繰り返し報告してきたことです)。</p>
+
+  <div class="key">
+    <b>次の 2 回。</b>第 4・5 章は、私が実際に作って測った記録です。
+    土台を間違えた状態での結果ですが、そこで出た数字のうち<b>いくつかは土台に依存しません</b> —
+    とくに「賞金は実在するのに誰も取れない」と「較正を良くすると判断が悪くなった」の 2 つは、
+    やり直した設計にもそのまま効いてきます。
+  </div>
+</section>
+
+<div class="nav"><a href="./jev-02-architecture.html">← 第 2 章: 中身の推定</a><a href="./jev-04-the-prize.html">第 4 章: 賞金はあるのか →</a></div>
+</main>
+<footer style="text-align:center;color:#4a5d54;font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" style="color:#198754">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

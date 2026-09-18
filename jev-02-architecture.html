@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jev を測る - 02: 中身の推定</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .tag{display:inline-block;border-radius:5px;padding:1px 8px;font-size:12.5px;font-weight:700}
+  .t-open{background:#fdf1ec;color:#b5401f;border:1px solid #f0b6a3}
+  .t-merged{background:#eaf5ef;color:#0f5132;border:1px solid var(--g4)}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">JEV を測る ・ 02</p>
+  <h1>中身の推定</h1>
+  <p>エンコーダではなく、生成をやめた MoE に読み出しを付けたもの</p>
+</header>
+<main>
+<a class="back" href="./jev-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回で分かること</h2>
+  <p class="lead">重みも論文も出ていないので、中身は外から推定するしかありません。
+  API を 1 万回叩いた外部の調査と公開ドキュメントを突き合わせると、当初の見立て (エンコーダ型) は
+  たぶん違って、別の形が浮かびます。</p>
+
+  <div class="key">
+    <b>一言でいうと</b><br>
+    <b>因果的な transformer (おそらく疎な MoE) を、生成をやめて確率の読み出しに付け替えたもの</b>という推定です。
+    state を 1 回だけ符号化し、質問ごとに枝を並列に伸ばし、枝の最後の表現から確率を直接読む。
+    <b>prefill (入力を読む段) で終わり、1 トークンずつ書く段に進まない</b>。
+    ここが「並列に答えが出る」の正体で、魔法ではなく<b>やめただけ</b>です。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. なぜエンコーダ型だと思ったか、なぜ違うか</a>
+    <a href="#s2">2. 並列に見える理由 — prefill で終わる</a>
+    <a href="#s3">3. state を共有し、質問を隔離する</a>
+    <a href="#s4">4. なぜ疎な MoE が向くのか</a>
+    <a href="#s5">5. 確実な部分と推測の部分</a>
+    <a href="#s6">6. この推定が実験設計を変える</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜエンコーダ型だと思ったか、なぜ違うか</h2>
+  <p>「文章を生成しない」「1 回の前向き計算で複数の判断を返す」「型が壊れない」と聞くと、
+  BERT のようなエンコーダに分類の出口を何本か付けた形を思い浮かべます。実際それは作れて、動きます
+  (第 4 章以降で作って測ります)。</p>
+
+  <p>しかしそれだと説明できないことが 2 つあります。</p>
+  <table>
+    <tr><th>観測</th><th>エンコーダ型では説明しにくい理由</th></tr>
+    <tr><td>「最上位モデル並みの知能」を主張する</td><td>数億パラメータ級のエンコーダに、最上位の生成モデルが持つ知識は入らない。事前学習の規模が違いすぎる</td></tr>
+    <tr><td>入力上限が約 32,000 トークンで、state と質問が枠を共有する</td><td>分類器なら質問ごとに独立に投げればよく、枠を共有する理由がない。<b>state の計算結果を使い回している</b>構造を示唆する</td></tr>
+  </table>
+
+  <p>公式ドキュメント自身も「事前学習された LLM の知識を保ったまま、生成された自信の申告を、
+  内部表現から直接読む決定確率に置き換える」という言い方をしています。
+  <b>捨てたのは生成であって、土台の LLM ではない</b>という読み方です。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>並列に見える理由 — prefill で終わる</h2>
+  <p>ふつうの生成モデルの推論は 2 段あります。</p>
+  <ol class="steps">
+    <li><b>prefill (入力を読む段)</b>: 入力トークンは全部すでに分かっているので、位置をまとめて計算できる。
+    層は順に進むが、同じ層の中では並列。</li>
+    <li><b>decode (1 トークンずつ書く段)</b>: 次のトークンは前のトークンを選ぶまで存在しないので、
+    どうしても順番待ちになる。ここが遅さと値段の正体。</li>
+  </ol>
+
+  <p>ここで大事な区別があります。<b>因果的な注意 (causal attention) は「どの位置がどの情報を使えるか」の話であって、
+  「入力をどの順に計算しなければならないか」の話ではありません。</b>
+  prefill の時点で入力は全部手元にあるので、まとめて計算できます。</p>
+
+  <p>Jev の形は <b>prefill と読み出しで終わり、decode に進まない</b>と推定されます。
+  だから「答えが並列に出る」のであって、新しい並列化を発明したわけではありません。
+  <code>"payments": 0.91</code> という文字列を 1 文字ずつ綴る仕事を、ニューラルネットからアプリのコードへ
+  移しただけです。</p>
+
+  <div class="fig">
+<svg viewBox="0 0 820 300" role="img" aria-label="生成モデルと決定モデルの計算の形">
+  <rect x="0" y="0" width="820" height="300" fill="#ffffff"/>
+  <text x="20" y="30" font-size="18" font-weight="700" fill="#0f5132">ふつうの生成モデル</text>
+  <rect x="20" y="46" width="300" height="52" rx="8" fill="#eaf5ef" stroke="#8fd6b4" stroke-width="2"/>
+  <text x="170" y="78" font-size="16" text-anchor="middle" fill="#12211a">prefill: 入力をまとめて読む</text>
+  <rect x="340" y="46" width="70" height="52" rx="8" fill="#fdf1ec" stroke="#f0b6a3" stroke-width="2"/>
+  <text x="375" y="78" font-size="15" text-anchor="middle" fill="#b5401f">1 字</text>
+  <rect x="420" y="46" width="70" height="52" rx="8" fill="#fdf1ec" stroke="#f0b6a3" stroke-width="2"/>
+  <text x="455" y="78" font-size="15" text-anchor="middle" fill="#b5401f">1 字</text>
+  <rect x="500" y="46" width="70" height="52" rx="8" fill="#fdf1ec" stroke="#f0b6a3" stroke-width="2"/>
+  <text x="535" y="78" font-size="15" text-anchor="middle" fill="#b5401f">1 字</text>
+  <text x="600" y="78" font-size="16" fill="#b5401f">… 順番待ちが続く</text>
+
+  <text x="20" y="160" font-size="18" font-weight="700" fill="#0f5132">決定モデル (推定)</text>
+  <rect x="20" y="176" width="300" height="52" rx="8" fill="#eaf5ef" stroke="#8fd6b4" stroke-width="2"/>
+  <text x="170" y="208" font-size="16" text-anchor="middle" fill="#12211a">prefill: state をまとめて読む</text>
+  <rect x="340" y="150" width="150" height="36" rx="8" fill="#eaf5ef" stroke="#43b581" stroke-width="2"/>
+  <text x="415" y="174" font-size="14" text-anchor="middle" fill="#0f5132">質問 1 の枝</text>
+  <rect x="340" y="192" width="150" height="36" rx="8" fill="#eaf5ef" stroke="#43b581" stroke-width="2"/>
+  <text x="415" y="216" font-size="14" text-anchor="middle" fill="#0f5132">質問 2 の枝</text>
+  <rect x="340" y="234" width="150" height="36" rx="8" fill="#eaf5ef" stroke="#43b581" stroke-width="2"/>
+  <text x="415" y="258" font-size="14" text-anchor="middle" fill="#0f5132">質問 3 の枝</text>
+  <rect x="510" y="176" width="130" height="52" rx="8" fill="#0f5132"/>
+  <text x="575" y="200" font-size="14" text-anchor="middle" fill="#ffffff">確率の読み出し</text>
+  <text x="575" y="218" font-size="13" text-anchor="middle" fill="#8fd6b4">ここで終わり</text>
+  <text x="660" y="208" font-size="16" fill="#0f5132">順番待ちなし</text>
+  <text x="20" y="290" font-size="15" fill="#4a5d54">質問どうしはおたがいを見ない。見るのは共有された state だけ。</text>
+</svg>
+    <p class="cap">図 1. 生成モデルは prefill のあとに 1 トークンずつの順番待ちが続く。決定モデルは prefill と読み出しで終わる。
+    速さの正体は新しい並列化ではなく、遅い段をやめたこと。</p>
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>state を共有し、質問を隔離する</h2>
+  <p>state が S トークン、質問が Q 個あるとします。質問ごとに別々のリクエストにすると、
+  state を <b>Q 回</b>読み直すことになります。同じ長い文章を何度も読むのは無駄です。</p>
+
+  <p>推定される形では、state を 1 回読んだ中間結果 (KV キャッシュ) を全部の質問が共有します。
+  各質問は自分の指示文と選択肢だけを足します。だから公式ドキュメントの
+  「約 32,000 トークンを state と質問で<b>共有</b>する」という書き方になり、
+  「質問を増やすと state の枠が減る」という制約が出てきます。</p>
+
+  <p>そして<b>質問どうしはおたがいを見ません</b>。これは効率のためだけでなく、
+  設計として意味があります。質問 1 の答えが質問 2 の答えに影響しないので、
+  あとから「どの判定が引っかかって人手に回ったのか」を 1 つずつ切り分けられます。</p>
+
+  <div class="key">
+    <b>だから公式が勧める作法はこうなる。</b>「この問い合わせを総合的に評価して」と 1 問で聞くのではなく、
+    「緊急か」「返金要求か」「規約違反か」と<b>小さく割る</b>。重みづけと最終判断は自分のコードで組み立てる。
+    質問は 1 回の呼び出しの中で並列に走るので、分けても遅くなりません。
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>なぜ疎な MoE が向くのか</h2>
+  <p>疎な MoE (Mixture of Experts) は、層ごとに用意した多数の「専門家」のうち少数だけを毎トークンで使う形です。
+  総パラメータは大きいのに、1 トークンあたりの計算は小さくなります。</p>
+
+  <p>この用途に向く理由は 2 つあります。</p>
+  <table>
+    <tr><th>性質</th><th>この用途で得になる理由</th></tr>
+    <tr><td>総容量は大きく、1 トークンの計算は小さい</td><td>知識量は事前学習の規模で決まるので大きくしたい。一方 prefill しかしないなら計算は削りたい。両者の要求が同じ方向を向く</td></tr>
+    <tr><td>生成モデルでの弱点が効かない</td><td>MoE は decode の 1 トークンごとに専門家の重みを読み直すのが重い。<b>decode をしないなら、その弱点が丸ごと消える</b></td></tr>
+  </table>
+
+  <p>2 つめが効いています。MoE を生成に使うときに払っていた代償が、生成をやめると払わなくてよくなる。
+  だから「この用途なら MoE でないほうが変」という言い方になります。</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>確実な部分と推測の部分</h2>
+  <p>推定を扱うときは、どこが公表で、どこが観測で、どこが推論なのかを分けておかないと、
+  あとで自分の推測を事実として引用してしまいます。</p>
+
+  <table>
+    <tr><th>内容</th><th>確からしさ</th></tr>
+    <tr><td>生成をしない。型付きの答えと確率を返す</td><td><b>公表</b> (公式ブログ・ドキュメント)</td></tr>
+    <tr><td>state と質問が入力枠を共有し、上限は約 32,000 トークン</td><td><b>公表</b> (公式ドキュメント)</td></tr>
+    <tr><td>質問は 1 回のクエリで並列に処理される</td><td><b>公表</b>。ただし内部の実装形は非公開</td></tr>
+    <tr><td>事前学習された LLM の知識を保っている</td><td><b>公表</b>に近い (公式が「retain the knowledge of a pretrained LLM」と書く)</td></tr>
+    <tr><td>state を 1 回符号化して質問の枝が共有する</td><td><b>観測からの推論</b> (文脈長と質問数に対する遅延の伸び方)</td></tr>
+    <tr><td>因果的な transformer である</td><td><b>推論</b>。支持は強い</td></tr>
+    <tr><td><b>疎な MoE である</b></td><td><b>推測</b>。この推定でいちばん弱い部分。向いているという議論は立つが、直接の証拠はない</td></tr>
+    <tr><td>報酬の式、データの作り方、パラメータ数</td><td><b>不明</b>。公開されていない</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>この回で一番弱いのは MoE の部分です。</b>「向いているから、そうでないほうが変」は動機の議論であって、
+    証拠ではありません。以降の実験では「MoE だと断定したから」ではなく
+    「<b>生成をやめた大きな因果モデルに読み出しを付ける</b>という形を試したいから」という理由で土台を選びます。
+    その形なら、MoE でも密なモデルでも同じ実験になります。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>この推定が実験設計を変える</h2>
+  <p>当初はエンコーダ型 (DeBERTa 系、1.8 億パラメータ) で作って測りました。結果は第 4・5 章にあります。
+  結論を先に言うと、動いたけれど<b>払う価値がありませんでした</b>。</p>
+
+  <p>推定が正しいなら、その失敗のうち少なくとも一部は<b>土台を間違えたこと</b>で説明できます。
+  分かったことのひとつは「効いているのは事前学習された表現で、追加学習ではない」でした
+  (エンコーダを凍結して線形 1 枚だけ学習したほうが、1.8 億パラメータを丸ごと動かすより良かった)。
+  もし効いているのが表現なら、<b>表現の質を上げる = 土台を大きくする</b>ことが最も直接的な介入になります。</p>
+
+  <div class="key">
+    <b>やり直しの方向。</b>土台を、生成をやめた大きな因果モデル (手元にある MoE) に替え、
+    最後の隠れ状態から読み出しを付ける。前向き計算は 1 回だけで、1 トークンも生成しない。
+    そのうえで測る対象を「正答率」から<b>「どこまで自動化を任せられるか」</b>に変える —
+    次の回で、なぜ測る対象まで変える必要があるのかを見ます。
+  </div>
+</section>
+
+<div class="nav"><a href="./jev-01-what-is-sold.html">← 第 1 章: 何を売っているのか</a><a href="./jev-03-rlcd.html">第 3 章: RLCD と較正 →</a></div>
+</main>
+<footer style="text-align:center;color:#4a5d54;font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" style="color:#198754">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

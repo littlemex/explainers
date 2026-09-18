@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jev を測る - 06: 設計のやり直し</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .toc{columns:2;font-size:15px;gap:30px}
+  .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
+  .toc a:hover{color:var(--g1)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .tag{display:inline-block;border-radius:5px;padding:1px 8px;font-size:12.5px;font-weight:700}
+  .t-open{background:#fdf1ec;color:#b5401f;border:1px solid #f0b6a3}
+  .t-merged{background:#eaf5ef;color:#0f5132;border:1px solid var(--g4)}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  @media(max-width:600px){.toc{columns:1}header h1{font-size:23px}section{padding:22px 18px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">JEV を測る ・ 06</p>
+  <h1>設計のやり直し</h1>
+  <p>土台を生成をやめた MoE に替え、測る対象を「自動化してよい範囲」に替える</p>
+</header>
+<main>
+<a class="back" href="./jev-index.html">← シリーズ目次</a>
+
+<section>
+  <h2><span class="num">0</span>この回の性格</h2>
+  <p class="lead">ここは時点依存の回です。第 1〜5 章までの結果を踏まえて、
+  何を変えるかと、その変更で何が判定できるようになるかを書きます。まだ結果はありません。</p>
+
+  <div class="key">
+    <b>変えるのは 2 か所です。</b><br>
+    <b>土台</b>: 1.8 億のエンコーダ → 生成をやめた大きな因果モデル (手元の MoE) の隠れ状態に読み出しを付ける。<br>
+    <b>測る対象</b>: 賞金の回収率 → <b>決めた正解率を保ったまま、全体の何割を自動化できるか</b>。<br>
+    据え置くのは第 4 章の会計と、7 件の欠陥の直し方です。
+  </div>
+
+  <div class="toc">
+    <a href="#s1">1. なぜ測る対象を変えるのか</a>
+    <a href="#s2">2. なぜ土台を変えるのか</a>
+    <a href="#s3">3. 新しい主指標</a>
+    <a href="#s4">4. 実装の形</a>
+    <a href="#s5">5. 比べる相手</a>
+    <a href="#s6">6. 失敗と判定する条件</a>
+    <a href="#s7">7. 据え置くもの</a>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="num">1</span>なぜ測る対象を変えるのか</h2>
+  <p>第 5 章の判定は「振り分けの道具として払う価値がない」でした。それは正しい判定ですが、
+  <b>Jev が売っているものを測っていません</b>。ベンダー自身が正答率で負けを公表しています
+  (711 件で 67.8% 対 74.1%)。売っているのは、間違えるときに間違えると言う能力です。</p>
+
+  <p>その能力が価値を持つ形は決まっています。<b>選択的自動化</b>です。</p>
+
+  <ol class="steps">
+    <li>業務が必要とする正解率を決める (例: 95%)</li>
+    <li>自信がある判断だけを自動で通し、残りを人に回す</li>
+    <li>その正解率を保てる範囲が全体の何割かを測る (これが被覆)</li>
+    <li>同じ被覆を得るのにいくらかかるかを比べる</li>
+  </ol>
+
+  <p>この形なら、正答率が 6 ポイント低くても勝てる余地があります。
+  <b>被覆 60% を 580 分の 1 の費用で買えるなら、正答率で負けていても経済的に勝ちます。</b>
+  逆に、自信が信用できなければ被覆はゼロになり、速さと安さは意味を失います。
+  つまりこの指標は<b>較正の主張と経済の主張を 1 本にまとめた形</b>です。</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">2</span>なぜ土台を変えるのか</h2>
+  <p>第 5 章で出た 2 つの数字が、そのまま理由になります。</p>
+
+  <table>
+    <tr><th>観測</th><th>そこから出る指示</th></tr>
+    <tr><td>凍結 (+0.127) が丸ごと学習 (+0.115) を下回らない</td><td>効いているのは<b>事前学習された表現</b>。追加学習ではない</td></tr>
+    <tr><td>答えを見れば +0.593、正直にやると ≈0</td><td>足りないのは表現力ではなく<b>汎化</b></td></tr>
+  </table>
+
+  <p>効いているのが表現で、足りないのが汎化なら、最も直接的な介入は<b>表現の質を上げること</b>です。
+  そして表現の質は事前学習の規模でほぼ決まります。1.8 億のエンコーダから、数百億級の因果モデルへ替える。</p>
+
+  <p>第 2 章の推定とも一致します。Jev はおそらく「生成をやめた大きな因果モデル + 読み出し」であって、
+  小さなエンコーダではありません。<b>私は土台を間違えて測っていた可能性が高い。</b></p>
+
+  <div class="warn">
+    <b>ただし MoE だと断定はしません。</b>第 2 章のとおり、疎な MoE という部分は推定のなかで一番弱いところです。
+    土台を選ぶ理由は「MoE だと分かったから」ではなく、<b>「生成をやめた大きな因果モデルに読み出しを付ける形を試したいから」</b>です。
+    その形なら MoE でも密なモデルでも同じ実験になります。手元にあるのが MoE なので、それを使います。
+  </div>
+</section>
+
+<section id="s3">
+  <h2><span class="num">3</span>新しい主指標</h2>
+  <p>3 つを組で報告します。1 本の数字にまとめないのは、まとめると「較正が良い」と「儲かる」の
+  どちらで勝ったのかが見えなくなるからです。</p>
+
+  <table>
+    <tr><th>指標</th><th>何に答えるか</th><th>合格の形</th></tr>
+    <tr><td><b>被覆と危険度の曲線</b></td><td>正解率 X% を保つとき、全体の何割を自動化できるか</td><td>同じ正解率で、タダの手法より広い被覆</td></tr>
+    <tr><td><b>被覆あたりの費用</b></td><td>自動化 1 件あたり、信号の取得費を含めていくらか</td><td>「安いモデルに解かせてから迷い具合を見る」やり方より安い</td></tr>
+    <tr><td><b>自信と正解率の単調性</b></td><td>公式が明言している「自信が高いほど正解率が高い」は成り立つか</td><td>自信の帯ごとの正解率が単調。破れる帯を名指しできる</td></tr>
+  </table>
+
+  <p>較正の指標 (Brier・ECE・信頼性曲線) も出しますが、<b>主指標にはしません</b>。
+  第 5 章で較正と判断が逆を向いたので、較正だけを見て良し悪しを決められないことが分かっています。
+  較正は<b>被覆の説明変数</b>として置きます。</p>
+
+  <p>もうひとつ、Jev の実際の使い方に合わせた形を入れます。<b>質問を小さく割る</b>作法です。
+  公式は「1 問で総合評価させるな、小さく割って重みづけは自分のコードで」と勧めています。
+  だから「1 個の大きな判断」ではなく「小さな判断を n 個並列に出して、合成は外側で」の形で測ります。
+  これは第 4 章の候補ごとの出口と同じ構造なので、実装はそのまま伸ばせます。</p>
+</section>
+
+<section id="s4">
+  <h2><span class="num">4</span>実装の形</h2>
+  <p>大きなモデルを毎回学習し直すのは高いので、2 段に分けます。</p>
+
+  <ol class="steps">
+    <li><b>表現を 1 回だけ取り出して貯める。</b>全問について前向き計算を 1 回だけ回し、
+    最後の隠れ状態を保存する。1 トークンも生成しない。これで「1 回の前向き計算」という費用の主張が
+    そのまま実測値になる。</li>
+    <li><b>貯めた表現の上で読み出しを学習する。</b>ここは軽いので、出口の形・損失・較正の扱いを
+    何十通りも試せる。第 5 章で「効いているのは表現」と分かっているので、この分け方は無理な近道ではない。</li>
+  </ol>
+
+  <p>この 2 段構成には副産物があります。「この表現は判断を担げるか」と「読み出しを学習できるか」を
+  <b>切り分けて測れる</b>。もし貯めた表現の上でタダの表引きを超えられないなら、
+  土台を大きくしても足りないという結論になり、そこで止められます。</p>
+
+  <table>
+    <tr><th>やること</th><th>備考</th></tr>
+    <tr><td>隠れ状態の取り出し</td><td>推論サーバは生成用に組まれているので、そのままでは隠れ状態を返さない。取り出す経路の用意が要る</td></tr>
+    <tr><td>層の選択</td><td>どの層を読むかはパラメータ。最終層が最良とは限らない</td></tr>
+    <tr><td>費用の計上</td><td>前向き計算 1 回の実費と実測レイテンシを、被覆あたりの費用に必ず含める</td></tr>
+  </table>
+
+</section>
+
+<section id="s5">
+  <h2><span class="num">5</span>比べる相手</h2>
+  <p>第 4・5 章の相手をそのまま引き継ぎ、1 つ足します。</p>
+
+  <table>
+    <tr><th>相手</th><th>置く理由</th></tr>
+    <tr><td>文章を見ない定数</td><td>床。これを超えないなら何も学んでいない</td></tr>
+    <tr><td>最近傍 32 件</td><td>先行研究が「素朴な手法が学習型と互角」と報告している</td></tr>
+    <tr><td>分野名の表引き (配備不可)</td><td>「問題の種類だけ知っている場合」の上限。第 5 章ではこれに負けた</td></tr>
+    <tr><td>答えを見てから当てはめた場合</td><td>表現力の天井。こことの差が汎化の不足</td></tr>
+    <tr><td><b>安いモデルに解かせてから迷い具合を見る</b></td><td><b>新規。</b>生成を 1 回する代わりに、はるかに強い信号が手に入る。<b>「生成しない」という前提そのものの対抗馬</b></td></tr>
+  </table>
+
+  <div class="key">
+    <b>最後の相手が本題です。</b>Jev の交換不可能な核は「生成せずに決める」の一点です。
+    生成を少しだけ許すと、答えのトークンの迷い具合という強い信号が手に入ります
+    (別系統の実測では、この信号は入力側の手がかりよりはるかに判別力が高い)。
+    <b>費用込みで並べて、生成しない側が勝つ領域があるのかを見ます。</b>
+    勝つなら「生成しない」に価値があり、負けるなら Jev の前提そのものが経済的に反証されます。
+    後者は失敗ではなく、結論として価値があります。
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="num">6</span>失敗と判定する条件</h2>
+  <p>実行前に固定します。あとから基準を言い換えないための予防です。</p>
+
+  <ol class="steps">
+    <li><b>被覆が出ない。</b>業務が必要とする正解率を決めたとき、その正解率を保てる被覆が
+    タダの手法と区別できない。→ 較正に価値がない</li>
+    <li><b>単調性が破れる。</b>自信の帯ごとの正解率が単調にならない。→ 自信を閾値に使えないので、
+    公式が勧める 3 段階の運用そのものが成立しない</li>
+    <li><b>生成側に経済で負ける。</b>信号の取得費を含めた同じ支出で、安いモデルに解かせてから
+    迷い具合を見るやり方が上回り、差の下限が正。→ 「生成しない」前提の反証</li>
+    <li><b>未見分野で消える。</b>分野を隠した束で、被覆の改善の 95% 下限が 0 以下。
+    第 5 章では 4 束すべてマイナスだった。土台を替えても同じなら、このトラフィックでは決着</li>
+    <li><b>表現が足りない。</b>貯めた表現の上でどんな読み出しを載せても分野名の表引きを超えない。
+    → 土台を大きくすることが解でなかった</li>
+  </ol>
+</section>
+
+<section id="s7">
+  <h2><span class="num">7</span>据え置くもの</h2>
+  <p>設計をやり直しても、変えないものを明示しておきます。変えると過去の数字と比べられなくなるからです。</p>
+
+  <table>
+    <tr><th>据え置くもの</th><th>理由</th></tr>
+    <tr><td>第 4 章の会計 4 か条</td><td>判断時の値段は訓練から推定 / 信号の費用は全件に課す / 同点は安い方 / 区間は分野をまとめて</td></tr>
+    <tr><td>比べる相手が凸包であること</td><td>2 つの静的方策の混合はコイン投げで達成できる</td></tr>
+    <tr><td>seed を 3 本以上</td><td>幅が比べたい差より大きいことが分かっている</td></tr>
+    <tr><td>epoch は検証で選ぶ</td><td>最後の epoch を報告すると自分の道具を過小評価する</td></tr>
+    <tr><td>分野の束は蛇行配分</td><td>件数で釣り合わせると 1 分野が束を埋めて区間が幅ゼロになる</td></tr>
+    <tr><td>タダの手法にも同じ後処理</td><td>学習モデルだけ較正すると不公平</td></tr>
+    <tr><td>ラベルのゆらぎを統計量として扱う</td><td>注記ではなく、賞金が生き残る条件として書く</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>この設計でも答えないことを 2 つ書いておきます。</b>
+    (1) <b>危ない入力をはじく用途 (guardrail)</b> はこのシリーズでは測りません。当てたい対象が
+    「モデルの実力」ではなく「文章の性質」なので、別の実験になります。外部の判定器が原理的に向く領域で、
+    業界標準もそうなっています。
+    (2) <b>Jev 本体との直接比較</b>は、早期アクセスを取るまでできません。取れたら第 1 章に書いた
+    「数ドルの反証」から始めます。
+  </div>
+</section>
+
+<div class="nav"><a href="./jev-05-what-broke.html">← 第 5 章: 較正すると悪くなる</a><span></span></div>
+</main>
+<footer style="text-align:center;color:#4a5d54;font-size:13.5px;padding:24px">
+  <a href="https://github.com/littlemex/explainers" style="color:#198754">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
