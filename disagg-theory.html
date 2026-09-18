@@ -81,6 +81,7 @@ td.mid{background:var(--warnbg)}
 <p><b>結論から。</b>大規模言語モデルの推論を「入力を読む係」と「答えを書く係」に分ける方式 (分離推論) が速くなる理由は、よく言われる「お互いの邪魔をしなくなるから」だけでは説明が足りない。式にすると理由はただ一つ、<b>書く係を少数の機械に集めると相席の人数が増え、毎回読み直すモデルの重みの代金を人数で割り勘にできる</b>から。</p>
 <p><b>勝てる場所は狭い。</b>108 通りの設定を探索して、分離が勝ったのは <b>17 件</b>。そのすべてが「1 文字あたりの速さの約束が厳しく、最初の 1 文字までの約束が緩い」領域に集まった。最良は 1.55 倍。逆に約束が緩いか、文脈が極端に長いか、記憶 (KV) が重い設計では、分離は必ず負ける。</p>
 <p style="margin-bottom:0"><b>配置と並列度は結果を 10 倍動かす。</b>同じ 64 GPU でも、並列度の選び方と prefill 対 decode の比率で 0.08 倍から 0.87 倍まで動いた。最良の比率は <b>1 対 1 ではなく 7 対 1</b> の prefill 偏重。そして「大きな記憶はノード内で受け渡す」という賢いルーティングは、方向は正しいが得は <b>+2 % から +5 %</b> しかない。理由は、記憶が複数の通信カードから並列に流れるので、そもそもノード間でも遅くないから。</p>
+<p style="margin-bottom:0"><b>回線が効くのは、比率を偏らせる自由としてである。</b>7 対 1 の偏った比率では、受け取る 1 台が飲み込む記憶の流量が 1 対 7 のときの <b>44 倍</b>になる。EFA 級 (GPU 1 枚あたり 400 Gbps) ならそれでも容量の 8.8 % なので偏りをそのまま選べるが、25 Gbps まで落ちると<b>最良の比率が 5 対 3 に戻り、容量が 29 % 落ちる</b>。受け渡し 1 回の時間は予算の 1 % も使っていないのに、こういう形で効く。</p>
 </div>
 
 <div class="note">
@@ -793,6 +794,59 @@ w_d(B) = <span class="k">A</span> / B + <span class="o">C</span>
 <g id="d4bars"></g>
 </svg>
 <p class="read" id="d4r"></p>
+</div>
+
+<h3>比率を偏らせると、はじめて回線が効いてくる</h3>
+
+<p>5 章で「回線は決め手ではない」と書いた。それは正しいが、<b>比率に依る</b>。送る側が 7 台で受ける側が 1 台なら、受ける 1 台は 7 台ぶんの記憶を飲み込まなければならない。これが incast で、比率を偏らせるほど圧力が上がる。</p>
+
+<figure>
+<svg viewBox="0 0 880 280" width="100%" style="max-width:880px" role="img"
+ aria-label="比率を偏らせると受信側 1 台あたりの流入が増え、回線の使用率が 44 倍になる">
+<text x="14" y="16" font-size="12.5" fill="#0f4a2e" font-weight="600">受ける 1 台が飲み込む記憶の流量。64 GPU、幅 8、70B。回線容量は 219 GB/s (27.3 GB/s x 8 本)</text>
+<line x1="120" y1="196" x2="820" y2="196" stroke="#3c5a4c"/>
+<line x1="120" y1="36" x2="120" y2="196" stroke="#3c5a4c"/>
+<g font-size="11" fill="#3c5a4c">
+<rect x="150" y="192" width="60" height="4" fill="#bed3ea" stroke="#1d4e8f"/>
+<text x="180" y="211" text-anchor="middle">1対7</text><text x="180" y="186" text-anchor="middle">0.2 %</text>
+<rect x="240" y="190" width="60" height="6" fill="#bed3ea" stroke="#1d4e8f"/>
+<text x="270" y="211" text-anchor="middle">2対6</text><text x="270" y="184" text-anchor="middle">0.4 %</text>
+<rect x="330" y="186" width="60" height="10" fill="#bed3ea" stroke="#1d4e8f"/>
+<text x="360" y="211" text-anchor="middle">3対5</text><text x="360" y="180" text-anchor="middle">0.8 %</text>
+<rect x="420" y="179" width="60" height="17" fill="#bed3ea" stroke="#1d4e8f"/>
+<text x="450" y="211" text-anchor="middle">4対4</text><text x="450" y="173" text-anchor="middle">1.3 %</text>
+<rect x="510" y="169" width="60" height="27" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="540" y="211" text-anchor="middle">5対3</text><text x="540" y="163" text-anchor="middle">2.1 %</text>
+<rect x="600" y="147" width="60" height="49" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="630" y="211" text-anchor="middle">6対2</text><text x="630" y="141" text-anchor="middle">3.8 %</text>
+<rect x="690" y="83" width="60" height="113" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="720" y="211" text-anchor="middle">7対1</text><text x="720" y="77" text-anchor="middle" font-weight="600">8.8 %</text>
+</g>
+<text x="450" y="232" font-size="12" fill="#3c5a4c" text-anchor="middle">読む係の台数 対 書く係の台数 (最良は右端)</text>
+<text x="14" y="60" font-size="11.5" fill="#3c5a4c">回線の</text>
+<text x="14" y="76" font-size="11.5" fill="#3c5a4c">使用率</text>
+<text x="770" y="120" font-size="11.5" fill="#8f2f2f" font-weight="600">44 倍</text>
+<path d="M14 250 L866 250" stroke="#d5e3da"/>
+<text x="14" y="272" font-size="12.5" fill="#0f4a2e" font-weight="600">EFA なら 8.8 % で余裕がある。だから「EFA が必要になる」のではなく「EFA があるから 7 対 1 を選べる」</text>
+</svg>
+<figcaption>この文書のモデルの出力。1 対 7 から 7 対 1 へ動かすと、受ける 1 台あたりの流入は 0.4 GB/s から 19.2 GB/s へ <b>44 倍</b>になる。合格レートが 7 倍になり、そのうえ受け皿が 7 分の 1 になるので、圧力は比率の 2 乗で効く。</figcaption>
+</figure>
+
+<p>ではどこから足りなくなるのか。回線を落として、<b>最良の比率そのものが動くか</b>を見る。</p>
+
+<table>
+<tr><th>モデル</th><th>回線 (GPU 1 枚あたり)</th><th>最良の比率</th><th>合格レート</th><th>回線の使用率</th><th>何が起きたか</th></tr>
+<tr><td>70B GQA</td><td>EFA 400G (実測 27.3 GB/s)</td><td class="n">7 対 1</td><td class="n">2.780</td><td class="n y">8.8 %</td><td>偏った比率をそのまま選べる</td></tr>
+<tr><td>70B GQA</td><td>100G (12.5 GB/s)</td><td class="n">7 対 1</td><td class="n">2.768</td><td class="n mid">19.1 %</td><td>まだ余裕がある</td></tr>
+<tr><td>70B GQA</td><td>25G (3.1 GB/s)</td><td class="n">7 対 1</td><td class="n">2.700</td><td class="n no">74.6 %</td><td>ぎりぎり。レートが 3 % 落ちる</td></tr>
+<tr><td>70B MLA</td><td>EFA 400G</td><td class="n">7 対 1</td><td class="n">2.767</td><td class="n mid">19.7 %</td><td><b>記憶は 3.6 分の 1 なのに圧力は 2.2 倍</b>。複製なので 1 本の線しか使えない</td></tr>
+<tr><td>70B MLA</td><td>25G</td><td class="n no">6 対 2</td><td class="n no">2.203</td><td class="n no">68.5 %</td><td><b>最良の比率が戻り、容量が 20 % 落ちる</b></td></tr>
+<tr><td>8B GQA</td><td>100G</td><td class="n">7 対 1</td><td class="n">27.264</td><td class="n no">75.4 %</td><td>小さいモデルは件数が 10 倍なので圧力も 10 倍</td></tr>
+<tr><td>8B GQA</td><td>25G</td><td class="n no">5 対 3</td><td class="n no">19.457</td><td class="n no">71.7 %</td><td><b>最良が 5 対 3 に戻り、容量が 29 % 落ちる</b></td></tr>
+</table>
+
+<div class="note">
+<p style="margin:0"><b>回線の効き方は「遅延の代金」ではなく「どこまで偏らせてよいかの制約」だった。</b>受け渡し 1 回の時間としては予算の 1 % も使っていない (5 章) のに、比率を偏らせる自由を奪う形で容量を 20 から 29 % 削る。<b>速い回線の価値は、速さそのものではなく、最良の比率を選べることにある。</b>そして複製型の記憶 (MLA) は 1 本の線しか使えないので、記憶が小さいのに先に詰まる。記憶の設計と回線の設計は独立に決められない。</p>
 </div>
 
 <h3>ユーザーの案: 1 ノードを 4 分割して 1 台を読む係、3 台を書く係</h3>
