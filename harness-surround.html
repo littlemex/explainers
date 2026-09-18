@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 46 章 プロトコルに名前を付けた ― 一部しか取れなくてもルーティングはできる、判定はできない</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 46 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 46 章 &nbsp;/&nbsp;
+<a href="harness-protocol.html">前章: 設計が縮んだ話</a></p>
+
+<h1>プロトコルに名前を付けた<br>一部しか取れなくてもルーティングはできる。判定はできない</h1>
+
+<div class="lead">
+<p><b>この章で決めたこと。</b>ハーネスの記録のやり取りを <b>Surround</b> と<b>仮に</b>名付けました
+(規格を主張するためではなく、境界の両側を指す言葉が要るからです)。
+線上の属性名は <code>surround.*</code> です。</p>
+<p style="margin-bottom:0"><b>そして本題の判断。</b>
+「記録として残す物」と「振り分けに使う物」は<b>同じ集合である必要が無く、そもそもなれません。</b>
+理由は好みではなく<b>時間</b>です ― 振り分けは呼ぶ<b>前</b>に決め、道筋は呼んだ<b>後</b>にしか存在しません。
+この章は、<b>取れる物は全部取り、どこまで主張できるかは受け手ごとに変える</b>という形に落とした記録です。
+設計案は 1 回レビューさせ、<b>致命的な穴が 2 つ見つかって書き直しました。</b></p>
+</div>
+
+<h2>1. 名前 ― Surround、線上は <code>surround.*</code></h2>
+
+<p>元は <code>harness.*</code> にする案でしたが、<b>2 人のレビュアーが独立に却下</b>しました。
+理由は納得できるものでした ― <b>harness は普通の英単語</b>で、しかも
+OpenTelemetry の <code>gen_ai.*</code> の隣に並べると<b>誰も登録していない兄弟の名前空間を持っている顔になる</b>からです。
+散文でも線上でも<b>名前は 1 つ</b>にしました。</p>
+
+<div class="note">
+<p style="margin:0"><b>発明はしていません。</b>4 つ借りて 2 つ足すだけです。
+属性名と運搬と<b>コード変更ゼロの注入</b>は OpenTelemetry、対象を digest で指す形は in-toto、
+「誰が言ったか」と「本当か」を分ける作りは SCITT、<b>覆っていない範囲の言い方</b>は C2PA。
+足すのは<b>部品ごとの内容ハッシュ</b>と<b>部品ごとの取得経路</b>の 2 つで、これはどの規格にもありませんでした。</p>
+</div>
+
+<h2>2. 「収集は断らない」は間違いでした ― 拒否が 2 種類ある</h2>
+
+<p>最初に書いた一文は<b>「収集は絶対に断らない。断るのは判定機だ」</b>でした。
+<b>両者がここを否定しました。</b>2 つの全く違う拒否を 1 つにまとめていたからです。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img"
+ aria-label="実行の拒否と記録の拒否は別物">
+<rect x="16" y="16" width="848" height="40" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="440" y="42" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">
+最初の一文: 「収集は絶対に断らない。断るのは判定機だ」 &#8212; 2 つの拒否を混ぜている</text>
+
+<rect x="16" y="82" width="410" height="120" rx="10" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="221" y="106" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">送り側に対して</text>
+<text x="221" y="130" font-size="12" fill="#3c5a4c" text-anchor="middle">部品はいくつ欠けていてもよい</text>
+<text x="221" y="150" font-size="12" fill="#3c5a4c" text-anchor="middle">1 つだけ来ても使える記録になる</text>
+<rect x="56" y="162" width="330" height="28" rx="6" fill="#fff" stroke="#1f7a4d"/>
+<text x="221" y="181" font-size="12" fill="#0f4a2e" text-anchor="middle" font-weight="600">最大限に寛容 &#8212; 実行は絶対に止めない</text>
+
+<rect x="454" y="82" width="410" height="120" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="659" y="106" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="600">自分自身について</text>
+<text x="659" y="130" font-size="12" fill="#3c5a4c" text-anchor="middle">完全なのか途中で死んだのか</text>
+<text x="659" y="150" font-size="12" fill="#3c5a4c" text-anchor="middle">読めなかったのか、無かったのか</text>
+<rect x="494" y="162" width="330" height="28" rx="6" fill="#fff" stroke="#1d4e8f"/>
+<text x="659" y="181" font-size="12" fill="#1d4e8f" text-anchor="middle" font-weight="600">厳格 &#8212; 記録としては拒否され得る</text>
+
+<rect x="16" y="228" width="848" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="440" y="252" font-size="13.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">
+書き直した一文</text>
+<text x="440" y="274" font-size="13" fill="#0f4a2e" text-anchor="middle">
+実行は収集のせいで絶対に止まらない。ただし記録は、記録として拒否され得る</text>
+</svg>
+<figcaption><b>柔軟さは送り側に向けた性質</b>で、<b>厳格さは収集器が自分の健康について言うこと</b>です。
+混ぜると片方を守るために片方を捨てることになります。</figcaption>
+</figure>
+
+<h2>3. なぜ厳格な側が必要か ― <b>収集器は自分の不在を記録できない</b></h2>
+
+<p>これが書き直しの引き金です。<b>雑な形</b>は分かりやすくて、<b>本当に出荷されそうな形</b>は分かりにくいです。</p>
+
+<pre><span class="c"># 雑な形(気付ける)</span>
+差し込み忘れ / 途中で死ぬ  &#8594; <span class="r">記録が 1 件も出ない</span>
+
+<span class="c"># 出荷されそうな形(気付けない)</span>
+shim v2 が SDK の項目名変更で <span class="o">decoding</span> を読めなくなる
+  &#8594; 「未記録」と書く
+  &#8594; ところがそれは<span class="r">送り側が復号設定を送らなかったとき</span>と<span class="r">全く同じ文字列</span>
+  &#8594; ルータは既定へ退避(設計通り) / 判定機は拒否(設計通り) / <span class="r">どこもエラーを出さない</span>
+  &#8594; <span class="r">shim の版を手で見比べる人が現れるまで、退行は見えない</span></pre>
+
+<div class="bad">
+<p style="margin:0"><b>言われて一番効いた指摘。</b>
+「<b>閉じた語彙が縛るのは綴りであって、真偽ではない</b>」。
+最初の設計は<b>「穴に理由が付いているから見える」</b>と書いていましたが、
+<b>その理由が本当かを誰も検査していませんでした。</b></p>
+</div>
+
+<figure>
+<svg viewBox="0 0 880 330" width="100%" style="max-width:880px" role="img"
+ aria-label="1 つの穴を 5 つに割り、能力申告と突き合わせて矛盾を検出する">
+<text x="16" y="22" font-size="12.5" fill="#8f2f2f">最初: 穴は 1 種類</text>
+<rect x="16" y="32" width="200" height="42" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="116" y="58" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">未記録</text>
+<text x="116" y="96" font-size="11.5" fill="#8f2f2f" text-anchor="middle">測定の失敗と</text>
+<text x="116" y="113" font-size="11.5" fill="#8f2f2f" text-anchor="middle">送り側の沈黙が同じ穴に落ちる</text>
+
+<path d="M224 53 L286 53" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a46a)"/>
+<defs><marker id="a46a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+
+<text x="292" y="22" font-size="12.5" fill="#0f4a2e">改訂: 誰の不在かを言う</text>
+<g font-size="11.5">
+<rect x="292" y="32" width="270" height="26" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="306" y="50" fill="#0f4a2e"><tspan font-weight="600">not_provided</tspan> &#8212; 送り側が送っていない</text>
+<rect x="292" y="64" width="270" height="26" rx="6" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="306" y="82" fill="#8a5a12"><tspan font-weight="600">not_reachable</tspan> &#8212; この shim には見えない</text>
+<rect x="292" y="96" width="270" height="26" rx="6" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="306" y="114" fill="#8f2f2f"><tspan font-weight="600">extraction_failed</tspan> &#8212; あったのに失敗</text>
+<rect x="292" y="128" width="270" height="26" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="306" y="146" fill="#3c5a4c"><tspan font-weight="600">redacted</tspan> &#8212; 意図的に伏せた</text>
+<rect x="292" y="160" width="270" height="26" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="306" y="178" fill="#3c5a4c"><tspan font-weight="600">not_observable</tspan> &#8212; 誰にも見えない</text>
+</g>
+
+<path d="M570 108 L628 108" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a46a)"/>
+<rect x="632" y="32" width="232" height="154" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="748" y="54" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">shim の能力申告</text>
+<text x="748" y="76" font-size="11.5" fill="#3c5a4c" text-anchor="middle">版 + 「ここで読めると</text>
+<text x="748" y="93" font-size="11.5" fill="#3c5a4c" text-anchor="middle">主張する部品の集合」</text>
+<line x1="652" y1="106" x2="844" y2="106" stroke="#bed3ea"/>
+<text x="748" y="128" font-size="11.5" fill="#1d4e8f" text-anchor="middle">申告「読める」</text>
+<text x="748" y="146" font-size="11.5" fill="#1d4e8f" text-anchor="middle">記録「読めなかった」</text>
+<rect x="652" y="156" width="192" height="24" rx="5" fill="#8f2f2f"/>
+<text x="748" y="173" font-size="11.5" fill="#fff" text-anchor="middle" font-weight="600">= 事実ではなく矛盾</text>
+
+<line x1="16" y1="208" x2="864" y2="208" stroke="#d5e3da"/>
+<text x="16" y="232" font-size="12.5" fill="#3c5a4c">もう 2 つ、記録が自分について言うこと</text>
+<g font-size="11.5">
+<rect x="16" y="242" width="410" height="74" rx="8" fill="#fff" stroke="#1d4e8f"/>
+<text x="221" y="262" fill="#1d4e8f" text-anchor="middle" font-weight="600">封筒の終了状態</text>
+<text x="221" y="281" fill="#3c5a4c" text-anchor="middle">complete / aborted / collector_failed</text>
+<text x="221" y="303" fill="#0f4a2e" text-anchor="middle">complete 以外は<tspan font-weight="600">記録には残り、判定機は拒否</tspan></text>
+
+<rect x="454" y="242" width="410" height="74" rx="8" fill="#fff" stroke="#1d4e8f"/>
+<text x="659" y="262" fill="#1d4e8f" text-anchor="middle" font-weight="600">矛盾の印</text>
+<text x="659" y="281" fill="#3c5a4c" text-anchor="middle">申告「手数 5」 対 道筋「9 往復」</text>
+<text x="659" y="303" fill="#0f4a2e" text-anchor="middle">同じ手の中に両方ある瞬間に<tspan font-weight="600">突き合わせる</tspan></text>
+</g>
+</svg>
+<figcaption>右上が効きどころです。<b>SCITT から借りた「誰が言ったか」と「本当か」の分離を、
+相手にだけ当てて自分に当てていなかった</b> ― それが最初の設計の穴でした。</figcaption>
+</figure>
+
+<h2>4. 【本題】4 つの利用者は、違う情報を必要とします</h2>
+
+<p>依頼の中心はここでした ―
+<b>ログとしての機能と、ルーティング(一種の推論)としての機能で、必要な情報は一致していないといけないのか。</b>
+答えは<b>一致しないし、そもそもなれません。</b>理由は<b>時間</b>です。</p>
+
+<figure>
+<svg viewBox="0 0 880 360" width="100%" style="max-width:880px" role="img"
+ aria-label="可用性の時間軸と 4 つの利用者が読める範囲">
+<line x1="60" y1="60" x2="830" y2="60" stroke="#3c5a4c" stroke-width="2"/>
+<g font-size="11.5" fill="#3c5a4c" text-anchor="middle">
+<text x="140" y="40">before_prefill</text><text x="340" y="40">during_compute</text>
+<text x="540" y="40">after_prefill</text><text x="750" y="40">after_generation</text></g>
+<g stroke="#3c5a4c"><line x1="140" y1="52" x2="140" y2="68"/><line x1="340" y1="52" x2="340" y2="68"/>
+<line x1="540" y1="52" x2="540" y2="68"/><line x1="750" y1="52" x2="750" y2="68"/></g>
+<text x="60" y="84" font-size="11" fill="#8f2f2f">呼ぶ前</text>
+<text x="830" y="84" font-size="11" fill="#3c5a4c" text-anchor="end">呼んだ後</text>
+
+<rect x="60" y="98" width="170" height="34" rx="7" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="145" y="120" font-size="12" fill="#0f4a2e" text-anchor="middle" font-weight="600">ルータが読める範囲</text>
+<rect x="60" y="140" width="770" height="34" rx="7" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="445" y="162" font-size="12" fill="#1d4e8f" text-anchor="middle" font-weight="600">ログ・道筋が読める範囲(全部)</text>
+<rect x="60" y="182" width="770" height="34" rx="7" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="445" y="204" font-size="12" fill="#8a5a12" text-anchor="middle" font-weight="600">判定機が読める範囲(全部 + 同定 + 割当来歴)</text>
+
+<rect x="60" y="238" width="770" height="42" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="445" y="256" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">
+道筋はここで初めて存在する &#8212; どんなプロトコルも事実を時間の逆向きには運べない</text>
+<text x="445" y="274" font-size="11.5" fill="#8f2f2f" text-anchor="middle">
+だからルータが道筋を読むことは原理的に不可能で、「同じ集合にする」は要求として成り立たない</text>
+<path d="M700 226 L700 236" stroke="#8f2f2f" stroke-width="2"/>
+
+<text x="60" y="308" font-size="12" fill="#3c5a4c">この軸はすでにコードにあります &#8212;
+<tspan font-family="ui-monospace,Menlo,monospace" font-size="11.5">quantity.AVAILABILITY</tspan>
+と <tspan font-family="ui-monospace,Menlo,monospace" font-size="11.5">usable_before_generating()</tspan></text>
+<text x="60" y="328" font-size="11.5" fill="#8f2f2f">しかも「良い値の一覧」ではなく軸の順序から導いています</text>
+<text x="60" y="346" font-size="11.5" fill="#8f2f2f">最初の版は during_compute を外し、この研究自身の読み出しを「自分の門に使えない」と報告したからです</text>
+</svg>
+<figcaption>ルータの帯が短いのは実装の都合ではありません。<b>呼ぶ前には、呼んだ後の事実が存在しない</b>という
+だけのことです。</figcaption>
+</figure>
+
+<h3>そして「一部だけでルーティングできるのか」の答え ― できます。できないといけません</h3>
+
+<p>理由は<b>間違えたときの代金が利用者ごとに違う</b>ことです。</p>
+
+<table>
+<tr><th>利用者</th><th>いつ読む</th><th>間違えたときの代金</th><th>だから</th></tr>
+<tr><td><b>ルータ</b></td><td>呼ぶ前</td><td class="y">余計な格上げ 1 回 ― <b>上限があり、値段が付き、次の呼びで戻せる</b></td>
+<td><b>部分的な記録で進む。</b>宣言済みの既定へ退避する</td></tr>
+<tr><td><b>ログ・道筋</b></td><td>全部</td><td>後で穴が見つかる</td><td><b>絶対に断らない。</b>不在に理由と状態を付ける</td></tr>
+<tr><td><b>判定機</b></td><td>事後</td><td class="no">公表した偽の主張 ― <b>上限が無く、取り消せない</b></td>
+<td><b>断る。</b>witness できなかった部品を名指しする</td></tr>
+<tr><td><b>再演器</b></td><td>事後</td><td>再現でない物が再現に見える</td><td>digest では足りず<b>中身が要る。</b>今回は範囲外として名前だけ</td></tr>
+</table>
+
+<div class="bad">
+<p style="margin:0"><b>1 つの厳しさで全部を回すと、両方向に壊れます。</b>
+判定機に合わせて厳しくすると、<b>部品が欠けるたびにルータが客を捌けなくなります</b> ―
+そして 8 部品のうち 4 つは<b>まだ収集器が無い</b>ので、それは「たまに」ではなく「ほとんど常に」です。
+逆にルータに合わせて緩めると、<b>部分的な記録の上で判定が公表されます</b> ―
+それは前章で数字 1 つを撤回した、まさにその失敗です。</p>
+</div>
+
+<div class="note">
+<p style="margin:0"><b>4 つ目はレビューで見つかりました。</b>2 人が独立に<b>「再演器が抜けている」</b>と指摘し、
+その基準は確かに他の 3 つと違います ― <b>判定機が digest を要るところで、再演器は中身を要る</b>し、
+同定が欠けたからではなく<b>中身が欠けたから</b>断ります。今できることは<b>名前を付けることだけ</b>で、
+それで防げる失敗は<b>「保存する物だから」という理由でログに再演器の要件を押し込むこと</b>です。</p>
+</div>
+
+<h2>5. 致命的だった 1 点 ― ルータが判定機に漏れます</h2>
+
+<p>2 人とも漏れを見つけましたが、<b>直し方で分かれ、片方だけが対象を正しく捉えていました。</b></p>
+
+<figure>
+<svg viewBox="0 0 880 360" width="100%" style="max-width:880px" role="img"
+ aria-label="欠けている部品がルータの退避を経て判定機の数字を汚す経路">
+<rect x="16" y="20" width="410" height="100" rx="10" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="221" y="42" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">走行 A</text>
+<text x="221" y="64" font-size="11.5" fill="#3c5a4c" text-anchor="middle">同定に使う 4 部品 &#8212; 全部一致</text>
+<text x="221" y="84" font-size="11.5" fill="#0f4a2e" text-anchor="middle">context_partitioning <tspan font-weight="600">取れた</tspan></text>
+<rect x="86" y="92" width="270" height="22" rx="5" fill="#fff" stroke="#1f7a4d"/>
+<text x="221" y="108" font-size="11.5" fill="#0f4a2e" text-anchor="middle">方針どおりの宛先へ</text>
+
+<rect x="454" y="20" width="410" height="100" rx="10" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="659" y="42" font-size="12.5" fill="#8a5a12" text-anchor="middle" font-weight="600">走行 B</text>
+<text x="659" y="64" font-size="11.5" fill="#3c5a4c" text-anchor="middle">同定に使う 4 部品 &#8212; 全部一致(A と同じ)</text>
+<text x="659" y="84" font-size="11.5" fill="#8a5a12" text-anchor="middle">context_partitioning <tspan font-weight="600">shim が弱くて取れない</tspan></text>
+<rect x="524" y="92" width="270" height="22" rx="5" fill="#fff" stroke="#8a5a12"/>
+<text x="659" y="108" font-size="11.5" fill="#8a5a12" text-anchor="middle">既定へ退避 &#8594; <tspan font-weight="600">別の宛先へ</tspan></text>
+
+<path d="M221 124 L400 158" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a46b)"/>
+<path d="M659 124 L480 158" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a46b)"/>
+<defs><marker id="a46b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+
+<rect x="290" y="162" width="300" height="40" rx="8" fill="#10241b"/>
+<text x="440" y="180" font-size="12.5" fill="#dff1e6" text-anchor="middle" font-weight="600">判定機</text>
+<text x="440" y="196" font-size="11.5" fill="#8fd6b4" text-anchor="middle">同定する 4 部品は完全に一致している</text>
+
+<path d="M440 206 L440 228" stroke="#8f2f2f" stroke-width="2.5" marker-end="url(#a46c)"/>
+<defs><marker id="a46c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker></defs>
+<rect x="16" y="232" width="848" height="54" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="440" y="254" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">
+「同じハーネスだ」と判定して費用・精度の差を公表する</text>
+<text x="440" y="276" font-size="12" fill="#8f2f2f" text-anchor="middle">
+その差は<tspan font-weight="600">「部品が取れなかったこと」の産物</tspan> &#8212; しかも shim が弱い側に系統的に偏る</text>
+
+<rect x="16" y="300" width="848" height="46" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="440" y="320" font-size="12" fill="#8a5a12" text-anchor="middle" font-weight="600">
+「退避したことは記録している」は弁明になりません</text>
+<text x="440" y="338" font-size="11.5" fill="#8a5a12" text-anchor="middle">
+記録することと、判定機が鍵にすることは別 &#8212; そして欠けは宛先・試行回数・溜まった文脈・費用を全部動かした</text>
+</svg>
+<figcaption>漏れの本体は<b>「欠けていること自体が、どのモデルに当たるかを決めてしまう」</b>ことです。
+しかも格上げは<b>難しい依頼を後段に偏って集める</b>ので、最終試行だけを採点すると
+<b>安いモデルの失敗が消えて費用の一部だけが残ります。</b></figcaption>
+</figure>
+
+<h3>2 人が分かれた点 ― そして片方が正しかった理由</h3>
+
+<table>
+<tr><th></th><th>提案</th><th>判定</th></tr>
+<tr><td>片方</td><td>ルータの決定を<b>10 番目のハーネス部品</b>にして同定に入れる</td>
+<td class="no"><b>誤り。</b>宛先を同定に入れると、<b>同じハーネスを 2 つの宛先に送った 2 走行が「別のハーネス」になる</b> ―
+識別子が提供するはずのまとめる働きそのものを壊す</td></tr>
+<tr><td>もう片方</td><td>ルータの決定は<b>ハーネスではなく「割当」</b>。別の物として記録し、判定機の必須入力にする</td>
+<td class="y"><b>正しい。</b>ルータの決定は<b>モデルの周りにある物ではなく、処置の割り当て</b>だから</td></tr>
+</table>
+
+<div class="box">
+<p style="margin-top:0"><b>採ったのは後者です。</b>名前は<b>割当来歴</b>で、<b>判定機には必須・ルータの基準は一切動かしません。</b>
+試行ごとに記録するのは、方針のハッシュ、<b>参照した事実とその欠けの印</b>、適用した退避、選んだ宛先、
+試行番号と親、終了理由、そして無作為に選んだ場合はその確率です。</p>
+<p style="margin-bottom:0"><b>これで判定機ができるようになること。</b>
+割当条件が同等な走行だけを比べる。失敗した試行も含めて<b>方針そのものを評価する</b>。
+そして<b>誰も記録していない状態に割当が依存していたなら、モデル対モデルの主張を拒否する。</b></p>
+</div>
+
+<h2>6. 道具の「見えない」は強すぎた ― ただし作り直した veto も不健全でした</h2>
+
+<p>今のコードは<b>道具の振る舞い</b>を<b>「観測できない」</b>と分類しています。
+これは道具を<b>関数として</b>見れば正しく、<b>実際に踏んだ入力に限れば誤り</b>です ―
+その入出力は<b>走行自身が作ったバイト列</b>で、語彙の中で最も強い経路にあり、しかも同時刻です。
+<b>手元にある証拠を捨てていました。</b></p>
+
+<p>そこで部品を割り、<b>取れる物は取る</b>ことにしました。
+ただし<b>最初に書いた veto の規則は 3 通りに反証されました。</b>どれ 1 つでも失格です。</p>
+
+<figure>
+<svg viewBox="0 0 880 380" width="100%" style="max-width:880px" role="img"
+ aria-label="veto の 3 つの反証と、作り直した条件">
+<text x="16" y="22" font-size="12.5" fill="#8f2f2f">最初の規則: 「引数が同じで応答のハッシュが違えば、違う道具を使った証明」</text>
+
+<g font-size="11.5">
+<rect x="16" y="34" width="276" height="100" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="154" y="54" fill="#8f2f2f" text-anchor="middle" font-weight="600">反証 1: 自分自身に発火する</text>
+<text x="154" y="76" fill="#3c5a4c" text-anchor="middle">k に書く &#8594; k を読む</text>
+<text x="154" y="94" fill="#3c5a4c" text-anchor="middle">引数は同じ、応答は違う</text>
+<text x="154" y="112" fill="#8f2f2f" text-anchor="middle" font-weight="600">1 走行・1 道具なのに拒否</text>
+<text x="154" y="128" fill="#8f2f2f" text-anchor="middle">集めた順序を使っていなかった</text>
+
+<rect x="302" y="34" width="276" height="100" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="440" y="54" fill="#8f2f2f" text-anchor="middle" font-weight="600">反証 2: ほぼ常に発火する</text>
+<text x="440" y="76" fill="#3c5a4c" text-anchor="middle">応答本文に要求 id・時刻・</text>
+<text x="440" y="94" fill="#3c5a4c" text-anchor="middle">追跡ヘッダが入る</text>
+<text x="440" y="112" fill="#8f2f2f" text-anchor="middle" font-weight="600">網越しの道具を持つ限り</text>
+<text x="440" y="128" fill="#8f2f2f" text-anchor="middle">判定機は永久に公表できない</text>
+
+<rect x="588" y="34" width="276" height="100" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="726" y="54" fill="#8a5a12" text-anchor="middle" font-weight="600">反証 3: 結論が偽</text>
+<text x="726" y="76" fill="#3c5a4c" text-anchor="middle">時計・生きた検索・動いた索引</text>
+<text x="726" y="94" fill="#3c5a4c" text-anchor="middle">比較を止めるのは正しい</text>
+<text x="726" y="112" fill="#8a5a12" text-anchor="middle" font-weight="600">だが「違う道具の証明」ではない</text>
+<text x="726" y="128" fill="#8a5a12" text-anchor="middle">環境が違っただけ</text>
+</g>
+
+<path d="M440 140 L440 162" stroke="#3c5a4c" stroke-width="2.5" marker-end="url(#a46d)"/>
+<defs><marker id="a46d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+
+<rect x="16" y="166" width="848" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="440" y="188" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">作り直した規則</text>
+<text x="440" y="208" font-size="12" fill="#0f4a2e" text-anchor="middle">
+実効的な呼び出し文脈が同じで、応答の安定した射影が違うなら</text>
+<text x="440" y="226" font-size="12" fill="#0f4a2e" text-anchor="middle" font-weight="600">
+その 1 回の呼び出しについて「記録された実行が分岐した」と言える &#8212; それ以上は言えない</text>
+
+<text x="16" y="258" font-size="12" fill="#3c5a4c">実効的な呼び出し文脈 =</text>
+<g font-size="11.5">
+<rect x="150" y="244" width="150" height="24" rx="5" fill="#fff" stroke="#1f7a4d"/>
+<text x="225" y="261" fill="#0f4a2e" text-anchor="middle">道筋の前置き</text>
+<rect x="310" y="244" width="110" height="24" rx="5" fill="#fff" stroke="#1f7a4d"/>
+<text x="365" y="261" fill="#0f4a2e" text-anchor="middle">引数</text>
+<rect x="430" y="244" width="160" height="24" rx="5" fill="#fff" stroke="#1f7a4d"/>
+<text x="510" y="261" fill="#0f4a2e" text-anchor="middle">資格情報の種類</text>
+<rect x="600" y="244" width="130" height="24" rx="5" fill="#fff" stroke="#1f7a4d"/>
+<text x="665" y="261" fill="#0f4a2e" text-anchor="middle">試行番号</text>
+</g>
+<text x="16" y="290" font-size="11.5" fill="#3c5a4c">射影は<tspan font-weight="600" fill="#0f4a2e">モデルに見えた形</tspan>の上で取る
+(正規化を拒む理由と同じ &#8212; 効いたのはそのバイト列だから)</text>
+
+<line x1="16" y1="304" x2="864" y2="304" stroke="#d5e3da"/>
+<text x="16" y="326" font-size="12" fill="#3c5a4c">強さは 3 段階に:</text>
+<g font-size="11.5">
+<rect x="120" y="312" width="238" height="24" rx="5" fill="#8f2f2f"/>
+<text x="239" y="329" fill="#fff" text-anchor="middle" font-weight="600">決定的と契約している道具 &#8594; 自動で拒否</text>
+<rect x="368" y="312" width="238" height="24" rx="5" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="487" y="329" fill="#8a5a12" text-anchor="middle" font-weight="600">揺れる道具 &#8594; 「不明」に広げる</text>
+<rect x="616" y="312" width="248" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="740" y="329" fill="#0f4a2e" text-anchor="middle" font-weight="600">揺れると分かっている項目 &#8594; 何もしない</text>
+</g>
+<text x="16" y="360" font-size="11.5" fill="#0f4a2e">片側だけである形は正しいままです &#8212;
+同じ引数を 2 通りに直列化すると引数が「違う」と出て<tspan font-weight="600">本物の違いを見逃します</tspan>。
+その見逃しが安全なのは、この規則が<tspan font-weight="600">拒否だけできて許可を出せない</tspan>からです</text>
+</svg>
+<figcaption><b>踏んでいない入力について、一致は何も言いません。</b>だから許可は出せません。
+そして<b>拒否しかできない規則は、見逃しても安全</b>です。</figcaption>
+</figure>
+
+<h2>7. digest は「どの境界の物か」を言わないといけません</h2>
+
+<p>正規化を拒む判断は 2 人とも支持しましたが、<b>それだけでは足りない</b>と両者が指摘しました。
+<b>「バイト列」と呼んでいた物が 3 つあった</b>からです。</p>
+
+<figure>
+<svg viewBox="0 0 880 270" width="100%" style="max-width:880px" role="img"
+ aria-label="transport / parsed / model_visible の 3 つの境界">
+<rect x="16" y="24" width="270" height="76" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="151" y="46" font-size="12.5" fill="#3c5a4c" text-anchor="middle" font-weight="600">transport</text>
+<text x="151" y="68" font-size="11.5" fill="#3c5a4c" text-anchor="middle">SDK が線に載せたバイト列</text>
+<text x="151" y="88" font-size="11.5" fill="#3c5a4c" text-anchor="middle">版が違えば形も違う</text>
+
+<rect x="306" y="24" width="270" height="76" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="441" y="46" font-size="12.5" fill="#3c5a4c" text-anchor="middle" font-weight="600">parsed</text>
+<text x="441" y="68" font-size="11.5" fill="#3c5a4c" text-anchor="middle">解いた後の値</text>
+<text x="441" y="88" font-size="11.5" fill="#3c5a4c" text-anchor="middle">検索や重複排除にはこれが便利</text>
+
+<rect x="596" y="24" width="268" height="76" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="730" y="46" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">model_visible</text>
+<text x="730" y="68" font-size="11.5" fill="#0f4a2e" text-anchor="middle">モデルが実際に読んだ文字列</text>
+<text x="730" y="88" font-size="11.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">同定を支えられるのはここだけ</text>
+
+<path d="M290 62 L302 62" stroke="#3c5a4c" stroke-width="2"/>
+<path d="M580 62 L592 62" stroke="#3c5a4c" stroke-width="2"/>
+
+<rect x="16" y="120" width="410" height="62" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="221" y="140" font-size="11.5" fill="#8a5a12" text-anchor="middle" font-weight="600">境界を書かないと、こう間違える(1)</text>
+<text x="221" y="159" font-size="11.5" fill="#3c5a4c" text-anchor="middle">2 つの SDK 版が違う形で送り</text>
+<text x="221" y="176" font-size="11.5" fill="#3c5a4c" text-anchor="middle">モデルには同じ文字列が届く &#8594; 無駄に別扱い</text>
+
+<rect x="454" y="120" width="410" height="62" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="659" y="140" font-size="11.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">境界を書かないと、こう間違える(2)</text>
+<text x="659" y="159" font-size="11.5" fill="#3c5a4c" text-anchor="middle">正規化すると同じ値になる 2 つが</text>
+<text x="659" y="176" font-size="11.5" fill="#3c5a4c" text-anchor="middle">そのまま埋め込むと挙動が違う &#8594; 同じ扱い</text>
+
+<rect x="16" y="200" width="848" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="440" y="222" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">
+正規化した digest は「索引」として許す</text>
+<text x="440" y="242" font-size="12" fill="#0f4a2e" text-anchor="middle">
+候補を狭めることはできて、比較を許可することはできない &#8212; veto と同じ片側だけの形</text>
+</svg>
+<figcaption>間違いは<b>両方向に起きます</b> ― 同じ物を別扱いする方向と、違う物を同じ扱いする方向。
+<b>境界を書くだけで両方止まります。</b></figcaption>
+</figure>
+
+<h2>8. 10 部品 ― 何を取り、誰が使えるか</h2>
+
+<p>最初の草稿は<b>「9 部品」と書いて 10 個並べ</b>、そのあと「8 個が未記録」という完了条件を書いていました。
+<b>自分の部品表が合っていないプロトコルは、不在を数え上げられません</b> ― それが上の仕組みの全部です。10 です。</p>
+
+<table>
+<tr><th>部品</th><th>最善の経路</th><th>ルータ</th><th>ログ</th><th>同定</th></tr>
+<tr><td>指示文</td><td>リクエストの中</td><td class="y">使う</td><td class="y">取る</td><td class="y">使う</td></tr>
+<tr><td>道具の形</td><td>リクエストの中</td><td class="y">使う</td><td class="y">取る</td><td class="y">使う</td></tr>
+<tr><td>答えの取り出し方</td><td>リクエストの中</td><td class="y">使う</td><td class="y">取る</td><td class="y">使う</td></tr>
+<tr><td>復号の設定</td><td>リクエストの中</td><td class="y">使う</td><td class="y">取る</td><td class="y">使う</td></tr>
+<tr><td>繰り返しの作り</td><td>相手の申告</td><td>手掛かりとして</td><td class="y">取る</td><td class="no">使わない</td></tr>
+<tr><td>手数の上限</td><td>相手の申告</td><td>手掛かりとして</td><td class="y">取る</td><td class="no">使わない</td></tr>
+<tr><td>再試行の方針</td><td>相手の申告</td><td class="no">使わない</td><td class="y">取る</td><td class="no">使わない</td></tr>
+<tr><td><b>文脈の分け方</b>(新)</td><td>相手の申告</td><td>手掛かりとして</td><td class="y">取る</td><td class="no">使わない</td></tr>
+<tr><td><b>道具の関数</b>(改名)</td><td class="no">観測できない</td><td class="no">使わない</td><td class="no">取れない</td><td class="no">使わない</td></tr>
+<tr><td><b>道具の道筋</b>(新)</td><td>リクエストの中(事後)</td><td class="no">使わない</td><td class="y">取る</td><td class="no">拒否だけ</td></tr>
+</table>
+
+<div class="warn">
+<p style="margin:0"><b>手掛かりは無料ではありません。</b>繰り返しの作りと手数の上限は<b>相手の申告</b>なので、
+<b>安く振り分けてもらえる値を送ることができます。</b>
+それを事後に見えるようにするのが割当来歴で、<b>決定が何を参照したかを記録している</b>からです。
+なお<b>道具の道筋も「常に取れる」とは書けません</b> ―
+サーバ側の agent やブラウザ、提供側が動かす道具は、こちら側の shim には見えません。</p>
+</div>
+
+<h2>9. やらないこと</h2>
+
+<table>
+<tr><th>やらないこと</th><th>理由</th></tr>
+<tr><td>モデルが読むバイト列を正規化する</td><td>モデルが読むのは意味ではなく文字列。<b>挙動が違う 2 つに同じ名前を与える</b></td></tr>
+<tr><td>送信後のバイト列をハッシュする</td><td><b>実際に送った物と違う物</b>をハッシュすることになる</td></tr>
+<tr><td>記録が群れの識別子を持つ</td><td><b>未決(T14)。</b>2 人が分かれたので、合意した振りをしない</td></tr>
+<tr><td>比較方針が「緩められない」と約束する</td><td>到達できるのは<b>否認できない緩め方</b>まで。持つ価値はあるが保証とは呼ばない</td></tr>
+<tr><td>揺れる道具の分布検定</td><td>レビューで挙がったが<b>まだ実験が困っていない</b>。穴として再発見されないよう書き残すだけ</td></tr>
+</table>
+
+<h2>10. 注入 ― これが使い物になるかを決める性質</h2>
+
+<p><b>両側でコードを変えなくていい</b>ことが成否を決めます。そしてこれは<b>既に別の物が解いています。</b></p>
+
+<pre><span class="c"># 送り側がやること(コード変更ゼロ)</span>
+export OTEL_...=...        <span class="c"># 環境変数を 1 つ</span>
+<span class="c"># 自動計装が client を包む</span>
+
+<span class="c"># shim が既存の計装に足すのは、この 4 つだけ</span>
+1. 届いた部品ごとの<span class="k">内容ハッシュ</span>
+2. そのハッシュが<span class="k">どの境界</span>の物か
+3. 部品ごとの<span class="k">取得経路</span>
+4. 自分の<span class="k">能力申告</span>と<span class="k">終了状態</span>
+
+<span class="c"># 全部、どうせ出ていた span の属性として載る</span></pre>
+
+<div class="lead">
+<p style="margin:0"><b>この章の要約。</b>名前は <b>Surround</b>、線上は <code>surround.*</code>。
+<b>実行は収集のせいで止まらないが、記録は記録として拒否され得る</b> ―
+柔軟さは送り側に向けた性質で、厳格さは<b>収集器が自分について言うこと</b>だからです。
+<b>4 つの利用者は違う情報を必要とし、それは時間の構造上そうなります。</b>
+一部だけでルーティングはできる ― <b>間違いの代金に上限があるから</b>です。
+判定はできない ― <b>公表した偽の主張には上限が無いから</b>です。
+レビューで<b>致命的な穴が 2 つ</b>(ルータの漏れと veto の不健全さ)見つかり、
+<b>どちらも設計を小さくする方向に直しました。</b></p>
+</div>
+
+<p class="foot">
+設計の正本は <code>docs/DESIGN-surround-protocol.md</code>、台帳の記録は <code>docs/EXPERIMENT-FEEDBACK.md</code> の F125、
+残作業は <code>docs/TODO.md</code> の T13・T15・T16・T17。<br>
+レビューは Fable 5.1 と GPT-5.6 sol に独立に 1 ラウンド。両者が独立に一致したのは
+「収集は断らない」の否定・割当の漏れ・veto の不健全さ・<code>harness.*</code> の却下・4 つ目の利用者(再演器)。
+分かれたのは 1 点 ― ルータの決定をハーネス同定に入れるか、割当という別の物にするか。<br>
+数字はこのプロジェクトの実測: 指示文 0.6243 対 0.7447、1 問ごとの一致 0.7346(1,187 問)/
+読み込み 0.109 秒 対 生成 10.42 秒(約 95 倍)/ 振り分けの 1.0% は<b>撤回済み</b>(前章)。
+</p>
+
+</div>
+</body>
+</html>
