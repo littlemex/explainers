@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分離推論が効く条件を、机の上で先に決める</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.big{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+.big>div{flex:1 1 220px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:14px 10px;
+background:var(--card)}
+.big b{display:block;font-size:28px;line-height:1.15;color:var(--gd);font-variant-numeric:tabular-nums}
+.big span{font-size:12.5px;color:var(--ink2)}
+.who{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.who>div{flex:1 1 300px;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)}
+.who h4{margin:0 0 6px;font-size:15.5px;color:var(--gd)}
+.who p{margin:4px 0;font-size:14px;color:var(--ink2)}
+.who .t{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:20px;margin-bottom:6px;
+background:var(--g);color:#fff}
+.who .t.b{background:var(--b)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="index.html">全体の目次</a> &nbsp;/&nbsp; 分離推論の理論</p>
+
+<h1>分離推論が効く条件を、机の上で先に決める<br>実験で当てにいく前に、勝てる場所を式で絞る</h1>
+
+<div class="lead">
+<p><b>結論から。</b>prefill と decode を別プールに分ける (分離推論) が速くなる理由は、世間でよく言われる「干渉が消えるから」では説明が足りない。式にすると理由はただ一つ、<b>decode の仕事を少数のエンジンに集めるとバッチが太り、モデルの重みを読む代金を多くの席で割り勘にできる</b>から。だから効くかどうかを決めるのは、入力の長さでも回線の速さでもなく、<b>(1) decode の 1 歩がどれだけ「重み読み」に支配されているか、(2) TPOT (1 トークンあたりの生成間隔) の約束がどれだけ厳しいか、(3) プールが十分大きいか</b>の 3 つになる。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>カタログ値と数個の安い実測だけで「分離が勝つか」を先に判定する解析モデルを書き、AIM345 ラボの実測 sweep で校正した。校正した 2 定数で、ラボの別系列 6 行の TTFT を誤差 -70 〜 +92 ms (実測 801 〜 1449 ms に対して) で当て、崩壊するレートも当てた。そのモデルに Fable 5 と Codex (GPT-5.6-sol) の敵対的レビューを 1 回ずつ通し、指摘のうち数値が変わる 6 件に対応した (5 件は実装を直し、1 件は導出で解決した)。</p>
+</div>
+
+<h2>0. 数値の要約</h2>
+
+<p>この文書の数値がどこから来て、何を言えて何を言えないかを先に並べる。行番号で後の節を参照できる。</p>
+
+<table>
+<tr><th>#</th><th>なぜ測るのか</th><th>どう測ったか</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+
+<tr><td class="n">1</td>
+<td>分離が勝つ物理的な理由を 1 つに絞れるか。絞れないと条件を書けない</td>
+<td>1 リクエストの GPU 秒を prefill 分 <code>w_p</code> と decode 分 <code>w_d</code> に分け、<code>w_d</code> を「重み読み <code>A/B</code>」と「席ごとの KV 読み <code>C</code>」に分解して、両構成の容量を同じ式で解いた</td>
+<td>実測を並べて眺める (交点が見つからないと何も言えない)、干渉の大きさだけを測る (代金が見えない)</td>
+<td>契約 (遅延の約束) を外すと両構成の上限は同じ <code>1/(w_p+w_d)</code>。差が出るのは契約がバッチの上限を決めるときだけ</td>
+<td>行 2, 3</td></tr>
+
+<tr><td class="n">2</td>
+<td>「バッチを大きくすれば得」は正しいが、バッチは勝手に選べるのか</td>
+<td>Little の法則で <code>B = 到着率 × 滞在時間</code>。滞在時間は <code>出力トークン数 × TPOT</code> なので <code>B ≤ λ_engine × out × TPOT</code></td>
+<td>バッチを自由変数として最大化する (到着がないのに席は埋まらない)</td>
+<td>バッチ上限は約束 (TPOT) と到着率の積。分離は同じ到着を少ないエンジンに集めるので上限が <code>n/n_d</code> 倍に増える</td>
+<td>行 1, 4</td></tr>
+
+<tr><td class="n">3</td>
+<td>干渉の大きさを式で書けるか。書けないと「厳しい TPOT なら分離」が定量にならない</td>
+<td>エンジンが時間の <code>ρ_p</code> を prefill に使うなら decode の 1 歩の間隔は <code>t_step/(1-ρ_p)</code> 以上。この式を chunked prefill (長い prefill を分割する方式) で書き直すと、<b>チャンクサイズが打ち消えて同じ式に戻る</b></td>
+<td>時間分割を仮定したまま放置する (レビューで両者から「チャンクで逃げられる」と反論された)</td>
+<td>チャンクサイズは自由度にならない。prefill 占有率の上限は <code>ρ_p ≤ 1 - t_step(B)/TPOT</code> でチャンク幅に依らない</td>
+<td>行 6, 12</td></tr>
+
+<tr><td class="n">4</td>
+<td>分離が払う代金を全部数えないと、勝ちを過大に見積もる</td>
+<td>4 つを別々の項にした。KV の受け渡し時間 (TTFT 予算に直列で乗る)、レプリカが整数しか置けない粒度損、プール分割で片側の利用率が上がる分、そして受信側に流入が集中する incast</td>
+<td>帯域だけを代金と見なす (実測では帯域は効いていない)</td>
+<td>32k 入力では受け渡しは TTFT 予算の 0.1 % (NVLink) 〜 4.7 % (実測 EFA) で、比率 0.77 と 0.75 の差しか生まない。<b>回線は決め手ではない</b></td>
+<td>行 7, 8</td></tr>
+
+<tr><td class="n">5</td>
+<td>モデルが現実を当てられるかを、当てはめでなく予測で確かめる</td>
+<td>分離側の合格 3 行だけで 2 定数 (prefill 348 ms、エンジン外の固定費 368 ms) を合わせ、統合側 6 行を<b>予測</b>した</td>
+<td>全行に合わせる (自由度が制約を超えて一致が保証される)</td>
+<td>統合 6 行を誤差 -70 〜 +92 ms で予測し、8 tasks/s の崩壊も当てた。逆に「公平共有」型の式は 810 ms を 1516 ms と外し、合格した行を不合格と予測して棄却された</td>
+<td>行 9</td></tr>
+
+<tr><td class="n">6</td>
+<td>ラボが「交点なし」だった構成で、何を変えれば分離が勝つのか</td>
+<td>校正済みモデルで TPOT・GPU 数・エンジン幅・回線を 1 つずつ動かした</td>
+<td>実験で総当たりする (1 回 30 秒窓でも sweep 1 本 10 分以上かかる)</td>
+<td>TPOT を 100 ms から 12 ms に締めると比率 0.54 から 2.02。GPU を 8 から 32 に増やすと 1.18。回線を NVLink にしても 0.71 から 0.79 止まり</td>
+<td>行 9, 10</td></tr>
+
+<tr><td class="n">7</td>
+<td>この理論が構造的に見えないものを名指ししないと、使った人が事故る</td>
+<td>Fable と Codex に同じ設問を投げ、符号を変えうる欠落を順位付けさせた</td>
+<td>「p99 は対象外」と一行書いて済ませる (両者から「それは限界ではなく欠落」と却下された)</td>
+<td>最有力は<b>契約が分位点である</b>こと。ラボの契約は「9 割の呼び出しが両方守る」で、平均値モデルは分離の主たる強み (テールの隔離) を構造的にゼロにしている</td>
+<td>行 12</td></tr>
+</table>
+
+<div class="warn">
+<p style="margin:0"><b>この文書の数値の性格。</b>ラボの実測値 (TTFT・TPOT・合格レート) は <code>awslabs/awsome-distributed-ai</code> ブランチ <code>riv2026/aim345-content</code> commit <code>f1ad17b</code> の <code>VALIDATION.md</code> からの引用で、私が測ったものではない。それ以外の数値はすべて<b>この文書のモデルの出力</b>であり、実測ではない。カタログ値 (GPU の理論性能・帯域) は入力であって結果ではなく、2 倍ずれれば結論の細部は動く。</p>
+</div>
+
+<h2>1. 出発点: 条件を全部揃えたら、分離は勝たなかった</h2>
+
+<p>AIM345 ラボは、同じモデル・同じ GPU 数・同じキャッシュ方針・同じルーティング・同じ遅延目標のもとで、統合エンジン 2 レプリカと prefill / decode 分離を並べて測った。結果は<b>分離が 1 度も勝たなかった</b>。長文脈 (入力 8192 トークン、出力 256 トークン) で、統合は 4 tasks/s まで契約を守り、分離は 1 tasks/s までだった。</p>
+
+<p>ここで大事なのは、分離側の decode は<b>期待どおりに働いていた</b>ことである。4 tasks/s のとき統合の TPOT は 90.035 ms/token に悪化していたのに、分離は 20.407 ms/token を保っていた。約 4.4 倍の差で、これは「decode が prefill に邪魔されない」という主張そのものである。それでも負けたのは、TTFT (最初のトークンまでの時間) が壊れたからだった。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" style="max-width:880px" role="img"
+ aria-label="ラボの実測。統合は TPOT が悪化しながら 4 tasks/s まで合格し、分離は TPOT を保ちながら TTFT で落ちた">
+<text x="14" y="18" font-size="12.5" fill="#0f4a2e" font-weight="600">投入レート (tasks/s)</text>
+<text x="150" y="18" font-size="12.5" fill="#3c5a4c">0.25</text>
+<text x="250" y="18" font-size="12.5" fill="#3c5a4c">0.5</text>
+<text x="340" y="18" font-size="12.5" fill="#3c5a4c">1</text>
+<text x="430" y="18" font-size="12.5" fill="#3c5a4c">2</text>
+<text x="520" y="18" font-size="12.5" fill="#3c5a4c">4</text>
+<text x="620" y="18" font-size="12.5" fill="#3c5a4c">8</text>
+
+<text x="14" y="52" font-size="12" fill="#0f4a2e" font-weight="600">統合 TPOT</text>
+<rect x="140" y="40" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="178" y="51" font-size="11" fill="#3c5a4c">6.4</text>
+<rect x="240" y="40" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="278" y="51" font-size="11" fill="#3c5a4c">8.7</text>
+<rect x="330" y="40" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="368" y="51" font-size="11" fill="#3c5a4c">10.9</text>
+<rect x="420" y="40" width="34" height="14" fill="#d6ecdf" stroke="#1f7a4d"/><text x="458" y="51" font-size="11" fill="#3c5a4c">22.0</text>
+<rect x="510" y="40" width="34" height="14" fill="#fdf3e2" stroke="#8a5a12"/><text x="548" y="51" font-size="11" fill="#8a5a12" font-weight="600">90.0</text>
+<rect x="610" y="40" width="34" height="14" fill="#fbeceb" stroke="#8f2f2f"/><text x="648" y="51" font-size="11" fill="#8f2f2f" font-weight="600">133.7</text>
+
+<text x="14" y="82" font-size="12" fill="#0f4a2e" font-weight="600">分離 TPOT</text>
+<rect x="140" y="70" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="178" y="81" font-size="11" fill="#3c5a4c">7.4</text>
+<rect x="240" y="70" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="278" y="81" font-size="11" fill="#3c5a4c">8.9</text>
+<rect x="330" y="70" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="368" y="81" font-size="11" fill="#3c5a4c">11.2</text>
+<rect x="420" y="70" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="458" y="81" font-size="11" fill="#3c5a4c">18.6</text>
+<rect x="510" y="70" width="34" height="14" fill="#e8f4ec" stroke="#1f7a4d"/><text x="548" y="81" font-size="11" fill="#1f7a4d" font-weight="600">20.4</text>
+<text x="610" y="81" font-size="11" fill="#3c5a4c">24.6</text>
+
+<text x="14" y="118" font-size="12" fill="#0f4a2e" font-weight="600">統合 TTFT</text>
+<text x="140" y="118" font-size="11" fill="#3c5a4c">801</text>
+<text x="240" y="118" font-size="11" fill="#3c5a4c">810</text>
+<text x="330" y="118" font-size="11" fill="#3c5a4c">801</text>
+<text x="420" y="118" font-size="11" fill="#3c5a4c">809</text>
+<text x="510" y="118" font-size="11" fill="#8a5a12" font-weight="600">1449</text>
+<text x="610" y="118" font-size="11" fill="#8f2f2f" font-weight="600">30290</text>
+
+<text x="14" y="146" font-size="12" fill="#0f4a2e" font-weight="600">分離 TTFT</text>
+<text x="140" y="146" font-size="11" fill="#3c5a4c">1397</text>
+<text x="240" y="146" font-size="11" fill="#3c5a4c">1316</text>
+<text x="330" y="146" font-size="11" fill="#3c5a4c">1512</text>
+<text x="420" y="146" font-size="11" fill="#8f2f2f" font-weight="600">2384</text>
+<text x="510" y="146" font-size="11" fill="#8f2f2f" font-weight="600">26586</text>
+<text x="610" y="146" font-size="11" fill="#8f2f2f">167975</text>
+
+<path d="M14 160 L866 160" stroke="#d5e3da" stroke-width="1"/>
+<rect x="14" y="172" width="420" height="62" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="26" y="192" font-size="12.5" fill="#0f4a2e" font-weight="600">統合が壊れたのは TPOT の側</text>
+<text x="26" y="210" font-size="11.5" fill="#3c5a4c">TTFT は 801 から 809 ms でほぼ動かず、干渉は全部 TPOT に乗った</text>
+<text x="26" y="226" font-size="11.5" fill="#3c5a4c">これが「prefill 優先」の実測的な証拠になる (6 節)</text>
+<rect x="446" y="172" width="420" height="62" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="458" y="192" font-size="12.5" fill="#8f2f2f" font-weight="600">分離が壊れたのは TTFT の側</text>
+<text x="458" y="210" font-size="11.5" fill="#3c5a4c">TPOT は最後まで 25 ms 以下。落ちたのは prefill プールが半分の GPU</text>
+<text x="458" y="226" font-size="11.5" fill="#3c5a4c">しかなく、2 tasks/s で待ちが伸びたから</text>
+</svg>
+<figcaption>単位はミリ秒。数値はすべて <code>VALIDATION.md</code> の g7.48xlarge 行 (8 GPU / スタック、TTFT 2000 ms、TPOT 100 ms/token、両方を満たす呼び出しが 9 割) からの引用で、この文書の著者による測定ではない。読み取るべきは「分離の decode は勝っていたが TTFT で負けた」という<b>負け方</b>で、これがモデルが説明すべき対象になる。</figcaption>
+</figure>
+
+<p>ラボの資産は「交点は見つからなかった」を正直に記録した点に価値がある。ただし記録だけでは<b>次にどこを探せばよいか</b>が出てこない。だから式にする。</p>
+
+<h2>2. 1 リクエストの値段を 2 つに分ける</h2>
+
+<p>1 リクエストが GPU を占める時間 (GPU 秒) を、prefill 分 <code>w_p</code> と decode 分 <code>w_d</code> に分ける。この 2 つは性質がまったく違う。</p>
+
+<p><code>w_p</code> はバッチに<b>依らない</b>。入力トークンを行列積に流す仕事なので、何本まとめても 1 本あたりの計算量は変わらない。式は「密な層の計算 <code>2 × 活性パラメータ数 × トークン数</code>」に「注意機構の計算 <code>2 × 層数 × 隠れ次元 × 新規トークン数 × 文脈長</code>」を足したものを、実効的な演算性能で割る。</p>
+
+<p><code>w_d</code> はバッチに<b>依る</b>。decode の 1 歩は、モデルの重みを全部読み直してから、席ごとの KV (過去の状態) を読む。前者は何席あっても 1 回で済むので<b>割り勘</b>にでき、後者は席ごとにかかるので割り勘にできない。</p>
+
+<figure>
+<svg viewBox="0 0 880 320" width="100%" style="max-width:880px" role="img"
+ aria-label="decode の 1 歩の内訳。重み読みは割り勘にできるが KV 読みは席ごとにかかる">
+<text x="14" y="20" font-size="13" fill="#0f4a2e" font-weight="600">decode の 1 歩が読むバイト数</text>
+
+<rect x="14" y="34" width="200" height="40" rx="6" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="114" y="52" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">重み (A)</text>
+<text x="114" y="68" font-size="11.5" fill="#3c5a4c" text-anchor="middle">席が何個でも 1 回</text>
+<rect x="222" y="34" width="52" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="248" y="58" font-size="11.5" fill="#1d4e8f" text-anchor="middle">KV×1</text>
+<text x="290" y="58" font-size="12" fill="#3c5a4c">席 1 個 (B=1)</text>
+
+<rect x="14" y="92" width="200" height="40" rx="6" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="114" y="116" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">重み (A) 同じ量</text>
+<rect x="222" y="92" width="52" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="278" y="92" width="52" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="334" y="92" width="52" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="390" y="92" width="52" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="460" y="116" font-size="12" fill="#3c5a4c">席 4 個 (B=4)</text>
+
+<text x="560" y="60" font-size="12.5" fill="#0f4a2e" font-weight="600">1 席あたりの値段</text>
+<text x="560" y="80" font-size="12" fill="#3c5a4c">B=1 なら 重み 1 個ぶん</text>
+<text x="560" y="100" font-size="12" fill="#3c5a4c">B=4 なら 重み 1/4 個ぶん</text>
+<text x="560" y="120" font-size="12" fill="#1f7a4d" font-weight="600">= これが割り勘の利得</text>
+
+<path d="M14 150 L866 150" stroke="#d5e3da"/>
+<text x="14" y="176" font-size="13" fill="#0f4a2e" font-weight="600">1 リクエストの decode 代金</text>
+<rect x="14" y="188" width="852" height="46" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="440" y="208" font-size="15" fill="#0f4a2e" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">w_d(B) = A / B + C</text>
+<text x="440" y="227" font-size="11.5" fill="#3c5a4c" text-anchor="middle">A = 出力トークン数 × (重みバイト数 ÷ 帯域 + 1 歩の固定費) &nbsp;&nbsp; C = 出力トークン数 × KV バイト数/トークン × 文脈長 ÷ 帯域</text>
+
+<rect x="14" y="248" width="418" height="62" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="26" y="268" font-size="12.5" fill="#0f4a2e" font-weight="600">A が支配する側 = 集めると効く</text>
+<text x="26" y="286" font-size="11.5" fill="#3c5a4c">重みが巨大で文脈が短い。671B 級の MoE がここ</text>
+<text x="26" y="302" font-size="11.5" fill="#3c5a4c">席を 4 倍にすれば 1 席の代金はほぼ 1/4</text>
+<rect x="448" y="248" width="418" height="62" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="460" y="268" font-size="12.5" fill="#8f2f2f" font-weight="600">C が支配する側 = 集めても無駄</text>
+<text x="460" y="286" font-size="11.5" fill="#3c5a4c">重みが中位で文脈が長い。128k 入力がここ</text>
+<text x="460" y="302" font-size="11.5" fill="#3c5a4c">席を増やしても 1 席の代金は下がらない</text>
+</svg>
+<figcaption>この分解が以降すべての骨になる。<code>A/B</code> は席数で割れるが <code>C</code> は割れない。つまり<b>「decode を集めると得」の効き幅は、1 歩のうち重み読みが占める割合で決まる</b>。この割合はモデルの重みサイズと文脈長から机の上で計算できる量で、実測を待つ必要がない。</figcaption>
+</figure>
+
+<div class="note">
+<p style="margin:0"><b>MLA には落とし穴がある。</b>DeepSeek 系の MLA (潜在ベクトルだけを持つ注意機構) の KV は、テンソル並列のランク間で<b>複製</b>されるのが普通で、並列度を上げても KV の読み出し量も容量も割れない。当初この扱いを間違えて一律に並列度で割っていたところ、レビューで指摘された。直すと、ラボの校正で「実測の傾きは KV バイトだけから計算した値の 5.95 倍」という不自然な補正係数が <b>1.49 倍</b>まで下がった。補正係数が小さくなったこと自体が、修正が正しい方向だった証拠になる。</p>
+</div>
+
+<h2>3. バッチは「選べる」ものではない</h2>
+
+<p>「席を増やせば安くなる」なら席を増やせばよい、とはならない。席の数は待ち行列の基本法則で決まってしまう。Little の法則は「同時に居る客の数 = 到着率 × 滞在時間」で、decode の滞在時間は「出力トークン数 × TPOT」である。1 歩ですべての席が 1 トークン進むので、同じリクエストの次のトークンまでの間隔がそのまま TPOT になる。</p>
+
+<figure>
+<svg viewBox="0 0 880 260" width="100%" style="max-width:880px" role="img"
+ aria-label="バッチは到着率と TPOT の積で決まり、分離は同じ到着を少ないエンジンに集めて上限を上げる">
+<rect x="14" y="24" width="852" height="40" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="440" y="42" font-size="15" fill="#0f4a2e" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">B = (このエンジンへの到着率) × (出力トークン数) × TPOT</text>
+<text x="440" y="58" font-size="11.5" fill="#3c5a4c" text-anchor="middle">約束が緩いほど、そして到着が多いほど席は増える。エンジンが勝手に増やすことはできない</text>
+
+<text x="14" y="94" font-size="13" fill="#0f4a2e" font-weight="600">統合 4 エンジン: 到着を 4 等分する</text>
+<g>
+<rect x="14" y="104" width="120" height="52" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="74" y="124" font-size="11.5" fill="#0f4a2e" text-anchor="middle">エンジン 1</text>
+<text x="74" y="142" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/4 → 席 6.5</text>
+<rect x="142" y="104" width="120" height="52" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="202" y="124" font-size="11.5" fill="#0f4a2e" text-anchor="middle">エンジン 2</text>
+<text x="202" y="142" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/4 → 席 6.5</text>
+<rect x="270" y="104" width="120" height="52" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="330" y="124" font-size="11.5" fill="#0f4a2e" text-anchor="middle">エンジン 3</text>
+<text x="330" y="142" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/4 → 席 6.5</text>
+<rect x="398" y="104" width="120" height="52" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="458" y="124" font-size="11.5" fill="#0f4a2e" text-anchor="middle">エンジン 4</text>
+<text x="458" y="142" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/4 → 席 6.5</text>
+</g>
+<text x="540" y="134" font-size="12" fill="#3c5a4c">各エンジンは prefill も decode もやる</text>
+
+<text x="14" y="184" font-size="13" fill="#0f4a2e" font-weight="600">分離 3 + 1: decode を 1 エンジンに集める</text>
+<g>
+<rect x="14" y="194" width="120" height="52" rx="6" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="74" y="214" font-size="11.5" fill="#8a5a12" text-anchor="middle">prefill 1</text>
+<text x="74" y="232" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/3</text>
+<rect x="142" y="194" width="120" height="52" rx="6" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="202" y="214" font-size="11.5" fill="#8a5a12" text-anchor="middle">prefill 2</text>
+<text x="202" y="232" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/3</text>
+<rect x="270" y="194" width="120" height="52" rx="6" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="330" y="214" font-size="11.5" fill="#8a5a12" text-anchor="middle">prefill 3</text>
+<text x="330" y="232" font-size="11.5" fill="#3c5a4c" text-anchor="middle">λ/3</text>
+<rect x="398" y="194" width="150" height="52" rx="6" fill="#e6eef8" stroke="#1d4e8f" stroke-width="2"/>
+<text x="473" y="214" font-size="11.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">decode 1 台</text>
+<text x="473" y="232" font-size="11.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">λ 全部 → 席 21.7</text>
+</g>
+<path d="M556 220 L600 220" stroke="#1f7a4d" stroke-width="2" marker-end="url(#a2)"/>
+<defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs>
+<text x="608" y="216" font-size="12.5" fill="#1f7a4d" font-weight="600">席が 3.3 倍</text>
+<text x="608" y="234" font-size="11.5" fill="#3c5a4c">1 席の重み代が 1/3.3</text>
+</svg>
+<figcaption>席数はこの文書のモデルの出力 (70B、H200 8 枚 / エンジン、32 GPU、入力 8192、出力 256、TPOT 25 ms) で、実測ではない。分離が decode 側で得をする理由はこれだけである。逆に prefill 側は<b>台数が減るぶん 1 台あたりの利用率が上がる</b>ので、TTFT が苦しくなる。この綱引きが分離の損得のすべてになる。</figcaption>
+</figure>
+
+<h2>4. 干渉は「代金」ではなく「制約」である</h2>
+
+<p>統合エンジンでは prefill と decode が同じエンジンを共有する。エンジンが時間の <code>ρ_p</code> を prefill に使っているなら、decode の 1 歩の間隔は少なくとも <code>t_step / (1 - ρ_p)</code> に伸びる。これを TPOT の約束に当てはめると、prefill に使える時間の割合に上限が生まれる。</p>
+
+<pre><span class="c"># 統合エンジンが守らねばならない不等式</span>
+TPOT_slo &gt;= t_step(B) / (1 - <span class="k">rho_p</span>)      <span class="c"># 干渉則</span>
+<span class="k">rho_p</span> &lt;= 1 - t_step(B) / TPOT_slo          <span class="c"># 言い換え = prefill 占有率の上限</span>
+</pre>
+
+<p>この式には外部の裏付けがある。TaiChi (arXiv:2508.01989) は「1 出力トークンあたり何個の prefill トークンが混ざったか」を横軸にして TPOT を測り、<code>TPOT = 0.2 ms × その個数 + 44 ms</code> という直線を決定係数 0.99 で得ている。上の式を 1 次まで展開すると同じ形になり、傾きはそのハードウェアの「prefill 1 トークンあたりの時間」になる。</p>
+
+<div class="warn">
+<p style="margin:0"><b>ここは両レビューが同じ穴を突いた。</b>飽和状態で席数 <code>B</code> を固定して書き直すと <code>TPOT = t_step(B) + B × (prefill 時間) / 出力トークン数</code> となり、<b>横軸をリクエスト単位の「入力長 ÷ 出力長」に取った場合は傾きに席数 B が掛かる</b>。だから傾きを「prefill 1 トークンあたりの時間」と読めるのは、TaiChi の横軸が定義どおり「その decode リクエストの生成中に計算された prefill トークン数 ÷ 出力長」であるときに限られる。論文はそう定義しているので同定は成り立つが、条件つきである。他の論文の似た回帰をそのまま流用してはいけない。</p>
+</div>
+
+<h3>chunked prefill を入れると、チャンクサイズが打ち消える</h3>
+
+<p>両レビューが独立に「統合側には chunked prefill という逃げ道がある。長い prefill を細かく割れば TPOT の膨張を抑えつつ prefill 占有率を上げられるので、この壁はモデルの作り物ではないか」と反論してきた。もっともな指摘なので、チャンクサイズ <code>c</code> を陽に入れて書き直した。結果は<b>反論の否定</b>だった。</p>
+
+<pre><span class="c"># 1 ステップに c トークンぶんの prefill チャンクを混ぜる場合</span>
+TPOT      = t_step(B) + c * tau_pf          <span class="c"># 1 歩は chunk のぶん重くなる (tau_pf = prefill 秒/トークン)</span>
+prefill 処理速度 = c / TPOT                  <span class="c"># 1 歩で c トークン進む</span>
+<span class="k">rho_p</span>     = tau_pf * c / TPOT
+          = (TPOT - t_step(B)) / TPOT
+          = 1 - t_step(B) / TPOT            <span class="o">&lt;-- c が消えた</span>
+</pre>
+
+<p>チャンクを細かくすれば 1 歩の膨張は小さくなるが、1 歩で進む prefill も同じ割合で減る。積は変わらない。<b>チャンクサイズは自由度にならず、到達できる上限は時間分割で考えたときとまったく同じ</b>である。しかも実際には細かいチャンクほど後続チャンクが既存の KV を読み直すので prefill 自体の効率が落ちる。つまり chunked prefill は<b>この上限に到達する手段</b>であって、上限を超える手段ではない。</p>
+
+<div class="note">
+<p style="margin:0"><b>この打ち消しが、干渉則を「スケジューラの仮定」から「恒等式」に格上げする。</b>元の導出は「prefill が decode の歩を押しのける」という時間分割を仮定していた。チャンク版はまったく違う機構 (1 つのバッチに混ぜる) から出発して同じ式に着く。異なる 2 つの機構が同じ上限を与えるので、この上限はスケジューラの実装ではなく仕事の量そのものから来ている。</p>
+</div>
+
+<h2>5. 分離が払う 4 つの代金</h2>
+
+<p>利得が 1 つなら、代金は 4 つある。1 つずつ別の項として持つ。まとめて「オーバーヘッド」と呼ぶと、どれが効いているか分からなくなる。</p>
+
+<table>
+<tr><th>代金</th><th>中身</th><th>大きさ (この文書のモデル、70B / 32 GPU / 入力 32k / TPOT 30 ms)</th><th>効くのはどんなとき</th></tr>
+<tr><td><b>受け渡し</b></td>
+<td>KV を prefill 側から decode 側へ運ぶ時間。TTFT 予算に直列で乗る</td>
+<td class="n">NVLink 11.9 ms (予算の 0.1 %) 〜 実測 EFA 393.1 ms (4.7 %)。比率は 0.771 対 0.753 で<b>ほぼ動かない</b></td>
+<td>KV が重い構成 (MHA)、短い入力で固定費が相対的に大きいとき</td></tr>
+<tr><td><b>整数の粒度</b></td>
+<td>エンジンは整数個しか置けない。理想の比が 5.5 対 2.5 でも 4 対 4 しか置けないことがある</td>
+<td class="n">8 GPU を 4 枚 / エンジンで分けると 4P/4D の 1 通りだけ。2 枚 / エンジンなら 6P/2D が選べる</td>
+<td>プールが小さいとき。GPU 8 枚では致命的、512 枚ならほぼ消える</td></tr>
+<tr><td><b>利用率の集中</b></td>
+<td>prefill の台数が減るので、同じ到着率でも 1 台あたりの利用率が上がり待ちが伸びる</td>
+<td class="n">これが AIM345 で分離を落とした主因。分離の prefill プールは 4 GPU で、統合の 8 GPU の半分</td>
+<td>TTFT 予算が prefill 1 回の数倍しかないとき</td></tr>
+<tr><td><b>incast</b></td>
+<td>送信側が多く受信側が少ないと、受信側に流入が集中する。送信側の帯域だけ見ていると見落とす</td>
+<td class="n">24P/8D では受信 1 台あたり 3 台ぶんの流入。モデルは受信側の吸収限界を制約として持つ</td>
+<td>prefill 偏重の分割、KV が重い構成</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 880 240" width="100%" style="max-width:880px" role="img"
+ aria-label="4 つの代金がどこに効くか。受け渡しは TTFT 予算を削り、粒度と利用率は席と待ちに効く">
+<text x="14" y="18" font-size="12.5" fill="#0f4a2e" font-weight="600">TTFT 予算 (この例では 8.28 秒 = 邪魔がないときの prefill 1 回 2.76 秒の 3 倍)</text>
+<rect x="14" y="28" width="852" height="26" rx="4" fill="#f6faf7" stroke="#d5e3da"/>
+<rect x="14" y="28" width="284" height="26" rx="4" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="156" y="45" font-size="11.5" fill="#0f4a2e" text-anchor="middle">prefill 1 回 (2.76 s)</text>
+<rect x="298" y="28" width="40" height="26" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="318" y="45" font-size="10" fill="#8a5a12" text-anchor="middle">受渡</text>
+<rect x="338" y="28" width="528" height="26" fill="#fff" stroke="#d5e3da" stroke-dasharray="3 3"/>
+<text x="602" y="45" font-size="11.5" fill="#3c5a4c" text-anchor="middle">残りが待ちに使える分 = ここが利用率の上限を決める</text>
+<text x="14" y="72" font-size="11.5" fill="#3c5a4c">受け渡し 393 ms は予算の 4.7 %。33 倍速い NVLink にしても 11.9 ms で、この帯の幅はほとんど変わらない</text>
+
+<path d="M14 88 L866 88" stroke="#d5e3da"/>
+<text x="14" y="112" font-size="12.5" fill="#0f4a2e" font-weight="600">効き方が違う 4 つ</text>
+<rect x="14" y="122" width="205" height="102" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="116" y="142" font-size="12.5" fill="#8a5a12" text-anchor="middle" font-weight="600">受け渡し</text>
+<text x="116" y="160" font-size="11.5" fill="#3c5a4c" text-anchor="middle">TTFT 予算を直接削る</text>
+<text x="116" y="192" font-size="20" fill="#8a5a12" text-anchor="middle" font-weight="600">4.7 %</text>
+<text x="116" y="212" font-size="11" fill="#3c5a4c" text-anchor="middle">32k 入力、実測 EFA</text>
+
+<rect x="229" y="122" width="205" height="102" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="331" y="142" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">整数の粒度</text>
+<text x="331" y="160" font-size="11.5" fill="#3c5a4c" text-anchor="middle">望む比を置けない</text>
+<text x="331" y="192" font-size="20" fill="#8f2f2f" text-anchor="middle" font-weight="600">8 枚で不成立</text>
+<text x="331" y="212" font-size="11" fill="#3c5a4c" text-anchor="middle">32 枚で 0.75、512 枚で 0.94</text>
+
+<rect x="444" y="122" width="205" height="102" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="546" y="142" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">利用率の集中</text>
+<text x="546" y="160" font-size="11.5" fill="#3c5a4c" text-anchor="middle">prefill の台数が減る</text>
+<text x="546" y="192" font-size="20" fill="#8f2f2f" text-anchor="middle" font-weight="600">主因</text>
+<text x="546" y="212" font-size="11" fill="#3c5a4c" text-anchor="middle">AIM345 で分離を落とした</text>
+
+<rect x="659" y="122" width="207" height="102" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="762" y="142" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">incast</text>
+<text x="762" y="160" font-size="11.5" fill="#3c5a4c" text-anchor="middle">受信側に流入が集まる</text>
+<text x="762" y="192" font-size="20" fill="#1d4e8f" text-anchor="middle" font-weight="600">24P → 8D</text>
+<text x="762" y="212" font-size="11" fill="#3c5a4c" text-anchor="middle">受信 1 台に 3 台ぶん</text>
+</svg>
+<figcaption>数値はこの文書のモデルの出力 (70B、32 GPU、入力 32768、TPOT 30 ms)。<b>4 つのうち大きいのは右の 2 つ</b>で、いちばん語られる受け渡し (左端) は予算の 5 % 程度しか使っていない。代金を 1 つにまとめて「オーバーヘッド」と呼ぶと、この差が見えなくなる。</figcaption>
+</figure>
+
+<div class="box">
+<p style="margin:0"><b>回線が決め手ではない、という結果は強調しておきたい。</b>32k 入力の条件で受け渡しを NVLink (11.9 ms) から実測 EFA (393.1 ms) まで 33 倍動かしても、分離の合格レートは 0.724 から 0.706 tasks/s に 2.5 % しか変わらない。分離の議論はしばしば転送実装 (NIXL、UCX、LIBFABRIC) の話になるが、<b>少なくともこの領域では転送は勝敗を決めていない</b>。決めているのは席数と利用率である。</p>
+</div>
+
+<h2>6. スケジューラの仮定は、ラボの実測が決めてくれた</h2>
+
+<p>統合エンジンの TTFT をどう書くかで結論が変わる。prefill が優先されるなら prefill は他の prefill だけを待ち、干渉は全部 TPOT に乗る。公平共有なら prefill は decode の占有ぶんも待たされ、TTFT にも乗る。Codex は「現行の vLLM や SGLang は動いている decode を先にバッチに入れるので、prefill 優先を既定にするのは統合側に有利すぎる」と指摘した。妥当な指摘だが、<b>ラボの実測がこの論点を決着させている</b>。</p>
+
+<table>
+<tr><th>投入レート</th><th>実測 TTFT</th><th>prefill 優先型の予測</th><th>公平共有型の予測</th><th>decode 占有率</th></tr>
+<tr><td class="n">0.25 tasks/s</td><td class="n">801.5 ms</td><td class="n y">731.3 ms (-70)</td><td class="n">901.5 ms (+100)</td><td class="n">0.31</td></tr>
+<tr><td class="n">0.5 tasks/s</td><td class="n">809.6 ms</td><td class="n y">748.6 ms (-61)</td><td class="n no">1516.1 ms (+707)</td><td class="n">0.61</td></tr>
+<tr><td class="n">1 tasks/s</td><td class="n">801.5 ms</td><td class="n y">788.6 ms (-13)</td><td class="n no">容量超過と誤判定</td><td class="n">0.89</td></tr>
+<tr><td class="n">2 tasks/s</td><td class="n">808.8 ms</td><td class="n y">900.6 ms (+92)</td><td class="n no">3142.2 ms (+2333)</td><td class="n">0.53</td></tr>
+<tr><td class="n">4 tasks/s</td><td class="n">1449.4 ms</td><td class="n y">1507.3 ms (+58)</td><td class="n no">容量超過と誤判定</td><td class="n">0.33</td></tr>
+<tr><td class="n">8 tasks/s</td><td class="n">30289.6 ms</td><td class="n y">容量超過 (正解)</td><td class="n">容量超過 (正解)</td><td class="n">0.52</td></tr>
+</table>
+
+<p>投入レートが 8 倍になり decode の占有率が 0.31 から 0.89 まで動いても、実測 TTFT は 801 ms から 809 ms の範囲でほとんど動いていない。<b>decode がどれだけ忙しくても prefill は待たされていない</b>。この engine (SGLang 0.5.12.post1、chunked prefill 有効) は実質的に prefill を優先しており、干渉は全部 TPOT に乗っている。公平共有型の式は 810 ms を 1516 ms と外し、実際に合格した 1 と 4 tasks/s の行を不合格と予測するので、この engine については棄却される。</p>
+
+<div class="warn">
+<p style="margin:0"><b>ただしこれは 1 つの engine の 1 つの版についての観測である。</b>他の engine やチャンク予算の設定では配分が変わる。モデルは <code>prefill_priority</code> を切り替え可能な入力として持ち、切り替えると 1 つのシナリオで比率が 0.83 から 1.73 まで動く。<b>結論がモデル外の 1 つのスイッチに依存している</b>という Fable の指摘はそのまま残る穴で、engine ごとにこの表を作り直す必要がある。</p>
+</div>
+
+<h2>7. 地図: どこが良いケースなのか</h2>
+
+<p>ここまでの式を数値で回して、条件を 1 つずつ振った。すべてこの文書のモデルの出力で、実測ではない。基準構成は Llama-3.1-70B、H200 を 8 枚 / エンジン、合計 32 GPU、出力 256 トークン、TTFT 予算は「邪魔がないときの prefill 1 回の 3 倍」に置いた。表の値は<b>分離の合格レート ÷ 統合の合格レート</b>で、1 より大きければ分離の勝ちである。</p>
+
+<table>
+<tr><th>入力トークン \ TPOT の約束</th><th>200 ms</th><th>150 ms</th><th>100 ms</th><th>50 ms</th><th>35 ms</th><th>25 ms</th><th>20 ms</th><th>15 ms</th></tr>
+<tr><td class="n">1024</td><td class="n no">0.48</td><td class="n no">0.53</td><td class="n no">0.60</td><td class="n no">0.66</td><td class="n no">0.69</td><td class="n">0.79</td><td class="n">0.95</td><td class="n y">1.37</td></tr>
+<tr><td class="n">2048</td><td class="n no">0.67</td><td class="n no">0.68</td><td class="n no">0.70</td><td class="n no">0.72</td><td class="n no">0.72</td><td class="n">0.82</td><td class="n">0.97</td><td class="n y">1.39</td></tr>
+<tr><td class="n">4096</td><td class="n no">0.71</td><td class="n no">0.72</td><td class="n no">0.72</td><td class="n no">0.72</td><td class="n no">0.72</td><td class="n">0.83</td><td class="n">0.98</td><td class="n y">1.40</td></tr>
+<tr><td class="n">8192</td><td class="n no">0.72</td><td class="n no">0.72</td><td class="n no">0.72</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n">0.83</td><td class="n">0.98</td><td class="n y">1.40</td></tr>
+<tr><td class="n">16384</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n">0.83</td><td class="n">0.98</td><td class="n y">1.40</td></tr>
+<tr><td class="n">32768</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n">0.83</td><td class="n">0.94</td><td class="n">0.94</td></tr>
+<tr><td class="n">65536</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td><td class="n no">0.73</td></tr>
+<tr><td class="n">131072</td><td class="n no">0.74</td><td class="n no">0.74</td><td class="n no">0.74</td><td class="n no">0.74</td><td class="n no">0.74</td><td class="n no">0.74</td><td class="n no">0.74</td><td class="n no">0.74</td></tr>
+</table>
+
+<p>この表からいちばん意外な事実が読める。<b>4096 トークン以上では、入力の長さがほとんど効いていない</b>。4096 でも 16384 でも列の値は 0.72 から 0.83 の範囲で同じように動き、変わるのは TPOT の列を移動したときだけである。分離の話は「長い文脈だから prefill が重い、だから分けよう」という筋で語られることが多いが、この式ではそうならない。理由は、入力が長くなると prefill の仕事も増えるが同時に合格できるレートも下がるので、席数を決める「到着率 × TPOT」の積が両構成で似た比率のまま動くからである。</p>
+
+<p>例外は両端にある。1024 トークンの行は緩い TPOT で 0.48 まで落ちる。入力が短いと prefill 1 回が短く、TTFT 予算 (その 3 倍) も小さいので、受け渡しの固定費が予算を食う割合が大きくなる。反対の端では、65536 トークン以上でどの TPOT でも 0.73 前後に張り付き、締めても改善しない。文脈が長いと decode の 1 歩は席ごとの KV 読み (<code>C</code> 項) に支配され、席を集めても 1 席あたりの代金が下がらないからである。<b>超長文脈は分離が効かない側</b>で、これは通俗的な理解とは逆になる。</p>
+
+<figure>
+<svg viewBox="0 0 960 300" width="100%" style="max-width:960px" role="img"
+ aria-label="TPOT の約束と入力長の平面。分離が勝つのは右上の細い帯だけ">
+<text x="14" y="18" font-size="12.5" fill="#0f4a2e" font-weight="600">分離 ÷ 統合 の比率。緑が濃いほど分離の勝ち</text>
+<text x="60" y="272" font-size="12" fill="#3c5a4c">緩い &lt;-- TPOT の約束 --&gt; 厳しい</text>
+<g font-size="11" fill="#3c5a4c" text-anchor="middle">
+<text x="130" y="46">200</text><text x="220" y="46">150</text><text x="310" y="46">100</text>
+<text x="400" y="46">50</text><text x="490" y="46">35</text><text x="580" y="46">25</text>
+<text x="670" y="46">20</text><text x="760" y="46">15 ms</text>
+</g>
+<g font-size="11" fill="#3c5a4c" text-anchor="end">
+<text x="80" y="72">1024</text><text x="80" y="100">2048</text><text x="80" y="128">4096</text>
+<text x="80" y="156">8192</text><text x="80" y="184">16k</text><text x="80" y="212">32k</text>
+<text x="80" y="240">65k 以上</text>
+</g>
+<text x="20" y="160" font-size="11.5" fill="#0f4a2e" font-weight="600">入力</text>
+<g stroke="#fff" stroke-width="1">
+<rect x="90" y="58" width="80" height="20" fill="#fbeceb"/><rect x="180" y="58" width="80" height="20" fill="#fbeceb"/><rect x="270" y="58" width="80" height="20" fill="#fbeceb"/><rect x="360" y="58" width="80" height="20" fill="#fbeceb"/><rect x="450" y="58" width="80" height="20" fill="#fbeceb"/><rect x="540" y="58" width="80" height="20" fill="#fdf3e2"/><rect x="630" y="58" width="80" height="20" fill="#f2f7f3"/><rect x="720" y="58" width="80" height="20" fill="#9bd3b3"/>
+<rect x="90" y="86" width="80" height="20" fill="#fbeceb"/><rect x="180" y="86" width="80" height="20" fill="#fbeceb"/><rect x="270" y="86" width="80" height="20" fill="#fbeceb"/><rect x="360" y="86" width="80" height="20" fill="#fbeceb"/><rect x="450" y="86" width="80" height="20" fill="#fbeceb"/><rect x="540" y="86" width="80" height="20" fill="#fdf3e2"/><rect x="630" y="86" width="80" height="20" fill="#f2f7f3"/><rect x="720" y="86" width="80" height="20" fill="#9bd3b3"/>
+<rect x="90" y="114" width="80" height="20" fill="#fbeceb"/><rect x="180" y="114" width="80" height="20" fill="#fbeceb"/><rect x="270" y="114" width="80" height="20" fill="#fbeceb"/><rect x="360" y="114" width="80" height="20" fill="#fbeceb"/><rect x="450" y="114" width="80" height="20" fill="#fbeceb"/><rect x="540" y="114" width="80" height="20" fill="#fdf3e2"/><rect x="630" y="114" width="80" height="20" fill="#f2f7f3"/><rect x="720" y="114" width="80" height="20" fill="#9bd3b3"/>
+<rect x="90" y="142" width="80" height="20" fill="#fbeceb"/><rect x="180" y="142" width="80" height="20" fill="#fbeceb"/><rect x="270" y="142" width="80" height="20" fill="#fbeceb"/><rect x="360" y="142" width="80" height="20" fill="#fbeceb"/><rect x="450" y="142" width="80" height="20" fill="#fbeceb"/><rect x="540" y="142" width="80" height="20" fill="#fdf3e2"/><rect x="630" y="142" width="80" height="20" fill="#f2f7f3"/><rect x="720" y="142" width="80" height="20" fill="#9bd3b3"/>
+<rect x="90" y="170" width="80" height="20" fill="#fbeceb"/><rect x="180" y="170" width="80" height="20" fill="#fbeceb"/><rect x="270" y="170" width="80" height="20" fill="#fbeceb"/><rect x="360" y="170" width="80" height="20" fill="#fbeceb"/><rect x="450" y="170" width="80" height="20" fill="#fbeceb"/><rect x="540" y="170" width="80" height="20" fill="#fdf3e2"/><rect x="630" y="170" width="80" height="20" fill="#f2f7f3"/><rect x="720" y="170" width="80" height="20" fill="#9bd3b3"/>
+<rect x="90" y="198" width="80" height="20" fill="#fbeceb"/><rect x="180" y="198" width="80" height="20" fill="#fbeceb"/><rect x="270" y="198" width="80" height="20" fill="#fbeceb"/><rect x="360" y="198" width="80" height="20" fill="#fbeceb"/><rect x="450" y="198" width="80" height="20" fill="#fbeceb"/><rect x="540" y="198" width="80" height="20" fill="#fdf3e2"/><rect x="630" y="198" width="80" height="20" fill="#f2f7f3"/><rect x="720" y="198" width="80" height="20" fill="#f2f7f3"/>
+<rect x="90" y="226" width="80" height="20" fill="#fbeceb"/><rect x="180" y="226" width="80" height="20" fill="#fbeceb"/><rect x="270" y="226" width="80" height="20" fill="#fbeceb"/><rect x="360" y="226" width="80" height="20" fill="#fbeceb"/><rect x="450" y="226" width="80" height="20" fill="#fbeceb"/><rect x="540" y="226" width="80" height="20" fill="#fbeceb"/><rect x="630" y="226" width="80" height="20" fill="#fbeceb"/><rect x="720" y="226" width="80" height="20" fill="#fbeceb"/>
+</g>
+<rect x="716" y="54" width="88" height="140" fill="none" stroke="#1f7a4d" stroke-width="2.5"/>
+<text x="820" y="116" font-size="12" fill="#1f7a4d" font-weight="600">分離が勝つ帯</text>
+<text x="820" y="134" font-size="11.5" fill="#3c5a4c">比率 1.37 〜 1.40</text>
+<text x="820" y="152" font-size="11.5" fill="#3c5a4c">1024 から 16k まで</text>
+<g font-size="11.5">
+<rect x="90" y="282" width="16" height="12" fill="#fbeceb" stroke="#fff"/><text x="112" y="292" fill="#3c5a4c">0.7 以下</text>
+<rect x="180" y="282" width="16" height="12" fill="#fdf3e2" stroke="#fff"/><text x="202" y="292" fill="#3c5a4c">0.8 前後</text>
+<rect x="280" y="282" width="16" height="12" fill="#f2f7f3" stroke="#fff"/><text x="302" y="292" fill="#3c5a4c">0.95 前後 (互角)</text>
+<rect x="430" y="282" width="16" height="12" fill="#9bd3b3" stroke="#fff"/><text x="452" y="292" fill="#3c5a4c">1.3 以上 (分離の勝ち)</text>
+</g>
+</svg>
+<figcaption>この文書のモデルの出力 (Llama-3.1-70B、H200 8 枚 / エンジン、32 GPU、出力 256、TTFT 予算は prefill 1 回の 3 倍)。<b>分離が勝つのは平面の右上の細い帯だけ</b>で、面積で言えばごく一部である。しかも 32k 以上の行ではその帯も消える。「分離は長文脈に効く」という通俗的な向きとは逆になっている。</figcaption>
+</figure>
+
+<h3>規模、キャッシュ、モデル、回線</h3>
+
+<table>
+<tr><th>振った軸</th><th>結果 (分離 ÷ 統合)</th><th>読み方</th></tr>
+<tr><td>GPU 総数 8 → 1024 枚<br>(入力 32k、TPOT 30 ms)</td>
+<td class="n">0.00 (8 枚、分離不成立) → 0.50 (16) → 0.75 (32) → 0.88 (64) → 0.94 (128) → 0.95 (1024)</td>
+<td>単調に改善するが、この条件では 1 を超えない。粒度と利用率の代金は規模で薄まるが、消えるわけではない</td></tr>
+<tr><td>prefix キャッシュのヒット率 0 → 95 %</td>
+<td class="n">0.753 → 0.735 (20 %) → 0.715 (40 %) → 0.685 (60 %) → 0.575 (80 %) → 0.00 (90 % 以上は分離不成立)</td>
+<td>ヒット率が高いほど分離が不利。prefill の計算は <code>(1 - h)</code> に減るのに、運ぶ KV は減らないから</td></tr>
+<tr><td>モデル (1 歩のうち重み読みの割合)</td>
+<td class="n">8B 0.17 → 比率 0.629 / MHA 70B 0.52 → 0.619 / 32B 0.61 → 0.705 / 70B 0.86 → 0.754 / 671B MoE 0.98 → 0.919</td>
+<td>重み読みが支配的なほど分離に有利という向きは出る。ただし MHA 70B は KV が重く受け渡しの代金が大きいので、割合の順位からは外れる</td></tr>
+<tr><td>回線 (NVLink → 実測 EFA)</td>
+<td class="n">0.77 → 0.75。受け渡しは 11.9 ms から 393.1 ms まで 33 倍動く</td>
+<td>ほぼ効かない。転送実装の議論は、この領域では勝敗と関係が薄い</td></tr>
+</table>
+
+<div class="note">
+<p style="margin:0"><b>キャッシュ税の書き方には注意が必要だと Fable に指摘された。</b>「受け渡しが TTFT 予算の何 % か」はヒット率とともに 4.7 % から 122 % まで増えるが、これは私が TTFT 予算を「prefill 1 回の 3 倍」と定義しているために予算そのものが縮むからで、物理ではない。予算をミリ秒で固定すれば税の割合は変わらない。<b>ヒット率で本当に増えるのは「残った prefill 仕事に対する受け渡しの比」で、その倍率が <code>1/(1-h)</code> になる</b>。表の 0.64 や 0.00 は「95 % ヒットするのに毎回 32k ぶん全部を直列で送る」という素朴な実装の最悪値であって、KV を意識したルータや層ごとのストリーミングで転送を重ねる実装なら小さくなる。</p>
+</div>
+
+<h2>8. AIM345 を再現し、何を変えれば勝つかを聞く</h2>
+
+<p>モデルが現実を当てるかどうかを、当てはめではなく<b>予測</b>で確かめる。分離側の合格した 3 行だけを使って 2 定数を合わせ、統合側の 6 行は予測に回した (6 節の表)。定数は prefill 1 回が 348 ms、エンジンの外側の固定費が 368 ms である。</p>
+
+<div class="big">
+<div><b>5.76</b><span>2 定数から出る統合の prefill 上限 (tasks/s)。ラボは 4 で合格し 8 で崩壊した</span></div>
+<div><b>3.94</b><span>モデルが出す統合の合格レート。ラボの合格は 4 tasks/s</span></div>
+<div><b>2.14</b><span>モデルが出す分離の合格レート。ラボは 1 で合格し 2 で不合格</span></div>
+<div><b>1.49</b><span>実測の傾き ÷ KV バイトだけから計算した傾き。MLA 複製を直す前は 5.95 だった</span></div>
+</div>
+
+<p>もう 1 つ、校正のやり方そのものに教訓がある。<b>低負荷の p90 TTFT を prefill の計算時間だと思ってはいけない</b>。ラボの 0.25 tasks/s での 801 ms をそのまま prefill 時間とすると、統合の上限は 2.50 tasks/s になり、ラボが実際に合格した 4 tasks/s と矛盾する。仕事量は遅延から読むのではなく、<b>合格レートから逆算する</b>のが正しい。</p>
+
+<p>そのうえで「ラボの構成で何を変えれば分離が勝つか」を聞くと、こう出る。</p>
+
+<table>
+<tr><th>変えるもの</th><th>モデルの答え</th><th>信用できるか</th></tr>
+<tr><td>TPOT の約束を締める<br>(100 ms から順に)</td>
+<td class="n">100 ms: 0.54 / 50 ms: 0.61 / 30 ms: 0.71 / 20 ms: 0.91 / 15 ms: 1.26 / 12 ms: 2.02</td>
+<td>12 ms の 2.02 だけが誤差帯の外。15 ms の 1.26 は<b>信用できない</b> (後述の偏り 2 倍以内)</td></tr>
+<tr><td>GPU を増やす<br>(TPOT 30 ms 固定)</td>
+<td class="n">8 枚: 1.09 / 16 枚: 1.09 / 32 枚: 1.18 / 64 枚: 1.18</td>
+<td>すべて誤差帯の内側。方向 (規模で改善) は信じてよいが、値は信じない</td></tr>
+<tr><td>エンジンの幅を変える<br>(4 枚 → 2 枚 / エンジン)</td>
+<td class="n">4P/4D で 2.14、6P/2D で 2.11。<b>ほぼ変わらない</b></td>
+<td>「粒度が悪かったから負けた」という説明は、直しても勝たないとモデル自身が言っている</td></tr>
+<tr><td>回線を替える</td>
+<td class="n">実測 EFA + 596 ms の段取り費で 0.71、段取り費なしで 0.79、NVLink でも 0.79</td>
+<td>効かない。段取り費 596 ms を消しても勝てない</td></tr>
+</table>
+
+<div class="bad">
+<p style="margin:0"><b>誤差の向きが両方とも分離に有利、という自己申告。</b>統合はモデル 3.94 に対しラボは 4 で合格しているので、モデルは合格した点を不合格と予測している (過小)。分離はモデル 2.14 に対しラボの境界は 1 以上 2 未満なので、モデルは最大で 2 倍ほど過大である。<b>両方の誤差が分離を有利にする向きに揃っている</b>ので、比率 1.0 から 1.3 程度の「分離の勝ち」はすべてこの偏りの中にある。この文書で分離の勝ちとして扱えるのは、比率が 2 を超えた行だけである。</p>
+</div>
+
+<h3>次に測るべき 1 つ</h3>
+
+<p>Fable が挙げた最も鋭い追加測定はこれである。<b>統合エンジンで decode のバッチを固定し、prefill トークンの流入率だけを掃引して達成 TPOT を測る</b>。これは干渉則の傾きを直接与え、4 節で条件つきだと述べた「席数 <code>B</code> が傾きに掛かるかどうか」を単独で決着させる。次点は統合側を 5、6、7 tasks/s で走らせて境界を挟み、3.94 という予測をそのままテストすることである。ラボの sweep は 2 の冪の格子なので、境界が [4, 8) という広い区間でしか分かっていない。</p>
+
+<h2>9. 外部研究はどこまで同じことを言っているか</h2>
+
+<table>
+<tr><th>研究</th><th>言っていること</th><th>この文書との関係</th></tr>
+<tr><td>DistServe<br>arXiv:2401.09670</td>
+<td>prefill と decode を分けて goodput を最適化。TTFT を M/D/1 で <code>D + RD²/2(1-RD)</code> と書き、並列化の効き方を式で比較する。KV 転送は OPT-175B でも総遅延の 0.1 % 未満で、95 % の要求で 30 ms 以下</td>
+<td>待ち行列の骨は同じ。転送が主要因でないという結論も一致する。ただし DistServe は「資源が少ない環境では設計空間が狭く、単純な構成のほうがよい」と自分で書いており、AIM345 の 8 GPU はまさにそこ</td></tr>
+<tr><td>Sarathi-Serve<br>arXiv:2403.02310</td>
+<td>chunked prefill と stall-free batching で、統合のまま干渉を抑える</td>
+<td>統合側の本当の競合相手。4 節で示したとおり、チャンクサイズは上限を動かさず上限に到達する手段である</td></tr>
+<tr><td>TaiChi<br>arXiv:2508.01989</td>
+<td>統合は「TTFT が厳しく TPOT が緩い」で有利、分離は「TPOT が厳しく TTFT が緩い」で有利。両方が厳しいとどちらも足りない。干渉の強さと TPOT は決定係数 0.99 の直線</td>
+<td>この文書の地図と同じ向き。TPOT が支配軸という結論も一致。干渉則の外部検証としても使った</td></tr>
+<tr><td>Splitwise<br>arXiv:2311.18677</td>
+<td>フェーズごとに違う世代の GPU を割り当てる。層ごとに KV 転送を prefill 計算に重ねて、重ねられない残りは A100 で 8 ms、H100 で 5 ms。会話向けは 25P/15T、コード向けは 35P/5T</td>
+<td>この文書が意図的に外した軸 (異種ハードウェア)。<b>同種ハードウェアで比率 1 前後なら、異種にする経済的な利得のほうが大きい可能性がある</b></td></tr>
+<tr><td>SLO 対応の資源割当<br>arXiv:2603.04716</td>
+<td>P と D の台数を、総スループット要求と入出力長から決める理論モデル。prefill 側は M/M/1、decode 側は TPOT を満たすバッチから求める</td>
+<td>構造がこの文書とほぼ同じ。独立に同じ形に到達しているのは、式の骨が正しいことの傍証になる</td></tr>
+<tr><td>NetKV arXiv:2606.03910<br>Topology-aware arXiv:2607.28633</td>
+<td>KV がデータセンター網を渡るので、転送時間が TTFT 予算に直接入る。どの decode インスタンスを選ぶかで結果が変わる</td>
+<td>この文書の incast 項と同じ懸念。ただし 32k の条件では転送は予算の 5 % 以下なので、支配的になるのは KV が重い構成や広域の場合</td></tr>
+<tr><td>Arrow arXiv:2505.11916<br>DOPD arXiv:2511.20982</td>
+<td>入出力長が揺れると固定の P:D 比が崩れるので、動的に付け替える</td>
+<td>この文書の弱点そのもの。最適分割はある 1 つの形に対する答えで、混合トラフィックには脆い</td></tr>
+</table>
+
+<h2>10. 実装側はこの理論をどう書いているか</h2>
+
+<p>理論が現場の実装と同じ形をしているかを確かめる。NVIDIA Dynamo の planner は、まさにこの式を製品として書いている。</p>
+
+<table>
+<tr><th>実装</th><th>該当箇所</th><th>やっていること</th></tr>
+<tr><td>Dynamo planner<br>レプリカ数の決定</td>
+<td><code>components/src/dynamo/planner/core/throughput_scaling.py</code> の <code>_compute_prefill_replicas</code> と <code>_compute_decode_replicas</code></td>
+<td><code>math.ceil(demand_rps / engine_rps)</code>。必要レートを「1 エンジンが約束を守れるレート」で割って切り上げる。この文書の「両プールを同じ式で解く」と同型</td></tr>
+<tr><td>Dynamo prefill 性能モデル</td>
+<td><code>core/perf_model/prefill.py</code> の <code>find_best_engine_prefill_rps</code></td>
+<td><code>engine_rps = 1.0 / wt</code>。prefill は 1 本ずつでもまとめても 1 秒あたり同じトークン数しか進まない、という「バッチに依らない」性質をコメントで明示している。さらに <code>scale = 1.0 - kv_hit_rate</code> でキャッシュヒットぶんを割り引く</td></tr>
+<tr><td>Dynamo decode 性能モデル</td>
+<td><code>core/perf_model/decode.py</code> の <code>find_best_engine_decode_rps</code></td>
+<td>TPOT を満たす最大バッチを二分探索し、<code>engine_rps = best_bs / (osl * wall_time)</code> で Little の法則を適用。上限は <code>max_kv_tokens / context_length</code> と <code>max_num_seqs</code> の小さいほう。この文書の <code>operating_batch()</code> とまったく同じ構造</td></tr>
+<tr><td>Dynamo の設計文書</td>
+<td><code>docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/disaggregated-serving.md</code> の "Capacity effects of disaggregation"</td>
+<td>「低い同時実行では統合のほうが転送と断片化を避けられる」「decode の KV 容量が律速なら prefill レプリカを増やすと総容量が下がる」と明記。普遍的なトークン閾値として書くなと警告している</td></tr>
+<tr><td>SGLang の転送セレクタ</td>
+<td><code>srt/server_args.py</code> の <code>disaggregation_transfer_backend</code> (既定 mooncake) と <code>srt/environ.py</code> の <code>SGLANG_DISAGGREGATION_NIXL_BACKEND</code> (既定 UCX)</td>
+<td>スイッチが 2 段あり、両方の既定が意図と違う方を向く。起動は成功して最初の要求で落ちる。理論とは無関係だが、実機で試すなら最初に踏む罠</td></tr>
+<tr><td>社内の 4P+4D 計画</td>
+<td>社内の検証計画書 (非公開)</td>
+<td>B300 1 ノードで 4 GPU を prefill、4 GPU を decode に割り、<code>NixlConnector</code> と <code>LIBFABRIC</code> で受け渡す計画。この文書の式で見ると 1 対 1 固定は最適比を表現できない配置で、GPU 8 枚は「分離不成立」と出る領域に近い</td></tr>
+</table>
+
+<h2>11. レビューで直したこと、そして残る穴</h2>
+
+<p>この文書のモデルには Fable 5 と Codex (GPT-5.6-sol) の敵対的レビューを 1 回ずつ通した。両者は独立に同じ 3 点を最重要として挙げた。指摘のうち<b>数値が変わるもの 6 件に対応</b>し (5 件は実装修正、1 件は導出で解決)、直せないものは穴として名指しする。</p>
+
+<figure>
+<svg viewBox="0 0 880 210" width="100%" style="max-width:880px" role="img"
+ aria-label="レビュー前と後。2 件の修正が 671B MoE の勝敗を逆転させた">
+<text x="14" y="18" font-size="12.5" fill="#0f4a2e" font-weight="600">671B MoE を B300 64 枚で、他をすべて固定して 1 点ずつ直した (分離 ÷ 統合)</text>
+<text x="14" y="52" font-size="12" fill="#3c5a4c">レビュー前</text>
+<rect x="120" y="38" width="316" height="22" rx="4" fill="#9bd3b3" stroke="#1f7a4d"/>
+<text x="278" y="54" font-size="12" fill="#0f4a2e" text-anchor="middle" font-weight="600">2.107 (分離の勝ち)</text>
+
+<text x="14" y="92" font-size="12" fill="#3c5a4c">MoE の重み読みを</text>
+<text x="14" y="108" font-size="12" fill="#3c5a4c">バッチ依存に直す</text>
+<rect x="120" y="82" width="138" height="22" rx="4" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="189" y="98" font-size="12" fill="#8f2f2f" text-anchor="middle" font-weight="600">0.919</text>
+<text x="270" y="98" font-size="11.5" fill="#3c5a4c">席が増えると触るエキスパートが増えるので、割り勘が効かない</text>
+
+<text x="14" y="140" font-size="12" fill="#3c5a4c">MLA の KV 複製を</text>
+<text x="14" y="156" font-size="12" fill="#3c5a4c">直す (単独の効果)</text>
+<rect x="120" y="130" width="169" height="22" rx="4" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="204" y="146" font-size="12" fill="#8a5a12" text-anchor="middle" font-weight="600">1.127 → 0.919</text>
+<text x="300" y="146" font-size="11.5" fill="#3c5a4c">潜在 KV は全ランクが持つので並列度で割れない</text>
+
+<path d="M14 172 L866 172" stroke="#d5e3da"/>
+<text x="14" y="196" font-size="11.5" fill="#8f2f2f" font-weight="600">看板事例が消えた。</text>
+<text x="150" y="196" font-size="11.5" fill="#3c5a4c">「巨大な重みは割り勘が効くから MoE は分離の教科書的事例」という当初の主張は、MoE の重み読みを正しく書くと成り立たない。</text>
+</svg>
+<figcaption>1 点ずつ切り替えて測った差で、他の条件は固定してある。<b>レビュー 1 件で結論の符号が変わった</b>。この文書がいちばん強く主張したかった事例が、そのまま消えている。残る「重み読みが支配的なほど分離に有利」という向き自体は密モデルの列 (8B から 70B) で単調なので生きているが、MoE をその代表例として持ち出すことはもうできない。</figcaption>
+</figure>
+
+<h3>直したもの</h3>
+
+<table>
+<tr><th>指摘</th><th>誰が</th><th>何が起きていたか</th><th>直した結果</th></tr>
+<tr><td>待ち行列の形が 2 つの構成で違う</td><td>両者</td>
+<td>統合をエンジンごとの独立待ち行列、分離を 1 本のプール待ち行列として書いていた。同じ利用率ならプールのほうが待ちが短いので、<b>分離にルータが提供していない利得を与えていた</b></td>
+<td>両方を同じ形にし、さらに continuous batching に合う processor sharing (<code>S/(1-ρ)</code>) に置き換えた</td></tr>
+<tr><td>MoE の重み読みはバッチに依らない定数ではない</td><td>両者</td>
+<td>バッチが増えると選ばれるエキスパートの種類が増えるので、1 歩で読む重みが増える。定数扱いは<b>看板事例の 671B MoE の利得を過大評価する</b></td>
+<td><code>weight_bytes_read(batch)</code> を実装。256 エキスパート中 8 個選択なら <code>1-(1-8/256)^B</code> の割合が触られる。他をすべて固定してこの 1 点だけ切り替えると、671B MoE の比率は <b>2.107 から 0.919</b> に落ちる。つまり<b>この 1 件で勝敗が逆転する</b></td></tr>
+<tr><td>MLA の KV はテンソル並列で複製される</td><td>Fable</td>
+<td>KV の読み出しと容量を一律に並列度で割っていた。MLA は潜在ベクトルを全ランクが持つので割れない。<b>校正対象そのものが MLA</b> だった</td>
+<td>複製の有無をモデル属性にした。校正の不自然な補正係数 5.95 倍が 1.49 倍まで下がり、671B MoE の比率は 1.127 から 0.919 に動いた</td></tr>
+<tr><td>キャッシュヒット時の prefill 計算量が違う</td><td>Fable</td>
+<td>注意機構の計算を「新規トークン数の 2 乗」で書いていた。実際は新規トークンがキャッシュ済みの部分も読むので「新規 × 全文脈長」に比例する</td>
+<td><code>prefill_flops(new, cached)</code> に分けた。キャッシュ 80 % の行の比率が 0.84 から 0.64 に下がった</td></tr>
+<tr><td>受信側の集中 (incast) が見えていない</td><td>Fable</td>
+<td>転送時間を送信側の帯域だけで書いていた。24P/8D なら受信 1 台に 3 台ぶんが集まる</td>
+<td>decode プールの吸収限界を制約として追加。671B MoE の最適分割が受信側を増やす向き (56P/8D から 48P/16D) に動いた</td></tr>
+<tr><td>chunked prefill が存在しない</td><td>両者</td>
+<td>統合側の逃げ道をモデル化していないので、統合の能力を過小評価している疑いがあった</td>
+<td>陽に導出したら<b>チャンクサイズが打ち消えて同じ上限に戻った</b> (4 節)。実装変更は不要で、代わりに導出を文書に追加した</td></tr>
+</table>
+
+<h3>直せていない穴</h3>
+
+<div class="bad">
+<p style="margin:0 0 8px"><b>1. 契約が分位点なのに、モデルは平均で書かれている。</b>これが両者が挙げた最有力の欠落である。ラボの契約は「TTFT と TPOT の<b>両方</b>を満たした呼び出しが 9 割」で、これはテールの言語である。平均 TPOT が 90 ms でも 2 割が 150 ms なら不合格になる。そして<b>長い prefill による TPOT のスパイクを消すことは分離の第一の存在理由</b>なので、平均値モデルは分離の主たる強みを構造的にゼロにしている。つまりこの文書で「統合の勝ち」と出た行ほど疑わしい。これは限界ではなく欠落で、直すには到着のばらつきと入出力長の分布を入れた待ち行列か、離散事象シミュレーションが必要になる。</p>
+<p style="margin:0 0 8px"><b>2. フェーズごとの並列度と異種ハードウェアを外している。</b>MoE の decode が巨大なエキスパート並列を要求するのは、実運用で分離が勝つ主因である。それを外したモデルが「671B MoE が教科書的事例」と語るのは筋が通らない、という Fable の指摘は正しい。この文書は入力欄 (<code>decode_gpus_per_engine</code>、<code>decode_gpu</code>、<code>decode_kv_bonus</code>) を持つだけで、そこを埋めた分析はしていない。</p>
+<p style="margin:0 0 8px"><b>3. decode 側の待ちがない。</b>KV スロットが空くまでの待ち、最初の 1 歩までの残り時間、バッチが形成されるまでの待ちが計上されていない。長文脈のシナリオでは席数が KV 容量の上限に張り付くので、<b>いちばん粗い近似をいちばん結論を出したい場所で使っている</b>ことになる。</p>
+<p style="margin:0"><b>4. 混合トラフィックと多ターンを見ていない。</b>最適分割はある 1 つの入出力長に対する答えで、実際の負荷は短入力長出力と長入力短出力の混合である。固定分割はこの比の揺れに弱く、統合は自動的に適応する。多ターン会話で前のターンの KV がエンジンに残る効果も、素朴には分離に不利な向きに働く。</p>
+</div>
+
+<h2>12. 使い方</h2>
+
+<p>コードは 5 ファイル、依存は標準ライブラリだけで、GPU も不要である (手元のリポジトリの <code>investigations/disagg-theory/</code> に置いてある)。</p>
+
+<pre><span class="c"># カタログ値だけで地図を描く</span>
+python3 run.py results/scenarios.json   <span class="c"># 33 シナリオの判定表</span>
+python3 sweep.py                        <span class="c"># TPOT x 入力長の地図と 4 本の掃引</span>
+python3 calibrate.py                    <span class="c"># AIM345 の実測で校正し、予測と照合する</span>
+</pre>
+
+<table>
+<tr><th>ファイル</th><th>役割</th></tr>
+<tr><td><code>catalog.py</code></td><td>GPU、モデル、回線の入力値。すべて「入力であって結果ではない」と明記してある。MoE のエキスパート数と MLA の複製フラグもここ</td></tr>
+<tr><td><code>model.py</code></td><td>理論の本体。<code>prefill_engine_seconds</code>、<code>decode_step_seconds</code>、<code>operating_batch</code>、<code>aggregated_feasible</code>、<code>disaggregated_feasible</code>、<code>diagnose</code></td></tr>
+<tr><td><code>scenarios.py</code></td><td>33 の条件。TPOT 軸、TTFT 軸、形状軸、キャッシュ軸、KV 軸、回線軸、規模軸、スケジューラ感度</td></tr>
+<tr><td><code>calibrate.py</code></td><td>ラボの実測 sweep を貼り、2 定数を合わせて残り 6 行を予測する。自由度と制約の勘定もここに書いた</td></tr>
+<tr><td><code>sweep.py</code></td><td>地図と掃引。<code>results/sweeps.json</code> に出力</td></tr>
+</table>
+
+<p>自分の環境に当てるときは、カタログ値をそのまま信じないで <code>calibrate.py</code> の型で 2 つだけ測るのが早い。<b>(1) 合格できた最大レートから逆算した 1 リクエストの GPU 秒</b>と、<b>(2) decode のバッチを何段か変えたときの 1 歩の時間</b>である。この 2 つが決まれば、TPOT の約束と GPU 数を振るだけで地図が描ける。</p>
+
+<div class="lead">
+<p style="margin:0 0 8px"><b>まとめ。</b>分離推論が効く条件は 3 つに絞れる。<b>decode の 1 歩が重み読みに支配されていること</b> (重みが大きく文脈が短い)、<b>TPOT の約束が厳しいこと</b> (基準構成では 15 ms 前後まで締めて初めて比率が 1 を超え、20 ms では 0.95 から 0.98 で互角どまり)、<b>プールが十分大きいこと</b> (GPU 8 枚では分離が成立しない)。逆に、超長文脈、緩い TPOT、高いキャッシュ再利用、小さなプールは分離が負ける側である。そして<b>回線の速さと入力の長さは、通俗的な理解に反してほとんど効いていない</b>。</p>
+<p style="margin:0"><b>ただし最大の留保を繰り返す。</b>この文書はすべて平均値で書かれており、実際の契約は分位点である。分離の第一の存在理由であるテールの隔離が構造的に見えていないので、<b>ここで「統合の勝ち」と出た行は、テールを入れたら逆転しうる</b>。地図は探索範囲を絞る道具であって、判定を代行する道具ではない。</p>
+</div>
+
+<p class="foot">
+実測値の出典: <code>awslabs/awsome-distributed-ai</code> ブランチ <code>riv2026/aim345-content</code> commit <code>f1ad17b</code> の <code>examples/use-cases/disaggregated-inference-prefill-decode/VALIDATION.md</code> および <code>README.md</code>、<code>DECISION-FRAMEWORK.md</code>。引用した外部研究: arXiv:2401.09670 (DistServe)、arXiv:2403.02310 (Sarathi-Serve)、arXiv:2311.18677 (Splitwise)、arXiv:2508.01989 (TaiChi)、arXiv:2603.04716、arXiv:2606.03910 (NetKV)、arXiv:2607.28633、arXiv:2505.11916 (Arrow)、arXiv:2511.20982 (DOPD)、arXiv:2510.08544 (SPAD)、arXiv:2502.07903 (HexGen-2)。実装の参照: <code>ai-dynamo/dynamo</code> の <code>components/src/dynamo/planner/</code> と <code>docs/fern/pages/.../disaggregated-serving.md</code>。モデル本体は <code>investigations/disagg-theory/</code> の 5 ファイル (<code>catalog.py</code>、<code>model.py</code>、<code>scenarios.py</code>、<code>sweep.py</code>、<code>calibrate.py</code>)。レビューは Fable 5 と Codex GPT-5.6-sol に各 1 回で、生の回答は手元に保存してある。
+</p>
+
+</div>
+</body>
+</html>
