@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tierbook のしくみ ― 機械が置いてある所から、人が打つコマンドまで</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:27px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:46px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 8px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4}
+pre .r{color:#ffb3ac}
+pre .o{color:#ffd79a}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.demo{border:1px solid var(--line);border-radius:10px;margin:18px 0;overflow:hidden;background:var(--card)}
+.demo>summary{padding:12px 16px;background:var(--gp);color:var(--gd);font-weight:600;cursor:pointer;font-size:15px}
+.demo>div{padding:4px 16px 16px}
+.layers{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.layer{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)}
+.layer .tag{display:inline-block;font-size:12px;background:var(--g);color:#fff;padding:2px 9px;
+border-radius:20px;margin-bottom:6px}
+.layer h4{margin:2px 0 6px;font-size:16px;color:var(--gd)}
+.layer p{margin:4px 0 0;font-size:14.5px;color:var(--ink2)}
+.arrow{text-align:center;color:var(--g2);font-size:20px;line-height:1}
+figure{margin:20px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px}
+ul,ol{padding-left:22px}
+li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.pill{display:inline-block;font-size:12.5px;padding:2px 9px;border-radius:20px;background:var(--gp);
+color:var(--gd);border:1px solid var(--line);margin:2px 3px 2px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="index.html">&larr; 目次にもどる</a></p>
+
+<h1>tierbook のしくみ<br>機械が置いてある所から、人が打つコマンドまで</h1>
+
+<div class="lead">
+<p><b>tierbook が何をする道具か、一文で。</b>質問に答えるための機械が何台かあって、性能も値段も違う。
+どの質問をどの機械に回すかを決めて、<b>安く済ませつつ正解率をなるべく落とさない</b>ための道具です。</p>
+<p style="margin-bottom:0">ただし tierbook の本体は「振り分け」そのものではありません。
+<b>本体は「その振り分けが本当に得だったと言えるか」を、言えないときには言えないと拒否する部分</b>です。
+この文書は、下の機械の話から順に、その拒否がどこに置かれているかまでを追います。</p>
+</div>
+
+<h2>1. なぜ「拒否する道具」なのか</h2>
+
+<p>普通に作ると、こういう物ができます。「質問を見て、簡単そうなら安い機械、難しそうなら高い機械に回す。
+結果、費用が 30% 下がりました」。数字は出ます。しかし<b>その数字が本当かどうかを確かめる方法がありません。</b></p>
+
+<p>この研究では、確かめようとするたびに同じ形の失敗が出ました。数字は出ていて、意味が無い。</p>
+
+<table>
+<tr><th>起きたこと</th><th>数字は出ていた</th><th>何が足りなかったか</th></tr>
+<tr><td>答えの取り出し方が壊れていた</td><td class="n">正解率 0.1599</td><td>10 択で当てずっぽうが 0.10 なので「弱いモデル」に見えた。実は <b>2,364 問中 1,822 問が「A」</b>に落ちていた</td></tr>
+<tr><td>達成目標が最初から不可能だった</td><td class="n">許可された回送 141 回</td><td>床に届くには<b>最低 167 回</b>必要。<b>書かれた日から誰も達成できなかった</b></td></tr>
+<tr><td>信号が「強い」と報告された</td><td class="n">0.8285</td><td>比較相手が<b>当てずっぽう(0.5)</b>だった。本当の比較相手は <b>0.6583</b>、しかも無料の代替が <b>0.8895</b></td></tr>
+<tr><td>費用の項目が効いていた</td><td class="n">その価値の 87%</td><td><b>漏洩</b>。呼び出しが終わってから分かる「実際の課金額」を、その呼び出しの判断に使っていた</td></tr>
+</table>
+
+<p><b>だから tierbook は「言えないときに言えないと言う」ことに作りの中心を置いています。</b>
+上の 4 つは全部、いま tierbook では<b>そのまま書けません</b>(拒否されます)。以下でその置き場所を見ていきます。</p>
+
+<h2>2. 全体の 5 層 ― 下から上へ</h2>
+
+<div class="layers">
+<div class="layer"><span class="tag">第 1 層・機械</span>
+<h4>答えを作る機械そのもの</h4>
+<p>GPU に載せた自前のモデル(このプロジェクトでは Kubernetes 上の GPU 2 枚)と、
+お金を払って使う外部の API。<b>tierbook はここを作りません。</b>ここは利用者が選んで用意します。</p></div>
+<div class="arrow">&darr;</div>
+<div class="layer"><span class="tag">第 2 層・観測</span>
+<h4>いまの状態を読む</h4>
+<p>機械が何件抱えているか、空いているか、料金がいくらか。<b>読めなかった項目は「読めなかった」と記録し、
+0 で埋めません。</b>混んでいるのに 0 と書くと「空いている」と読まれて、いちばん高い機械に流れます。</p></div>
+<div class="arrow">&darr;</div>
+<div class="layer"><span class="tag">第 3 層・判断</span>
+<h4>どこに回すかを決める</h4>
+<p>あらかじめ作った表を 1 回引くだけ。<b>その場で計算しません。</b>
+理由は、後で「なぜそう決めたか」を再現できる必要があるからです。</p></div>
+<div class="arrow">&darr;</div>
+<div class="layer"><span class="tag">第 4 層・記録</span>
+<h4>決めたことと、その後どうなったかを書く</h4>
+<p>追記だけ。<b>後から書き換えません。</b>書き換えられる記録から計算した成績は、根拠になりません。</p></div>
+<div class="arrow">&darr;</div>
+<div class="layer"><span class="tag">第 5 層・判定</span>
+<h4>その記録で何が言えるか、言えないかを出す</h4>
+<p>ここが本体です。<b>合格・不合格・そして「この記録では判定できない」の 3 つ</b>を返します。
+3 つ目があることが要点です。</p></div>
+</div>
+
+<figure>
+<svg viewBox="0 0 900 300" width="100%" style="max-width:900px" role="img" aria-label="1 件のリクエストが 5 層を通る流れ">
+<defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L0,6 L7,3 z" fill="#2f9e63"/></marker></defs>
+<rect x="8" y="120" width="112" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="64" y="143" font-size="13" text-anchor="middle" fill="#0f4a2e">質問が来る</text>
+<text x="64" y="161" font-size="11" text-anchor="middle" fill="#3c5a4c">1 件</text>
+<line x1="122" y1="148" x2="164" y2="148" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<rect x="168" y="112" width="126" height="72" rx="8" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="231" y="136" font-size="13" text-anchor="middle" fill="#0f4a2e">状態を読む</text>
+<text x="231" y="154" font-size="11" text-anchor="middle" fill="#3c5a4c">混雑・値段</text>
+<text x="231" y="170" font-size="11" text-anchor="middle" fill="#8a5a12">読めなければ空欄</text>
+<line x1="296" y1="148" x2="338" y2="148" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<rect x="342" y="112" width="126" height="72" rx="8" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="405" y="136" font-size="13" text-anchor="middle" fill="#0f4a2e">表を 1 回引く</text>
+<text x="405" y="154" font-size="11" text-anchor="middle" fill="#3c5a4c">その場で計算しない</text>
+<text x="405" y="170" font-size="11" text-anchor="middle" fill="#3c5a4c">= 再現できる</text>
+<line x1="470" y1="130" x2="512" y2="96" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<line x1="470" y1="166" x2="512" y2="200" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<rect x="516" y="62" width="118" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="575" y="85" font-size="13" text-anchor="middle" fill="#0f4a2e">安い機械</text>
+<text x="575" y="103" font-size="11" text-anchor="middle" fill="#3c5a4c">自前 GPU</text>
+<rect x="516" y="178" width="118" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="575" y="201" font-size="13" text-anchor="middle" fill="#0f4a2e">高い機械</text>
+<text x="575" y="219" font-size="11" text-anchor="middle" fill="#3c5a4c">外部 API</text>
+<line x1="636" y1="90" x2="678" y2="132" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<line x1="636" y1="206" x2="678" y2="164" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<rect x="682" y="112" width="120" height="72" rx="8" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="742" y="136" font-size="13" text-anchor="middle" fill="#0f4a2e">記録に追記</text>
+<text x="742" y="154" font-size="11" text-anchor="middle" fill="#3c5a4c">決定 + 結果</text>
+<text x="742" y="170" font-size="11" text-anchor="middle" fill="#3c5a4c">書き換えない</text>
+<line x1="742" y1="188" x2="742" y2="228" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
+<rect x="640" y="232" width="204" height="52" rx="8" fill="#fff" stroke="#1f7a4d" stroke-width="2"/>
+<text x="742" y="253" font-size="13" text-anchor="middle" fill="#0f4a2e">判定: 合格 / 不合格 /</text>
+<text x="742" y="271" font-size="13" text-anchor="middle" fill="#8a5a12">この記録では判定できない</text>
+</svg>
+<figcaption>1 件のリクエストが通る道。右下の「判定できない」があることが、この道具の性格を決めています。</figcaption>
+</figure>
+
+<h2>3. 第 1 層 ― 機械はどこにあるか</h2>
+
+<p>このプロジェクトの実験では、こういう構成で動かしました。</p>
+
+<table>
+<tr><th>置き場所</th><th>何が動いているか</th><th>役割</th></tr>
+<tr><td>Kubernetes(GPU 2 枚)</td><td>推論サーバに自前モデルを載せたもの</td><td>安い側。1 台に複数モデルを載せられる</td></tr>
+<tr><td>外部 API</td><td>使った分だけ払うモデル</td><td>高い側。安い方が無理そうなときだけ回す</td></tr>
+<tr><td>ゲートウェイ</td><td>Envoy + 外部処理(ext_proc)</td><td>実際に行き先を選ぶ。<b>ここは業界標準の物を使い、tierbook は作りません</b></td></tr>
+</table>
+
+<div class="box">
+<p style="margin-top:0"><b>ここは 3 台や 4 台でも成り立ちます。</b>「箱」と「モデル」は一対一ではありません。
+1 台の推論サーバに複数のモデルを載せることもあり、設定も変わります。だから tierbook の側は
+<b>台数もモデルの数も決め打ちにしていません。</b></p>
+<p style="margin-bottom:0"><b>そして API も判断の途中に入れられます。</b>「最後の行き先」だけでなく、
+「途中で API に聞いて、その答えを見て決める」形も表現できます。</p>
+</div>
+
+<h3>作らないと決めた物 ― これが実は重要です</h3>
+<p>行き先の探索、待ち行列の採点、キャッシュの当たり具合、故障時の切り替え、モデルの世代管理。
+<b>全部、業界標準の仕組みが既に持っています。</b>作り直すと、価値ではなく<b>追随の負債</b>が増えるだけです。</p>
+<p>だから tierbook が推論サーバ側に求めるものは、次の 3 つだけに絞りました。</p>
+<ol>
+<li><b>結果を後から受け取る口</b>(正解だったか、いくらかかったか)</li>
+<li><b>1 ステップで何件処理したかの数</b>(どの行がどのリクエストか対応づけるため)</li>
+<li><b>「私は答えない方がいい」を返す通路</b></li>
+</ol>
+<div class="warn">
+<p style="margin:0"><b>3 番目は今も無いので、回避策で動かしています。</b>推論サーバの拡張点には
+「行き先を返す通路」がありません。仕方なく<b>答えの文章の中に決まった文字列を混ぜて</b>合図にしています。
+1 ビット伝えるのに生成を数回ぶん使い、両側が同じ文字列を知っている必要があります。
+コードには「本来はこう直すべき」という文も一緒に書いてあります ―
+<b>回避策を設計と勘違いさせないため</b>です。</p>
+</div>
+
+<h2>4. 第 2 層 ― 読めなかったものを 0 で埋めない</h2>
+
+<p>ここは短い層ですが、いちばん間違えやすい所です。</p>
+
+<div class="bad">
+<p style="margin:0"><b>やってはいけないこと。</b>「いま何件抱えているか」が読めなかったときに <code>0</code> を入れる。
+<b>0 は「空いている」と読まれます。</b>だから混んでいる機械に「空いています」という札が付き、
+そこに流し込みます。<b>読めなかったのなら、項目そのものを空にする</b>のが正解です。</p>
+</div>
+
+<p>空だと、次の層は「この項目が無いので、私はこの判断を保証できません」と言います。<b>止まりません、答えます。</b>
+ただし<b>「保証つき」の印を付けません。</b>この区別が、あとで成績を計算するときに効きます。</p>
+
+<h2>5. 第 3 層 ― その場で考えず、表を引く</h2>
+
+<p>オンラインでやるのは<b>表を 1 回引くこと</b>だけです。賢い計算はしません。理由は 2 つ。</p>
+<ul>
+<li><b>速い。</b>判断が遅いと、判断のために節約したぶんが消えます。</li>
+<li><b>再現できる。</b>あとで同じ入力を流したときに<b>同じ答えが出る</b>必要があります。</li>
+</ul>
+
+<div class="box">
+<p style="margin-top:0"><b>2 つ目が、この作りのいちばん深い制約になっています。</b>
+素直に作ると「結果が返ってきたら、その場でしきい値を少し直す」という形になります。
+これをやると、<b>N 番目の判断が「その前に何件の結果が届いたか」で変わります。</b>
+届く順番は通信の速さで決まるので、<b>同じ問題をもう一度流すと違う判断をします。</b>エラーも出ません。
+動いているように見えます。</p>
+<p style="margin-bottom:0">なので tierbook では<b>結果は追記だけ</b>にして、しきい値は
+<b>後からまとめて作り直した「束」</b>から読みます。代償として<b>いま観測した結果は次の束まで挙動を変えません。</b>
+速くはならず、<b>やり直せるようになる</b>だけです。だから「取り込めていない件数」を数える関数を付けて、
+<b>作り直す間隔を人が決められる</b>ようにしました。</p>
+</div>
+
+<h2>6. 第 4 層 ― 記録は追記だけ</h2>
+
+<p>1 件の判断について、こういうことを書きます。</p>
+
+<table>
+<tr><th>書くこと</th><th>なぜ必要か</th></tr>
+<tr><td>候補全部と、選ばなかった理由</td><td>理由は<b>決まった語彙</b>から選びます。自由記述だと後で集計できません</td></tr>
+<tr><td>選ぶ確率</td><td>「別の選択の方が良かった」と後で言うために必須。<b>後から復元できません</b></td></tr>
+<tr><td>使った設定の中身のハッシュ</td><td>名前ではなく中身。名前は同じで中身が違う、が起きます</td></tr>
+<tr><td>値段の根拠(出所・日付・順序)</td><td>値段そのものは古くなります。<b>もう一度求められる材料</b>を残します</td></tr>
+<tr><td>この記録で言えないこと</td><td>「欠け」として明示。<b>足りないことが黙って消えないように</b></td></tr>
+</table>
+
+<div class="warn">
+<p style="margin:0"><b>「値段の根拠」が入っているのは、1 日溶かしたからです。</b>
+9 つの候補の「安い/高い」の分け方を、<b>3 つの文書の文章から逆算</b>して復元し、
+元の 168 件と一致するのを確かめてやっと確定しました。価格は実行時に取得していて、
+<b>取得した値を残していなかった</b>のです。しかも<b>件数を偶然知っていたから</b>復元できました。
+いちばん誰も書き残さないのは<b>「どちらが安かったか」の順序</b>で、判断が動くのはそこです。</p>
+</div>
+
+<h2>7. 第 5 層 ― 判定と、そこに置いた拒否</h2>
+
+<p>ここが本体です。ここまでの記録を読んで、<b>合格・不合格・判定できない</b>を返します。
+そして<b>「本当は言えないこと」を言おうとすると拒否</b>します。</p>
+
+<h3>置いてある拒否、一覧</h3>
+<table>
+<tr><th>言おうとしたこと</th><th>拒否する理由</th></tr>
+<tr><td>「差が無い」</td><td>「有意でない」は「差が無い」ではありません。<b>専用の検定と、事前に決めた許容範囲</b>が必要です</td></tr>
+<tr><td>「有意でなかった」(勝ち負けが分かれたのが 5 件以下)</td><td><b>どんなデータでも有意になり得ません</b>(最小の p が 0.0625)。それは標本の小ささの話で、世界の話ではありません</td></tr>
+<tr><td>比べた設定を言わずに順位を出す</td><td>信号は交差します。<b>ある水準で分かれる 3 つの信号が、厳しい 1 割では全部同じ値</b>になります</td></tr>
+<tr><td>採点する対象で閾値を決めて、その判定を出す</td><td>同じ価格ごとに候補が 7 通りでき、<b>最良を取ると報告する幅がそのまま膨らみます</b></td></tr>
+<tr><td>測定条件が違う 2 つを比べる</td><td>差は<b>腕の差ではなく、一部は質問の差</b>です</td></tr>
+<tr><td>単位が違う費用を引き算する</td><td><b>どの単位でもない数</b>が出て、それが費用の優位そのものに見えます</td></tr>
+<tr><td>率を単独で出して何かを否定する</td><td>0.8934 は、横に 0.9156 があれば結論を運べません</td></tr>
+<tr><td>合格した検査 1 つだけ報告する</td><td>部分的な結果ではなく<b>別の主張</b>です</td></tr>
+</table>
+
+<h2>8. デモ ― 実際に打って、実際に返ってきたもの</h2>
+
+<p>以下は<b>実際に実行した出力をそのまま</b>貼っています。作った出力ではありません。</p>
+
+<details class="demo" open><summary>デモ 1 ― その目標、そもそも達成できるか(実測の事故を再現)</summary><div>
+<p>「1,187 問で、正解率 0.90 を、回送 141 回以内で達成する」という目標がありました。打ってみます。</p>
+<pre><span class="c">$ tierbook floor-feasibility --items 1187 --target api \
+    --floor 0.90 --box-solved 902 --target-rescued 280 --escalation-budget 141</span>
+
+floor 0.9000 vs api (box 0.7599, ceiling 0.9958, gamma 0.5939, needs &gt;=167 rescues, &lt;=141 escalations)
+<span class="r">unsatisfiable: the bar permits 141 escalations and reaching floor 0.9000 from a box at 0.7599
+over 1187 items needs at least 167 net rescues. No signal, no oracle and no mechanism can meet it;
+this is arithmetic, so the finding is about the bar</span>
+<span class="o">exit=2</span></pre>
+<p><b>読み方。</b>安い機械は 1,187 問中 902 問正解しています。0.90 に届くには
+<b>あと 167 問を間違いから正解に変える</b>必要があります。しかし<b>許可された回送は 141 回。</b>
+<b>どんな信号でも、完璧な予知でも不可能</b>です。しかもこれは<b>ただの足し算</b>なので、
+<b>目標が書かれた日に分かったこと</b>です。実際には気付かれず、何度も「信号が悪い」と責められました。</p>
+<p><b>終了コードが 2 で、1 ではない</b>のも意図です。<b>何も壊れておらず、どの方策も悪くない</b> ―
+悪いのは目標の側です。</p>
+</div></details>
+
+<details class="demo"><summary>デモ 2 ― 判定器を、違うモデルに繋いだとき</summary><div>
+<p>「難しそうか」を測る判定器は、特定のモデルの中身に合わせて作られています。別のモデルに繋ぐと?</p>
+<pre><span class="c">$ tierbook admit-judge --judge-id prefill-gate/0.1 --digest &lt;作ったときのモデルのハッシュ&gt; \
+    --served ./別のモデル --base-rate-correct 180 --base-rate-total 253</span>
+
+<span class="r">refused: judge 'prefill-gate/0.1' was built on 1b27ef7294e2ad2c and the served model is
+a5bafe56228ac330. A carried judge measurably still works -- 0.7176 against 0.7529 for the
+matched one, an interval including zero -- so this cannot be caught downstream by the gate
+looking wrong</span></pre>
+<p><b>読み方。</b>ここが怖いところです。<b>間違ったモデルに繋いだ判定器も「動きます」。</b>
+実測で 0.7176 対 0.7529(正しい方)で、<b>その差は誤差の範囲</b>でした。
+つまり<b>後から見て「おかしい」と気付く方法がありません。</b>だから<b>流し始める前に止めます。</b></p>
+<p><b>鍵はモデルの「名前」ではなく「中身のハッシュ」です。</b>
+名前・語彙の数・層の数・数値の型が<b>全部一致する 2 つのモデル</b>を実際に測ったところ、
+<b>同じ質問に対する内部の状態が、別の質問どうしより遠かった</b>のです。名前では区別できません。</p>
+</div></details>
+
+<details class="demo"><summary>デモ 3 ― その信号、門の判断に使っていいか</summary><div>
+<p>3 つの信号を宣言して、生成前の判断に使えるか聞きます。</p>
+<pre><span class="c">$ tierbook admissible-quantities --served ./model --elicitation-name terse \
+    --elicitation-template ./prompt.txt \
+    --quantity "field_name:scalar:after_prefill:passive_observation:<b>topic</b>:1:30:r1" \
+    --quantity "jlens:scalar:<b>during_compute</b>:active_probe:own_competence:2:30:r1" \
+    --quantity "answer_length:scalar:<b>after_generation</b>:passive_observation:own_competence:1:30:r1"</span>
+
+<span class="r">not usable</span>: field_name/r1 (about <b>topic</b>, scalar, after_prefill, passive_observation, free)
+<span class="o">usable</span>: jlens/r1 (about own_competence, scalar, during_compute, active_probe, 1 extra pass(es))
+<span class="r">not usable</span>: answer_length/r1 (about own_competence, scalar, <b>after_generation</b>, passive_observation, free)
+1 of 3 quantities are admissible to a pre-generation gate</pre>
+<p><b>3 つとも別の理由で落ちたり通ったりしています。</b></p>
+<ul>
+<li><b>1 つ目は「何についての信号か」が違う。</b>これは<b>分野を当てる</b>信号です。実測では
+<b>分野の当てはめが偶然の 5.3 倍(0.7593 対 0.1429)</b>なのに、<b>自分の誤りの予測は 0.4227 で、
+コイン投げの 0.5 を下回りました。</b>強いけれど、<b>逆向き</b>です。これを通すと
+「難しさで振り分けている」と報告しながら<b>実際は分野で振り分ける</b>ことになります。</li>
+<li><b>2 つ目は通ります。</b>生成の前(読み込みの計算中)に取れて、この機械自身の実力についての信号だからです。
+追加で 1 回読む必要があるので「無料ではない」と表示されています。</li>
+<li><b>3 つ目は遅すぎる。</b>答えを書き終えてから分かる信号です。
+<b>門が避けたかった費用は、その時点でもう払っています。</b></li>
+</ul>
+</div></details>
+
+<details class="demo"><summary>デモ 4 ― 合格した検査 1 つを報告させない</summary><div>
+<p>「この振る舞いは、モデルが言葉にできる作戦だ」という主張を、登録した基準ごとに見ます。</p>
+<pre><span class="c">$ tierbook registered-criteria --conclusion "the fallback is a verbalizable strategy" \
+    --null-median 0.7584 --null-at-quantile 0.7928 --null-draws 1000 \
+    --criterion "beats-its-null:0.8285:above:-:declared_in_advance" \
+    --criterion "outside-the-letter-span:0.754:below:0.50:declared_in_advance" \
+    --alternative "free-output-entropy:0.8895"</span>
+
+<span class="o">holds</span>: beats-its-null: 0.8285 &gt; 0.7928 (declared_in_advance, margin <b>+0.0357</b>)
+<span class="r">FAILS</span>: outside-the-letter-span: 0.7540 &lt; 0.5000 (declared_in_advance, margin <b>-0.2540</b>)
+alternative: free-output-entropy at <b>0.8895</b>
+<span class="r">'the fallback is a verbalizable strategy' is not supported</span> -- criteria
+['outside-the-letter-span'] did not hold; and a freely available alternative beat it:
+['free-output-entropy']</pre>
+<p><b>1 行目だけを報告すると、合格に見えます。</b>「並べ替えた偽データに勝った」は本当です。
+しかし<b>2 つ目の基準は落ち</b>、しかも<b>無料で手に入る読み出しが 0.8895 で上</b>です。</p>
+<p><b>だから「勝った 1 つを報告する関数」を作っていません。</b>
+合格した検査だけを出すのは、部分的な結果ではなく<b>別の主張</b>だからです。</p>
+</div></details>
+
+<h2>9. 型付き API(Jev / TypeSafe AI)の取り込み</h2>
+
+<p>2026 年 9 月に公開された、<b>「文字列ではなく型付きの決定を返す」</b>インタフェースを取り込みました。
+売り文句は 2 つで、<b>片方は本物、もう片方は主張です。</b></p>
+
+<table>
+<tr><th>売り文句</th><th>何についての話か</th><th>判定</th></tr>
+<tr><td>「型エラーを起こさない」</td><td><b>形</b></td><td><b>本物。</b>文法に縛った出力なので、<b>読めない答えは原理的に出ません</b></td></tr>
+<tr><td>「確率は較正済み」</td><td><b>中身</b></td><td><b>主張。</b>文法を 1 度も破らずに<b>間違った選択肢に 0.99 を置ける</b></td></tr>
+</table>
+
+<div class="bad">
+<p style="margin:0"><b>この 2 つを混ぜると事故になります。</b>「形式エラー 0%」を「読み取りに問題なし」と読むことです。
+このプロジェクトの実測では、<b>2,364 問中 1,822 問が「A」</b>に落ちていて、
+<b>その全部が形式として完璧に正しい答え</b>でした。だから型付きの出力に対しても
+<b>偏りの検査はそのまま走ります。</b></p>
+</div>
+
+<p><b>確率の側の扱い。</b>「較正済み」と<b>書いてある</b>ことと、<b>誰かが実際に測った</b>ことを分けました。
+測っていない確率に対して<b>「0.85 を 85% と読む」ことは拒否</b>し、
+拒否の文で<b>「較正がいらない使い方」も案内します ― 順位付け</b>です。
+順番に並べるだけなら較正は不要で、そこは最初から使えます。</p>
+
+<div class="warn">
+<p style="margin:0"><b>いま測れません。</b>この API は<b>早期アクセスの順番待ち</b>で、叩けません。
+なので<b>インタフェースは実装済み、数字はゼロ</b>です。入力の単価は $0.042/MTok
+(frontier は $0.20〜$10)と公表されていますが、<b>こちらで確かめた数字ではありません。</b></p>
+</div>
+
+<p><b>それでも取り込む価値がある理由。</b>答えと<b>一緒に</b>返ってくる確率は
+<b>追加の読み込みが 0 回</b>です。この作りの費用計算では、<b>門が使える信号としていちばん安い</b>ことになります。</p>
+
+<div class="box">
+<p style="margin:0"><b>ただし、埋まらない穴には届きません。</b>振り分けが本当に得かを決めるのは
+<b>「高い機械が正解する確率」−「安い機械が正解する確率」</b>です。
+安い機械が返す自信は<b>2 番目の項</b>の別の見積もりにすぎません。
+<b>1 番目の項は、安い機械の中を見ても分かりません。</b>そこは今も空席です。</p>
+</div>
+
+<h2>10. いまの規模と、正直な限界</h2>
+
+<table>
+<tr><th>項目</th><th>数</th></tr>
+<tr><td>モジュール</td><td class="n">38</td></tr>
+<tr><td>テスト</td><td class="n">66 ファイル・1,964 通過</td></tr>
+<tr><td>実験からの記録</td><td class="n">122 項目</td></tr>
+<tr><td>人が打てるコマンド</td><td class="n">16</td></tr>
+</table>
+
+<p><b>テストの作り方について 1 つ。</b>この作りでは、機構を足すたびに
+<b>その機構をわざと壊して、テストが落ちることを確認</b>しています。
+通るだけのテストは、<b>何も検査していなくても通ります。</b></p>
+
+<h3>できていないこと</h3>
+<ul>
+<li><b>GPU 秒での費用が測れていません。</b>トークン数は費用の弱い代理で、
+<b>トークンで勝っている方策が GPU 秒で負けることがあります。</b>測るには<b>負荷をかける</b>必要があり、
+問題数を増やしても取れません。</li>
+<li><b>いちばん欲しい信号がありません。</b>「高い方に回すと得か」を予測する信号は、
+<b>誰も持っていません。</b>「難しいか」は測れて、「回すと得か」は測れていません。</li>
+<li><b>Jev の数字はゼロです。</b>順番待ちのため。</li>
+</ul>
+
+<div class="lead">
+<p style="margin:0"><b>最後に一文。</b>この道具の値打ちは「30% 安くなりました」と言えることではなく、
+<b>「その 30% は言えます / 言えません」を分けられること</b>です。
+上の 4 つのデモは全部、<b>言えないことを言おうとして止められた</b>例でした。</p>
+</div>
+
+<p class="foot">
+出典はすべてこのプロジェクト自身の実測です。デモの出力は実際にコマンドを実行して得たものをそのまま貼っています。<br>
+数字の一覧: 正解率 0.1599(10 択・当てずっぽう 0.10)/ 1,822 of 2,364 が「A」/ 必要な救出 167 対 許可 141 /
+判定器 0.7176 対 0.7529 / 分野 0.7593 対 偶然 0.1429、自己の誤り 0.4227 / 基準 0.8285 対 帰無 0.7928、無料の代替 0.8895 /
+読み込み 0.109 秒 対 生成 10.42 秒(約 95 倍)/ 費用項目の 87% が漏洩。
+</p>
+
+</div>
+</body>
+</html>
