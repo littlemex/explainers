@@ -3,20 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tierbook のしくみ ― 機械が置いてある所から、人が打つコマンドまで</title>
+<title>tierbook の構成 ― stratoclave・vLLM Semantic Router との実際の接合</title>
 <style>
 :root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
---g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb}
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
 font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
-.wrap{max-width:1000px;margin:0 auto;padding:36px 24px 90px}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
 a{color:var(--g)}
 .nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
-h1{font-size:27px;margin:0 0 12px;line-height:1.4;border-bottom:3px solid var(--g);padding-bottom:14px}
-h2{font-size:20px;margin:46px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h1{font-size:26px;margin:0 0 12px;line-height:1.45;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
 h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
-.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 8px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
 .lead b{color:var(--gd)}
 table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
 th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
@@ -27,397 +28,518 @@ td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
 .warn b{color:var(--warn)}
 .bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
 .bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
 pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
-font-size:13px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+font-size:12.8px;line-height:1.62;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 pre .c{color:#8fd6b4}
 pre .r{color:#ffb3ac}
 pre .o{color:#ffd79a}
+pre .k{color:#9ecbff}
 code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
 font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.demo{border:1px solid var(--line);border-radius:10px;margin:18px 0;overflow:hidden;background:var(--card)}
-.demo>summary{padding:12px 16px;background:var(--gp);color:var(--gd);font-weight:600;cursor:pointer;font-size:15px}
-.demo>div{padding:4px 16px 16px}
-.layers{display:flex;flex-direction:column;gap:10px;margin:18px 0}
-.layer{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)}
-.layer .tag{display:inline-block;font-size:12px;background:var(--g);color:#fff;padding:2px 9px;
-border-radius:20px;margin-bottom:6px}
-.layer h4{margin:2px 0 6px;font-size:16px;color:var(--gd)}
-.layer p{margin:4px 0 0;font-size:14.5px;color:var(--ink2)}
-.arrow{text-align:center;color:var(--g2);font-size:20px;line-height:1}
-figure{margin:20px 0;text-align:center}
-figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
 ul,ol{padding-left:22px}
 li{margin:5px 0}
 .foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
-.pill{display:inline-block;font-size:12.5px;padding:2px 9px;border-radius:20px;background:var(--gp);
-color:var(--gd);border:1px solid var(--line);margin:2px 3px 2px 0}
+.who{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.who>div{flex:1 1 300px;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)}
+.who h4{margin:0 0 6px;font-size:15.5px;color:var(--gd)}
+.who p{margin:4px 0;font-size:14px;color:var(--ink2)}
+.who .t{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:20px;margin-bottom:6px;
+background:var(--g);color:#fff}
+.who .t.b{background:var(--b)}
 </style>
 </head>
 <body>
 <div class="wrap">
 <p class="nav"><a href="index.html">&larr; 目次にもどる</a></p>
 
-<h1>tierbook のしくみ<br>機械が置いてある所から、人が打つコマンドまで</h1>
+<h1>tierbook の構成<br>stratoclave・vLLM Semantic Router との実際の接合</h1>
 
 <div class="lead">
-<p><b>tierbook が何をする道具か、一文で。</b>質問に答えるための機械が何台かあって、性能も値段も違う。
-どの質問をどの機械に回すかを決めて、<b>安く済ませつつ正解率をなるべく落とさない</b>ための道具です。</p>
-<p style="margin-bottom:0">ただし tierbook の本体は「振り分け」そのものではありません。
-<b>本体は「その振り分けが本当に得だったと言えるか」を、言えないときには言えないと拒否する部分</b>です。
-この文書は、下の機械の話から順に、その拒否がどこに置かれているかまでを追います。</p>
+<p><b>この文書が答えること。</b>質問をどのモデルに回すかを決める仕組みは、実際には
+<b>3 つの別プロジェクトが 3 つの別の仕事をして</b>成り立っています。どれが何を持っていて、
+<b>境界にどんな項目が流れるのか</b>を、実際のコードの名前で示します。</p>
+<p style="margin-bottom:0">図はすべて<b>手元の実物を読んで</b>描いています
+(stratoclave <b>v1.5.0</b>、tierbook の依存グラフは計算した実測、vLLM 側の設定は
+実際に生成される構造)。想像で描いた線は 1 本もありません。</p>
 </div>
 
-<h2>1. なぜ「拒否する道具」なのか</h2>
+<h2>1. 登場する 3 つのプロジェクト ― 仕事が重なっていません</h2>
 
-<p>普通に作ると、こういう物ができます。「質問を見て、簡単そうなら安い機械、難しそうなら高い機械に回す。
-結果、費用が 30% 下がりました」。数字は出ます。しかし<b>その数字が本当かどうかを確かめる方法がありません。</b></p>
-
-<p>この研究では、確かめようとするたびに同じ形の失敗が出ました。数字は出ていて、意味が無い。</p>
-
-<table>
-<tr><th>起きたこと</th><th>数字は出ていた</th><th>何が足りなかったか</th></tr>
-<tr><td>答えの取り出し方が壊れていた</td><td class="n">正解率 0.1599</td><td>10 択で当てずっぽうが 0.10 なので「弱いモデル」に見えた。実は <b>2,364 問中 1,822 問が「A」</b>に落ちていた</td></tr>
-<tr><td>達成目標が最初から不可能だった</td><td class="n">許可された回送 141 回</td><td>床に届くには<b>最低 167 回</b>必要。<b>書かれた日から誰も達成できなかった</b></td></tr>
-<tr><td>信号が「強い」と報告された</td><td class="n">0.8285</td><td>比較相手が<b>当てずっぽう(0.5)</b>だった。本当の比較相手は <b>0.6583</b>、しかも無料の代替が <b>0.8895</b></td></tr>
-<tr><td>費用の項目が効いていた</td><td class="n">その価値の 87%</td><td><b>漏洩</b>。呼び出しが終わってから分かる「実際の課金額」を、その呼び出しの判断に使っていた</td></tr>
-</table>
-
-<p><b>だから tierbook は「言えないときに言えないと言う」ことに作りの中心を置いています。</b>
-上の 4 つは全部、いま tierbook では<b>そのまま書けません</b>(拒否されます)。以下でその置き場所を見ていきます。</p>
-
-<h2>2. 全体の 5 層 ― 下から上へ</h2>
-
-<div class="layers">
-<div class="layer"><span class="tag">第 1 層・機械</span>
-<h4>答えを作る機械そのもの</h4>
-<p>GPU に載せた自前のモデル(このプロジェクトでは Kubernetes 上の GPU 2 枚)と、
-お金を払って使う外部の API。<b>tierbook はここを作りません。</b>ここは利用者が選んで用意します。</p></div>
-<div class="arrow">&darr;</div>
-<div class="layer"><span class="tag">第 2 層・観測</span>
-<h4>いまの状態を読む</h4>
-<p>機械が何件抱えているか、空いているか、料金がいくらか。<b>読めなかった項目は「読めなかった」と記録し、
-0 で埋めません。</b>混んでいるのに 0 と書くと「空いている」と読まれて、いちばん高い機械に流れます。</p></div>
-<div class="arrow">&darr;</div>
-<div class="layer"><span class="tag">第 3 層・判断</span>
-<h4>どこに回すかを決める</h4>
-<p>あらかじめ作った表を 1 回引くだけ。<b>その場で計算しません。</b>
-理由は、後で「なぜそう決めたか」を再現できる必要があるからです。</p></div>
-<div class="arrow">&darr;</div>
-<div class="layer"><span class="tag">第 4 層・記録</span>
-<h4>決めたことと、その後どうなったかを書く</h4>
-<p>追記だけ。<b>後から書き換えません。</b>書き換えられる記録から計算した成績は、根拠になりません。</p></div>
-<div class="arrow">&darr;</div>
-<div class="layer"><span class="tag">第 5 層・判定</span>
-<h4>その記録で何が言えるか、言えないかを出す</h4>
-<p>ここが本体です。<b>合格・不合格・そして「この記録では判定できない」の 3 つ</b>を返します。
-3 つ目があることが要点です。</p></div>
+<div class="who">
+<div><span class="t b">gateway</span>
+<h4>stratoclave</h4>
+<p><b>お金の正本</b>を持つ汎用 AI Gateway。誰の依頼か確認し、予算を先に押さえ、
+呼び出し、実際の使用量で精算し、<b>台帳に追記</b>します。</p>
+<p><b>品質は主張しません。</b>設計文書に <code>Quality is NOT asserted here</code> と明記されています。</p></div>
+<div><span class="t">router</span>
+<h4>vLLM Semantic Router</h4>
+<p>依頼を見て<b>分類し、モデル名を 1 つ選ぶ</b>。接続そのものは Envoy が持ち、
+分類は外部処理(ext_proc)として動きます。</p>
+<p><b>自前の多要素選択器を持っています</b>が、tierbook はそれを<b>使いません</b>(理由は 4 章)。</p></div>
+<div><span class="t">evidence</span>
+<h4>tierbook</h4>
+<p><b>証拠の正本</b>。「この振り分けが得だったと本当に言えるか」を判定し、
+<b>言えないときは言えないと拒否</b>します。</p>
+<p>stratoclave が主張しないと明言した<b>品質の側</b>を、ちょうど埋めます。</p></div>
 </div>
+
+<div class="note">
+<p style="margin:0"><b>3 つが噛み合う一文。</b>stratoclave の設計文書はこの流れをこう書いています ―
+<code>routing judgment (VSR) → execution → ledger-precision charge → span_id reconciliation →
+a counterfactual savings figure a CFO can audit</code>。<b>「いくら安くなったか」は監査できる形で出ます。</b>
+そこに<b>「その安さは品質を落としていないと言えるのか」</b>が抜けていて、それが tierbook です。</p>
+</div>
+
+<h2>2. 実コンポーネント構成 ― 1 件の依頼が通る道</h2>
 
 <figure>
-<svg viewBox="0 0 900 300" width="100%" style="max-width:900px" role="img" aria-label="1 件のリクエストが 5 層を通る流れ">
-<defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-<path d="M0,0 L0,6 L7,3 z" fill="#2f9e63"/></marker></defs>
-<rect x="8" y="120" width="112" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
-<text x="64" y="143" font-size="13" text-anchor="middle" fill="#0f4a2e">質問が来る</text>
-<text x="64" y="161" font-size="11" text-anchor="middle" fill="#3c5a4c">1 件</text>
-<line x1="122" y1="148" x2="164" y2="148" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<rect x="168" y="112" width="126" height="72" rx="8" fill="#e8f4ec" stroke="#2f9e63"/>
-<text x="231" y="136" font-size="13" text-anchor="middle" fill="#0f4a2e">状態を読む</text>
-<text x="231" y="154" font-size="11" text-anchor="middle" fill="#3c5a4c">混雑・値段</text>
-<text x="231" y="170" font-size="11" text-anchor="middle" fill="#8a5a12">読めなければ空欄</text>
-<line x1="296" y1="148" x2="338" y2="148" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<rect x="342" y="112" width="126" height="72" rx="8" fill="#e8f4ec" stroke="#2f9e63"/>
-<text x="405" y="136" font-size="13" text-anchor="middle" fill="#0f4a2e">表を 1 回引く</text>
-<text x="405" y="154" font-size="11" text-anchor="middle" fill="#3c5a4c">その場で計算しない</text>
-<text x="405" y="170" font-size="11" text-anchor="middle" fill="#3c5a4c">= 再現できる</text>
-<line x1="470" y1="130" x2="512" y2="96" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<line x1="470" y1="166" x2="512" y2="200" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<rect x="516" y="62" width="118" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
-<text x="575" y="85" font-size="13" text-anchor="middle" fill="#0f4a2e">安い機械</text>
-<text x="575" y="103" font-size="11" text-anchor="middle" fill="#3c5a4c">自前 GPU</text>
-<rect x="516" y="178" width="118" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
-<text x="575" y="201" font-size="13" text-anchor="middle" fill="#0f4a2e">高い機械</text>
-<text x="575" y="219" font-size="11" text-anchor="middle" fill="#3c5a4c">外部 API</text>
-<line x1="636" y1="90" x2="678" y2="132" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<line x1="636" y1="206" x2="678" y2="164" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<rect x="682" y="112" width="120" height="72" rx="8" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
-<text x="742" y="136" font-size="13" text-anchor="middle" fill="#0f4a2e">記録に追記</text>
-<text x="742" y="154" font-size="11" text-anchor="middle" fill="#3c5a4c">決定 + 結果</text>
-<text x="742" y="170" font-size="11" text-anchor="middle" fill="#3c5a4c">書き換えない</text>
-<line x1="742" y1="188" x2="742" y2="228" stroke="#2f9e63" stroke-width="2" marker-end="url(#a)"/>
-<rect x="640" y="232" width="204" height="52" rx="8" fill="#fff" stroke="#1f7a4d" stroke-width="2"/>
-<text x="742" y="253" font-size="13" text-anchor="middle" fill="#0f4a2e">判定: 合格 / 不合格 /</text>
-<text x="742" y="271" font-size="13" text-anchor="middle" fill="#8a5a12">この記録では判定できない</text>
+<svg viewBox="0 0 980 520" width="100%" style="max-width:980px" role="img"
+ aria-label="クライアントから stratoclave、Semantic Router、推論エンジンまでの実コンポーネント構成">
+<defs>
+<marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L0,6 L7,3 z" fill="#2f9e63"/></marker>
+<marker id="ab" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L0,6 L7,3 z" fill="#1d4e8f"/></marker>
+<marker id="ag" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L0,6 L7,3 z" fill="#8a5a12"/></marker>
+</defs>
+
+<rect x="10" y="14" width="150" height="46" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="85" y="34" font-size="13" text-anchor="middle" fill="#0f4a2e">クライアント</text>
+<text x="85" y="50" font-size="11" text-anchor="middle" fill="#3c5a4c">OpenAI / Anthropic 互換</text>
+
+<rect x="10" y="82" width="430" height="176" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="2"/>
+<text x="24" y="104" font-size="13.5" fill="#1d4e8f" font-weight="600">stratoclave v1.5.0 — お金の正本</text>
+<rect x="24" y="116" width="192" height="38" rx="6" fill="#fff" stroke="#bed3ea"/>
+<text x="120" y="132" font-size="11.5" text-anchor="middle" fill="#12241c">1. 認証 + モデル許可リスト</text>
+<text x="120" y="147" font-size="10.5" text-anchor="middle" fill="#3c5a4c">C1 Admission</text>
+<rect x="232" y="116" width="192" height="38" rx="6" fill="#fff" stroke="#bed3ea"/>
+<text x="328" y="132" font-size="11.5" text-anchor="middle" fill="#12241c">2. 料率を凍結して予約</text>
+<text x="328" y="147" font-size="10.5" text-anchor="middle" fill="#3c5a4c">C2 Price identity</text>
+<rect x="24" y="162" width="192" height="38" rx="6" fill="#fff" stroke="#bed3ea"/>
+<text x="120" y="178" font-size="11.5" text-anchor="middle" fill="#12241c">3. 呼び出し (seam)</text>
+<text x="120" y="193" font-size="10.5" text-anchor="middle" fill="#3c5a4c">_pipeline.py</text>
+<rect x="232" y="162" width="192" height="38" rx="6" fill="#fff" stroke="#bed3ea"/>
+<text x="328" y="178" font-size="11.5" text-anchor="middle" fill="#12241c">4. 実使用量で精算 + 追記</text>
+<text x="328" y="193" font-size="10.5" text-anchor="middle" fill="#3c5a4c">C4 charge of record</text>
+<rect x="24" y="208" width="400" height="38" rx="6" fill="#fff" stroke="#1d4e8f"/>
+<text x="224" y="224" font-size="11.5" text-anchor="middle" fill="#1d4e8f" font-weight="600">served_by = "bedrock" | "vllm" | "semantic-router"</text>
+<text x="224" y="239" font-size="10.5" text-anchor="middle" fill="#3c5a4c">virtual なモデルは semantic-router 必須。sr_pool_ref でプールを名指し</text>
+
+<line x1="85" y1="62" x2="85" y2="78" stroke="#1d4e8f" stroke-width="2" marker-end="url(#ab)"/>
+
+<rect x="470" y="82" width="330" height="120" rx="10" fill="#e8f4ec" stroke="#2f9e63" stroke-width="2"/>
+<text x="484" y="104" font-size="13.5" fill="#0f4a2e" font-weight="600">vLLM Semantic Router</text>
+<rect x="484" y="116" width="140" height="34" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="554" y="131" font-size="11.5" text-anchor="middle" fill="#12241c">Envoy</text>
+<text x="554" y="145" font-size="10.5" text-anchor="middle" fill="#3c5a4c">接続を持つ</text>
+<rect x="640" y="116" width="146" height="34" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="713" y="131" font-size="11.5" text-anchor="middle" fill="#12241c">ext_proc</text>
+<text x="713" y="145" font-size="10.5" text-anchor="middle" fill="#3c5a4c">分類してモデル名を返す</text>
+<rect x="484" y="158" width="302" height="32" rx="6" fill="#fff" stroke="#2f9e63"/>
+<text x="635" y="178" font-size="11" text-anchor="middle" fill="#0f4a2e">decisions[].rules.conditions → モデル 1 つ (strategy: priority)</text>
+
+<line x1="424" y1="227" x2="452" y2="227" stroke="#1d4e8f" stroke-width="2"/>
+<line x1="452" y1="227" x2="452" y2="142" stroke="#1d4e8f" stroke-width="2"/>
+<line x1="452" y1="142" x2="466" y2="142" stroke="#1d4e8f" stroke-width="2" marker-end="url(#ab)"/>
+
+<rect x="826" y="82" width="144" height="56" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="898" y="103" font-size="12" text-anchor="middle" fill="#0f4a2e">外部 API</text>
+<text x="898" y="120" font-size="10.5" text-anchor="middle" fill="#3c5a4c">使った分だけ払う</text>
+<rect x="826" y="150" width="144" height="70" rx="8" fill="#fff" stroke="#d5e3da"/>
+<text x="898" y="170" font-size="12" text-anchor="middle" fill="#0f4a2e">自前 vLLM (GPU)</text>
+<text x="898" y="186" font-size="10.5" text-anchor="middle" fill="#3c5a4c">Kubernetes 上</text>
+<text x="898" y="201" font-size="10.5" text-anchor="middle" fill="#8a5a12">1 台に複数モデル可</text>
+<line x1="802" y1="130" x2="822" y2="112" stroke="#2f9e63" stroke-width="2" marker-end="url(#ar)"/>
+<line x1="802" y1="152" x2="822" y2="176" stroke="#2f9e63" stroke-width="2" marker-end="url(#ar)"/>
+
+<rect x="10" y="286" width="430" height="86" rx="10" fill="#fff" stroke="#1d4e8f" stroke-dasharray="4 3"/>
+<text x="24" y="308" font-size="13" fill="#1d4e8f" font-weight="600">決定ログ (run_id, span_id)</text>
+<text x="24" y="328" font-size="11.5" fill="#12241c">potential (助言のみ) と realized (実際に効いた) を厳密分離</text>
+<text x="24" y="346" font-size="11.5" fill="#12241c">span_id で「請求されたモデル」に join できる</text>
+<text x="24" y="364" font-size="11" fill="#8a5a12">Savings Certificate = CFO が監査できる差額。品質は主張しない</text>
+<line x1="224" y1="258" x2="224" y2="282" stroke="#1d4e8f" stroke-width="2" marker-end="url(#ab)"/>
+
+<rect x="470" y="286" width="500" height="200" rx="10" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="484" y="308" font-size="13.5" fill="#0f4a2e" font-weight="600">tierbook — 証拠の正本</text>
+<rect x="484" y="320" width="230" height="50" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="599" y="338" font-size="11.5" text-anchor="middle" fill="#12241c">オフライン: compile</text>
+<text x="599" y="354" font-size="10.5" text-anchor="middle" fill="#3c5a4c">台帳 → 引くだけの表</text>
+<rect x="726" y="320" width="230" height="50" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="841" y="338" font-size="11.5" text-anchor="middle" fill="#12241c">export-vsr</text>
+<text x="841" y="354" font-size="10.5" text-anchor="middle" fill="#3c5a4c">router の v0.3 設定を生成</text>
+<rect x="484" y="380" width="230" height="50" rx="6" fill="#fff" stroke="#d5e3da"/>
+<text x="599" y="398" font-size="11.5" text-anchor="middle" fill="#12241c">オンライン: assign</text>
+<text x="599" y="414" font-size="10.5" text-anchor="middle" fill="#3c5a4c">表を 1 回引き、決定を追記</text>
+<rect x="726" y="380" width="230" height="50" rx="6" fill="#fff" stroke="#1f7a4d"/>
+<text x="841" y="398" font-size="11.5" text-anchor="middle" fill="#0f4a2e" font-weight="600">accept</text>
+<text x="841" y="414" font-size="10.5" text-anchor="middle" fill="#3c5a4c">合格 / 不合格 / 判定できない</text>
+<rect x="484" y="440" width="472" height="34" rx="6" fill="#fff" stroke="#8a5a12"/>
+<text x="720" y="461" font-size="11" text-anchor="middle" fill="#8a5a12">ここが stratoclave の「品質は主張しない」を埋める部分</text>
+
+<line x1="841" y1="316" x2="841" y2="206" stroke="#8a5a12" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<text x="855" y="262" font-size="10.5" fill="#8a5a12">設定を配る</text>
+<line x1="470" y1="404" x2="444" y2="404" stroke="#8a5a12" stroke-width="2" stroke-dasharray="5 3"/>
+<line x1="444" y1="404" x2="444" y2="330" stroke="#8a5a12" stroke-width="2"/>
+<line x1="444" y1="330" x2="444" y2="330" stroke="#8a5a12" stroke-width="2"/>
+<text x="300" y="398" font-size="10.5" fill="#8a5a12">決定ログを読む</text>
+<line x1="440" y1="392" x2="418" y2="376" stroke="#8a5a12" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ag)"/>
 </svg>
-<figcaption>1 件のリクエストが通る道。右下の「判定できない」があることが、この道具の性格を決めています。</figcaption>
+<figcaption><b>実線は依頼が通る道、点線は設定と記録の流れ。</b>
+青が stratoclave(お金)、緑が振り分けと証拠。stratoclave の中の
+<code>served_by</code> と <code>sr_pool_ref</code>、router 側の <code>decisions[].rules.conditions</code>、
+tierbook の 4 つのコマンドは<b>すべて実物のコードにある名前</b>です。</figcaption>
 </figure>
 
-<h2>3. 第 1 層 ― 機械はどこにあるか</h2>
+<div class="box">
+<p style="margin-top:0"><b>いちばん重要な線が 1 本あります。</b>stratoclave のモデル定義には
+<code>served_by</code> という項目があり、値は <code>"bedrock"</code> / <code>"vllm"</code> /
+<code>"semantic-router"</code> の 3 つだけです。そして<b>「実体を持たない仮想モデル」は
+<code>served_by="semantic-router"</code> でなければならない</b>と検証で強制されており、
+<code>sr_pool_ref</code> で<b>具体的なモデルではなくルーターのプールを名指し</b>します。</p>
+<p style="margin-bottom:0"><b>つまり「賢く振り分ける」は、gateway から見れば 1 つのモデル名です。</b>
+利用者は普通にモデルを 1 つ指定し、その裏で振り分けが起きます。
+<b>この一段があるので、振り分けの中身を差し替えても利用者側は何も変えなくて済みます。</b></p>
+</div>
 
-<p>このプロジェクトの実験では、こういう構成で動かしました。</p>
+<h2>3. 2 つの台帳 ― 同じ 1 件を、違う目的で記録する</h2>
+
+<p>ここが構成のいちばんの要点です。<b>台帳が 2 つあり、片方は「お金の正本」、もう片方は「証拠の正本」です。</b>
+どちらかに寄せると壊れます。</p>
 
 <table>
-<tr><th>置き場所</th><th>何が動いているか</th><th>役割</th></tr>
-<tr><td>Kubernetes(GPU 2 枚)</td><td>推論サーバに自前モデルを載せたもの</td><td>安い側。1 台に複数モデルを載せられる</td></tr>
-<tr><td>外部 API</td><td>使った分だけ払うモデル</td><td>高い側。安い方が無理そうなときだけ回す</td></tr>
-<tr><td>ゲートウェイ</td><td>Envoy + 外部処理(ext_proc)</td><td>実際に行き先を選ぶ。<b>ここは業界標準の物を使い、tierbook は作りません</b></td></tr>
+<tr><th></th><th>stratoclave の台帳</th><th>tierbook の台帳</th></tr>
+<tr><td><b>正本として持つもの</b></td><td>いくら請求したか(charge of record)</td><td>なぜそう決めたか、そこから何が言えるか</td></tr>
+<tr><td><b>答える問い</b></td><td>この依頼を受けていいか / 料率は凍結されたか / 精算は着地したか</td><td>この記録は、いま主張しようとしている内容を支えられるか</td></tr>
+<tr><td><b>拒否するもの</b></td><td>凍結できない料率 / 再計算できない請求</td><td>設定を名乗らない比較 / 単独で出された率 / 合格した検査 1 つだけの報告</td></tr>
+<tr><td><b>品質について</b></td><td><b>主張しない</b>と明記(<code>Quality is NOT asserted here</code>)</td><td><b>ここが担当</b></td></tr>
+<tr><td><b>結び付ける鍵</b></td><td colspan="2" style="text-align:center"><code>(run_id, span_id)</code> — 同じ 1 件を両側から指せる</td></tr>
 </table>
 
-<div class="box">
-<p style="margin-top:0"><b>ここは 3 台や 4 台でも成り立ちます。</b>「箱」と「モデル」は一対一ではありません。
-1 台の推論サーバに複数のモデルを載せることもあり、設定も変わります。だから tierbook の側は
-<b>台数もモデルの数も決め打ちにしていません。</b></p>
-<p style="margin-bottom:0"><b>そして API も判断の途中に入れられます。</b>「最後の行き先」だけでなく、
-「途中で API に聞いて、その答えを見て決める」形も表現できます。</p>
-</div>
-
-<h3>作らないと決めた物 ― これが実は重要です</h3>
-<p>行き先の探索、待ち行列の採点、キャッシュの当たり具合、故障時の切り替え、モデルの世代管理。
-<b>全部、業界標準の仕組みが既に持っています。</b>作り直すと、価値ではなく<b>追随の負債</b>が増えるだけです。</p>
-<p>だから tierbook が推論サーバ側に求めるものは、次の 3 つだけに絞りました。</p>
-<ol>
-<li><b>結果を後から受け取る口</b>(正解だったか、いくらかかったか)</li>
-<li><b>1 ステップで何件処理したかの数</b>(どの行がどのリクエストか対応づけるため)</li>
-<li><b>「私は答えない方がいい」を返す通路</b></li>
-</ol>
-<div class="warn">
-<p style="margin:0"><b>3 番目は今も無いので、回避策で動かしています。</b>推論サーバの拡張点には
-「行き先を返す通路」がありません。仕方なく<b>答えの文章の中に決まった文字列を混ぜて</b>合図にしています。
-1 ビット伝えるのに生成を数回ぶん使い、両側が同じ文字列を知っている必要があります。
-コードには「本来はこう直すべき」という文も一緒に書いてあります ―
-<b>回避策を設計と勘違いさせないため</b>です。</p>
-</div>
-
-<h2>4. 第 2 層 ― 読めなかったものを 0 で埋めない</h2>
-
-<p>ここは短い層ですが、いちばん間違えやすい所です。</p>
-
+<h3>なぜ分けるのか ― 混ぜたときに何が壊れるか</h3>
 <div class="bad">
-<p style="margin:0"><b>やってはいけないこと。</b>「いま何件抱えているか」が読めなかったときに <code>0</code> を入れる。
-<b>0 は「空いている」と読まれます。</b>だから混んでいる機械に「空いています」という札が付き、
-そこに流し込みます。<b>読めなかったのなら、項目そのものを空にする</b>のが正解です。</p>
+<p style="margin:0"><b>お金の台帳に品質の判定を持たせると、請求が判定に依存します。</b>
+品質の判定は後から変わります(測り直す、母集団を変える、基準を追加する)。
+<b>請求が後から変わってはいけません。</b>逆に、証拠の台帳にお金の正本を持たせると、
+<b>「言えない」と言うたびに請求が止まります。</b>止めてはいけません ―
+判定できないことは、請求しない理由ではありません。</p>
 </div>
 
-<p>空だと、次の層は「この項目が無いので、私はこの判断を保証できません」と言います。<b>止まりません、答えます。</b>
-ただし<b>「保証つき」の印を付けません。</b>この区別が、あとで成績を計算するときに効きます。</p>
-
-<h2>5. 第 3 層 ― その場で考えず、表を引く</h2>
-
-<p>オンラインでやるのは<b>表を 1 回引くこと</b>だけです。賢い計算はしません。理由は 2 つ。</p>
-<ul>
-<li><b>速い。</b>判断が遅いと、判断のために節約したぶんが消えます。</li>
-<li><b>再現できる。</b>あとで同じ入力を流したときに<b>同じ答えが出る</b>必要があります。</li>
-</ul>
-
-<div class="box">
-<p style="margin-top:0"><b>2 つ目が、この作りのいちばん深い制約になっています。</b>
-素直に作ると「結果が返ってきたら、その場でしきい値を少し直す」という形になります。
-これをやると、<b>N 番目の判断が「その前に何件の結果が届いたか」で変わります。</b>
-届く順番は通信の速さで決まるので、<b>同じ問題をもう一度流すと違う判断をします。</b>エラーも出ません。
-動いているように見えます。</p>
-<p style="margin-bottom:0">なので tierbook では<b>結果は追記だけ</b>にして、しきい値は
-<b>後からまとめて作り直した「束」</b>から読みます。代償として<b>いま観測した結果は次の束まで挙動を変えません。</b>
-速くはならず、<b>やり直せるようになる</b>だけです。だから「取り込めていない件数」を数える関数を付けて、
-<b>作り直す間隔を人が決められる</b>ようにしました。</p>
+<h3>potential と realized を混ぜない</h3>
+<p>stratoclave は<b>「助言しただけ」と「実際に効いた」を厳密に分けて</b>記録します。
+これは段階的な導入(Shadow → Canary → Full)のためで、最初の 2 週間は
+<b>振り分けを相談するが実行はしない</b>状態で走ります。</p>
+<div class="note">
+<p style="margin:0"><b>この分離は tierbook 側の要求と同じ形です。</b>tierbook も
+「その方策を実際に走らせた結果」と「走らせていれば得られたはずの結果」を混ぜません。
+混ぜた数字は<b>実測でも予測でもない第三の何か</b>になり、どちらとしても使えなくなります。</p>
 </div>
 
-<h2>6. 第 4 層 ― 記録は追記だけ</h2>
+<h2>4. 境界に流れる項目 ― 実名で</h2>
 
-<p>1 件の判断について、こういうことを書きます。</p>
+<p>境界ごとに、<b>実際に何が渡るか</b>です。すべて実物のコードから取りました。</p>
 
-<table>
-<tr><th>書くこと</th><th>なぜ必要か</th></tr>
-<tr><td>候補全部と、選ばなかった理由</td><td>理由は<b>決まった語彙</b>から選びます。自由記述だと後で集計できません</td></tr>
-<tr><td>選ぶ確率</td><td>「別の選択の方が良かった」と後で言うために必須。<b>後から復元できません</b></td></tr>
-<tr><td>使った設定の中身のハッシュ</td><td>名前ではなく中身。名前は同じで中身が違う、が起きます</td></tr>
-<tr><td>値段の根拠(出所・日付・順序)</td><td>値段そのものは古くなります。<b>もう一度求められる材料</b>を残します</td></tr>
-<tr><td>この記録で言えないこと</td><td>「欠け」として明示。<b>足りないことが黙って消えないように</b></td></tr>
-</table>
+<h3>境界 A ― tierbook → Semantic Router(設定を配る)</h3>
+<pre><span class="c"># tierbook export-vsr が生成する v0.3 設定の骨格</span>
+{
+  <span class="k">"providers"</span>: {
+    <span class="k">"defaults"</span>: { <span class="k">"default_model"</span>: <span class="o">"…"</span> },   <span class="c"># 分類できなかった依頼はここへ</span>
+    <span class="k">"models"</span>: [ { <span class="k">"backend_refs"</span>: [ … ] } ]     <span class="c"># 素のアドレスではなく参照</span>
+  },
+  <span class="k">"routing"</span>: {
+    <span class="k">"strategy"</span>: <span class="o">"priority"</span>,                       <span class="c"># 多要素の採点は使わない</span>
+    <span class="k">"modelCards"</span>: [ { <span class="k">"quality_score"</span>: … } ],    <span class="c"># 記録のためだけ。採点入力ではない</span>
+    <span class="k">"signals"</span>: { <span class="k">"domains"</span>: [ {…} ] },            <span class="c"># 素の文字列ではなくオブジェクト</span>
+    <span class="k">"decisions"</span>: [ {
+      <span class="k">"rules"</span>: { <span class="k">"operator"</span>: <span class="o">"AND"</span>,
+                 <span class="k">"conditions"</span>: [ { <span class="k">"type"</span>: …, <span class="k">"name"</span>: … } ] }
+    } ]
+  }
+}</pre>
 
 <div class="warn">
-<p style="margin:0"><b>「値段の根拠」が入っているのは、1 日溶かしたからです。</b>
-9 つの候補の「安い/高い」の分け方を、<b>3 つの文書の文章から逆算</b>して復元し、
-元の 168 件と一致するのを確かめてやっと確定しました。価格は実行時に取得していて、
-<b>取得した値を残していなかった</b>のです。しかも<b>件数を偶然知っていたから</b>復元できました。
-いちばん誰も書き残さないのは<b>「どちらが安かったか」の順序</b>で、判断が動くのはそこです。</p>
+<p style="margin:0"><b>router 自身の選択器を、意図的に使っていません。</b>
+router には「品質・遅延・費用に重みを付けて選ぶ」機能があります。tierbook はそれを使わず、
+<b>1 つの分類に対してモデルを 1 つ名指しする</b>形だけを出します。理由はコードにこう書いてあります ―
+<b>その場の統計で選ぶと、誰も約束していない証拠で選んだことになり、事故のあと誰も検証できない。</b>
+だから <code>quality_score</code> は<b>記録のためだけ</b>に入っていて、採点の入力ではありません。</p>
 </div>
 
-<h2>7. 第 5 層 ― 判定と、そこに置いた拒否</h2>
-
-<p>ここが本体です。ここまでの記録を読んで、<b>合格・不合格・判定できない</b>を返します。
-そして<b>「本当は言えないこと」を言おうとすると拒否</b>します。</p>
-
-<h3>置いてある拒否、一覧</h3>
+<h3>境界 A で拒否される 4 つ</h3>
 <table>
-<tr><th>言おうとしたこと</th><th>拒否する理由</th></tr>
-<tr><td>「差が無い」</td><td>「有意でない」は「差が無い」ではありません。<b>専用の検定と、事前に決めた許容範囲</b>が必要です</td></tr>
-<tr><td>「有意でなかった」(勝ち負けが分かれたのが 5 件以下)</td><td><b>どんなデータでも有意になり得ません</b>(最小の p が 0.0625)。それは標本の小ささの話で、世界の話ではありません</td></tr>
-<tr><td>比べた設定を言わずに順位を出す</td><td>信号は交差します。<b>ある水準で分かれる 3 つの信号が、厳しい 1 割では全部同じ値</b>になります</td></tr>
-<tr><td>採点する対象で閾値を決めて、その判定を出す</td><td>同じ価格ごとに候補が 7 通りでき、<b>最良を取ると報告する幅がそのまま膨らみます</b></td></tr>
-<tr><td>測定条件が違う 2 つを比べる</td><td>差は<b>腕の差ではなく、一部は質問の差</b>です</td></tr>
-<tr><td>単位が違う費用を引き算する</td><td><b>どの単位でもない数</b>が出て、それが費用の優位そのものに見えます</td></tr>
-<tr><td>率を単独で出して何かを否定する</td><td>0.8934 は、横に 0.9156 があれば結論を運べません</td></tr>
-<tr><td>合格した検査 1 つだけ報告する</td><td>部分的な結果ではなく<b>別の主張</b>です</td></tr>
+<tr><th>状況</th><th>なぜ黙って通さないか</th></tr>
+<tr><td>コンパイル済みの項目が無い分類</td><td>既定でも最安でもなく<b>何も出しません</b>。分類されなかった依頼は router 自身の既定モデルへ行き、それは運用者が意図して設定した先です</td></tr>
+<tr><td><code>provisional</code> な項目</td><td>専用のフラグ無しでは出しません。出すときは<b>設定ファイルの説明文にその事実が残ります</b></td></tr>
+<tr><td>2 段構えの連鎖</td><td><b>連鎖として出せません。</b>先頭だけ出すと<b>安全網が黙って外れます</b>。router は「失敗したら次へ」を観測できないからです</td></tr>
+<tr><td>分類ラベルが宣言されていない分類</td><td>ラベルの集合は運用者が選んだ分類器のものです。<b>推測で対応づけると、別の traffic についての証拠で振り分けます</b></td></tr>
 </table>
 
-<h2>8. デモ ― 実際に打って、実際に返ってきたもの</h2>
-
-<p>以下は<b>実際に実行した出力をそのまま</b>貼っています。作った出力ではありません。</p>
-
-<details class="demo" open><summary>デモ 1 ― その目標、そもそも達成できるか(実測の事故を再現)</summary><div>
-<p>「1,187 問で、正解率 0.90 を、回送 141 回以内で達成する」という目標がありました。打ってみます。</p>
-<pre><span class="c">$ tierbook floor-feasibility --items 1187 --target api \
-    --floor 0.90 --box-solved 902 --target-rescued 280 --escalation-budget 141</span>
-
-floor 0.9000 vs api (box 0.7599, ceiling 0.9958, gamma 0.5939, needs &gt;=167 rescues, &lt;=141 escalations)
-<span class="r">unsatisfiable: the bar permits 141 escalations and reaching floor 0.9000 from a box at 0.7599
-over 1187 items needs at least 167 net rescues. No signal, no oracle and no mechanism can meet it;
-this is arithmetic, so the finding is about the bar</span>
-<span class="o">exit=2</span></pre>
-<p><b>読み方。</b>安い機械は 1,187 問中 902 問正解しています。0.90 に届くには
-<b>あと 167 問を間違いから正解に変える</b>必要があります。しかし<b>許可された回送は 141 回。</b>
-<b>どんな信号でも、完璧な予知でも不可能</b>です。しかもこれは<b>ただの足し算</b>なので、
-<b>目標が書かれた日に分かったこと</b>です。実際には気付かれず、何度も「信号が悪い」と責められました。</p>
-<p><b>終了コードが 2 で、1 ではない</b>のも意図です。<b>何も壊れておらず、どの方策も悪くない</b> ―
-悪いのは目標の側です。</p>
-</div></details>
-
-<details class="demo"><summary>デモ 2 ― 判定器を、違うモデルに繋いだとき</summary><div>
-<p>「難しそうか」を測る判定器は、特定のモデルの中身に合わせて作られています。別のモデルに繋ぐと?</p>
-<pre><span class="c">$ tierbook admit-judge --judge-id prefill-gate/0.1 --digest &lt;作ったときのモデルのハッシュ&gt; \
-    --served ./別のモデル --base-rate-correct 180 --base-rate-total 253</span>
-
-<span class="r">refused: judge 'prefill-gate/0.1' was built on 1b27ef7294e2ad2c and the served model is
-a5bafe56228ac330. A carried judge measurably still works -- 0.7176 against 0.7529 for the
-matched one, an interval including zero -- so this cannot be caught downstream by the gate
-looking wrong</span></pre>
-<p><b>読み方。</b>ここが怖いところです。<b>間違ったモデルに繋いだ判定器も「動きます」。</b>
-実測で 0.7176 対 0.7529(正しい方)で、<b>その差は誤差の範囲</b>でした。
-つまり<b>後から見て「おかしい」と気付く方法がありません。</b>だから<b>流し始める前に止めます。</b></p>
-<p><b>鍵はモデルの「名前」ではなく「中身のハッシュ」です。</b>
-名前・語彙の数・層の数・数値の型が<b>全部一致する 2 つのモデル</b>を実際に測ったところ、
-<b>同じ質問に対する内部の状態が、別の質問どうしより遠かった</b>のです。名前では区別できません。</p>
-</div></details>
-
-<details class="demo"><summary>デモ 3 ― その信号、門の判断に使っていいか</summary><div>
-<p>3 つの信号を宣言して、生成前の判断に使えるか聞きます。</p>
-<pre><span class="c">$ tierbook admissible-quantities --served ./model --elicitation-name terse \
-    --elicitation-template ./prompt.txt \
-    --quantity "field_name:scalar:after_prefill:passive_observation:<b>topic</b>:1:30:r1" \
-    --quantity "jlens:scalar:<b>during_compute</b>:active_probe:own_competence:2:30:r1" \
-    --quantity "answer_length:scalar:<b>after_generation</b>:passive_observation:own_competence:1:30:r1"</span>
-
-<span class="r">not usable</span>: field_name/r1 (about <b>topic</b>, scalar, after_prefill, passive_observation, free)
-<span class="o">usable</span>: jlens/r1 (about own_competence, scalar, during_compute, active_probe, 1 extra pass(es))
-<span class="r">not usable</span>: answer_length/r1 (about own_competence, scalar, <b>after_generation</b>, passive_observation, free)
-1 of 3 quantities are admissible to a pre-generation gate</pre>
-<p><b>3 つとも別の理由で落ちたり通ったりしています。</b></p>
-<ul>
-<li><b>1 つ目は「何についての信号か」が違う。</b>これは<b>分野を当てる</b>信号です。実測では
-<b>分野の当てはめが偶然の 5.3 倍(0.7593 対 0.1429)</b>なのに、<b>自分の誤りの予測は 0.4227 で、
-コイン投げの 0.5 を下回りました。</b>強いけれど、<b>逆向き</b>です。これを通すと
-「難しさで振り分けている」と報告しながら<b>実際は分野で振り分ける</b>ことになります。</li>
-<li><b>2 つ目は通ります。</b>生成の前(読み込みの計算中)に取れて、この機械自身の実力についての信号だからです。
-追加で 1 回読む必要があるので「無料ではない」と表示されています。</li>
-<li><b>3 つ目は遅すぎる。</b>答えを書き終えてから分かる信号です。
-<b>門が避けたかった費用は、その時点でもう払っています。</b></li>
-</ul>
-</div></details>
-
-<details class="demo"><summary>デモ 4 ― 合格した検査 1 つを報告させない</summary><div>
-<p>「この振る舞いは、モデルが言葉にできる作戦だ」という主張を、登録した基準ごとに見ます。</p>
-<pre><span class="c">$ tierbook registered-criteria --conclusion "the fallback is a verbalizable strategy" \
-    --null-median 0.7584 --null-at-quantile 0.7928 --null-draws 1000 \
-    --criterion "beats-its-null:0.8285:above:-:declared_in_advance" \
-    --criterion "outside-the-letter-span:0.754:below:0.50:declared_in_advance" \
-    --alternative "free-output-entropy:0.8895"</span>
-
-<span class="o">holds</span>: beats-its-null: 0.8285 &gt; 0.7928 (declared_in_advance, margin <b>+0.0357</b>)
-<span class="r">FAILS</span>: outside-the-letter-span: 0.7540 &lt; 0.5000 (declared_in_advance, margin <b>-0.2540</b>)
-alternative: free-output-entropy at <b>0.8895</b>
-<span class="r">'the fallback is a verbalizable strategy' is not supported</span> -- criteria
-['outside-the-letter-span'] did not hold; and a freely available alternative beat it:
-['free-output-entropy']</pre>
-<p><b>1 行目だけを報告すると、合格に見えます。</b>「並べ替えた偽データに勝った」は本当です。
-しかし<b>2 つ目の基準は落ち</b>、しかも<b>無料で手に入る読み出しが 0.8895 で上</b>です。</p>
-<p><b>だから「勝った 1 つを報告する関数」を作っていません。</b>
-合格した検査だけを出すのは、部分的な結果ではなく<b>別の主張</b>だからです。</p>
-</div></details>
-
-<h2>9. 型付き API(Jev / TypeSafe AI)の取り込み</h2>
-
-<p>2026 年 9 月に公開された、<b>「文字列ではなく型付きの決定を返す」</b>インタフェースを取り込みました。
-売り文句は 2 つで、<b>片方は本物、もう片方は主張です。</b></p>
-
+<h3>境界 B ― stratoclave ↔ 実行(seam)</h3>
 <table>
-<tr><th>売り文句</th><th>何についての話か</th><th>判定</th></tr>
-<tr><td>「型エラーを起こさない」</td><td><b>形</b></td><td><b>本物。</b>文法に縛った出力なので、<b>読めない答えは原理的に出ません</b></td></tr>
-<tr><td>「確率は較正済み」</td><td><b>中身</b></td><td><b>主張。</b>文法を 1 度も破らずに<b>間違った選択肢に 0.99 を置ける</b></td></tr>
+<tr><th>項目</th><th>実名</th><th>役割</th></tr>
+<tr><td>行き先の種別</td><td><code>served_by</code></td><td><code>bedrock</code> / <code>vllm</code> / <code>semantic-router</code> の 3 つだけ</td></tr>
+<tr><td>ルーターのプール</td><td><code>sr_pool_ref</code></td><td>仮想モデルが<b>具体的なモデルではなくプール</b>を名指す</td></tr>
+<tr><td>実体の有無</td><td><code>virtual</code></td><td>真なら <code>served_by</code> は <code>semantic-router</code> 必須(検証で強制)</td></tr>
+<tr><td>接続先</td><td><code>endpoint_key</code></td><td>自前 vLLM のときの宛先</td></tr>
+<tr><td>料率の鍵</td><td><code>pricing_key</code></td><td>1 つの鍵は 1 つの価格点。<b>値段が違うモデルを同じ鍵に入れると、高い方で請求して報告します</b></td></tr>
 </table>
 
-<div class="bad">
-<p style="margin:0"><b>この 2 つを混ぜると事故になります。</b>「形式エラー 0%」を「読み取りに問題なし」と読むことです。
-このプロジェクトの実測では、<b>2,364 問中 1,822 問が「A」</b>に落ちていて、
-<b>その全部が形式として完璧に正しい答え</b>でした。だから型付きの出力に対しても
-<b>偏りの検査はそのまま走ります。</b></p>
-</div>
+<h3>境界 C ― 決定ログ ↔ 請求(join)</h3>
+<pre><span class="c"># 同じ 1 件を両側から指す鍵</span>
+(<span class="k">run_id</span>, <span class="k">span_id</span>)
 
-<p><b>確率の側の扱い。</b>「較正済み」と<b>書いてある</b>ことと、<b>誰かが実際に測った</b>ことを分けました。
-測っていない確率に対して<b>「0.85 を 85% と読む」ことは拒否</b>し、
-拒否の文で<b>「較正がいらない使い方」も案内します ― 順位付け</b>です。
-順番に並べるだけなら較正は不要で、そこは最初から使えます。</p>
+<span class="c"># 決定の記録に一緒に入るもの(実際の一覧から)</span>
+span_id, request_id, group_id, model_id, pricing_version, …
+
+<span class="c"># これがあるので、こう言える</span>
+<span class="o">「この依頼は VSR が A を勧め、実際は B が請求された。差額はこれ」</span>
+<span class="r">← 品質については何も言っていない。そこが tierbook の担当</span></pre>
+
+<h2 id="s4">4b. 推論エンジンの内側 ― 生成を始める前に止める</h2>
+
+<p>ここまでは「どのモデルに回すか」でした。もう一段内側に、
+<b>「安いモデルが読み込みだけした時点で、自分で降りる」</b>という仕組みがあります。
+これは vLLM の<b>公式の拡張点だけ</b>で作ってあり、fork していません。</p>
+
+<figure>
+<svg viewBox="0 0 940 250" width="100%" style="max-width:940px" role="img"
+ aria-label="vLLM の 3 つの拡張点を使った、生成前に降りる仕組み">
+<defs><marker id="ax" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+<path d="M0,0 L0,6 L7,3 z" fill="#2f9e63"/></marker></defs>
+<rect x="10" y="16" width="920" height="222" rx="10" fill="#e8f4ec" stroke="#2f9e63" stroke-width="2"/>
+<text x="26" y="38" font-size="13.5" fill="#0f4a2e" font-weight="600">vLLM worker の中(1 プロセス)</text>
+
+<rect x="26" y="52" width="270" height="66" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="161" y="72" font-size="12" text-anchor="middle" fill="#12241c">拡張点 1: vllm.general_plugins</text>
+<text x="161" y="90" font-size="10.5" text-anchor="middle" fill="#3c5a4c">重みを読み込んだ後にフックを付ける</text>
+<text x="161" y="106" font-size="10.5" text-anchor="middle" fill="#8a5a12">層は名前でなく構造で探す</text>
+
+<rect x="316" y="52" width="270" height="66" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="451" y="72" font-size="12" text-anchor="middle" fill="#12241c">読み込み(prefill)の途中の状態</text>
+<text x="451" y="90" font-size="10.5" text-anchor="middle" fill="#3c5a4c">中間層の値を 1 つ取り出す</text>
+<text x="451" y="106" font-size="10.5" text-anchor="middle" fill="#8a5a12">この時点でまだ 1 文字も生成していない</text>
+
+<rect x="606" y="52" width="298" height="66" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="755" y="72" font-size="12" text-anchor="middle" fill="#12241c">拡張点 2: --logits-processors</text>
+<text x="755" y="90" font-size="10.5" text-anchor="middle" fill="#3c5a4c">次の語を選ぶ直前に割り込む</text>
+<text x="755" y="106" font-size="10.5" text-anchor="middle" fill="#8a5a12">is_argmax_invariant() は False を返す</text>
+
+<line x1="296" y1="85" x2="312" y2="85" stroke="#2f9e63" stroke-width="2" marker-end="url(#ax)"/>
+<line x1="586" y1="85" x2="602" y2="85" stroke="#2f9e63" stroke-width="2" marker-end="url(#ax)"/>
+
+<rect x="26" y="134" width="430" height="90" rx="7" fill="#fff" stroke="#1f7a4d" stroke-width="2"/>
+<text x="241" y="154" font-size="12.5" text-anchor="middle" fill="#0f4a2e" font-weight="600">続ける場合</text>
+<text x="241" y="176" font-size="11" text-anchor="middle" fill="#12241c">そのまま生成して答える</text>
+<text x="241" y="196" font-size="10.5" text-anchor="middle" fill="#3c5a4c">読み込み 0.109 秒 + 生成 10.42 秒</text>
+<text x="241" y="214" font-size="10.5" text-anchor="middle" fill="#8a5a12">生成は読み込みの約 95 倍</text>
+
+<rect x="474" y="134" width="430" height="90" rx="7" fill="#fdf3e2" stroke="#8a5a12" stroke-width="2"/>
+<text x="689" y="154" font-size="12.5" text-anchor="middle" fill="#8a5a12" font-weight="600">降りる場合</text>
+<text x="689" y="176" font-size="11" text-anchor="middle" fill="#12241c">合図の文字列を出して即終了</text>
+<text x="689" y="196" font-size="10.5" text-anchor="middle" fill="#3c5a4c">行き先は決めない。呼び手が標準の選択器で選ぶ</text>
+<text x="689" y="214" font-size="10.5" text-anchor="middle" fill="#8f2f2f">拡張点に「行動を返す通路」が無いための回避策</text>
+</svg>
+<figcaption>読み込みが終わった時点(まだ 1 文字も生成していない)で降りられます。
+<b>生成は読み込みの約 95 倍</b>なので、降りて浮くのはほぼ全額です。</figcaption>
+</figure>
 
 <div class="warn">
-<p style="margin:0"><b>いま測れません。</b>この API は<b>早期アクセスの順番待ち</b>で、叩けません。
-なので<b>インタフェースは実装済み、数字はゼロ</b>です。入力の単価は $0.042/MTok
-(frontier は $0.20〜$10)と公表されていますが、<b>こちらで確かめた数字ではありません。</b></p>
+<p style="margin:0"><b>3 つ目の拡張点が無いので、回避策で動かしています。</b>
+「行き先ではなく<b>行動</b>を返す」ための通路が拡張点に存在しません。
+仕方なく<b>答えの文章に決まった文字列を混ぜて</b>合図にしています。1 ビット伝えるのに生成を数回ぶん使い、
+両側が同じ文字列を知っている必要があります。<b>珍しい 1 語では足りませんでした</b> ―
+候補 4 つとも、24 万語の語彙で 1 語になりませんでした。コードには
+<b>「本来はこう直すべき」も一緒に書いてあります</b>(回避策を設計と勘違いさせないため)。</p>
 </div>
-
-<p><b>それでも取り込む価値がある理由。</b>答えと<b>一緒に</b>返ってくる確率は
-<b>追加の読み込みが 0 回</b>です。この作りの費用計算では、<b>門が使える信号としていちばん安い</b>ことになります。</p>
 
 <div class="box">
-<p style="margin:0"><b>ただし、埋まらない穴には届きません。</b>振り分けが本当に得かを決めるのは
-<b>「高い機械が正解する確率」−「安い機械が正解する確率」</b>です。
-安い機械が返す自信は<b>2 番目の項</b>の別の見積もりにすぎません。
-<b>1 番目の項は、安い機械の中を見ても分かりません。</b>そこは今も空席です。</p>
+<p style="margin-top:0"><b>行き先を返さないのは意図です。</b>「私は降りる」だけを返し、
+<b>どこへ回すかは呼び手側の標準の選択器</b>が決めます。エンジンが行き先を決めると、
+<b>そのエンジンが第 2 のルーターになり</b>、業界標準の仕組みが既に持っている
+endpoint 選択・待ち行列・故障切り替えを作り直すことになります。</p>
+<p style="margin-bottom:0"><b>ここが 2 章の図と繋がります。</b>降りたあとの行き先選びは
+<b>Semantic Router の仕事</b>で、そこに tierbook が配った設定が効きます。</p>
 </div>
 
-<h2>10. いまの規模と、正直な限界</h2>
+<h2>5. tierbook の内部構造 ― 依存の向きが 1 つに揃っている</h2>
+
+<p>38 モジュールありますが、<b>依存の向きに例外がありません。</b>下の図は<b>実際の import を機械的に数えて</b>作ったもので、
+手で描いたものではありません。</p>
+
+<figure>
+<svg viewBox="0 0 960 430" width="100%" style="max-width:960px" role="img"
+ aria-label="tierbook の内部依存を 4 段で示した図">
+<defs><marker id="au" markerWidth="8" markerHeight="8" refX="6" refY="2.5" orient="auto">
+<path d="M0,0 L0,5 L6,2.5 z" fill="#8fb3a4"/></marker></defs>
+
+<text x="14" y="26" font-size="12.5" fill="#8a5a12" font-weight="600">第 0 段・葉(何にも依存しない)</text>
+<rect x="14" y="34" width="118" height="42" rx="7" fill="#fdf3e2" stroke="#8a5a12" stroke-width="2"/>
+<text x="73" y="52" font-size="12.5" text-anchor="middle" fill="#8a5a12" font-weight="600">evidence</text>
+<text x="73" y="68" font-size="10" text-anchor="middle" fill="#8a5a12">20 が依存</text>
+<rect x="142" y="34" width="94" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="189" y="58" font-size="12" text-anchor="middle" fill="#12241c">record</text>
+<rect x="246" y="34" width="94" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="293" y="58" font-size="12" text-anchor="middle" fill="#12241c">decide</text>
+<rect x="350" y="34" width="94" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="397" y="58" font-size="12" text-anchor="middle" fill="#12241c">config</text>
+<rect x="454" y="34" width="94" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="501" y="58" font-size="12" text-anchor="middle" fill="#12241c">plane</text>
+<rect x="558" y="34" width="98" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="607" y="58" font-size="12" text-anchor="middle" fill="#12241c">escalate</text>
+<rect x="666" y="34" width="94" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="713" y="58" font-size="12" text-anchor="middle" fill="#12241c">lineage</text>
+<rect x="770" y="34" width="94" height="42" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="817" y="58" font-size="12" text-anchor="middle" fill="#12241c">report</text>
+
+<text x="14" y="122" font-size="12.5" fill="#0f4a2e" font-weight="600">第 1 段・語彙と契約(evidence にだけ依存)</text>
+<rect x="14" y="130" width="104" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="66" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">spend</text>
+<rect x="128" y="130" width="104" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="180" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">extraction</text>
+<rect x="242" y="130" width="104" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="294" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">criterion</text>
+<rect x="356" y="130" width="104" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="408" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">bar</text>
+<rect x="470" y="130" width="104" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="522" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">policy</text>
+<rect x="584" y="130" width="104" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="636" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">upstreams</text>
+<rect x="698" y="130" width="128" height="38" rx="7" fill="#e8f4ec" stroke="#2f9e63"/>
+<text x="762" y="153" font-size="11.5" text-anchor="middle" fill="#0f4a2e">outcomes</text>
+<text x="836" y="147" font-size="9.5" fill="#3c5a4c">+extraction</text>
+<text x="836" y="159" font-size="9.5" fill="#3c5a4c">+spend</text>
+
+<line x1="73" y1="78" x2="66" y2="126" stroke="#8fb3a4" stroke-width="1.5" marker-end="url(#au)"/>
+<line x1="73" y1="78" x2="294" y2="126" stroke="#8fb3a4" stroke-width="1.2" marker-end="url(#au)"/>
+<line x1="73" y1="78" x2="522" y2="126" stroke="#8fb3a4" stroke-width="1.2" marker-end="url(#au)"/>
+<line x1="73" y1="78" x2="762" y2="126" stroke="#8fb3a4" stroke-width="1.2" marker-end="url(#au)"/>
+
+<text x="14" y="214" font-size="12.5" fill="#0f4a2e" font-weight="600">第 2 段・分析と検定</text>
+<rect x="14" y="222" width="120" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="74" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">reproduce</text>
+<rect x="144" y="222" width="120" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="204" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">quorum</text>
+<rect x="274" y="222" width="140" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="344" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">counterfactual</text>
+<rect x="424" y="222" width="110" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="479" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">judge</text>
+<rect x="544" y="222" width="110" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="599" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">quantity</text>
+<rect x="664" y="222" width="110" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="719" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">router</text>
+<rect x="784" y="222" width="110" height="38" rx="7" fill="#fff" stroke="#2f9e63"/>
+<text x="839" y="245" font-size="11.5" text-anchor="middle" fill="#12241c">predict</text>
+<line x1="762" y1="170" x2="344" y2="218" stroke="#8fb3a4" stroke-width="1.2" marker-end="url(#au)"/>
+<line x1="66" y1="170" x2="344" y2="218" stroke="#8fb3a4" stroke-width="1.2" marker-end="url(#au)"/>
+<line x1="74" y1="262" x2="479" y2="262" stroke="#8fb3a4" stroke-width="1.2" stroke-dasharray="3 2"/>
+<line x1="479" y1="262" x2="479" y2="262" stroke="#8fb3a4"/>
+<text x="240" y="276" font-size="9.5" fill="#3c5a4c">judge は reproduce に依存(率は単独で出せない)</text>
+
+<text x="14" y="316" font-size="12.5" fill="#0f4a2e" font-weight="600">第 3 段・記録と判定と入口</text>
+<rect x="14" y="324" width="110" height="38" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="69" y="347" font-size="11.5" text-anchor="middle" fill="#12241c">serve</text>
+<rect x="134" y="324" width="110" height="38" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="189" y="347" font-size="11.5" text-anchor="middle" fill="#12241c">accept</text>
+<rect x="254" y="324" width="110" height="38" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="309" y="347" font-size="11.5" text-anchor="middle" fill="#12241c">explore</text>
+<rect x="374" y="324" width="110" height="38" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="429" y="347" font-size="11.5" text-anchor="middle" fill="#12241c">table</text>
+<rect x="494" y="324" width="120" height="38" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="554" y="347" font-size="11.5" text-anchor="middle" fill="#12241c">export_vsr</text>
+<rect x="624" y="324" width="130" height="38" rx="7" fill="#fff" stroke="#d5e3da"/>
+<text x="689" y="347" font-size="11.5" text-anchor="middle" fill="#12241c">audit / logs</text>
+<rect x="764" y="316" width="130" height="54" rx="7" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="829" y="337" font-size="12.5" text-anchor="middle" fill="#0f4a2e" font-weight="600">cli</text>
+<text x="829" y="354" font-size="10" text-anchor="middle" fill="#3c5a4c">16 の入口</text>
+
+<line x1="829" y1="312" x2="599" y2="266" stroke="#8fb3a4" stroke-width="1.2" marker-end="url(#au)"/>
+<line x1="829" y1="312" x2="408" y2="174" stroke="#8fb3a4" stroke-width="1" marker-end="url(#au)"/>
+
+<text x="14" y="404" font-size="11" fill="#3c5a4c">矢印は「依存される向き」。下から上への矢印は 1 本もありません = 循環が無い</text>
+<text x="14" y="420" font-size="11" fill="#8a5a12">意図的に葉に置いたもの: 単位の語彙・測定条件・分位点表・「何についての信号か」・「いつ確定したか」</text>
+</svg>
+<figcaption><b>依存が一方向で、循環がありません。</b>これは偶然ではなく、
+2 回ぶつかって作った規律の結果です。<code>quorum</code> から新しい語彙を読もうとしたとき
+<b>4 モジュールが輪になる</b>ことが分かり、語彙を葉の <code>evidence</code> に移しました。
+その結果 <code>evidence</code> は<b>20 モジュールが依存する共通の語彙置き場</b>になっています。</figcaption>
+</figure>
+
+<h3>葉に何が置いてあるか ― ここが設計の芯です</h3>
+<table>
+<tr><th>葉に置いたもの</th><th>なぜ 1 か所でなければならないか</th></tr>
+<tr><td>費用の単位(ドル / トークン / GPU 秒)</td><td>2 か所にあると「費用とは何か」で食い違うまで<b>編集 1 回</b></td></tr>
+<tr><td>測定条件(プロンプトの本文のハッシュ)</td><td>「簡潔」という<b>同じ呼び名で本文が違う</b>ものを 2 つ持てないように</td></tr>
+<tr><td>正規分布の分位点表</td><td>5 個の値の表が 2 つあると、<b>5% の意味</b>で両者が食い違う</td></tr>
+<tr><td>「何についての信号か」</td><td>判定器の側と方策構築の側が<b>同じ語彙を検査する</b>必要がある</td></tr>
+<tr><td>「その数はいつ確定したか」</td><td>比較の設定と、検定の帰無で<b>同じ区別</b>が必要</td></tr>
+</table>
+
+<h2>6. 誰が何を持たないか ― 線引きが構成の本体です</h2>
+
+<p><b>3 つのプロジェクトが「これは自分の仕事ではない」と明示的に決めている</b>ことのほうが、
+持っているものより重要です。線が曖昧だと、同じ物が 2 か所にでき、片方だけ直されます。</p>
 
 <table>
-<tr><th>項目</th><th>数</th></tr>
-<tr><td>モジュール</td><td class="n">38</td></tr>
-<tr><td>テスト</td><td class="n">66 ファイル・1,964 通過</td></tr>
+<tr><th>これは誰の仕事か</th><th>持つ側</th><th>持たない側の理由</th></tr>
+<tr><td>行き先の探索・待ち行列の採点・故障切り替え・世代管理</td><td>Semantic Router</td><td>tierbook が作り直すと<b>価値ではなく追随の負債</b>が増える</td></tr>
+<tr><td>料率の凍結・予約・精算・請求の正本</td><td>stratoclave</td><td>tierbook が持つと<b>「判定できない」と言うたびに請求が止まる</b></td></tr>
+<tr><td>品質の測定と評価</td><td><b>利用者</b>(機構は stratoclave が提供)</td><td>gateway は<b>可能にする機構</b>を出したら完成。適用は使う人の責務</td></tr>
+<tr><td>その品質の主張が支えられるかの判定</td><td>tierbook</td><td>gateway が<b>主張しないと明言</b>している空白</td></tr>
+<tr><td>どのモデルをどう載せるか</td><td>利用者</td><td>箱とモデルは<b>一対一ではない</b>。1 台に複数載せられ、台数も変わる</td></tr>
+</table>
+
+<div class="note">
+<p style="margin:0"><b>「機構は出した、適用は使う人」という線が繰り返し出てきます。</b>
+stratoclave 側の文書はこれを最も強く書いていて、<b>「品質未測定」という但し書きは欠陥ではなく、
+責務境界を正直に示す正しい設計</b>だと明言しています。tierbook もこの線を守っており、
+だから <code>quality_score</code> を router の採点入力にしません ―
+<b>それは利用者が測って納得すべき数字</b>で、機構が勝手に重み付けするものではありません。</p>
+</div>
+
+<h2>7. いまの実測値と、正直な穴</h2>
+
+<table>
+<tr><th>項目</th><th>いま</th></tr>
+<tr><td>tierbook のモジュール</td><td class="n">38(循環なし、葉は 8)</td></tr>
+<tr><td>テスト</td><td class="n">66 ファイル・1,964 通過・3 skip</td></tr>
+<tr><td>人が打てる入口</td><td class="n">16</td></tr>
 <tr><td>実験からの記録</td><td class="n">122 項目</td></tr>
-<tr><td>人が打てるコマンド</td><td class="n">16</td></tr>
+<tr><td>stratoclave</td><td class="n">v1.5.0(境界の項目は v1.4.0 から不変)</td></tr>
 </table>
 
-<p><b>テストの作り方について 1 つ。</b>この作りでは、機構を足すたびに
-<b>その機構をわざと壊して、テストが落ちることを確認</b>しています。
-通るだけのテストは、<b>何も検査していなくても通ります。</b></p>
-
-<h3>できていないこと</h3>
+<h3>穴を 3 つ、はっきり書きます</h3>
 <ul>
 <li><b>GPU 秒での費用が測れていません。</b>トークン数は費用の弱い代理で、
-<b>トークンで勝っている方策が GPU 秒で負けることがあります。</b>測るには<b>負荷をかける</b>必要があり、
-問題数を増やしても取れません。</li>
-<li><b>いちばん欲しい信号がありません。</b>「高い方に回すと得か」を予測する信号は、
-<b>誰も持っていません。</b>「難しいか」は測れて、「回すと得か」は測れていません。</li>
-<li><b>Jev の数字はゼロです。</b>順番待ちのため。</li>
+<b>トークンで勝っている方策が GPU 秒で負けることがあります。</b>測るには負荷が必要で、問題数を増やしても取れません。</li>
+<li><b>いちばん欲しい信号がありません。</b>振り分けが得かを決めるのは
+<b>「高い方が正解する確率」−「安い方が正解する確率」</b>で、<b>1 番目の項を予測できる物が誰にもありません。</b>
+「難しいか」は測れて(隠れ状態で 0.69〜0.77)、「回すと得か」は空席です。</li>
+<li><b>「行動を返す通路」が推論エンジンに無い。</b>合図の文字列で回避しています。
+これは<b>上流に出すべき要望</b>としてコードに書いてあります。</li>
 </ul>
 
 <div class="lead">
-<p style="margin:0"><b>最後に一文。</b>この道具の値打ちは「30% 安くなりました」と言えることではなく、
-<b>「その 30% は言えます / 言えません」を分けられること</b>です。
-上の 4 つのデモは全部、<b>言えないことを言おうとして止められた</b>例でした。</p>
+<p style="margin:0"><b>構成を一文で。</b>
+<b>Semantic Router が「どこへ送るか」を持ち、stratoclave が「いくら請求したか」を持ち、
+tierbook が「その安さは品質を落としていないと言えるのか」を持つ。</b>
+3 つが <code>served_by="semantic-router"</code> と <code>sr_pool_ref</code> と
+<code>(run_id, span_id)</code> の 3 つの項目で噛み合っていて、
+<b>どこにも同じ物が 2 つありません。</b></p>
 </div>
 
 <p class="foot">
-出典はすべてこのプロジェクト自身の実測です。デモの出力は実際にコマンドを実行して得たものをそのまま貼っています。<br>
-数字の一覧: 正解率 0.1599(10 択・当てずっぽう 0.10)/ 1,822 of 2,364 が「A」/ 必要な救出 167 対 許可 141 /
-判定器 0.7176 対 0.7529 / 分野 0.7593 対 偶然 0.1429、自己の誤り 0.4227 / 基準 0.8285 対 帰無 0.7928、無料の代替 0.8895 /
-読み込み 0.109 秒 対 生成 10.42 秒(約 95 倍)/ 費用項目の 87% が漏洩。
+このページの構成図・依存グラフ・境界の項目名は、すべて手元の実物を読んで作りました:
+stratoclave <b>v1.5.0</b>(<code>backend/mvp/models.py</code> の <code>served_by</code> と <code>sr_pool_ref</code>、
+<code>backend/mvp/_pipeline.py</code> の seam、<code>docs/design/CONTRACTS.md</code> と
+<code>docs/design/vsr-savings-certificate.md</code>)、tierbook の依存グラフは import を機械的に数えた実測、
+router の設定構造は <code>src/tierbook/export_vsr.py</code> が実際に生成する形、
+推論エンジン側は <code>tb_gate.py</code> の拡張点。<br>
+数字: 読み込み 0.109 秒 対 生成 10.42 秒(約 95 倍)/ 隠れ状態での回答可能性 0.69〜0.77 /
+tierbook 38 モジュール・1,964 テスト・122 記録。
 </p>
 
 </div>
