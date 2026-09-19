@@ -9,7 +9,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 | Series | Topic | Entry |
 |--------|-------|-------|
 | Skills | A catalog of my own Claude Code skills (slash commands) — what each does and when to fire it — so I don't have to remember them. Sub-series: Kaggle competition workflow; building corporate-template pptx decks out of editable native shapes | [skills/index.html](./skills/index.html) |
-| English | Rebuilding English grammar around one picture per word instead of a list of translations. Sub-series: prepositions — 93 figures over seven pages, from `at`/`in`/`on` through movement, position, time, relation and cause, closing with a searchable map of all 146 English prepositions (98 single-word, 48 group) | [english/index.html](./english/index.html) |
+| English | Rebuilding English grammar around one picture per word instead of a list of translations. Two sub-series. Prepositions: 93 figures over seven pages, from `at`/`in`/`on` through movement, position, time, relation and cause, closing with a searchable map of all 146 English prepositions (98 single-word, 48 group). Basic verbs: 63 schemas over seven pages — `get` is a switch flipping from 0 to 1, `have` is being inside your reach — ending with phrasal verbs factored into verb figure times preposition figure | [english/index.html](./english/index.html) |
 | vLLM blog | Reading the official vLLM blog one post at a time in Japanese, citing the original figures and adding hands-on demos (episode 1: tiered KV cache offloading; episode 2: GLM 5.3 Hybrid HiSparse; episode 3: agentic serving measured on AgentX) | [vllm-blog-index.html](./vllm-blog-index.html) |
 | Paper reading | Reading one notable paper/blog post at a time — background, core equations, and conclusions in a single beginner-friendly, interactive page (episode 1: Lilian Weng's scaling laws; episode 2: Kimi K3's architecture) | [paper-index.html](./paper-index.html) |
 | ML basics | Transformer building blocks (Attention, FFN/MoE, normalization) and Flow Matching, each explained from scratch with live animations | [ml-basics-index.html](./ml-basics-index.html) |
@@ -38,7 +38,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 
 Each explainer is a single self-contained HTML file (inline CSS/JS, no build step). Open any file directly in a browser, or browse them from `index.html`.
 
-The one exception is the English series: its seven pages share `english/prepositions/prep.css`, `prep-engine.js` (the figure primitives) and `prep-data.js` (all 93 cards, tagged by page), because copying one dataset into seven files would guarantee they drift apart. Still no build step — the pages load those three files relatively.
+The one exception is the English series: its pages share `english/lib/fig.css` and `english/lib/fig-engine.js` (the figure primitives, one drawing convention across every sub-series), plus one data file per sub-series (`english/prepositions/prep-data.js`, `english/basic-verbs/verb-data.js`) holding every card tagged by page. Copying one dataset into seven files would guarantee they drift apart. Still no build step — the pages load those files relatively.
 
 ## Authoring rule: quiz-based explainer series
 
