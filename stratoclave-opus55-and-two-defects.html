@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opus 5.5 に切り替え、自前ゲートウェイに載せる途中で欠陥 2 つが出た</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.big{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+.big>div{flex:1 1 220px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:14px 10px;
+background:var(--card)}
+.big b{display:block;font-size:28px;line-height:1.15;color:var(--gd);font-variant-numeric:tabular-nums}
+.big span{font-size:12.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="index.html">全体の目次</a> &nbsp;/&nbsp; Opus 5.5 への切り替えと、見つかった欠陥 2 つ</p>
+
+<h1>Opus 5.5 に切り替え、自前ゲートウェイに載せる途中で欠陥 2 つが出た<br>「成功したのに消える昇格」と「レビュー済みの値段が無い」</h1>
+
+<div class="lead">
+<p><b>結論から。</b>モデルを 1 つ増やすだけの作業のはずが、<b>成功と表示されるのに何も起きない欠陥</b>に当たった。自前の LLM ゲートウェイ (stratoclave) でモデルを有効化すると API は 200 (成功) を返すのに、そのモデルはどこからも見えない。原因は権限 1 行の欠落で、しかも設計が「読めなかったら前の状態を保つ」という安全側の作りだったせいで、外からは「有効化していない状態」と区別できなかった。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>stratoclave の CLI を最新に入れ替え、Claude Code 自身と自前ゲートウェイの既定モデルを Opus 5.5 に切り替え、レビュー用に Fable 5.1 と GPT-6 を呼べるようにした。その過程で欠陥を 2 つ見つけて直し、1 つは直せない理由をはっきりさせて残した。</p>
+</div>
+
+<h2>1. 数字の要約</h2>
+
+<p>この文書の主張はすべて実際に動いている環境で測ったものである。plan (実行計画) やモック (偽物で代用する試験) は実機の検証と認めない、という自分の決めごとに従っている。</p>
+
+<table>
+<tr><th>#</th><th>なぜ見たか</th><th>どう測ったか</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr>
+<td class="n">1</td>
+<td>入っている CLI が古いという指摘の裏取り</td>
+<td>手元の実行ファイルの版と、リポジトリの最新との差分を <code>git log</code> で数えた</td>
+<td>版番号だけ見る (両方 0.2.0 なので判別できない)</td>
+<td>ビルド日が 5 週間前で、<b>CLI に触る 17 コミット分の遅れ</b>。入れ替え後に新機能 <code>limit-raise</code> が現れて差を確認</td>
+<td>4 節</td>
+</tr>
+<tr>
+<td class="n">2</td>
+<td>Opus 5.5 が本当に呼べるのか</td>
+<td>4 モデルそれぞれに実際に 1 回ずつ問いを投げた</td>
+<td>モデル一覧 API を見るだけ</td>
+<td>Opus 5.5 / Fable 5.1 / GPT-6 Sol / GPT-6 Astra の <b>4 つすべてが応答</b>。100 万トークン窓の指定も Opus 5.5 で通った</td>
+<td>2 節</td>
+</tr>
+<tr>
+<td class="n">3</td>
+<td>有効化したのにモデルが見えない</td>
+<td>有効化 API の応答と、60 秒の更新窓を越えた 75 秒後の一覧、さらにサーバのログを突き合わせた</td>
+<td>時間を置いて待つ (何度待っても出ない)</td>
+<td>API は <b>200 (成功)</b>、一覧には<b>不在</b>、ログに権限拒否。<b>権限 1 行の欠落</b>で確定</td>
+<td>5 節</td>
+</tr>
+<tr>
+<td class="n">4</td>
+<td>権限を足せば直るのか</td>
+<td>許可リストにテーブルを 1 つ足して再配備し、同じ有効化をやり直した</td>
+<td>読み方を Scan から索引引きに変える (関数の設計方針に反する)</td>
+<td><b>1 更新窓以内に出現</b>し、権限付与も成功。原因と修正が一対一で対応</td>
+<td>5 節</td>
+</tr>
+<tr>
+<td class="n">5</td>
+<td>それでも普通の利用者に使わせられない</td>
+<td>権限付与 API を叩いて拒否文を読んだ</td>
+<td>既存の値段に相乗りさせる (実際の値段が違うので過大・過小請求になる)</td>
+<td><b>レビュー済みの下限価格が無いと拒否</b>される。値段はイメージの中にあるので、カタログと違って配布が要る</td>
+<td>6 節</td>
+</tr>
+<tr>
+<td class="n">6</td>
+<td>再配備で動いている箱が縮まないか</td>
+<td>配備前に <code>cdk diff</code> を全部読み、稼働中の設定値と突き合わせた</td>
+<td>そのまま配備する</td>
+<td>素で配備すると <b>CPU とメモリが 4 分の 1</b>、処理係が 4 本から 1 本、自動増減も外れる。値を明示して差分を消した</td>
+<td>7 節</td>
+</tr>
+<tr>
+<td class="n">7</td>
+<td>GPT-6 も載せられるか</td>
+<td>候補を作って検証 (probe) を両方の呼び出し方で走らせた</td>
+<td>検証を飛ばして有効化する (機構が許さない)</td>
+<td><b>載せられない</b>。検証の実装が片方の通信様式しか持たず、判定が出ないので有効化できない</td>
+<td>8 節</td>
+</tr>
+</table>
+
+<h2>2. 何をしたか ― 3 つの場所でモデルを切り替えた</h2>
+
+<p>「Opus 5.5 に切り替える」は 1 か所の設定変更では終わらない。同じ言葉が指す場所が 3 つあり、経路がそれぞれ独立しているからである。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img"
+ aria-label="3 つの経路。Claude Code と質問スクリプトは Bedrock を直接呼び、stratoclave の CLI だけが自前ゲートウェイを経由する">
+<defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+
+<rect x="14" y="26" width="196" height="54" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="112" y="48" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">Claude Code 本体</text>
+<text x="112" y="68" font-size="11.5" fill="#3c5a4c" text-anchor="middle">settings.json</text>
+
+<rect x="14" y="112" width="196" height="54" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="112" y="134" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">レビュー用の質問道具</text>
+<text x="112" y="154" font-size="11.5" fill="#3c5a4c" text-anchor="middle">fable5_ask.py</text>
+
+<rect x="14" y="198" width="196" height="54" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="112" y="220" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="600">stratoclave の CLI</text>
+<text x="112" y="240" font-size="11.5" fill="#3c5a4c" text-anchor="middle">config.toml</text>
+
+<path d="M214 53 L470 53" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a2)"/>
+<path d="M214 139 L470 139" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a2)"/>
+<path d="M214 225 L300 225" stroke="#1d4e8f" stroke-width="2" marker-end="url(#a2)"/>
+
+<rect x="304" y="198" width="166" height="54" rx="8" fill="#10241b" stroke="#10241b"/>
+<text x="387" y="220" font-size="13" fill="#dff1e6" text-anchor="middle" font-weight="600">自前ゲートウェイ</text>
+<text x="387" y="240" font-size="11.5" fill="#9fd8bb" text-anchor="middle">ECS 上の stratoclave</text>
+<path d="M474 225 L560 225" stroke="#1d4e8f" stroke-width="2" marker-end="url(#a2)"/>
+
+<rect x="474" y="26" width="200" height="54" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="574" y="53" font-size="12.5" fill="#12241c" text-anchor="middle">Bedrock を直接</text>
+<rect x="474" y="112" width="200" height="54" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="574" y="139" font-size="12.5" fill="#12241c" text-anchor="middle">Bedrock を直接</text>
+<rect x="564" y="198" width="110" height="54" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="619" y="225" font-size="12.5" fill="#12241c" text-anchor="middle">Bedrock</text>
+
+<text x="700" y="47" font-size="11.5" fill="#1f7a4d" font-weight="600">すぐ使える</text>
+<text x="700" y="64" font-size="11" fill="#3c5a4c">設定 3 ファイル</text>
+<text x="700" y="133" font-size="11.5" fill="#1f7a4d" font-weight="600">すぐ使える</text>
+<text x="700" y="150" font-size="11" fill="#3c5a4c">道具を 1 本に統合</text>
+<text x="700" y="219" font-size="11.5" fill="#8f2f2f" font-weight="600">ここだけ難関</text>
+<text x="700" y="236" font-size="11" fill="#3c5a4c">カタログに登録が必要</text>
+</svg>
+<figcaption>Claude Code 自身とレビュー用の質問道具は Bedrock (Amazon の基盤モデル提供サービス) を直接呼ぶので、新しいモデル名を書けばその場で使える。自前ゲートウェイだけは「自分のカタログに載っているモデル以外は受け付けない」という設計なので、登録作業が必要になる。この文書の欠陥 2 つは全部その登録経路で出た。</figcaption>
+</figure>
+
+<p>まず CLI を最新にした。入っていた実行ファイルは 5 週間前のビルドで、版番号は最新と同じ 0.2.0 のままだったので<b>番号では古さが分からない</b>。ソースと比べると CLI に触る変更が 17 件入っていた。入れ替え後にコマンド一覧へ <code>limit-raise</code> が現れたので、別物に変わったことが目に見える形で確かめられた。</p>
+
+<p>次に Claude Code 自身の既定モデルを Opus 5.5 にした。書き換えたのは 3 か所で、利用者全体の設定、この作業リポジトリの設定、そして新規プロジェクト用のひな形である。<b>リポジトリ側の設定が利用者設定を上書きする</b>ので、1 か所だけ直しても効かない。</p>
+
+<div class="note">
+<p style="margin:0"><b>100 万トークンの窓は別扱いになっている。</b>Bedrock のモデル名に <code>[1m]</code> を付けて直接呼ぶと、Opus 5 でも Opus 5.5 でも「権限が無い」と断られる。これは名前の一部ではなく、要求の中で「長い窓を使う」という指定を添える仕組みだからである。実際にその指定を添えて呼ぶと Opus 5.5 でも応答が返ったので、既定を <code>claude-opus-5-5[1m]</code> にしても窓は失われない。</p>
+</div>
+
+<h2>3. レビューを頼む相手を 1 本の道具にまとめた</h2>
+
+<p>今後「Fable に見てもらって」「Codex に見せて」と言われたら、その時点で最も強いモデルを使う、という決めごとになった。今の顔ぶれは Anthropic 系が Fable 5.1、OpenAI 系が GPT-6 Sol か GPT-6 Astra、そして<b>既定のレビュー担当が Opus 5.5</b> である。</p>
+
+<p>これまで呼び出し口はモデルごとに<b>ファイルを丸ごと複製</b>していた。<code>opus5_ask.py</code> は <code>fable5_ask.py</code> の写しで、違いはモデル名の 1 行だけだった。今回 4 モデルに増えるところで、複製を 4 本に増やすのをやめ、<code>--model</code> で選ぶ 1 本のエンジンにまとめた。</p>
+
+<table>
+<tr><th>短い名前</th><th>実際に呼ぶモデル</th><th>役割</th></tr>
+<tr><td><code>fable</code> (既定)</td><td>global.anthropic.claude-fable-5-1</td><td>Anthropic 系の敵対レビュー担当</td></tr>
+<tr><td><code>sol</code></td><td>global.openai.gpt-6-sol</td><td>OpenAI 系。系統が違うので突き合わせに価値がある</td></tr>
+<tr><td><code>astra</code></td><td>global.openai.gpt-6-astra</td><td>同上。Sol と交換可能</td></tr>
+<tr><td><code>opus</code></td><td>global.anthropic.claude-opus-5-5</td><td>既定のレビュー担当。Fable が拒否したときの逃げ先でもある</td></tr>
+</table>
+
+<p>4 つすべてに実際に問いを投げて応答を確認した。そのとき OpenAI 系だけの落とし穴が出た。<b><code>temperature</code> (答えのばらけ具合を決める指定) を送ると拒否される</b>。「This model doesn't support the temperature field」という明示的な拒否なので黙って無視されるわけではないが、他のモデルと同じ書き方では動かない。道具側でこの指定を既定で送らないようにし、OpenAI 系に付けた場合は Bedrock を呼ぶ前に手元で止めるようにした。</p>
+
+<div class="warn">
+<p style="margin:0"><b>Fable が黙って空を返したときの見分け方。</b>安全性の判定に引っかかると、エラーではなく「成功だが中身が 0 文字」で返ってくる。見分けるのは <code>inputTokens=0</code>、つまり<b>入力がそもそも受け付けられていない</b>という事実で、この症状は出力の上限を増やしても直らない。道具の警告文が「考える処理が予算を使い切った、上限を増やせ」と誤診していたので、入力トークンが 0 のときは別の文言を出すようにした。</p>
+</div>
+
+<h2>4. 自前ゲートウェイにモデルを載せる経路は 5 段ある</h2>
+
+<p>ここから難関である。自前ゲートウェイは「自分のカタログに無いモデル名は受け付けない」設計なので、Bedrock で呼べるだけでは足りない。設計上の売りは<b>カタログを増やすのにソフトウェアの配布が要らない</b>ことで、経路は 5 段になっている。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" style="max-width:880px" role="img"
+ aria-label="5 段の経路。発見、候補作成、検証、有効化、権限付与の順に進み、最後の 2 段で欠陥に当たった">
+<defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+
+<rect x="10" y="40" width="148" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="84" y="64" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">1. 発見</text>
+<text x="84" y="82" font-size="11" fill="#3c5a4c" text-anchor="middle">Bedrock を一覧して</text>
+<text x="84" y="97" font-size="11" fill="#3c5a4c" text-anchor="middle">83 件を記録</text>
+
+<path d="M162 73 L186 73" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a4)"/>
+
+<rect x="190" y="40" width="148" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="264" y="64" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">2. 候補を作る</text>
+<text x="264" y="82" font-size="11" fill="#3c5a4c" text-anchor="middle">公開名・値段の種別</text>
+<text x="264" y="97" font-size="11" fill="#3c5a4c" text-anchor="middle">通信様式を人が決める</text>
+
+<path d="M342 73 L366 73" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a4)"/>
+
+<rect x="370" y="40" width="148" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="444" y="64" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">3. 検証する</text>
+<text x="444" y="82" font-size="11" fill="#3c5a4c" text-anchor="middle">本当に 1 回呼んで</text>
+<text x="444" y="97" font-size="11" fill="#3c5a4c" text-anchor="middle">課金が着地するか見る</text>
+
+<path d="M522 73 L546 73" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a4)"/>
+
+<rect x="550" y="40" width="148" height="66" rx="8" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="624" y="64" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">4. 有効化する</text>
+<text x="624" y="82" font-size="11" fill="#3c5a4c" text-anchor="middle">200 を返すのに</text>
+<text x="624" y="97" font-size="11" fill="#8f2f2f" text-anchor="middle">どこにも出ない</text>
+
+<path d="M702 73 L726 73" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a4)"/>
+
+<rect x="730" y="40" width="140" height="66" rx="8" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="800" y="64" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">5. 権限を付与</text>
+<text x="800" y="82" font-size="11" fill="#3c5a4c" text-anchor="middle">値段が未レビュー</text>
+<text x="800" y="97" font-size="11" fill="#8f2f2f" text-anchor="middle">なので拒否</text>
+
+<text x="84" y="140" font-size="11" fill="#3c5a4c" text-anchor="middle">運用コマンド</text>
+<text x="264" y="140" font-size="11" fill="#3c5a4c" text-anchor="middle">管理 API</text>
+<text x="444" y="140" font-size="11" fill="#3c5a4c" text-anchor="middle">管理 API</text>
+<text x="624" y="140" font-size="11" fill="#8f2f2f" text-anchor="middle" font-weight="600">欠陥 1</text>
+<text x="800" y="140" font-size="11" fill="#8f2f2f" text-anchor="middle" font-weight="600">欠陥 2</text>
+
+<rect x="10" y="168" width="860" height="62" rx="8" fill="#fdf3e2" stroke="#e6cf9e"/>
+<text x="26" y="192" font-size="12" fill="#8a5a12" font-weight="600">有効化しても最大 60 秒は見えない</text>
+<text x="26" y="212" font-size="11.5" fill="#3c5a4c">カタログの内訳は各サーバが 60 秒ごとに読み直す作りで、書いた瞬間に全台へ伝える仕組みは持っていない。「まだ出ない」と「壊れている」を取り違えやすい。</text>
+</svg>
+<figcaption>1 から 3 は素直に通った。止まったのは 4 と 5 で、どちらも「成功したように見える」か「理由が別の場所にある」形の失敗だった。60 秒の更新窓があるので、失敗と待ちを取り違えないよう窓を越えてから判定する必要がある。</figcaption>
+</figure>
+
+<p>1 段目の発見は運用コマンドで、サーバ側に呼び口が無い。手元から実行してアカウントの Bedrock を一覧し、値段表を 1 件ずつ読んで <b>83 件</b>を記録した。このとき出る <code>key=v1:&lt;長い文字列&gt;</code> は<b>選ばれた値段そのものの指紋</b>なので、2 つのモデルの指紋が一致すれば値段が同じ、と判断に使える。</p>
+
+<p>3 段目の検証は本当に 1 回モデルを呼ぶ。Opus 5.5 が 66 マイクロドル、Fable 5.1 が 165 マイクロドル (1 マイクロドルは 100 万分の 1 ドル) で、台帳に着地した。「呼べる」ではなく「呼んで請求まで通る」を確かめる作りである。</p>
+
+<h2>5. 欠陥 1 ― 成功を返してから消える有効化</h2>
+
+<p>有効化の API は 200 (成功) を返し、応答の中には今書いたばかりのモデルの情報が入っている。ところが 75 秒待ってもモデル一覧に出てこない。更新窓の 60 秒は越えている。権限付与を頼むと「そんなモデル系列はレジストリに宣言されていない」と断られる。</p>
+
+<p>原因はサーバのログにだけ出ていた。有効化された項目を読む関数は、テーブル全体を走査する読み方 (Scan) を使う。これは意図的で、関数自身の説明にも「索引を使った問い合わせではない。テーブルの索引設計は別の担当のもので、この行の種類は後から足されたものだから」と書かれている。<b>そしてサーバにはそのテーブルを走査する権限が付いていなかった。</b></p>
+
+<figure>
+<svg viewBox="0 0 880 330" width="100%" style="max-width:880px" role="img"
+ aria-label="有効化は書き込みに成功するが、読み直す側が権限拒否で失敗し、前の状態を保ち続けるため外から区別できない">
+<defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
+<marker id="a5r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker></defs>
+
+<rect x="14" y="24" width="180" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="104" y="48" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">有効化の API</text>
+<text x="104" y="67" font-size="11.5" fill="#1f7a4d" text-anchor="middle">200 を返す</text>
+
+<path d="M198 52 L286 52" stroke="#1f7a4d" stroke-width="2" marker-end="url(#a5)"/>
+<text x="242" y="42" font-size="11" fill="#1f7a4d" text-anchor="middle">書き込み成功</text>
+
+<rect x="290" y="24" width="210" height="56" rx="8" fill="#10241b" stroke="#10241b"/>
+<text x="395" y="48" font-size="12.5" fill="#dff1e6" text-anchor="middle" font-weight="600">promotion-candidates</text>
+<text x="395" y="67" font-size="11.5" fill="#9fd8bb" text-anchor="middle">ACTIVE# の行が入っている</text>
+
+<path d="M395 84 L395 128" stroke="#8f2f2f" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a5r)"/>
+<text x="410" y="110" font-size="11.5" fill="#8f2f2f" font-weight="600">Scan で読もうとする</text>
+
+<rect x="250" y="132" width="300" height="56" rx="8" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="400" y="156" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">AccessDeniedException</text>
+<text x="400" y="175" font-size="11.5" fill="#3c5a4c" text-anchor="middle">許可リストにこのテーブルが無い</text>
+
+<path d="M250 160 L150 160" stroke="#8f2f2f" stroke-width="2" marker-end="url(#a5r)"/>
+<rect x="14" y="132" width="132" height="56" rx="8" fill="#fdf3e2" stroke="#e6cf9e"/>
+<text x="80" y="153" font-size="12" fill="#8a5a12" text-anchor="middle" font-weight="600">前の状態を保つ</text>
+<text x="80" y="172" font-size="11" fill="#3c5a4c" text-anchor="middle">設計どおりの安全側</text>
+
+<rect x="14" y="216" width="266" height="86" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="147" y="240" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">外から見えるもの</text>
+<text x="147" y="260" font-size="11.5" fill="#3c5a4c" text-anchor="middle">モデル一覧に出ない</text>
+<text x="147" y="277" font-size="11.5" fill="#3c5a4c" text-anchor="middle">権限付与は「宣言が無い」</text>
+<text x="147" y="294" font-size="11.5" fill="#3c5a4c" text-anchor="middle">ルーティングも通らない</text>
+
+<rect x="304" y="216" width="266" height="86" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="437" y="240" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">一度も昇格していない状態</text>
+<text x="437" y="260" font-size="11.5" fill="#3c5a4c" text-anchor="middle">モデル一覧に出ない</text>
+<text x="437" y="277" font-size="11.5" fill="#3c5a4c" text-anchor="middle">権限付与は「宣言が無い」</text>
+<text x="437" y="294" font-size="11.5" fill="#3c5a4c" text-anchor="middle">ルーティングも通らない</text>
+
+<path d="M284 259 L300 259" stroke="#8f2f2f" stroke-width="2"/>
+<text x="700" y="250" font-size="13" fill="#8f2f2f" font-weight="600">左右が完全に同じ</text>
+<text x="700" y="272" font-size="11.5" fill="#3c5a4c">これが「黙って無効化される」</text>
+<text x="700" y="289" font-size="11.5" fill="#3c5a4c">ということの意味である</text>
+</svg>
+<figcaption>書き込みは成功しているので API は正直に 200 を返す。壊れているのは読み直す側で、しかも「読めなかったら前の正しい状態を保つ」という設計 (これ自体は正しい) のせいで、症状が「昇格していない状態」と一字一句同じになる。運用者が見る場所には何の手がかりも出ない。</figcaption>
+</figure>
+
+<div class="bad">
+<p style="margin:0 0 8px"><b>見分けられる唯一の手がかりはサーバのログにある。</b></p>
+<pre><span class="r">composed_registry_activated_half_unreadable</span>
+ error=<span class="o">'activated-entry store unreachable listing entries: AccessDeniedException</span>
+   <span class="o">... not authorized to perform: dynamodb:Scan on ... table/stratoclave-promotion-candidates'</span>
+ note=<span class="c">'keeping the last known-good activated set (fail-static)'</span></pre>
+</div>
+
+<p>直し方は許可リストにこのテーブルを 1 つ足すだけである。足して再配備すると、同じ有効化が 1 更新窓以内に一覧へ現れ、権限付与も通った。<b>原因の特定と修正が一対一で対応している</b>ので、症状が消えただけではないと言える。</p>
+
+<p>許可リストには<b>この付与を「あってもよい」ではなく「無ければ落ちる」</b>という形で試験も足した。元の試験は別のテーブル (RBAC の元データ) を戻したら落ちるようになっていたが、必要な付与を落としたときは何も起きなかった。同じ形の事故がもう一度起きないようにするには両方向を押さえる必要がある。なお試験の説明文は「5 つのテーブル」と書いて 6 つ並べていたので、数ではなく規則 (この一覧のテーブルには必ず走査する呼び出し元が居る) を書くように直した。</p>
+
+<h2>6. 欠陥 2 ― カタログは配布が要らないが、値段は要る</h2>
+
+<p>有効化が通っても、まだ普通の利用者には使わせられない。昇格したモデルは「権限が必要」という扱いになるので、組織に対して使用権を付与する必要がある。その付与が断られた。</p>
+
+<pre>{"detail":"<span class="r">no reviewed floor row exists for pricing_key='opus-5-5'</span>.
+ This is not a price disagreement -- <span class="o">nobody has reviewed a price for this key yet</span>."}</pre>
+
+<p>値段は 2 つの層で決まる。<b>下限 (floor) はソフトウェアのイメージの中にあるファイル</b>で、人間が目で見て決めた値である。もう 1 つは DynamoDB に置く上書きで、これは実際の値段が動いたときに追いかけるための層である。</p>
+
+<figure>
+<svg viewBox="0 0 880 270" width="100%" style="max-width:880px" role="img"
+ aria-label="カタログは配布不要で増やせるが、値段の下限はイメージの中にあるため配布が必要という非対称">
+<rect x="14" y="26" width="410" height="200" rx="10" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="219" y="54" font-size="14" fill="#0f4a2e" text-anchor="middle" font-weight="600">カタログ (どのモデルが居るか)</text>
+<rect x="38" y="74" width="362" height="40" rx="6" fill="#fff" stroke="#1f7a4d"/>
+<text x="219" y="99" font-size="12" fill="#12241c" text-anchor="middle">DynamoDB の promotion-candidates に書く</text>
+<rect x="38" y="126" width="362" height="40" rx="6" fill="#fff" stroke="#1f7a4d"/>
+<text x="219" y="151" font-size="12" fill="#12241c" text-anchor="middle">各サーバが 60 秒ごとに読み直す</text>
+<text x="219" y="196" font-size="13.5" fill="#1f7a4d" text-anchor="middle" font-weight="600">配布 (release) は不要</text>
+<text x="219" y="214" font-size="11.5" fill="#3c5a4c" text-anchor="middle">これがこの仕組みの売り</text>
+
+<rect x="456" y="26" width="410" height="200" rx="10" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="661" y="54" font-size="14" fill="#8f2f2f" text-anchor="middle" font-weight="600">値段の下限 (いくらで請求するか)</text>
+<rect x="480" y="74" width="362" height="40" rx="6" fill="#fff" stroke="#8f2f2f"/>
+<text x="661" y="99" font-size="12" fill="#12241c" text-anchor="middle">defaults/pricing.json = イメージの中</text>
+<rect x="480" y="126" width="362" height="40" rx="6" fill="#fff" stroke="#8f2f2f"/>
+<text x="661" y="151" font-size="12" fill="#12241c" text-anchor="middle">権限付与がこの行の存在を要求する</text>
+<text x="661" y="196" font-size="13.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">配布が必要</text>
+<text x="661" y="214" font-size="11.5" fill="#3c5a4c" text-anchor="middle">イメージを焼き直して配備する</text>
+</svg>
+<figcaption>この非対称が今回の学びである。「新しいモデルは配布を待たない」というのは<b>カタログについては本当</b>で、値段については本当ではない。上書きの層に値を入れれば 3 段目の検証は通るが、5 段目の権限付与は下限の行を見るので通らない。</figcaption>
+</figure>
+
+<p>これは正しい設計だと考える。下限は人間が見た数字であり、誰も値付けしていない種別に使用権を出せば、その時に上書き層が言っている値で請求することになる。上書き層は外部の値段情報で自動更新される対象なので、そこだけを根拠に請求を始めるのは危うい。</p>
+
+<p>だから 4 種別の下限をイメージ内のファイルに書き、イメージを焼き直して配備した。上書き層に先に入れていた同じ値は、<b>同じ数字を 2 か所で持つと必ずずれる</b>ので空の集合を発行して外した。外した後も課金が正しく着地することを実際に呼んで確かめている。</p>
+
+<h2>7. 値段は全部測った ― そして 4 つとも独自の種別にした</h2>
+
+<p>値段の種別 (pricing key) は<b>その中で最も高いメンバーの値段で課金される</b>作りになっている。だから既存の種別に相乗りさせると、安いモデルが過大請求になる。逆に既存の種別を下げると、古いモデルが過小請求になる。</p>
+
+<table>
+<tr><th>種別</th><th>入力</th><th>出力</th><th>キャッシュ読み</th><th>キャッシュ書き</th><th>独自にした理由</th></tr>
+<tr><td>opus (Opus 5 など)</td><td class="n">5.50</td><td class="n">27.50</td><td class="n">0.55</td><td class="n">6.875</td><td>既存</td></tr>
+<tr><td><b>opus-5-5</b></td><td class="n y">4.40</td><td class="n y">22.00</td><td class="n y">0.22</td><td class="n y">5.50</td><td><b>全項目が opus より安い</b>。相乗りは過大請求</td></tr>
+<tr><td>fable (Fable 5)</td><td class="n">11.00</td><td class="n">55.00</td><td class="n">1.10</td><td class="n">13.75</td><td>既存</td></tr>
+<tr><td><b>fable-5-1</b></td><td class="n">11.00</td><td class="n">55.00</td><td class="n y">0.275</td><td class="n">13.75</td><td>キャッシュ読みが <b>4 分の 1</b>。相乗りは 4 倍で課金</td></tr>
+<tr><td><b>gpt-6-sol</b></td><td class="n">2.20</td><td class="n">11.00</td><td class="n">0.22</td><td class="n no">未掲載</td><td>値段表が別の商品なので独自</td></tr>
+<tr><td><b>gpt-6-astra</b></td><td class="n">11.00</td><td class="n">55.00</td><td class="n">1.10</td><td class="n no">未掲載</td><td>同上</td></tr>
+</table>
+
+<p>単位は 100 万トークンあたりのドルで、すべて Bedrock の値段表 API を 2026-09-23 に読んだ実測である。<b>Opus 5.5 は Opus 5 より 2 割安い</b> (入力 5.50 対 4.40、出力 27.50 対 22.00)。キャッシュ読みは 0.55 対 0.22 で 6 割安い。</p>
+
+<div class="warn">
+<p style="margin:0"><b>GPT-6 のキャッシュ書きだけは実測ではない。</b>この系列の値段表には「キャッシュ書き」の項目が存在しない。この経路では書かれたキャッシュのトークンは<b>通常の入力トークンとして課金される</b>ので、入力と同じ値をレビュー済みの初期値として置いた。0 にすると実際に発生する課金が無料に見えてしまうからである。この文書で唯一、測定ではなく判断で決めた数字である。各行の注記にもその旨を書いた。</p>
+</div>
+
+<div class="note">
+<p style="margin:0"><b>既存の GPT-5.6 Sol の下限は古くなっている。</b>リポジトリは 5.50 / 33.00 と書いているが、値段表の現在の値は 4.40 / 22.00 だった。値段は下がる方向に動く、というのはこのファイル自身の注記にも書かれている前提である。既に課金しているモデルが居る種別の訂正は、それ自身の根拠を伴う別の変更なので今回は触っていない。</p>
+</div>
+
+<h2>8. 動いている箱を縮ませないための注意</h2>
+
+<p>配備には落とし穴がある。今動いている箱は CPU 4096・メモリ 8192・処理係 4 本・リクエスト数による自動増減の目標 300 で動いている。ところがコード側の既定値はそれより小さく、リクエスト数の目標は<b>既定値が無い</b>。素で配備すると差分がそのまま適用される。</p>
+
+<figure>
+<svg viewBox="0 0 880 210" width="100%" style="max-width:880px" role="img"
+ aria-label="素で配備した場合と値を明示した場合の比較。CPU とメモリが 4 分の 1 になる">
+<text x="14" y="26" font-size="12.5" fill="#3c5a4c">CPU (単位)</text>
+<rect x="150" y="14" width="440" height="20" rx="4" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="600" y="29" font-size="12" fill="#0f4a2e">4096 ― 今動いている値</text>
+<rect x="150" y="40" width="110" height="20" rx="4" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="270" y="55" font-size="12" fill="#8f2f2f">1024 ― 素で配備すると</text>
+
+<text x="14" y="98" font-size="12.5" fill="#3c5a4c">メモリ (MiB)</text>
+<rect x="150" y="86" width="440" height="20" rx="4" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="600" y="101" font-size="12" fill="#0f4a2e">8192 ― 今動いている値</text>
+<rect x="150" y="112" width="110" height="20" rx="4" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="270" y="127" font-size="12" fill="#8f2f2f">2048 ― 素で配備すると</text>
+
+<text x="14" y="170" font-size="12.5" fill="#3c5a4c">処理係の本数</text>
+<rect x="150" y="158" width="440" height="20" rx="4" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="600" y="173" font-size="12" fill="#0f4a2e">4 本 ― 今動いている値</text>
+<rect x="150" y="184" width="110" height="20" rx="4" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="270" y="199" font-size="12" fill="#8f2f2f">1 本 ― 素で配備すると</text>
+</svg>
+<figcaption>棒の長さは実際の比である。加えてリクエスト数による自動増減の仕組みそのものが外れる (目標値に既定が無いため設定されない)。負荷が来ても台数が増えなくなるので、縮小と合わせて二重に効く。</figcaption>
+</figure>
+
+<p>防ぎ方は 1 つで、<b>配備の前に差分を全部読み、稼働中の値と突き合わせる</b>。差分に <code>Cpu</code> や <code>Memory</code> や処理係の本数が出てこなくなるまで値を明示してから配備した。実際の差分は、新しいテーブル 2 つとその権限、監視 2 件、環境変数 2 個だけに収まった。</p>
+
+<h2>9. GPT-6 は自前ゲートウェイに載らない ― 回避せず理由を書く</h2>
+
+<p>GPT-6 Sol と GPT-6 Astra は候補までは作れたが、<b>有効化できない</b>。3 段目の検証が、通信様式のうち片方しか実装していないからである。</p>
+
+<figure>
+<svg viewBox="0 0 880 200" width="100%" style="max-width:880px" role="img"
+ aria-label="通信様式ごとの対応表。検証だけが responses に未対応で、そこで経路が切れる">
+<text x="300" y="30" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">messages (Anthropic 系)</text>
+<text x="560" y="30" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">responses (OpenAI 系)</text>
+
+<text x="20" y="62" font-size="12.5" fill="#3c5a4c">Bedrock で呼べる</text>
+<rect x="200" y="46" width="200" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="300" y="63" font-size="12" fill="#0f4a2e" text-anchor="middle">対応</text>
+<rect x="460" y="46" width="200" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="560" y="63" font-size="12" fill="#0f4a2e" text-anchor="middle">対応 (実際に応答を確認)</text>
+
+<text x="20" y="102" font-size="12.5" fill="#3c5a4c">発見と候補作成</text>
+<rect x="200" y="86" width="200" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="300" y="103" font-size="12" fill="#0f4a2e" text-anchor="middle">対応</text>
+<rect x="460" y="86" width="200" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="560" y="103" font-size="12" fill="#0f4a2e" text-anchor="middle">対応 (候補まで作れた)</text>
+
+<text x="20" y="142" font-size="12.5" fill="#3c5a4c">検証 (probe)</text>
+<rect x="200" y="126" width="200" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="300" y="143" font-size="12" fill="#0f4a2e" text-anchor="middle">対応</text>
+<rect x="460" y="126" width="200" height="24" rx="5" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="560" y="143" font-size="12" fill="#8f2f2f" text-anchor="middle" font-weight="600">未実装 ― ここで切れる</text>
+
+<text x="20" y="182" font-size="12.5" fill="#3c5a4c">有効化</text>
+<rect x="200" y="166" width="200" height="24" rx="5" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="300" y="183" font-size="12" fill="#0f4a2e" text-anchor="middle">対応</text>
+<rect x="460" y="166" width="200" height="24" rx="5" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="560" y="183" font-size="12" fill="#8f2f2f" text-anchor="middle">判定が無いので到達しない</text>
+<text x="690" y="143" font-size="11.5" fill="#8f2f2f">空欄が答え</text>
+<text x="690" y="160" font-size="11.5" fill="#3c5a4c">1 行の欠落ではなく</text>
+<text x="690" y="177" font-size="11.5" fill="#3c5a4c">機能の不在</text>
+</svg>
+<figcaption>横 1 列が欠けているのではなく、右の列の真ん中だけが空いている。だから有効化に必要な判定が生まれず、その下も到達しない。設定では埋まらない、機能を足す必要のある穴である。</figcaption>
+</figure>
+
+<p>検証は Bedrock の共通の呼び方を使っており、GPT-6 はその呼び方でも実際に応答する。だが <code>wire_protocol</code> が指しているのは<b>ゲートウェイがそのモデルを客に出すときの経路</b>で、OpenAI 系は OpenAI 互換の別の口から出している。だから検証もその口で 1 回呼んで、その応答からトークン数を読まないと「請求が着地する」を確かめたことにならない。</p>
+
+<p>これは 1 行足して済む話ではなく、<b>お金を扱う経路に新しい通信手段を足す機能追加</b>である。予算を確保し、課金を着地させ、判定を保存する。だから今回は回避せず、穴として書いて残した。レビュー用に GPT-6 を使うこと自体は Bedrock を直接呼ぶ道具で今日からできているので、実務は止まらない。</p>
+
+<h2>10. やっていないこと、まだ開いていること</h2>
+
+<ul>
+<li><b>GPT-6 の検証経路</b>は未実装のまま。候補は作ったが有効化していないので、自前ゲートウェイ越しには使えない。</li>
+<li><b>GPT-5.6 Sol の古い下限価格</b>は直していない。既に課金しているモデルが居る種別なので別の変更にする。</li>
+<li><b>サーバ側のテストに順序依存の失敗が 2 件ある。</b>3,576 件が通り 1 件落ちたが、落ちた 1 件はテスト自身のコメントに「既知の順序依存の失敗で、まだ根本原因が分かっていない」と書かれている。単体では通り、収集順を変えると別の 1 件が落ちる。<b>自分の変更が増やした失敗はゼロ</b>だが、既存の赤を「無関係だから良い」とは書かない。順序依存の汚染そのものが別途直す対象である。</li>
+<li><b>GPT-6 のキャッシュ書きの値</b>は測定ではなく判断である。値段表に項目が現れたら測り直す。</li>
+<li>インフラ側のテストは全件 (33 スイート・255 件・skip 1) 緑である。</li>
+</ul>
+
+<div class="lead">
+<p style="margin:0"><b>まとめ。</b>Opus 5.5 への切り替えは 3 つの経路すべてで終わり、Fable 5.1 と GPT-6 はレビュー用にすぐ使える。自前ゲートウェイには Opus 5.5 と Fable 5.1 が載り、普通の利用者のトークンで応答することまで確かめた。途中で見つけた 2 つの欠陥のうち、<b>権限 1 行の欠落は「成功したように見える」形で昇格を無効化していた</b>のがいちばん重い発見で、直したうえで同じ事故が再発しないよう試験を両方向に変えた。</p>
+</div>
+
+<p class="foot">
+実測はすべて 2026-09-23、AWS アカウント 776010787911 の us-east-1 で稼働中の stratoclave に対して行った。
+変更したファイルは <code>iac/lib/ecs-stack.ts</code>、<code>iac/test/ecs-stack-scan-allowlist.test.ts</code>、
+<code>backend/mvp/defaults/pricing.json</code>。ブランチは <code>fix/promoted-model-stays-invisible</code>。
+値段は Bedrock の <code>ListFoundationModelAgreementOffers</code> を
+<code>mvp.pricing_feeds.dimensions.select</code> 経由で読んだ値。
+検証の課金は Opus 5.5 が 66 マイクロドル、Fable 5.1 が 165 マイクロドル。
+</p>
+
+</div>
+</body>
+</html>
