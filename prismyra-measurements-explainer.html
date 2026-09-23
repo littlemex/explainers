@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prismyra 実測記 — 効かない高速化を消し、効くものだけを測って残す</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+.retract{background:#fff6e6;border:2px dashed #d8a23a;border-radius:10px;padding:14px 16px;margin:16px 0}
+.retract b{color:#8a5a12}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 16px 10px}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:10px;text-align:left}
+figcaption b{color:var(--gd)}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+svg{display:block;margin:0 auto;max-width:100%;height:auto}
+.svgtitle{font:700 14px -apple-system,"Hiragino Sans",sans-serif;fill:#0f4a2e}
+.lbl{font:600 12.5px -apple-system,"Hiragino Sans",sans-serif;fill:#12241c}
+.lbls{font:11.5px -apple-system,"Hiragino Sans",sans-serif;fill:#3c5a4c}
+.mono{font:11.5px ui-monospace,Menlo,monospace;fill:#12241c}
+.monos{font:10.5px ui-monospace,Menlo,monospace;fill:#3c5a4c}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="index.html">全体の目次</a> &nbsp;/&nbsp; Prismyra の実測記</p>
+
+<h1>Prismyra 実測記<br>効かない高速化を消し、効くものだけを測って残す</h1>
+
+<div class="lead">
+<p><b>Prismyra とは何か。</b>文書を 1 回だけ読み込んで、その文書についての質問に文章を書かずに答えるライブラリ。ふつうの AI は「はい」と一文字答えるだけでも文章を作る仕組み ( 生成 ) を使うが、Prismyra はモデルの内部にある「次にどの文字が来そうか」という確率の値 ( logit と呼ぶ ) を直接読み出して答えにする。1 つの文書に 34 個の質問がついていても、読み込みは 1 回で済む。モデルは Qwen/Qwen3.6-35B-A3B-FP8、GPU は L40S 1 枚。リポジトリは github.com/littlemex/Prismyra で、現在の main は <code>d5161f7</code>。</p>
+<p style="margin-bottom:0">この文書は、直近の作業で見つかった 10 件の実測の記録。<b>効いていたと思っていた高速化が実は 1 度も動いていなかった話</b>から始まり、<b>効いていない部分を直すたびに前の主張が崩れて撤回した話</b>が何度も出てくる。数字が良く見えた瞬間に疑うべき合図と、自分のミスで測定そのものを無効にした 4 件も、そのまま残す。ここが最も価値のある部分なので、削らずに書く。</p>
+</div>
+
+<h2>0. 数値の要約</h2>
+<p>10 件の実測を先に並べる。行番号は後の章の見出しに対応しているので、気になる行から直接飛んでよい。</p>
+<table>
+<tr><th>#</th><th>やったこと</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th></tr>
+
+<tr><td class="n">1</td>
+<td>「保存方式を変えると 8〜9% 遅い」と報告していた機能 (paged) を丸ごと削除した</td>
+<td>結果が完璧すぎた ( 計算の順番が変わるはずの経路なのに確率差が 0.0000、メモリの山も小数第 3 位まで一致 ) ので配線を疑った</td>
+<td>本体のコードに「実際に使った行数」を記録させる仕組み ( <code>last_branch_rows</code> ) を足して、フラグを渡した通りに動いているかを確かめた</td>
+<td>単体テストが全部通っているので配線も正しいと信じる ( 実際は 18 個のテストが全部同じ配線だけを見ていた )</td>
+<td>フラグは 7 番目の引数だが呼び出しは 6 個しか渡していなかった。paged の層は 1 度も作られていない = 全ての測定が同じ経路同士の比較だった</td></tr>
+
+<tr><td class="n">2</td>
+<td>「質問の数 ( 幅 ) を変えても時間は変わらない」という主張を、長い文書でも測り直した</td>
+<td>短い文脈だけで測って「変わらない」と決めていた。文脈が長い実運用でも成り立つかは未確認だった</td>
+<td>文脈長を 3,040 トークンと 24,327 トークンの 2 通りで幅を変えて計測。副作用の確認は公開ベンチマーク ( RACE 101 問・BoolQ 60 問 ) の決定と確率のブレで判定</td>
+<td>短い文脈の 1 点だけを信じて先に進む</td>
+<td>3,040 トークンでは 1.02 倍で「変わらない」に近いが、24,327 トークンでは <b>1.51 倍</b> ( 238 ms 対 360 ms )。行数を質問数に合わせて絞る改修を実施、RACE で決定の変化 0 件、BoolQ ( 幅 1 対 1 の対照実験 ) で確率差 0.0000</td></tr>
+
+<tr><td class="n">3</td>
+<td>メモリが足りるかどうかの受付チェックを、観測値から見積もる形に直した</td>
+<td>保持分だけを見て受け付けていたので、受け付けたのに途中で落ちる ( 一時的に使う分を見ていなかった ) 状態になっていた</td>
+<td>24,327 トークンで保持・答える一時ピーク・読む一時ピークの 3 つを別々に実測し、空きメモリの見積もりも allocator の予約分を足す形に直した</td>
+<td>デバイスの空き ( free ) だけを見る ( 予約済みで未使用の分を空きと見誤る )</td>
+<td>保持 0.87 GiB・答える一時ピーク 4.97 GiB・<b>読む一時ピーク 5.63 GiB</b> ( 質問数を減らしても縮まない )。26,112 トークンは通り、<b>52,224 トークンは何も確保する前に断られる</b>ようになった</td></tr>
+
+<tr><td class="n">4</td>
+<td>層ごとに毎回まるごと作り直していたコピーを、保管の並び順を変えるだけで消した</td>
+<td>計算部品が読みたい並び順と保管の並び順が違っていたため、見せ方を合わせるための複製が毎回発生していた</td>
+<td>24,327 トークン・幅 32 で、一時メモリと処理時間を変更前後で比較。3,040 トークンでも変化がないことを確認</td>
+<td>計算部品側のコードを書き換えて並びを合わせる ( 検証範囲が広がり手戻りが増える )</td>
+<td>一時メモリ 4.970→3.482 GiB、時間 360→312 ms。<b>3,040 トークンでは 2.534 GiB のままぴったり変化なし</b> ( 短い文脈では効かない場所だと分かった )。行あたり費用の幅依存が 0.111/0.155 GiB から <b>0.109/0.109 GiB</b> に消えた</td></tr>
+
+<tr><td class="n">5</td>
+<td>「読み取った答えと生成した答えは区別できない」という一番大事な主張を、長い文書で測り直した</td>
+<td>短い文書だけで検証していた。文書が長くなると壊れる可能性を見落としていた</td>
+<td>同じ RACE 159 問・同じ正解のまま、埋め草の記事を替えて長さだけを 407・6,104・10,199 トークンと変えて正解率を比較</td>
+<td>短い文書の一致だけを見て「区別できない」を確定事実として書く</td>
+<td>407 トークンでは差 +0.6% ( 95% 区間がゼロを含む ) だが、<b>10,199 トークンでは -5.0% ( 区間 [-8.6, -1.3] でゼロを含まない )</b>。初めて 2 方式が分離し、向きは読み取りに不利</td></tr>
+
+<tr><td class="n">6</td>
+<td>決定ループの実験 ( テトリス ) で、結論を 2 回作って 2 回とも間違いだと分かった</td>
+<td>「盤面を評価できるか」を機械的に判定できる問題がなく、代理の指標 ( 生存手数 ) だけで判断していた</td>
+<td>床 ( 乱択 ) と陽性対照 ( 点数まで渡す ) を必ず並べて測る。さらに機械的に正解が決まる質問 ( 穴の数・列の高さなど 132 問 ) で文字入力と画像入力を比較</td>
+<td>働いていなさそうな設定を除外して「動いた設定」だけを報告する</td>
+<td>画像で盤面を渡すと機械的な質問には <b>84.8%</b> 正解 ( 文字では 69.7% ) なのに、テトリスの成績は画像経路も床と同じ ( 消した列 0.0±0.0 )。壊れているのは「見る」でも「評価する」でもなく、<b>34 候補ぶんの比較を積み上げる</b> 3 番目の鎖だった</td></tr>
+
+<tr><td class="n">7</td>
+<td>同じ目的の他の実装 (ikermoel/open-alternative-jev) と設計を比較し、良い部分だけを取り込んだ</td>
+<td>質問を 1 本の列に詰める方式 (packed) は正解率を落とすと相手の測定にあったので、自分の方式が同じ欠陥を持つか確認したかった</td>
+<td>相手の公開データで packed と個別リクエスト (separate) を比較。自分の実装には温度スケーリングという較正の手法を追加して較正誤差 (ECE) を測定</td>
+<td>相手の実装を丸ごと真似る ( 自分の設計の利点を検証せずに捨てる )</td>
+<td>相手の packed は個別回答の 8.0% を変え正解率を 2.8pt 落とす。自分の分岐にはその劣化がない。温度スケーリングを追加して <b>較正誤差が半分</b> (RACE 0.031→0.016)、正解率は定義上不変</td></tr>
+
+<tr><td class="n">8</td>
+<td>vLLM に速度で 4.3 倍負けていた原因を特定し、1.9 倍まで詰めた</td>
+<td>正面比較で 4.3 倍遅いという結果が出たが、原因が計算量なのか実装なのか不明だった</td>
+<td>1 回分の処理を profile し、GPU が実際に計算していた時間の比率とカーネル起動の回数を層の種類別に集計</td>
+<td>遅い理由を「エンジンの違い」として片付ける ( 実際は自分の枠組みの代替実装が原因だった )</td>
+<td>GPU の実計算は全体の 42% だけ、<b>カーネル起動 32,873 回のうち 93% が線形注意の層</b> (30 層中 1,021 回/層)。同梱カーネルに差し替えて 7.36→<b>16.44 問/s</b>、4.3 倍負け→<b>1.9 倍負け</b></td></tr>
+
+<tr><td class="n">9</td>
+<td>自分のミスで測定そのものを無効にした事例を 4 件、原因を特定して直した</td>
+<td>間違った測定は間違った結論を生むので、原因を消さないまま次の測定に進むと同じ穴を繰り返す</td>
+<td>結果が異常な値を出した箇所を 1 つずつ遡って、比較コードやリソース管理の実装を再点検した</td>
+<td>異常値を外れ値として無視して先に進む</td>
+<td>質問 id の記事間重複 (101問で id 6種のみ)、BoolQ 較正が黙って消える文字列照合ミス、<code>Context</code> の参照残りによる OOM、盤面 0 個問題の id 衝突。4 件とも修正済み</td></tr>
+
+<tr><td class="n">10</td>
+<td>現在の状態を確認した</td>
+<td>ここまでの修正が全体として壊れていないかを最後に確認する必要がある</td>
+<td>実機テストと、デバイスを使わないテストの両方を一括実行</td>
+<td>個別の修正ごとにテストを見て「全体は大丈夫だろう」と判断する</td>
+<td>main は <code>d5161f7</code>。<b>実機テスト 169 件 + デバイス不要テスト 135 件が通過</b></td></tr>
+
+</table>
+
+<h2>1. 動いていなかった高速化を削除した</h2>
+
+<p>Prismyra には、文書を読み込んだ結果 ( キャッシュと呼ぶ、モデルが文書を理解した内容の保存場所 ) を「ページ」という決まった大きさの箱に分けて保存する方式 ( paged ) があった。実装した本人は、これを使うと「答えは変わらないが 8〜9% 遅い」と測定し、そのまま報告していた。ところがこの結果は<b>全部無効</b>だった。</p>
+
+<div class="bad">
+<b>気づいた合図は「結果が完璧すぎたこと」だった。</b>paged は計算の順番を変える保存方式なので、四捨五入の誤差くらいは出るはずだった。ところが確率の差は <b>0.0000</b>、メモリの使用量の山 ( ピーク ) も小数第 3 位までぴったり一致していた。順番が違う経路を比べているのに、差が全く出ないのはおかしい。
+</div>
+
+<p>原因を追うと、配線がそもそも繋がっていなかった。<code>Prismyra.__init__</code> ( 起動時の設定 ) はフラグを正しく保存し、カーネル ( 計算を実行する低レベルの部品 ) が paged 用の引数を受け取れるかも検証していた。<code>stats()</code> ( 状態を表示する関数 ) にも "paged" という文字が出ていた。しかし実際に文書を読む処理 <code>_read</code> は、保存領域を作る関数 <code>build_cache</code> を <b>引数 6 個</b>で呼んでおり、paged のフラグは <b>7 番目の引数</b>だった。つまり呼び出しの時点でフラグが渡っていない。paged の保存領域は 1 度も作られておらず、「paged あり」と「paged なし」の測定は<b>同じ経路同士の比較</b>だった。</p>
+
+<figure>
+<svg viewBox="0 0 940 260" role="img" aria-label="paged フラグが途中で消える経路の図">
+  <text x="470" y="24" text-anchor="middle" class="svgtitle">図 1  フラグは保存され、検証もされたが、呼び出しの手前で止まっていた</text>
+
+  <rect x="24" y="52" width="220" height="64" rx="10" fill="#fff" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="134" y="78" text-anchor="middle" class="lbl">__init__</text>
+  <text x="134" y="98" text-anchor="middle" class="monos">paged=True を保存</text>
+
+  <path d="M244 84 L288 84" stroke="#1f7a4d" stroke-width="2" marker-end="url(#ar1)"/>
+  <defs><marker id="ar1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+    <path d="M0 0 L9 4.5 L0 9 z" fill="#1f7a4d"/></marker>
+    <marker id="arR1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+    <path d="M0 0 L9 4.5 L0 9 z" fill="#8f2f2f"/></marker></defs>
+
+  <rect x="288" y="52" width="220" height="64" rx="10" fill="#fff" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="398" y="78" text-anchor="middle" class="lbl">stats()</text>
+  <text x="398" y="98" text-anchor="middle" class="monos">"paged" と表示される</text>
+
+  <path d="M508 84 L552 84" stroke="#1f7a4d" stroke-width="2" marker-end="url(#ar1)"/>
+
+  <rect x="552" y="52" width="200" height="64" rx="10" fill="#fff" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="652" y="78" text-anchor="middle" class="lbl">カーネル起動時検証</text>
+  <text x="652" y="98" text-anchor="middle" class="monos">引数を受け取れるか確認済み</text>
+
+  <path d="M134 116 L134 172" stroke="#8f2f2f" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arR1)"/>
+  <text x="150" y="150" class="lbls" fill="#8f2f2f">ここで途切れる</text>
+
+  <rect x="24" y="176" width="300" height="64" rx="10" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+  <text x="174" y="202" text-anchor="middle" class="lbl" fill="#8f2f2f">_read → build_cache(引数 6 個)</text>
+  <text x="174" y="222" text-anchor="middle" class="monos" fill="#8f2f2f">paged は 7 番目の引数 = 渡らない</text>
+
+  <rect x="360" y="176" width="500" height="64" rx="10" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+  <text x="610" y="202" text-anchor="middle" class="lbl" fill="#8f2f2f">paged の保存領域は 1 度も作られない</text>
+  <text x="610" y="222" text-anchor="middle" class="monos" fill="#8f2f2f">「paged あり」も「なし」も同じ経路を実行</text>
+</svg>
+<figcaption><b>3 つの確認 ( 保存・表示・カーネル検証 ) がすべて通っていたのに、本体の呼び出しだけが繋がっていなかった。</b>単体テスト 18 個、起動時の検証、ベンチマークのオプションまで揃っていたのに、それらは全部「フラグが正しく保存されているか」しか見ておらず、「実際に使われた保存方式」を見ていなかった。</figcaption>
+</figure>
+
+<p>この事故のいちばんの教訓は、<b>チェックの網が「設定が正しいか」しか見ておらず「その設定通りに動いたか」を見ていなかった</b>ことだった。再発防止として、実際に仕事をするコード自身に「今回は何行を対象に計算したか」を記録させる仕組み ( <code>last_branch_rows</code> ) を追加した。これがあれば、フラグと実際の動作がずれた瞬間に、フラグを見るのではなく実際の行数を見て気づける。</p>
+
+
+<h2>2. 「幅を変えても時間は同じ」は短い文脈だけの話だった</h2>
+
+<p>Prismyra は 1 つの文書に対して複数の質問を「幅」という単位でまとめて処理する。文書に「幅を変えても処理時間は変わらない ( 1.01 倍 )」と書いていたが、この測定は文脈が短いときのものだけだった。文脈長を変えて測り直すと、様子が変わった。</p>
+
+<table>
+<tr><th>文脈長</th><th>幅を変えたときの時間の比</th><th>実測 ( ms )</th><th>備考</th></tr>
+<tr><td class="n">3,040 トークン</td><td class="n">1.02 倍</td><td class="n">-</td><td>「変わらない」に近い</td></tr>
+<tr><td class="n">24,327 トークン</td><td class="n"><b>1.51 倍</b></td><td class="n">238 → 360</td><td>幅が増えると明確に重くなる</td></tr>
+</table>
+
+<p>理由は単純で、<b>各質問が自分専用に文脈のコピーを持って読む</b>実装になっていたため。文脈が長いほど、質問の数 ( 行数 ) に比例して重くなる。そこで、質問数に合わせて処理する行数を絞る改修を行った。</p>
+
+<div class="warn">
+<b>直せば数字は動く。だから答えの中身が変わっていないかを別に確認する必要がある。</b>行数を絞る改修は計算の範囲を変えるので、確率の値がわずかに動く可能性がある。速度が直ったことと、答えが正しいままであることは別の主張なので、別の測定で確かめる。
+</div>
+
+<p>確認は公開ラベル付きベンチマーク 2 つで行った。RACE ( 101 問、1 文書に複数の質問がつく ) では<b>決定 ( どの選択肢を選ぶか ) の変化が 0 件</b>、確率の最大の動きは 0.1995 だった。BoolQ ( 60 問、1 文脈につき質問が 1 個しかないので、幅を変えても実質「幅 1 対 幅 1」の比較になる、いわば対照実験 ) では<b>確率差が 0.0000</b>。BoolQ の 0.0000 が特に重要で、「本当に差が無いはずの場所で、道具が差が無いと正しく言えている」ことの証拠になっている。</p>
+
+
+<h2>3. メモリの受付チェックが 2 か所で甘かった</h2>
+
+<p>GPU のメモリ ( VRAM ) は有限なので、「この処理は入るか」を事前に受付でチェックする。Prismyra の受付チェックは<b>保持する分だけ</b>を見ていて、処理の途中で一時的に膨らむ分を見ていなかった。24,327 トークンで実測すると、保持は 0.87 GiB しかないのに、答えを作る一時ピークは 4.97 GiB、<b>文書を読む一時ピークは 5.63 GiB</b> で読む方が一番大きい。しかも読む一時ピークは質問数を減らしても縮まない。つまり「保持だけ見て受け付けた」処理が、実際には保持の 6 倍以上のメモリを一瞬使って落ちる、という状態になっていた。</p>
+
+<p>受付チェックを、両方とも実測値から見積もる形に修正した。答える側の一時ピークは「観測した行あたりの定数 + 設定から計算できる 2,048 バイト/文脈トークン/行」、読む側は「235,582 バイト/文脈トークン」という式にした。この式で見積もると、26,112 トークンは通り、<b>52,224 トークンは何も確保する前に、名前つきで ( どの処理が原因かを言って ) 断られる</b>ようになった。</p>
+
+<div class="box">
+<b>空きメモリの数え方も直した。</b><code>mem_get_info</code> が返す「空き」は、GPU 全体としての空きであって、自分のプロセスが確保したが今は使っていない分 ( 予約済み未使用 ) を空きに数えない。デバイスの空きだけを見ていたときは、プロセス内に 9 GiB 余っているのに 18,000 トークンの処理を拒否するという、明らかに変な挙動が起きていた。予約済み未使用分を空きに足す形に直した。
+</div>
+
+<p>この修正はレビューで 2 つの逆方向の誤りを指摘されて、両方直した。</p>
+
+<div class="retract">
+<b>撤回 (a): 「予測値の最大を記憶する」方式は逆に厳しすぎた。</b>最初は「これまで見積もった中で一番大きい値」を記憶して、それを基準に判定する方式にしていた。ところが短い文脈で 1 度でも大きめに見積もると、その値が居座り続けて、あとから来た短い文脈の処理 ( 本来 4.97 GiB で足りる ) を「17.7 GiB 要る」と見積もって断ってしまう。文脈長に依存しない定数の部分だけを記憶する形に変えて解決した。
+</div>
+
+<div class="retract">
+<b>撤回 (b): 逆方向に、狭い実測から広い幅を予測すると足りない。</b>幅 1 の実測結果だけから幅 32 を予測すると、実測 4.028 GiB に対して見積もりが 3.482 GiB と<b>不足</b>していた。そこで、測った幅より広い処理を見積もりだけで断らないようにした。見積もりは「最低これだけは要る」という下限を言うだけにして、最終判断は実際にメモリを確保してみた結果に任せる。
+</div>
+
+
+<h2>4. 同じ内容を 2 回コピーしていたのをやめた</h2>
+
+<p>Prismyra の中で、計算部品 ( 行列演算のコード ) が読みたいデータの並び順と、保存領域がデータを保管している並び順が違っていた。そのため、層 ( モデルの層、Qwen3.6 なら数十層ある ) を処理するたびに、保存領域をまるごと作り直して並び順を合わせていた。保管の並び順を「トークン優先」に変え、見せ方 ( 計算部品から見える形 ) だけを従来通りに保つことで、この作り直しを消した。<b>計算部品側のコードは 1 行も変えていない。</b></p>
+
+<figure>
+<svg viewBox="0 0 940 220" role="img" aria-label="保存の並び順を変えて作り直しを消す図">
+  <text x="470" y="24" text-anchor="middle" class="svgtitle">図 2  保管の並び順を変えるだけで、層ごとの作り直しが消える</text>
+
+  <rect x="30" y="50" width="400" height="140" rx="12" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+  <text x="230" y="76" text-anchor="middle" class="lbl" fill="#8f2f2f">修正前</text>
+  <text x="50" y="102" class="monos">保管の並び = A</text>
+  <text x="50" y="122" class="monos">計算部品が欲しい並び = B</text>
+  <rect x="50" y="134" width="360" height="40" rx="6" fill="#fff" stroke="#8f2f2f" stroke-width="1.5"/>
+  <text x="230" y="158" text-anchor="middle" class="lbl" fill="#8f2f2f">層ごとに A→B へ全部コピー</text>
+
+  <rect x="510" y="50" width="400" height="140" rx="12" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="710" y="76" text-anchor="middle" class="lbl" fill="#0f4a2e">修正後</text>
+  <text x="530" y="102" class="monos">保管の並び = B ( トークン優先 )</text>
+  <text x="530" y="122" class="monos">計算部品が欲しい並び = B</text>
+  <rect x="530" y="134" width="360" height="40" rx="6" fill="#fff" stroke="#1f7a4d" stroke-width="1.5"/>
+  <text x="710" y="158" text-anchor="middle" class="lbl" fill="#0f4a2e">コピー不要 ( 見せ方も B のまま )</text>
+</svg>
+<figcaption><b>並びを揃えただけで、毎層のコピーが 0 になった。</b>計算部品のコードは変更していないので、この修正が壊す可能性のある範囲は保存領域の実装だけに閉じている。</figcaption>
+</figure>
+
+<p>効果は文脈長によって違った。24,327 トークン・幅 32 では一時メモリが <b>4.970→3.482 GiB</b>、時間が <b>360→312 ms</b>、幅を変えたときの効き ( 3 節の 1.51 倍 ) が <b>1.51→1.29 倍</b>に縮んだ。一方、<b>3,040 トークンでは 2.534 GiB のまま前後でぴったり変化がなかった</b>。短い文脈では、そもそもこの作り直しが処理時間の山の頂上ではないので、直しても見た目の効果が出ない場所だと分かった。</p>
+
+<p>予想していなかった副産物もあった。行あたりの費用 ( メモリ ) が、修正前は幅 1 で 0.111 GiB・幅 32 で 0.155 GiB と幅によって違っていたのが、修正後は <b>0.109 GiB と 0.109 GiB</b> になり、幅による差そのものが消えた。作り直しのコピーが、幅が大きいときに割高になる原因そのものだったということになる。</p>
+
+
+<h2>5. 一番大事な主張が長い文書で崩れた</h2>
+
+<p>Prismyra が主張する中で一番大事なのは「1 回の forward ( モデルに 1 回だけ入力を通す処理 ) で読み取った答えは、文章を生成して得た答えと区別できない」という点。これまでは短い文書だけで確かめていた。今回、同じ RACE 159 問・同じ正解のまま、文書を埴め草 ( 関係のない別の記事 ) で埋めて長さだけを変えて測り直した。</p>
+
+<table>
+<tr><th>文書の長さ</th><th>読み取り方式の正解率</th><th>生成方式の正解率</th><th>差</th><th>95% 区間</th></tr>
+<tr><td class="n">407 トークン</td><td class="n">95.0%</td><td class="n">94.3%</td><td class="n">+0.6%</td><td class="n">[-1.3, +3.0]</td></tr>
+<tr><td class="n">6,104 トークン</td><td class="n">83.6%</td><td class="n">86.2%</td><td class="n">-2.5%</td><td class="n">[-5.6, +0.6]</td></tr>
+<tr><td class="n">10,199 トークン</td><td class="n">82.4%</td><td class="n">87.4%</td><td class="n"><b>-5.0%</b></td><td class="n"><b>[-8.6, -1.3]</b></td></tr>
+</table>
+
+<div class="retract">
+<b>撤回。</b>「読み取った答えは生成した答えと区別できない」は、短い文書 ( 407 トークン ) だけで成り立つ主張だった。文書が長くなるにつれて差が開き、10,199 トークンでは区間がゼロを跨がない ( ゼロを含まない ) ところまで悪化した。これはこのプロジェクトで<b>初めて 2 方式がはっきり分離した</b>結果であり、向きは読み取り方式に不利。
+</div>
+
+<p>半分はモデル自体の問題で、生成方式も文書が長くなると 6.9pt 落ちる。しかし差そのものが開くのは、答えの取り出し方の違いによる。読み取り方式は「あらかじめ宣言した選択肢 ( 4 つなど ) だけ」の中で確率を採点する。生成方式は文字を実際に出力させて、完全一致 → 区切り付き一致 → 先頭一致 → 言及、という 4 段階の緩い判定で答えを拾う。文書が長くなって確率の分布が平らになる ( どの選択肢も差がつきにくくなる ) と、選択肢を 1 発で決め切る読み取り方式の方が不利になる、という仮説を立てている。</p>
+
+<div class="warn">
+<b>これは仮説であり、決着はまだついていない。</b>決着させる測定は「生成方式が最初に出す 1 文字」と「読み取り方式が選んだ選択肢」を直接比べることだが、まだ実施していない。また、埋め草の記事は Prismyra にとって競合にあたる記事を使っているので、この測定は<b>長文脈での精度の下限</b>にあたる ( 敵対的な条件での結果 )。
+</div>
+
+
+<h2>6. テトリスで結論を 2 回間違えた</h2>
+
+<p>Prismyra を「決定ループ ( 状況を見て次の 1 手を選び続ける処理 ) 」に使えるかを試すため、テトリスを実装した。1 手あたりの合法な置き方は最大 34 通りで、これを 1 つの文書に 34 個の質問として渡す ( この設計にとって最も条件の良いケース )。同じ乱数の種で全ての打ち手に同じピースの並びを与え、60 手動かす。</p>
+
+<table>
+<tr><th>方式</th><th>60 手中の生存</th><th>消した列</th><th>乱択との差 (p 値)</th></tr>
+<tr><td>熟練の基準 ( 5 つの特徴量と固定の重み )</td><td class="n">60.0 ± 0.0</td><td class="n">20.5 ± 1.5</td><td class="n">p=0.0002</td></tr>
+<tr><td>読み出し・候補表 + 点数まで渡す ( 陽性対照 )</td><td class="n">57.3 ± 2.3</td><td class="n">9.0 ± 3.6</td><td class="n">-</td></tr>
+<tr><td><b>読み出し・候補表 ( 点数なし )</b></td><td class="n"><b>51.7 ± 2.1</b></td><td class="n"><b>6.0 ± 1.7</b></td><td class="n">-</td></tr>
+<tr><td>読み出し・盤面の絵 + 置き方を文で説明</td><td class="n">26.3 ± 2.7</td><td class="n">0.3 ± 0.5</td><td class="n">p=0.16</td></tr>
+<tr><td>読み出し・置いた後の盤面の絵</td><td class="n">24.0 ± 6.2</td><td class="n">0.2 ± 0.4</td><td class="n">p=0.68</td></tr>
+<tr><td>読み出し・<b>盤面を画像として渡す</b></td><td class="n">24.5 ± 4.2</td><td class="n">0.0 ± 0.0</td><td class="n">p=0.88</td></tr>
+<tr><td>乱択 ( 床 )</td><td class="n">23.7 ± 3.4</td><td class="n">0.2 ± 0.4</td><td class="n">-</td></tr>
+</table>
+
+<div class="retract">
+<b>撤回 (1回目): 「モデルは盤面を評価できない」は間違いだった。</b>「置いた結果の盤面を見せても改善しない」という結果だけを見て、こう結論づけた。しかしこの操作が消しているのは「置いた後の盤面を想像する手間」だけで、「絵として描かれた盤面を読み取る手間」は消していない。評価そのものの失敗を示す測定になっていなかった。
+</div>
+
+<div class="retract">
+<b>撤回 (2回目): 「評価はできるが、文字で書かれた盤面 (ASCII) を読めない」も半分間違いだった。</b>このモデルは画像を読む能力を持っているのに、盤面の情報をずっと文字だけで渡していた。画像として渡す実験を追加したところ、画像経路もテトリスの成績では床 ( 乱択 ) と同じ ( 消した列 0.0±0.0 ) だった。「文字が読めない」という説明では、画像でも改善しなかったこの結果を説明できない。
+</div>
+
+<p>そこで、テトリスの成績とは別に、<b>正解が機械的に決まる質問</b> ( 穴が k 個より多いか・列 a は列 b より高いか・列 x は空か、しきい値は真値の両側に置く ) を 132 問用意して、文字入力と画像入力を比較した。</p>
+
+<table>
+<tr><th>入力形式</th><th>正解数</th><th>正解率</th><th>統計的な有意性</th></tr>
+<tr><td>文字 (ASCII)</td><td class="n">92/132</td><td class="n">69.7%</td><td class="n">全部「いいえ」と同値・P(≥92)=0.54</td></tr>
+<tr><td><b>画像</b></td><td class="n"><b>112/132</b></td><td class="n"><b>84.8%</b></td><td class="n"><b>P(≥112)=0.00005</b></td></tr>
+</table>
+
+<p>盤面ごとに文字と画像を対応させて比べると、画像が 8 勝 1 敗 3 分け ( 符号検定 p=0.039 )。<b>それでも画像経路のテトリスの成績は床のまま</b>だった。</p>
+
+<figure>
+<svg viewBox="0 0 940 200" role="img" aria-label="評価の3段階の鎖のどこが壊れているかの図">
+  <text x="470" y="22" text-anchor="middle" class="svgtitle">図 3  「見る」→「評価する」→「34 候補を比較する」の 3 段階のうち、壊れているのは 3 段目</text>
+
+  <rect x="30" y="50" width="260" height="90" rx="10" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="160" y="80" text-anchor="middle" class="lbl" fill="#0f4a2e">1. 盤面を見る</text>
+  <text x="160" y="102" text-anchor="middle" class="monos">画像で 84.8% 正解</text>
+  <text x="160" y="120" text-anchor="middle" class="lbls" fill="#0f4a2e">できている</text>
+
+  <path d="M290 95 L330 95" stroke="#1f7a4d" stroke-width="2" marker-end="url(#ar1)"/>
+
+  <rect x="330" y="50" width="260" height="90" rx="10" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="460" y="80" text-anchor="middle" class="lbl" fill="#0f4a2e">2. 数字を評価する</text>
+  <text x="460" y="102" text-anchor="middle" class="monos">点数を渡すと 51.7 手 (陽性対照)</text>
+  <text x="460" y="120" text-anchor="middle" class="lbls" fill="#0f4a2e">できている</text>
+
+  <path d="M590 95 L630 95" stroke="#8f2f2f" stroke-width="2" marker-end="url(#arR1)"/>
+
+  <rect x="630" y="50" width="280" height="90" rx="10" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+  <text x="770" y="80" text-anchor="middle" class="lbl" fill="#8f2f2f">3. 34 候補ぶんの穴/高さの合計を</text>
+  <text x="770" y="98" text-anchor="middle" class="lbl" fill="#8f2f2f">積み上げて比較する</text>
+  <text x="770" y="120" text-anchor="middle" class="lbls" fill="#8f2f2f">画像経路でも床のまま = ここが壊れている</text>
+
+  <text x="470" y="172" text-anchor="middle" class="lbls">床と陽性対照を表に入れていなかったら「26 手・537 ms/手」が働く打ち手のように読めてしまう ( 実際は働いていないことの所要時間 )</text>
+</svg>
+<figcaption><b>床 ( 乱択 ) と陽性対照 ( 点数を渡す ) を必ず並べて測ることが、この間違いを見つける唯一の方法だった。</b>片方だけを見ていたら、遅いだけの空回りを「動いている」と誤読していた。</figcaption>
+</figure>
+
+
+<h2>7. 他のリポジトリ (ikermoel/open-alternative-jev) との比較と取り込み</h2>
+
+<p>同じ目的を持つ別実装が公開されている ( Apache-2.0 ライセンス、star 50 )。機構が違う。彼らは複数の質問を <b>1 本の列に詰めて渡す ( packed )</b> ので、後の質問が前の質問を見てしまう。彼ら自身の測定でも、packed は個別に答えたときと比べて回答の 8.0% を変え、正解率を 2.8pt 落とす ( 87.3%→84.5% )。Prismyra の分岐 ( 1 質問ずつ独立に扱う設計 ) にはこの劣化がない。</p>
+
+<p>一方、vLLM ( 別の推論エンジン ) で質問ごとに<b>別のリクエスト</b>として投げる方式 ( separate ) は、文脈の再利用 ( prefix cache ) が効いて、packed より速くて正確だった。</p>
+
+<table>
+<tr><th>方式</th><th>正解率</th><th>速さ ( 問/s )</th></tr>
+<tr><td><b>separate ( vLLM、個別リクエスト )</b></td><td class="n"><b>87.0%</b></td><td class="n"><b>71.9</b></td></tr>
+<tr><td>packed ( 1 本の列に詰める )</td><td class="n">84.3%</td><td class="n">38.7</td></tr>
+</table>
+
+<p>取り込んだのは<b>温度スケーリング</b> ( 確率の値そのものを少し均す・尖らせる較正の手法 )。これまで確率の「順番」は使っていたが、確率の「値」が正しいかどうかは 1 度も測っていなかった。1 つの数を掛けるだけの手法で、較正誤差 (ECE、確率の値が実際の正解率とどれだけずれているかの指標) が<b>半減</b>した ( RACE 0.031→0.016、BoolQ 0.025→0.013 )。正解率はこの操作では<b>定義上不変</b> ( すべての選択肢を同じ正の数で割っても、順番は変わらないため )。</p>
+
+<div class="note">
+<b>温度の向きが彼らと逆だった理由は、たぶん読み出しの範囲の違い。</b>Prismyra の温度は 0.90 と 1.05、彼らは 1.3〜1.5 で、向きが逆。Prismyra は<b>宣言された選択肢だけ</b>で確率を正規化するのに対し、彼らは<b>語彙全体</b>から文字を読み出す。正規化する範囲が違えば、確率がもともと尖っている度合いも違うので、較正に必要な調整の向きが変わって当然、という理解。
+</div>
+
+
+<h2>8. 速度で 4 倍負けていたのを 1.9 倍に詰めた</h2>
+
+<p>同一モデル・同一 GPU・同一 RACE 問題で vLLM と正面比較した。比較を公平にするため、vLLM 側の出力も文字トークンだけに絞った ( 絞らずに上位 20 個の候補確率を見る方式だと、答えの文字が改行や <code>&lt;think&gt;</code> というモデルの思考過程を表す特殊なトークンの陰に隠れてしまい、全問が偶然と同じ水準の正解率になった。これに気づかずにいたら、読み出し方式の欠陥をエンジンの遅さとして誤って報告するところだった )。</p>
+
+<table>
+<tr><th></th><th>速さ ( 問/s )</th><th>文脈あたりの時間</th><th>送ったトークン</th><th>正解率</th></tr>
+<tr><td>Prismyra ( 最初 )</td><td class="n">7.36</td><td class="n">536.7 ms</td><td class="n">28,421</td><td class="n">0.953</td></tr>
+<tr><td>vLLM</td><td class="n">31.64</td><td class="n">125.0 ms</td><td class="n">76,556</td><td class="n">0.936</td></tr>
+</table>
+
+<p>速さは <b>4.3 倍負け</b>だが、送ったトークン数は Prismyra が <b>2.7 倍少ない ( 勝ち )</b>。正解率は読み出し方式が違うので単純比較はできない。</p>
+
+<p>遅い原因は計算量ではなかった。1 回の処理 ( 質問に答える枝の部分 ) を profile すると、実時間 268.4 ms のうち GPU が実際に計算していたのは 112.7 ms、つまり <b>42% だけ</b>。残りはカーネル ( 計算の実行単位 ) の起動待ちで、<b>1 回の処理でカーネル起動が 32,873 回</b>もあった。層の種類別に見ると、線形注意という種類の層が <b>1 層あたり 1,021 回</b>起動され、通常の注意層は 114 回。Qwen3.6 は 30 層中ほとんどが線形注意層なので、<b>起動回数の 93% がそこに集中</b>していた。中身は、chunked ( 一定の大きさに刻んで処理する方式 ) な走査を素の PyTorch で書いた実装で、1 層あたりコピー 218 回・要素ごとの演算 191 回・掛け算 82 回、合計 66 種類の操作に分かれていた。</p>
+
+<figure>
+<svg viewBox="0 0 940 210" role="img" aria-label="カーネル起動回数の内訳">
+  <text x="470" y="22" text-anchor="middle" class="svgtitle">図 4  カーネル起動 32,873 回のうち、93% が線形注意の層に集中</text>
+
+  <rect x="40" y="50" width="360" height="120" rx="10" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+  <text x="220" y="76" text-anchor="middle" class="lbl" fill="#0f4a2e">通常の注意層</text>
+  <text x="220" y="98" text-anchor="middle" class="monos">114 回 / 層</text>
+  <text x="220" y="120" text-anchor="middle" class="lbls">起動全体の 7%</text>
+
+  <rect x="440" y="50" width="460" height="120" rx="10" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+  <text x="670" y="76" text-anchor="middle" class="lbl" fill="#8f2f2f">線形注意の層 ( 30 層中ほとんど )</text>
+  <text x="670" y="98" text-anchor="middle" class="monos" fill="#8f2f2f">1,021 回 / 層 = 起動全体の 93%</text>
+  <text x="670" y="120" text-anchor="middle" class="lbls" fill="#8f2f2f">素の PyTorch 実装 ( コピー 218・演算 191・掛け算 82 )</text>
+
+  <text x="470" y="192" text-anchor="middle" class="lbls">GPU の実計算時間は全体の 42% だけ。残り 58% はカーネル起動の待ち時間</text>
+</svg>
+<figcaption><b>ここは「枠組みの代替実装」だった。</b>枠組みは kernel hub ( 最適化済みカーネルを配る仕組み ) に問い合わせて失敗したときにこの素の実装へ落ちる作りで、vLLM は hub が提供するはずのカーネルを最初から同梱していた。</figcaption>
+</figure>
+
+<p>vLLM が持っていたカーネルを借りて差し替えると、1 回の処理が <b>268.4→111.8 ms</b>、1 問あたり <b>137.5→57.6 ms</b>、速さは <b>7.36→16.44 問/s</b>、負けは <b>4.3 倍→1.9 倍</b>に縮んだ。</p>
+
+<div class="warn">
+<b>数値が変わる差し替えなので、採用前に必ず既存実装と照合した。</b>枠組みの実装とカーネルの出力を比較し、<b>相対誤差 5e-2 を超えたら採用を拒否する</b>チェックを入れた。実データ 472 問での影響は、<b>決定 ( どの選択肢を選ぶか ) の 465/472 = 98.5% が一致</b>、正解率は <b>0.9364→0.9407</b> で下がっていない。
+</div>
+
+<p>動いた 7 問のうち 1 問が、動画の長さに関する実機テスト 2 件を落とした。原因は、テストが「正解が整数 6 ぴったり」を要求していたこと。守りたかったのは「時間の情報がモデルに届いているか」だった ( 時間を渡さないと 6 秒の動画が 0.67 秒に見えてしまい、モデルは 2 と答えてしまう )。そこで判定を「5 以上」に直し、定数を書いた場所に理由と測定値をコメントで残した。<b>黙って許容値を広げて変更を通すのは、退行を高速化として出荷する手口</b>なので、避けた。</p>
+
+<p>1 つの差し替えが結果にどれだけ影響したかを測るための仕組み <code>PRISMYRA_WITHOUT</code> を追加した ( 既存の <code>fast_kernels=False</code> は 5 つの高速化を全部止めてしまうので、個別に切り分けられなかった )。</p>
+
+<div class="note">
+<b>残り 1.9 倍を詰める攻め口は、安い順に 3 つ見えている。</b>(1) 現在の畳み込みカーネルは文脈を読む部分だけを覆っていて、答えを作る枝の部分は素の PyTorch のまま。(2) CUDA graph ( 一連の GPU 処理をまとめて記録し、繰り返し再生する仕組み ) は、放棄する前の 1 回の記録で 83.9→51.7 ms ( 1.62 倍 )。(3) 1 節で削除した paged 経路は、メモリ削減の効果は実測ゼロだったが、決まった大きさの箱に保管する ( page pool ) 発想自体は、長さをデータとして持ち運べるので CUDA graph が必要とする「毎回同じ形」を用意する手段として使える可能性がある。
+</div>
+
+
+<h2>9. 自分のミスで測定を無効にした例 (これも必ず書く)</h2>
+
+<p>良い結果も悪い結果も、測定のやり方自体が間違っていたら意味を持たない。ここに 4 件をそのまま残す。</p>
+
+<div class="bad">
+<b>質問 id の記事間重複。</b>「質問を単独で聞いたときと、他の質問と一緒に聞いたときで、101 問中 73 問の答えが変わった」という結果が出た。原因は比較コードの誤りで、質問の id は<b>1 回の依頼の中でだけ一意</b>で、記事をまたぐと重複していた ( 101 問で id は 6 種類だけ )。実際には<b>別の記事の質問同士</b>を比べていた。位置で対応付けて id の一致も検査する形に直すと、変化は 0 問になった。
+</div>
+
+<div class="bad">
+<b>BoolQ の較正が黙って消えた。</b>正解が True/False で、選択肢の文字列が "yes"/"no" なので、文字列としての照合が何も見つからず、較正の区間が出ないまま該当する節が黙って消えていた。正解の位置を、質問がまだ手元にある場所で記録する形に修正し、データが足りず出せないときは「出せない」とはっきり表示するようにした。
+</div>
+
+<div class="bad">
+<b>ベンチマークが 2 つ目の幅でメモリ不足になった。</b><code>Context</code> ( 処理中の状態を持つオブジェクト ) が推論エンジンを内部で参照する実装だったため、<code>with</code> 文 ( 使い終わったら片付ける構文 ) を抜けた後も名前が残っていると、35 GiB のモデルの重みが生きたままメモリに居座り続けていた。
+</div>
+
+<div class="bad">
+<b>穴が 0 個の盤面で質問 id が衝突した。</b>しきい値を真値の両側に置く設計 ( 6 節 ) で、<code>max(0, 0-1)</code> と <code>0</code> が同じ値になり、2 つの質問が同じ id を持ってしまった。パッケージ自身が持つ重複 id 検査が拒否したことで発覚した。
+</div>
+
+<h2>10. 現在の状態</h2>
+
+<p>main は <code>d5161f7</code>。実機テスト <b>169 件</b> + デバイス不要テスト <b>135 件</b>が通過。文書は <code>docs/PERFORMANCE.md</code> ( 速度とメモリ )、<code>docs/ACCURACY.md</code> ( 正解率と限界 )、<code>docs/FORK.md</code> ( 分岐の仕組み )、<code>examples/tetris/README.md</code> ( 決定ループ )。</p>
+
+<div class="foot">
+出典は github.com/littlemex/Prismyra ( 現在の main は <code>d5161f7</code> )。数値はすべて Qwen/Qwen3.6-35B-A3B-FP8・GPU は L40S 1 枚での実測。実機テスト 169 件 + デバイス不要テスト 135 件が通過。文書は <code>docs/PERFORMANCE.md</code>・<code>docs/ACCURACY.md</code>・<code>docs/FORK.md</code>・<code>examples/tetris/README.md</code>。
+</div>
+
+</div>
+</body>
+</html>
