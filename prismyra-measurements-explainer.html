@@ -62,7 +62,7 @@ svg{display:block;margin:0 auto;max-width:100%;height:auto}
 </div>
 
 <h2>0. 数値の要約</h2>
-<p>10 件の実測を先に並べる。行番号は後の章の見出しに対応しているので、気になる行から直接飛んでよい。</p>
+<p>12 件の実測を先に並べる。行番号は後の章の見出しに対応しているので、気になる行から直接飛んでよい。11 行目と 12 行目は速度の続きで、8 節の後ろ ( 8e・8f ) にある。</p>
 <table>
 <tr><th>#</th><th>やったこと</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th></tr>
 
@@ -135,6 +135,20 @@ svg{display:block;margin:0 auto;max-width:100%;height:auto}
 <td>実機テストと、デバイスを使わないテストの両方を一括実行</td>
 <td>個別の修正ごとにテストを見て「全体は大丈夫だろう」と判断する</td>
 <td>main は <code>d5161f7</code>。<b>実機テスト 169 件 + デバイス不要テスト 135 件が通過</b></td></tr>
+
+<tr><td class="n">11</td>
+<td>vLLM との勝敗を「1 文書あたりの質問数」を横軸にして測り直した</td>
+<td>これまでの比較は全部「1 文書に 4 問」だった。RACE の記事が 4 問しか持っていないからで、そこを選んだ理由は無い。両者は文書 1 通あたりの固定費と質問 1 問あたりの費用が違うので、1 点だけ測ると 2 本の線のうち 1 点しか見ていない</td>
+<td>1 文書が抱える質問数を 1・2・4・8・10・12・14・16・32・64 と変えて両方を計測。足りない分は<b>同じ標本の他の文書から質問を借りて</b>数を揃え、借りた質問は正解が無いので採点から外し、速さの計算にだけ数える ( 答える手間は本物と同じなので )</td>
+<td>4 問の 1 点を「この道具の速さ」として報告し続ける</td>
+<td><b>交点は 12 問。</b>そこより少ないと vLLM が速く、多いとこちらが速い。上限は約 1.9 倍。vLLM は<b>どの問数でも 48〜50 問/s で動かない</b>のに対し、こちらは文書 1 通の時間が 1 問で 223.8 ms・16 問で 241.1 ms とほぼ横ばい</td></tr>
+
+<tr><td class="n">12</td>
+<td>「通過を録画して再生する」機能を入れる条件を、固定のしきい値から<b>実測して決める</b>方式に変えた</td>
+<td>録画を有効にすると <b>102.07 問/s が 47.21 問/s に落ちた</b>。3.5 倍速くなると測った機能が、2.16 倍遅くしていた</td>
+<td>同じ通過を録画あり・なしで計測。さらに接尾辞 ( 質問文の長さ ) を 16・32・64・128 トークンに変えて「素で通す時間」と「再生する時間」の比を直接計測</td>
+<td>しきい値を 3 から 7 に上げる ( 実際にやって、256 問でまだ 64.49 対 103.44 で負けた )</td>
+<td>再生が速いのは<b>接尾辞が短いときだけ</b>。比は 16 トークンで 0.684、128 トークンで <b>0.997</b> ( ほぼ何も減らない )。録画の代金も 151 ms ではなく実測 462〜948 ms。実測で決める方式にしたら 128 問で <b>100.06 対 102.07</b> まで戻った</td></tr>
 
 </table>
 
@@ -388,6 +402,9 @@ svg{display:block;margin:0 auto;max-width:100%;height:auto}
 </table>
 
 <p>速さは <b>4.3 倍負け</b>だが、送ったトークン数は Prismyra が <b>2.7 倍少ない ( 勝ち )</b>。正解率は読み出し方式が違うので単純比較はできない。</p>
+<div class="warn">
+<b>[注意] この「4.3 倍」「1.9 倍」は 1 文書に 4 問のときの数字で、読む場所を間違えている。</b>RACE の記事が 4 問しか持っていないから 4 問で測っただけで、そこを選んだ理由は無い。<b>2 本の線は 12 問で交差する</b>。下の 8e 節がその測り直しで、この節の倍率は「交点よりずっと手前の 1 点」だと分かる。
+</div>
 
 <p>遅い原因は計算量ではなかった。1 回の処理 ( 質問に答える枝の部分 ) を profile すると、実時間 268.4 ms のうち GPU が実際に計算していたのは 112.7 ms、つまり <b>42% だけ</b>。残りはカーネル ( 計算の実行単位 ) の起動待ちで、<b>1 回の処理でカーネル起動が 32,873 回</b>もあった。層の種類別に見ると、線形注意という種類の層が <b>1 層あたり 1,021 回</b>起動され、通常の注意層は 114 回。Qwen3.6 は 30 層中ほとんどが線形注意層なので、<b>起動回数の 93% がそこに集中</b>していた。中身は、chunked ( 一定の大きさに刻んで処理する方式 ) な走査を素の PyTorch で書いた実装で、1 層あたりコピー 218 回・要素ごとの演算 191 回・掛け算 82 回、合計 66 種類の操作に分かれていた。</p>
 
@@ -482,6 +499,138 @@ svg{display:block;margin:0 auto;max-width:100%;height:auto}
 <b>1 節で削除した paged ( ページ分割 ) 経路に、値段が付いた。</b>メモリ削減は実測ゼロだったので削除は正しかった。だがそれが本当に買っていたのは<b>形の固定</b>だった。ページの置き場は固定確保で、長さは別のデータとして渡る。つまり <b>1 つの録画があらゆる文脈長に使える</b>。録画が 3.5 倍と測れた今、それは「1 つの用途が得る」と「すべての用途が得る」の差になる。<b>削除の判断は当時の証拠では正しく、戻す理由は当時と別のもの</b>という形で文書に残した。
 </div>
 
+<h2>8e. 勝敗は「1 文書あたりの質問数」で決まる。交点は 12 問</h2>
+
+<p>ここまでの対戦は全部「1 文書に 4 問」で測っていた。RACE という試験問題集の記事が 1 本あたり 4 問しか持っていないからで、<b>そこを選んだ理由は無い</b>。両者は費用の形が違う。vLLM は質問 1 問ごとに 1 回の依頼を送り、文書の部分は使い回す ( prefix cache ) ので、<b>質問の数に比例</b>して時間が増える。こちらは文書を 1 回読んで、質問は同じ 1 回の通過の別の行として並べるので、<b>32 問までは 1 回の通過</b>で終わる。形が違う 2 本の線を 1 点だけ比べると、その 1 点の倍率しか分からない。</p>
+
+<p>そこで横軸を質問数にして測り直した。足りない質問は<b>同じ標本の他の文書から借りて</b>数を揃える。借りた質問はその文書について聞くと意味を持たないので<b>採点からは外し</b>、速さの計算にだけ数える ( 答える手間は本物の質問とまったく同じだから )。</p>
+
+<table>
+<tr><th>1 文書の質問数</th><th>こちら ( 問/s )</th><th>vLLM ( 問/s )</th><th>倍率</th><th>こちら 文書あたり</th><th>vLLM 文書あたり</th></tr>
+<tr><td class="n">1</td><td class="n">4.48</td><td class="n">8.30</td><td class="n no">0.54</td><td class="n">223.8 ms</td><td class="n">119.6 ms</td></tr>
+<tr><td class="n">4</td><td class="n">17.63</td><td class="n">32.37</td><td class="n no">0.54</td><td class="n">226.9 ms</td><td class="n">122.9 ms</td></tr>
+<tr><td class="n">8</td><td class="n">34.77</td><td class="n">49.27</td><td class="n no">0.71</td><td class="n">229.7 ms</td><td class="n">154.0 ms</td></tr>
+<tr><td class="n">10</td><td class="n">43.80</td><td class="n">50.35</td><td class="n no">0.87</td><td class="n">228.1 ms</td><td class="n">192.1 ms</td></tr>
+<tr><td class="n"><b>12</b></td><td class="n"><b>52.25</b></td><td class="n">50.30</td><td class="n y"><b>1.04</b></td><td class="n">229.5 ms</td><td class="n">230.0 ms</td></tr>
+<tr><td class="n">16</td><td class="n">64.98</td><td class="n">49.13</td><td class="n y">1.32</td><td class="n">241.1 ms</td><td class="n">311.2 ms</td></tr>
+<tr><td class="n">32</td><td class="n">85.28</td><td class="n">48.01</td><td class="n y">1.78</td><td class="n">347.2 ms</td><td class="n">633.8 ms</td></tr>
+<tr><td class="n">64</td><td class="n">91.08</td><td class="n">48.34</td><td class="n y">1.88</td><td class="n">703.0 ms</td><td class="n">1,293.8 ms</td></tr>
+</table>
+
+<p>倍率の列ではなく、<b>右の 2 列</b>を見てほしい。質問を 1 問から 16 問に増やすと、vLLM は 119.6 ms から 311.2 ms へ <b>191.6 ms 増える</b>。こちらは 223.8 ms から 241.1 ms へ <b>17.3 ms しか増えない</b>。15 問ぶんの仕事を足して 17 ms というのが、1 回の通過に行として並べるという形そのものの値段である。</p>
+
+<figure>
+<svg viewBox="0 0 880 320" role="img" aria-label="質問数に対する 1 文書あたりの時間">
+  <text x="440" y="24" text-anchor="middle" class="svgtitle">図 8e ― 1 文書あたりにかかる時間。線の傾きが形の違いで、交わる点が 12 問</text>
+
+  <line x1="80" y1="270" x2="820" y2="270" stroke="#3c5a4c" stroke-width="1.5"/>
+  <line x1="80" y1="270" x2="80" y2="50" stroke="#3c5a4c" stroke-width="1.5"/>
+  <text x="80" y="292" text-anchor="middle" class="monos">1</text>
+  <text x="228" y="292" text-anchor="middle" class="monos">4</text>
+  <text x="425" y="292" text-anchor="middle" class="monos">8</text>
+  <text x="524" y="292" text-anchor="middle" class="monos">10</text>
+  <text x="623" y="292" text-anchor="middle" class="monos">12</text>
+  <text x="820" y="292" text-anchor="middle" class="monos">16</text>
+  <text x="440" y="311" text-anchor="middle" class="lbls">1 文書あたりの質問数</text>
+  <text x="74" y="62" text-anchor="end" class="monos">320</text>
+  <text x="74" y="168" text-anchor="end" class="monos">160</text>
+  <text x="74" y="274" text-anchor="end" class="monos">0 ms</text>
+
+  <polyline points="80,122 228,120 425,118 524,119 623,118 820,110" fill="none" stroke="#1f7a4d" stroke-width="3.5"/>
+  <polyline points="80,191 228,189 425,168 524,143 623,118 820,64" fill="none" stroke="#1d4e8f" stroke-width="3.5" stroke-dasharray="7 5"/>
+
+  <circle cx="623" cy="118" r="7" fill="#8a5a12"/>
+  <text x="623" y="102" text-anchor="middle" class="lbl" fill="#8a5a12">12 問で交わる</text>
+
+  <text x="210" y="104" class="lbl" fill="#0f4a2e">こちら ( ほぼ横ばい )</text>
+  <text x="210" y="213" class="lbl" fill="#1d4e8f">vLLM ( 質問数に比例 )</text>
+  <text x="700" y="200" class="lbls" fill="#3c5a4c">この右側では</text>
+  <text x="700" y="218" class="lbls" fill="#3c5a4c">こちらが速い</text>
+</svg>
+<figcaption><b>横ばいの線と、比例して上がる線。</b>交点より左では一般的なサービングエンジンが正しい道具で、右ではこちらが正しい道具になる。<b>1 本の倍率でどちらが速いかを語れない</b>のは、線が 2 本あって傾きが違うから。</figcaption>
+</figure>
+
+<p>vLLM 側はどの問数でも <b>48〜50 問/s</b> で動かない。これは仕事をうまくやった上で「もう手が空いていない」状態 ( 飽和 ) の見た目である。仕事が下手なのではなく、仕事の量が質問数に比例して増えているだけ。</p>
+
+<div class="bad">
+<b>この表を作る途中で 1 行だけ間違った数字を出した。</b>「1 文書 128 問」と書いた点が、実際には約 80 問だった。20 本の記事から借りられる質問は全部で約 80 問しかなく、借り足りないときに<b>黙って少ない数で続けていた</b>。問/s の値そのものは正しく、<b>横軸のラベルだけが嘘</b>だった。今は足りなければ「標本を増やせ」と言って止まる。これは「主張より狭いものを検査して合格にする」のと同じ形の誤りで、このプロジェクトで何度も出ている。
+</div>
+
+<h2>8f. 録画は接尾辞が長いと何も減らさない。固定のしきい値を 3 回外した</h2>
+
+<p>8c 節で「通過を録画して再生すると 3.5 倍」と書いた。実際に有効にしてみたら、<b>102.07 問/s が 47.21 問/s に落ちた</b>。速くするはずの機能が 2.16 倍遅くしていた。</p>
+
+<p>原因は録画そのものではなく、<b>「録る価値があるか」の見積もり</b>だった。録画が減らすのは「次に何をするか GPU が指示を待っている時間」である。ところが指示の送信は<b>返事を待たない</b>仕組み ( 非同期 ) なので、1 つ 1 つの計算が指示を送る時間より長くなると、送る側が先に進んでしまって<b>待ち時間そのものが無くなる</b>。減らすものが無くなれば、録画しても何も速くならない。</p>
+
+<table>
+<tr><th>接尾辞 ( 質問文 ) の長さ</th><th>素で通す</th><th>再生する</th><th>比</th><th>録画の代金</th><th>元が取れる回数</th></tr>
+<tr><td class="n">16 トークン</td><td class="n">109.4 ms</td><td class="n">74.8 ms</td><td class="n y">0.684</td><td class="n">493.6 ms</td><td class="n">17 回</td></tr>
+<tr><td class="n">32 トークン</td><td class="n">110.7 ms</td><td class="n">94.7 ms</td><td class="n">0.855</td><td class="n">462.1 ms</td><td class="n">40 回</td></tr>
+<tr><td class="n">64 トークン</td><td class="n">144.2 ms</td><td class="n">142.1 ms</td><td class="n no">0.986</td><td class="n">562.4 ms</td><td class="n">約 400 回</td></tr>
+<tr><td class="n">128 トークン</td><td class="n">268.1 ms</td><td class="n">267.3 ms</td><td class="n no">0.997</td><td class="n">948.2 ms</td><td class="n">約 2,000 回</td></tr>
+</table>
+
+<p>128 トークンでは、録画が買うのは <b>268 ms のうち 0.8 ms</b> で、録るのに 948 ms かかる。8c 節の 3.5 倍は<b>短い接尾辞の話</b>で、機構の性質ではなく<b>その形の性質</b>だった。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" role="img" aria-label="接尾辞の長さごとの、再生が素の通過に対して占める割合">
+  <text x="440" y="24" text-anchor="middle" class="svgtitle">図 8f ― 再生の時間 ÷ 素の通過の時間。1.0 に近いほど「減らすものが無い」</text>
+
+  <line x1="150" y1="60" x2="150" y2="215" stroke="#3c5a4c" stroke-width="1.5"/>
+  <line x1="150" y1="215" x2="830" y2="215" stroke="#3c5a4c" stroke-width="1.5"/>
+  <line x1="830" y1="60" x2="830" y2="215" stroke="#8f2f2f" stroke-width="2" stroke-dasharray="5 4"/>
+  <text x="830" y="234" text-anchor="middle" class="lbls" fill="#8f2f2f">1.0 = 無意味</text>
+  <text x="150" y="234" text-anchor="middle" class="lbls">0</text>
+
+  <rect x="150" y="70" width="465" height="26" rx="4" fill="#1f7a4d"/>
+  <text x="142" y="88" text-anchor="end" class="lbl">16</text>
+  <text x="625" y="88" class="mono" fill="#0f4a2e">0.684  ( 17 回で元が取れる )</text>
+
+  <rect x="150" y="105" width="581" height="26" rx="4" fill="#2f9e63"/>
+  <text x="142" y="123" text-anchor="end" class="lbl">32</text>
+  <text x="723" y="123" text-anchor="end" class="mono" fill="#fff">0.855  ( 40 回 )</text>
+
+  <rect x="150" y="140" width="670" height="26" rx="4" fill="#c98a3c"/>
+  <text x="142" y="158" text-anchor="end" class="lbl">64</text>
+  <text x="812" y="158" text-anchor="end" class="mono" fill="#fff">0.986  ( 約 400 回 )</text>
+
+  <rect x="150" y="175" width="678" height="26" rx="4" fill="#8f2f2f"/>
+  <text x="142" y="193" text-anchor="end" class="lbl">128</text>
+  <text x="820" y="193" text-anchor="end" class="mono" fill="#fff">0.997  ( 約 2,000 回 )</text>
+
+  <text x="60" y="140" class="lbls">接尾辞の</text>
+  <text x="60" y="158" class="lbls">長さ</text>
+</svg>
+<figcaption><b>棒が長いほど再生が遅い。</b>16 トークンでは 3 割強を削れるが、128 トークンでは 0.3% しか削れない。<b>同じ機構が、形によって役に立ったり無意味になったりする</b>ので、1 つの固定した条件では書けない。</figcaption>
+</figure>
+
+<p>固定のしきい値を 3 回置いて、3 回とも実測で負けた。</p>
+
+<table>
+<tr><th>置いた条件</th><th>予想</th><th>実測</th></tr>
+<tr><td>同じ形が 2 回目に出たら録る</td><td>速くなる</td><td class="no">128 問で <b>47.21 対 102.07</b> ( 2.16 倍遅い )</td></tr>
+<tr><td>あと 3 回同じ形が来るなら録る</td><td>速くなる</td><td class="no">同じ 2.16 倍の負け</td></tr>
+<tr><td>あと 7 回同じ形が来るなら録る</td><td>速くなる</td><td class="no">256 問で <b>64.49 対 103.44</b></td></tr>
+<tr><td><b>実測した比から毎回決める</b></td><td>損はしない</td><td class="y">128 問で <b>100.06 対 102.07</b></td></tr>
+</table>
+
+<p>1 番目の条件は「2 回目で録る」ので、<b>3 回目が来ないことが多く、録って検査して捨てるだけ</b>だった。2 番目と 3 番目は「録画の代金は 151 ms」という数字から計算したもので、その数字は間違っている。<b>間違いはミリ秒で書くと見えず、パス数 ( 通過の回数 ) で書くと書けない</b>。録画の前には暖機として 3 回通す必要があり、1 回 107.7 ms なら暖機だけで 323 ms になる。151 という数字は<b>暖機を数え忘れていた</b>。</p>
+
+<div class="note">
+<b>今のやり方。</b>engine は、ちょうど走らせた素の通過の時間と、録画を信用する前にどうせ 2 回走らせる確認用の再生の時間を、その場で計る。そして「これから来る回数でこの代金を払えるか」を比べ、払えない録画は<b>捨てて理由を残す</b>。
+<pre><span class="c">a replay of this shape costs 267.3 ms against 268.1 eagerly, so recording it</span>
+<span class="c">pays from 2009 more passes and 7 are expected</span></pre>
+形ごとに 1 回だけ払えばよく ( 覚えるので )、文書ごとには払わない。「これから来る回数」は 2 つの事実から取る。<b>1 つは、いま処理中の依頼が同じ形をあと何回走らせるか</b> — 依頼側が質問を全部まとめて渡した時点で既に宣言している。<b>もう 1 つは、その形がこの置き場で何回戻ってきたか</b>。どちらも予想ではなく事実である。
+</div>
+
+<div class="warn">
+<b>[注意] 「元が取れる回数」の右 2 行は精密な数字ではない。</b>1 から比を引いた値で割るので、比が 0.997 のときは 0.1 ms の違いで 200 回動く。実行時の出力は丸める前の時刻から 414 回と 2,190 回を出し、表の丸めた値から計算すると 411 回と 2,009 回になる。<b>再生がほとんど何も減らさない領域では「何回で元が取れるか」は精密な量ではない</b>。これは表の結論そのものを、カードの側ではなく算術の側から見たものである。
+</div>
+
+<div class="box">
+<b>3 回の失敗に共通していたこと。</b>どれも<b>費用の計算式に項が足りない、または定数だと思い込んでいた</b>だけで、カーネルが予想外の動きをした例は 1 つも無い。速くする機構を入れるかどうかは、機構の善し悪しではなく<b>その場の費用の比</b>で決まる。
+</div>
+
 <h2>9. 自分のミスで測定を無効にした例 (これも必ず書く)</h2>
 
 <p>良い結果も悪い結果も、測定のやり方自体が間違っていたら意味を持たない。ここに 4 件をそのまま残す。</p>
@@ -504,10 +653,10 @@ svg{display:block;margin:0 auto;max-width:100%;height:auto}
 
 <h2>10. 現在の状態</h2>
 
-<p>main は <code>146f2b4</code>。実機テスト <b>170 件</b> + デバイス不要テスト <b>135 件</b>が通過。文書は <code>docs/PERFORMANCE.md</code> ( 速度とメモリ )、<code>docs/ACCURACY.md</code> ( 正解率と限界 )、<code>docs/FORK.md</code> ( 分岐の仕組み )、<code>examples/tetris/README.md</code> ( 決定ループ )。</p>
+<p>main は <code>47a439d</code>。実機テスト <b>166 件</b> + デバイス不要テスト <b>150 件</b>が通過。文書は <code>docs/PERFORMANCE.md</code> ( 速度とメモリ )、<code>docs/ACCURACY.md</code> ( 正解率と限界 )、<code>docs/FORK.md</code> ( 分岐の仕組み )、<code>examples/tetris/README.md</code> ( 決定ループ )。</p>
 
 <div class="foot">
-出典は github.com/littlemex/Prismyra ( 現在の main は <code>146f2b4</code> )。比較相手は github.com/ikermoel/open-alternative-jev ( Apache-2.0 )。彼らの数値は別のモデル ( Qwen3.6-27B 8bit と Qwen3-0.6B ) で取られているので<b>絶対値の直接比較はできない</b>。比較できるのは形と、同一モデル・同一 GPU で取り直した vLLM との対戦だけ。数値はすべて Qwen/Qwen3.6-35B-A3B-FP8・GPU は L40S 1 枚での実測。実機テスト 170 件 + デバイス不要テスト 135 件が通過。文書は <code>docs/PERFORMANCE.md</code>・<code>docs/ACCURACY.md</code>・<code>docs/FORK.md</code>・<code>examples/tetris/README.md</code>。
+出典は github.com/littlemex/Prismyra ( 現在の main は <code>47a439d</code> )。比較相手は github.com/ikermoel/open-alternative-jev ( Apache-2.0 )。彼らの数値は別のモデル ( Qwen3.6-27B 8bit と Qwen3-0.6B ) で取られているので<b>絶対値の直接比較はできない</b>。比較できるのは形と、同一モデル・同一 GPU で取り直した vLLM との対戦だけ。数値はすべて Qwen/Qwen3.6-35B-A3B-FP8・GPU は L40S 1 枚での実測。実機テスト 166 件 + デバイス不要テスト 150 件が通過。文書は <code>docs/PERFORMANCE.md</code>・<code>docs/ACCURACY.md</code>・<code>docs/FORK.md</code>・<code>examples/tetris/README.md</code>。
 </div>
 
 </div>
