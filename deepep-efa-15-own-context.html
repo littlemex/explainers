@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 15: 自分専用のコンテキストに移したら、GDRCopy なしで動いた</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 15</p>
+  <h1>自分専用のコンテキストに移したら、GDRCopy なしで動いた</h1>
+  <p>コピーを出すコンテキストを変えただけで、GDRCopy が無いマシンでも DeepEP が動いた。本物の EFA との比較は、別の壁に当たって足踏み中の記録</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>修正: 自分専用のコンテキストから届ける</h2>
+    <p class="lead">第 14 回で分かったのは「同じコンテキストの中でカーネルの終了を待つ呼び出しが止める」ことだった。だから、その呼び出しを別のコンテキストに移した。</p>
+
+    <p>エミュレータは今、コピーを<b>自分専用の CUDA コンテキスト</b>から出すようになっています。仕組みは 3 つです。</p>
+
+    <ul class="steps">
+      <li>コンテキストを作る GPU は、<b>その窓 (window) が載っている GPU</b> から決める。窓のポインタを見れば、どの GPU の上のメモリかが分かるので、それを使う</li>
+      <li><b>VMM (仮想メモリ) の形で確保された窓だけ</b>を受け付ける。それ以外の形の窓は、登録の時点で拒否する</li>
+      <li>どのスレッドも、コンテキストを<b>束縛せず</b>、使うたびに積んで (push)、終わったら外す (pop) だけにする</li>
+    </ul>
+
+    <div class="key">
+      <p><b>RTX PRO 6000 の 1 台の上で 2 ランクを 2 ノードに見立てた構成で、4 通りが全部一致しました。</b>GDRCopy なしで 3 反復、GDRCopy なしで 20 反復、カーネル方式の到着通知、そして GDRCopy あり。どれも答え合わせの機械 (第 14 回) が全行・全個で一致すると言っています。</p>
+    </div>
+
+    <p>主コンテキストに戻す (<code>SRDSIM_DELIVERY_CONTEXT=primary</code>) と、狙ったとおりにまた止まります。<b>直った理由がコンテキストを分けたことそのものだ</b>と確認できたのは、この「戻すと壊れる」テストのおかげです。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>H100 の 2 ホストで動くが、遅い ―― その理由の実測</h2>
+    <p class="lead">GDRCopy 無しで動くようになったのは進歩だが、無料ではなかった。</p>
+
+    <p>2 台の H100 (1 ホストに EFA 1 枚) で、DeepEP 自身の試験 <code>test_ep.py</code> をエミュレータ経由で実行しました。<b>GDRCopy ありは、全設定の通しが約 90 秒</b>で通ります。<b>GDRCopy なしはエラーは出ませんが、1 設定あたり約 30 秒かかり、88 設定で 45 分</b>。GDRCopy ありと比べて<b>約 30 倍遅い</b>計算です。</p>
+
+    <p>原因を、8 KB のコピーを 1,000 回繰り返して測りました。</p>
+
+    <table>
+      <tr><th>コピーを出す場所</th><th>毎回コピーの後に待つ</th><th>最後に 1 回だけ待つ</th></tr>
+      <tr><td>主コンテキスト (常駐カーネルの有無に関わらず)</td><td>7.6 µs</td><td>3.0 µs</td></tr>
+      <tr><td>2 つ目のコンテキスト (常駐カーネルあり)</td><td class="no">2,404 µs</td><td>5.4 µs</td></tr>
+    </table>
+
+    <div class="key">
+      <p><b>2,404 µs は、主コンテキストの 7.6 µs と比べて約 316 倍です。</b>2 つ目のコンテキストは、常駐カーネルがいる 1 つ目のコンテキストと GPU を時分割で共有しています。<b>その切り替えの代金を、待つたびに払っている</b>ということです。「最後に 1 回だけ待つ」なら 5.4 µs まで下がるので、コピーそのものは安く、<b>待つ回数を減らすことが効きます</b>。</p>
+    </div>
+
+    <p>今のエミュレータは、受け取る側は再利用の直前だけ待てば十分な形になっていますが、<b>送る側は 1 フレームごとに待つ形が残っています</b>。これを 1 回の送信操作につき 1 回の待ちにまとめる変更が次に要りますが、<b>まだ実装していません</b>。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>本物の EFA: GIN は立つが、DeepEP はまだ乗れない</h2>
+    <p class="lead">第 14 回までは、本物の EFA と比べる相手すら立ちませんでした。今回は、立つところまでは進みましたが、その先で別の壁に当たりました。</p>
+
+    <table>
+      <tr><th>問い</th><th>結果</th></tr>
+      <tr><td>H1: 本物の GIN (GPU-Initiated Networking) は立つか</td><td class="ok">成立。<code>aws-ofi-nccl v1.21.1</code> に RDMA プロトコルを指定すると、<code>ginType: proxy(2)</code> になる</td></tr>
+      <tr><td>H2: その上で DeepEP が動くか</td><td class="no">不成立。DeepEP のバッファを作る段で、aws-ofi-nccl の GIN が接続を拒否する</td></tr>
+    </table>
+
+    <p>拒否のメッセージは <code>Provider does not support FI_RX_CQ_DATA</code>。理由は EFA の作りにあります。<b>p5 では libfabric が EFA の口を 2 つ見せます。</b>1 つ (<code>efa-direct</code>) は <code>FI_RX_CQ_DATA</code> という受信モードを必須とし、もう 1 つ (<code>efa</code>) はこのモードを返しません。<code>aws-ofi-nccl</code> の通常の通信経路は <code>FI_RX_CQ_DATA</code> を要求しないので <code>efa</code> の方を選びますが、<b>GIN はその選ばれた口をそのまま引き継いで使おうとし、<code>FI_RX_CQ_DATA</code> が無いことを理由に拒否します</b>。上流の最新版のソースを読んでも、同じ作りです。</p>
+
+    <div class="warn">
+      <p><b>これは DeepEP のせいでもエミュレータのせいでもありません。</b>aws-ofi-nccl が、自分の通常経路 (transport) と GIN の間で口の選び方を共有していないために起きています。したがって、<b>本物の EFA-GDA backend との比較は、まだできていません</b>。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>つまずきの教訓: セキュリティグループの送信規則</h2>
+    <p class="lead">2 台の間の EFA 通信が、まったく別の理由で止まっていました。</p>
+
+    <p>2 ホスト間で EFA を使った通信を試したところ、<code>Unreachable remote</code> (相手に届かない) というエラーで通りませんでした。TCP では同じ 2 台の間が普通に通信できるのに、EFA だけが通りません。原因は<b>セキュリティグループの送信規則 (egress)</b> でした。SRD (EFA の配送方式) は、送信元・宛先を IP アドレスの組で表す普通の通信とは違う扱いを受けるため、<b>「どこへでも送ってよい」という <code>0.0.0.0/0</code> の送信規則だけでは足りません</b>。<b>自分自身のセキュリティグループを宛先として名指しした送信規則</b>が別に必要でした。</p>
+
+    <div class="warn">
+      <p><b>取り下げ。</b>以前 (9 月) は、この 2 台の組で「EFA 越しの通信が動かない」「3 ランクの通信が EFA 上でハングし、応答テストも無反応だった」と記録していました。あれは EFA そのものの欠陥ではなく、<b>この送信規則が抜けていただけ</b>でした。規則を足すと、通信は普通に通ります。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>計測器の教訓の続き: DeepEP 自身の遅延読み込み</h2>
+    <p class="lead">第 14 回では、CUDA の runtime が <code>cuGetProcAddress</code> を使うために、最初の計測器 (LD_PRELOAD で公開関数を包む方式) が runtime の呼び出しを見られなかったと書きました。今回、<b>DeepEP 自身にも同じ形の理由がある</b>ことが分かりました。</p>
+
+    <p>DeepEP は driver の関数を、自分で書いた<b>遅延読み込みの仕組み (lazy load)</b> を通して手に入れています。つまり <code>cuModuleLoad</code> のような呼び出しも、LD_PRELOAD が包んでいる「公開されたシンボルをそのまま呼ぶ」経路ではなく、<b>DeepEP が自分で探して取った関数ポインタ</b>を経由します。これも LD_PRELOAD の包みを素通りする経路です。</p>
+
+    <div class="key">
+      <p><b>CUPTI (driver がすべての呼び出しの入口と出口を教えてくれる公式の仕組み) に切り替えたのが、ここでも正解でした。</b>CUPTI は「誰がどうやって関数を取ったか」に関係なく、driver そのものが呼ばれた瞬間を教えてくれます。第 14 回の <code>cuModuleLoad</code> の観測が今回「確定」まで進んだのは、この計測器のおかげです。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>いま言えることと、まだできていないこと</h2>
+
+    <table>
+      <tr><th>状態</th><th>内容</th></tr>
+      <tr><td class="ok">できる</td><td>GDRCopy が無いマシンでも、自分専用のコンテキストから届けることで DeepEP の dispatch と combine が動き、答え合わせも全部通る</td></tr>
+      <tr><td class="ok">できる</td><td>本物の GIN を、EFA の RDMA プロトコルを指定した上で立てる (H1)</td></tr>
+      <tr><td class="no">未達</td><td>本物の GIN の上で DeepEP を動かすこと (H2)。aws-ofi-nccl 側の口の選び方が原因で、DeepEP・emulator のどちらとも無関係</td></tr>
+      <tr><td class="no">未達</td><td>GDRCopy 無しの経路を、待つ回数を減らして速くすること (未実装)</td></tr>
+      <tr><td class="no">未達</td><td>1 ホストに GPU が複数ある構成、3 ノード以上の構成、vLLM 経由での動作</td></tr>
+    </table>
+
+    <p>本物の EFA との比較を進めるには、<code>aws-ofi-nccl</code> 側で通常経路と GIN が同じ口を選ぶように直る (か、直し方を上流に示す) のを待つか、迂回する方法を探す必要があります。速さの改善は、送る側の待ちを 1 フレーム単位から 1 操作単位にまとめる変更が次の一手です。</p>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-14-oracle-retraction.html">← 14: 答え合わせの機械が、前回の「耐える」を壊した</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>

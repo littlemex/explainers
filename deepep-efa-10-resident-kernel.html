@@ -181,7 +181,7 @@ probe: the small copy returned CUDA_ERROR_LAUNCH_FAILED (719) after 0 ms</code><
     </div>
 
     <div class="warn">
-      <p><b>訂正 (2026-09-24)。</b>この一般化は言い過ぎでした。同じプロセスで<b>他に何もしていなければ</b>、常駐して spin しているカーネルがいても copy は 1〜2 ms で届きます。止めるのは、同じプロセス内で並行して走る、<b>そのカーネルの終了を待つ種類の呼び出し</b>だけです。測った範囲では <code>cuMemFree</code> / <code>cuMemFreeHost</code> が止め、<code>cuCtxSynchronize</code> / <code>cuMemAlloc</code> / <code>cuMemAllocHost</code> / VMM map は止めませんでした。止まったとき、カーネルは 19.3 秒後に諦めています。つまりこの回で見えていた 93 秒のブロックは「resident なカーネルがいたから」ではなく、<b>同じプロセスのどこかで free 系の呼び出しが走っていたから</b>だった可能性が高いということです。詳しい測り直しは <a href="./deepep-efa-14-oracle-retraction.html">14</a>。</p>
+      <p><b>訂正 (2026-09-24)。</b>この一般化は言い過ぎでした。同じプロセスで<b>他に何もしていなければ</b>、常駐して spin しているカーネルがいても copy は 1〜2 ms で届きます。止めるのは、<b>同じコンテキストの中</b>で並行して走る、そのカーネルの終了を待つ種類の呼び出しだけです。測った範囲では <code>cuMemFree</code> / <code>cuMemFreeHost</code> が止め、<code>cuCtxSynchronize</code> / <code>cuMemAlloc</code> / <code>cuMemAllocHost</code> / VMM map は止めませんでした。止まったとき、カーネルは 19.3 秒後に諦めています。<b>さらなる訂正 (確定)。</b>free 系だけでなく、<b>モジュールを読み込む <code>cuModuleLoadData</code> も同じだけ止めます</b> (RTX PRO 6000 で 19.7 秒、H100 で 20.8 秒)。GPU に何も仕事を出さない <code>cuEventCreate</code> まで一緒に止まるので、これは待ち行列の話ではなく<b>コンテキスト単位のロック</b>です。2 つ目のコンテキストからの書き込みは止まりません。つまりこの回で見えていた 93 秒のブロックの犯人は、DeepEP の JIT が dispatch の途中で呼ぶ <code>cuModuleLoad</code> だったと確定しました。詳しい測り直しと修正は <a href="./deepep-efa-14-oracle-retraction.html">14</a> と <a href="./deepep-efa-15-own-context.html">15</a>。</p>
     </div>
 
     <p>これで順序も確定します。凍結までの間、driver はコンテキストを健全と報告し、stream を idle と報告します。719 が出るのは<b>最後</b>で、DeepEP が自分のタイムアウトで trap したときです。私が 3 ラウンド「最初の障害」として読んでいたコードは、いちばん後ろの出来事でした。</p>

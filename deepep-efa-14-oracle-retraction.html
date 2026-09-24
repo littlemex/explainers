@@ -105,7 +105,7 @@
   </section>
 
   <section>
-    <h2><span class="num">3</span>GDRCopy を使わないと DeepEP が止まる理由の、いまの最有力候補</h2>
+    <h2><span class="num">3</span>GDRCopy を使わないと DeepEP が止まる理由</h2>
     <p class="lead">GDRCopy (GPU の BAR 領域を直接書く仕組み) が使えないマシンでは、エミュレータは CUDA のコピーに戻ります。そこで DeepEP が止まる理由を、今回初めて特定できました。犯人は解放 (free) ではありませんでした。</p>
 
     <p>DeepEP には JIT (Just-In-Time。実行するときにカーネルをコンパイルして読み込む仕組み) があり、dispatch の途中で <code>cuModuleLoad</code> を呼びます。これが、エミュレータの側が出す 2 本のコピー (<code>cuMemcpyHtoDAsync</code> と <code>cuMemcpyDtoHAsync</code>) と互いに待ち合って止まっていました。</p>
@@ -117,7 +117,7 @@
     <p>第 10 回・第 11 回で見えていた「常駐カーネルがいるとコピーが届かない」という一般化は、この節と合わせて読み直すと言い過ぎだったことが分かります。実測では、<b>同じプロセスで他に何もしていなければ、常駐カーネルがいてもコピーは 1〜2 ms で届きます</b>。止めるのは、同じプロセス内で並行して走る、<b>そのカーネルの終了を待つ種類の呼び出し</b>だけです。測った範囲では <code>cuMemFree</code> / <code>cuMemFreeHost</code> が止め、<code>cuCtxSynchronize</code> / <code>cuMemAlloc</code> / <code>cuMemAllocHost</code> / VMM map (仮想メモリのマッピング) は止めませんでした。止まったとき、カーネルは <b>19.3 秒後に諦めています</b>。さらに、<b>別プロセスからの書き込み</b> (CUDA IPC 経由、または <code>ncclMemAlloc</code> と同じ確保方法で作った VMM 領域をファイル記述子で渡したもの) は、親プロセスが解放している最中でも届きました。</p>
 
     <div class="warn">
-      <p><b>ただし今回 DeepEP が止まった理由は、この free の話とは別です。</b>候補として最有力なのは <code>cuModuleLoad</code> (JIT のモジュール読み込み) がコピーと待ち合っている、という説明で、<b>観測は今のところ 1 回だけ</b>です。resident_copy_probe (常駐カーネル probe) には modload を割り込ませる試験も用意してあるので、この説明が本当に成り立つかは<b>そのプローブでの再現確認が進行中</b>です。</p>
+      <p><b>訂正 (確定)。</b>DeepEP が止まった理由は、この free の話とは別だと確定しました。resident_copy_probe (常駐カーネル probe) で <code>cuModuleLoadData</code> (JIT のモジュール読み込み) を割り込ませたところ、同じコンテキストの中では<b>コピーも、GPU に何も仕事を出さない <code>cuEventCreate</code> も、同じだけ止まりました</b>。RTX PRO 6000 では 19.7 秒、H100 では 20.8 秒で、どちらも同じ振る舞いです。<b>2 つ目のコンテキストからの書き込みは止まりません。</b>つまりこれは「プロセス単位」ではなく<b>「コンテキスト単位」のロック</b>で、<code>cuModuleLoad</code> も <code>cuMemFree</code> 系と同じ種類の呼び出しだったということです。詳しい修正は <a href="./deepep-efa-15-own-context.html">15</a>。</p>
     </div>
   </section>
 
@@ -141,14 +141,14 @@
       <tr><th>状態</th><th>内容</th></tr>
       <tr><td class="ok">できる</td><td>GDRCopy が使えるマシンなら、1 台の上で 2 プロセスを 2 ノードに見立てて、DeepEP の dispatch と combine が動き、答え合わせも全部通る</td></tr>
       <tr><td class="ok">できる</td><td>わざと壊す試験 (corrupt / drop / violate-i1) を、答え合わせの機械が見逃さない</td></tr>
-      <tr><td class="no">未達</td><td>GDRCopy が使えないマシンで動かすこと (§3 の理由で止まる)</td></tr>
+      <tr><td class="ok">→ できるようになった (2026-09-24 第 15 回)</td><td>GDRCopy が使えないマシンでも、エミュレータが自分専用のコンテキストから届けるようになり、答え合わせも通る</td></tr>
       <tr><td class="no">未達</td><td>本物の EFA との比較 (emulator 対 実 EFA-GDA backend)</td></tr>
       <tr><td class="no">未達</td><td>1 ホストに GPU が複数ある構成</td></tr>
       <tr><td class="no">未達</td><td>3 ノード以上の構成</td></tr>
       <tr><td class="no">未達</td><td>vLLM 経由での動作 (DeepEP 側のホストメモリ破壊が別に残っていて、そこで止まっている)</td></tr>
     </table>
 
-    <p>今後の道は 2 つに分かれます。<b>本物の EFA との比較</b>には、RDMA 書き込みと GDRCopy 2.5 以上の両方が使えるマシンが要ります (§2 で見た aws-ofi-nccl の GIN の条件と同じです)。<b>GDRCopy が使えないマシンで動かす</b>には、別プロセスから届ける方式が候補になります。ただしその場合、<b>NCCL が実際に登録した窓の上で動くこと</b>、<b>データより先に到着通知が見えないこと (I1 を守ること)</b>、<b>窓の後片付けの手順</b>という 3 条件を満たす必要があり、どれもまだ検証していません。</p>
+    <p>今後の道は 2 つに分かれます。<b>本物の EFA との比較</b>には、RDMA 書き込みと GDRCopy 2.5 以上の両方が使えるマシンが要ります (§2 で見た aws-ofi-nccl の GIN の条件と同じです)。<b>GDRCopy が使えないマシンで動かす</b>方は、後日この一覧のとおり解決しました。詳細は <a href="./deepep-efa-15-own-context.html">15</a>。</p>
   </section>
 
   <div class="nav">
