@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 47 章 vLLM-SR の 3 つの発表を、主張と実物で読む</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 50 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 8 部 第 47 章 &nbsp;/&nbsp;
+<a href="harness-surround.html">前章: プロトコルに名前を付けた</a> &nbsp;/&nbsp; <a href="gateway-48-decision-measured.html">次章: 元のモデルとの差</a></p>
+
+<h1>vLLM Semantic Router の 3 つの発表を、主張と実物で読む<br>Jev の形は公開重みになったが、読むのは今も質問ごとに全部</h1>
+
+<div class="lead">
+<p><b>この章の結論。</b>2026-09-18〜24 に vLLM Semantic Router (以下 SR。リクエストごとに送り先のモデルを選ぶ OSS のルータ) が 3 つを出しました。
+リクエストを読み取る小さなモデル群 <b>Vela 1.0</b>、TypeSafe AI の Jev と同じ呼び方 (System One 形式) で答える公開重みのモデル <b>Decision 1.0</b>、そしてルータ本体の <b>v0.4 Hermes</b> です。</p>
+<p style="margin-bottom:0">実物を読んで分かったことは 3 つです。
+<b>Vela はルータに既に入っていますが、Decision はまだ入っていません</b> (本体への組み込みは「次の一手」と本人たちが書いています)。
+<b>Decision の同梱コードは AMD の GPU でしか起動しません</b> (Lux・Nox・Sol は gfx942 という型番を、Kai・Lex は AMD 用の PyTorch を要求します)。評価に使った問題も配っていません。
+そして論文自身が<b>「質問ごとに文脈を読み直しているので、生成をやめただけでは速くならない」</b>と書いています。
+最後の点は、私が作った Prismyra がちょうど逆の設計をしている所で、第 49 章でこの 2 つを合体させます。</p>
+</div>
+
+<h2>要約表</h2>
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>何が出て、何がまだかを分ける</td><td>ブログ 3 本、論文 PDF、Hugging Face の 6 リポジトリ、SR の main (commit <code>4502249</code>) を読んだ</td><td>発表文だけ読む</td><td>Vela はルータの信号として稼働中。Decision は重みとローカル推論コードだけで、<b>ルータ統合は未出荷</b></td><td>§1, §5</td></tr>
+<tr><td class="n">2</td><td>Lux-9B の点数がいくつあるか</td><td>論文の表 2、モデルカード、<code>metrics/benchmark.json</code> を並べ、JSON から自分で再計算</td><td>ブログの値だけ使う</td><td><b>77.22 / 77.40 / 76.94 の 3 版</b>。JSON からの再計算は 77.40 でカードと一致</td><td>§3</td></tr>
+<tr><td class="n">3</td><td>重みの選び方で順位が動くか</td><td>同じ JSON のパネル値に、現行 30/25/15/15/15 と旧 25/25/15/15/20 を掛け直した</td><td>等重み</td><td>Decision の 5 モデルは<b>全員上がり</b>、Jev と Kev-9B は下がる (未調整の Qwen はほぼ不変)。ただし<b>順位は入れ替わらない</b></td><td>§3</td></tr>
+<tr><td class="n">4</td><td>Lux の方式が何を伸ばしたか (机上)</td><td>Lux と、その元になった未調整 Qwen3.5-9B のパネルごとの差</td><td>総合点だけ比べる</td><td>読解のパネルは <b>+0.32 点だけ</b>。規則の判定 +10.47、推論 +11.88</td><td>§3, 第 48 章</td></tr>
+<tr><td class="n">5</td><td>NVIDIA の GPU で動くか</td><td>同梱コードを読み、東京の EKS の L40S で実行した</td><td>公式の Docker イメージ</td><td>Lux/Nox/Sol は gfx942 以外で、Kai/Lex は AMD 用でない PyTorch で停止。チェックを外すと Lux は L40S で動き、同梱の参照出力と答えは 5/5 一致</td><td>§4, 第 48 章</td></tr>
+<tr><td class="n">6</td><td>質問を増やすと得か</td><td>論文 §3.2 と <code>QUESTION-SCALING.md</code> を読んだ</td><td>ブログのテトリスの動画</td><td>論文自身が「質問間で状態を再利用しない」と明記。Lux は 1 問 33.17 ms、32 問 600.74 ms で<b>ほぼ比例</b> (AMD、旧い重み)</td><td>§2, 第 49 章</td></tr>
+<tr><td class="n">7</td><td>tierbook の書き出しが Hermes で動くか</td><td>SR 自身の Go の設定ローダーに、tierbook の書き出しを実際に読ませた (EKS の Job)</td><td>スキーマを目で読む</td><td>v0.3.0 は受理、main <code>4502249</code> は<b>古い項目 5 か所で起動を拒否</b></td><td>§5, 第 50 章</td></tr>
+</table>
+
+<h2>1. 3 つの発表は何で、ルータのどこに入るのか</h2>
+
+<p>SR は「このリクエストはどのモデルに送るか」を決めるルータです。
+Hermes の説明では、リクエストはまず<b>信号</b> (Signal。「分野は何か」「個人情報を含むか」などの読み取り結果) に変換され、
+<b>規則</b> (Decision。ここでは AND/OR の条件で経路を選ぶ規則エンジンのこと) が経路を 1 つ選び、
+その経路の<b>やり方</b> (Algorithm。1 モデルに送る、自信が無ければ上位に上げる、複数に聞いて審判に選ばせる、など) で実際にモデルを呼びます。</p>
+
+<p>紛らわしいのは、ルータの「Decision」段と、今回のモデル「Decision 1.0」が<b>同じ名前の別物</b>だということです。
+ブログ本文も「The Router's Decision stage is the policy engine running today; the Decision 1.0 model family above is a separate launch」と断っています。</p>
+
+<figure>
+<svg viewBox="0 0 880 330" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<defs><marker id="a47" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#3c5a4c"/></marker></defs>
+<rect x="20" y="40" width="110" height="56" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="75" y="73" text-anchor="middle" font-size="13" font-weight="600" fill="#10241b">リクエスト</text>
+<rect x="165" y="40" width="140" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="235" y="64" text-anchor="middle" font-size="13" font-weight="600" fill="#0f4a2e">Signal</text>
+<text x="235" y="83" text-anchor="middle" font-size="11.5" fill="#0f4a2e">信号を読む</text>
+<rect x="340" y="40" width="140" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="410" y="64" text-anchor="middle" font-size="13" font-weight="600" fill="#0f4a2e">Decision 段</text>
+<text x="410" y="83" text-anchor="middle" font-size="11.5" fill="#0f4a2e">規則で経路を選ぶ</text>
+<rect x="515" y="40" width="140" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="585" y="64" text-anchor="middle" font-size="13" font-weight="600" fill="#0f4a2e">Algorithm</text>
+<text x="585" y="83" text-anchor="middle" font-size="11.5" fill="#0f4a2e">呼び方を決める</text>
+<rect x="690" y="40" width="170" height="56" rx="8" fill="#10241b"/>
+<text x="775" y="73" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">バックエンドのモデル</text>
+<line x1="130" y1="68" x2="163" y2="68" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#a47)"/>
+<line x1="305" y1="68" x2="338" y2="68" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#a47)"/>
+<line x1="480" y1="68" x2="513" y2="68" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#a47)"/>
+<line x1="655" y1="68" x2="688" y2="68" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#a47)"/>
+<rect x="20" y="150" width="140" height="70" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="90" y="176" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">外から入れる口</text>
+<text x="90" y="196" text-anchor="middle" font-size="11.5" fill="#3c5a4c">metadata 信号</text>
+<text x="90" y="211" text-anchor="middle" font-size="11.5" fill="#3c5a4c">外部分類器</text>
+<line x1="130" y1="150" x2="195" y2="99" stroke="#3c5a4c" stroke-width="1.4" marker-end="url(#a47)"/>
+<rect x="185" y="150" width="175" height="70" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="272" y="176" text-anchor="middle" font-size="13" font-weight="600" fill="#1d4e8f">Vela 1.0 (15 本)</text>
+<text x="272" y="196" text-anchor="middle" font-size="11.5" fill="#1d4e8f">分野・PII・注入攻撃</text>
+<text x="272" y="211" text-anchor="middle" font-size="11.5" fill="#1d4e8f">根拠の無い箇所 など</text>
+<line x1="265" y1="150" x2="258" y2="99" stroke="#1d4e8f" stroke-width="1.8" marker-end="url(#a47)"/>
+<text x="272" y="130" font-size="11.5" fill="#1f7a4d">[稼働中]</text>
+<rect x="690" y="150" width="170" height="70" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="775" y="174" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">Hermes の呼び方</text>
+<text x="775" y="193" text-anchor="middle" font-size="11.5" fill="#3c5a4c">Confidence・ReMoM</text>
+<text x="775" y="209" text-anchor="middle" font-size="11.5" fill="#3c5a4c">Fusion・Workflows</text>
+<line x1="720" y1="150" x2="620" y2="99" stroke="#3c5a4c" stroke-width="1.4" marker-end="url(#a47)"/>
+<rect x="380" y="250" width="240" height="66" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-dasharray="5 4"/>
+<text x="500" y="274" text-anchor="middle" font-size="13" font-weight="600" fill="#8a5a12">Decision 1.0 (6 本)</text>
+<text x="500" y="294" text-anchor="middle" font-size="11.5" fill="#8a5a12">状態と質問から型付きの確率を返す</text>
+<text x="500" y="309" text-anchor="middle" font-size="11.5" fill="#8a5a12">重みとローカル推論コードのみ</text>
+<line x1="440" y1="250" x2="415" y2="99" stroke="#8a5a12" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#a47)"/>
+<line x1="560" y1="250" x2="580" y2="99" stroke="#8a5a12" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#a47)"/>
+<text x="600" y="240" font-size="11.5" fill="#8a5a12">[未統合・予定]</text>
+</svg>
+<figcaption>図 1. SR の処理の流れと、今回の 3 つの発表の位置。実線は main (<code>4502249</code>) のコードで確認できた接続、点線はブログが「次の一手」と書いている未出荷の接続です。Vela の各モデルは <code>config/recipes/vela-amd/recipe.dsl</code> などで信号の実体に割り当てられています。</figcaption>
+</figure>
+
+<p>この図で一番大事なのは点線です。<b>Decision 1.0 がルータの中で振り分けを良くした、という測定は、今回読んだ公開資料の中には見当たりません。</b>
+Hermes のブログ自身が「The models and their interface are available now; native Decision integration in vLLM Semantic Router is the next step」と書いており
+(<a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/website/blog/2026-09-24-v0.4-vllm-sr-hermes-release.md#L88">blog L88</a>)、
+ルータ本体のソース (<code>src/</code>) を <code>Decision-1.0</code>・<code>Lux</code>・<code>noul</code>・<code>systemone</code> で検索しても 1 件も出てきません。</p>
+
+<h2>2. Decision 1.0 の中身 ― 生成はしないが、質問ごとに全部を読み直す</h2>
+
+<p>Decision 1.0 は Jev の呼び方をそのまま真似ています。<b>状態</b> (state。判断の材料になる文章) と、名前付きの<b>質問</b>をいくつか渡すと、質問ごとに選択肢の確率が返ってきます。
+質問の型は 3 つで、<b>Choice</b> (選択肢から 1 つ選ぶ)、<b>Noul</b> (はい・いいえ。Boolean の言い換え)、<b>Score</b> (順序のある段階で採点) です。
+文章を 1 文字も生成せず、モデルが入力を読み終えた時点の内部の数値から、選択肢ごとの確率を直接出します。</p>
+
+<p>モデルは 2 系統あります。Kai と Lex (0.57B) は双方向のエンコーダ (前後の文脈を同時に見る型) で、質問の型ごとに 22 層の道筋を丸ごと 3 本持っています。
+Eos・Sol・Nox・Lux (0.75B〜7.94B) は Qwen3.5 の言語部分をそのまま使い、単語を予測する出力層の代わりに<b>学習した採点ヘッド</b> (読み終えた内部の数値から、選択肢ごとに点を付ける小さな部品) を付けたものです。
+名前の「9B」は実際には 7.94B、「0.6B」は 0.57B です (論文の表 1)。</p>
+
+<p>採点ヘッドが読む場所を見ると、次の章の話がすぐ分かります。下の図は、1 つの状態に 3 つの質問をしたときに Lux が実際に作る入力です
+(<code>code/decision_model.py</code> の <code>segments()</code> と <code>encode()</code> をそのまま図にしました)。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="20" y="24" font-size="12.5" font-weight="600" fill="#10241b">1 つの状態に質問 3 つ = 3 行の入力。各行はトークン 0 から最後まで流れる</text>
+<g font-size="11.5">
+<rect x="20" y="40" width="440" height="36" fill="#fbeceb" stroke="#8f2f2f"/><text x="240" y="63" text-anchor="middle" fill="#8f2f2f">Context: 状態 (数千トークン)</text>
+<rect x="460" y="40" width="130" height="36" fill="#e6eef8" stroke="#1d4e8f"/><text x="525" y="63" text-anchor="middle" fill="#1d4e8f">質問 1</text>
+<rect x="590" y="40" width="190" height="36" fill="#e8f4ec" stroke="#1f7a4d"/><text x="685" y="63" text-anchor="middle" fill="#0f4a2e">選択肢の塊 ×K</text>
+<rect x="780" y="40" width="80" height="36" fill="#fff" stroke="#3c5a4c"/><text x="820" y="63" text-anchor="middle" fill="#3c5a4c">Decision:</text>
+<rect x="20" y="90" width="440" height="36" fill="#fbeceb" stroke="#8f2f2f"/><text x="240" y="113" text-anchor="middle" fill="#8f2f2f">Context: 状態 (同じもの)</text>
+<rect x="460" y="90" width="130" height="36" fill="#e6eef8" stroke="#1d4e8f"/><text x="525" y="113" text-anchor="middle" fill="#1d4e8f">質問 2</text>
+<rect x="590" y="90" width="190" height="36" fill="#e8f4ec" stroke="#1f7a4d"/><text x="685" y="113" text-anchor="middle" fill="#0f4a2e">選択肢の塊 ×K</text>
+<rect x="780" y="90" width="80" height="36" fill="#fff" stroke="#3c5a4c"/><text x="820" y="113" text-anchor="middle" fill="#3c5a4c">Decision:</text>
+<rect x="20" y="140" width="440" height="36" fill="#fbeceb" stroke="#8f2f2f"/><text x="240" y="163" text-anchor="middle" fill="#8f2f2f">Context: 状態 (同じもの)</text>
+<rect x="460" y="140" width="130" height="36" fill="#e6eef8" stroke="#1d4e8f"/><text x="525" y="163" text-anchor="middle" fill="#1d4e8f">質問 3</text>
+<rect x="590" y="140" width="190" height="36" fill="#e8f4ec" stroke="#1f7a4d"/><text x="685" y="163" text-anchor="middle" fill="#0f4a2e">選択肢の塊 ×K</text>
+<rect x="780" y="140" width="80" height="36" fill="#fff" stroke="#3c5a4c"/><text x="820" y="163" text-anchor="middle" fill="#3c5a4c">Decision:</text>
+</g>
+<g stroke="#10241b" stroke-width="1.5">
+<line x1="640" y1="190" x2="640" y2="178"/><line x1="700" y1="190" x2="700" y2="178"/><line x1="760" y1="190" x2="760" y2="178"/><line x1="855" y1="190" x2="855" y2="178"/>
+</g>
+<text x="700" y="208" text-anchor="middle" font-size="11.5" fill="#10241b">ヘッドが読むのは、各選択肢の塊の最後の位置</text>
+<text x="700" y="224" text-anchor="middle" font-size="11.5" fill="#10241b">と、行の最後の 1 位置だけ</text>
+<text x="20" y="208" font-size="11.5" fill="#8f2f2f">赤い部分は 3 行とも同じ文字列なのに、</text>
+<text x="20" y="224" font-size="11.5" fill="#8f2f2f">3 回計算される (再利用しない)</text>
+</svg>
+<figcaption>図 2. Lux の入力の並び。状態が先頭に来るので、同じ状態への質問はすべて同じ先頭部分を共有しています。それでも同梱の実装は行ごとに最初から計算します。論文 §3.2 は「The current implementation does not reuse state activations across questions; eliminating output-token generation alone does not establish a latency advantage over a one-token generative classifier」と書いています。</figcaption>
+</figure>
+
+<p>つまり<b>「生成しないから速い」は、この実装では示されていません</b>。論文はそれを正直に書いていて、同梱の測定 (<code>QUESTION-SCALING.md</code>、AMD gfx942、旧い重み) でも
+1 問 499 トークンのとき 1 問 33.17 ms、8 問 150.41 ms、32 問 600.74 ms と、ほぼ質問数に比例しています。
+論文の「今後の方向」の 1 番目が「同じ先頭部分を 1 回だけ計算し、注意の KV と Gated DeltaNet の再帰状態を質問ごとに分岐させる」で、これは Prismyra がすでにやっていることです。</p>
+
+<h2>3. 点数の読み方 ― 3 つの版、後から決めた重み、読解だけ伸びていない</h2>
+
+<h3>Lux の総合点は 3 つある</h3>
+<p>総合点は 100 点満点で、同じ Lux について版によって 3 つの値があります。論文の表 2 は 77.22、現行のモデルカードと <code>metrics/benchmark.json</code> は 77.40、ブログは 76.94 です。
+JSON のパネルごとの正解率に公開された重みを掛けて自分で計算すると <b>77.40</b> になり、カードと一致しました。
+論文は付録 A で固定した古いリビジョンを使っているので、<b>論文とカードは別の版の Lux</b> です。ブログの 76.94 と 84.10 は、論文にも 6 つのリポジトリにも見つかりませんでした。</p>
+
+<h3>重みは結果を見てから決めた、と本人たちが書いている</h3>
+<p>総合点は 5 つのパネルの重み付き平均で、重みは 30/25/15/15/15 です。
+<code>EVALUATION.md</code> は「outcome-informed product-priority weights, chosen after observing benchmark results」、論文の付録 C は「The weights were chosen after observing results」と書いています。
+旧い重み 25/25/15/15/20 と比べるとどう動くかを、同じ JSON から計算しました。</p>
+
+<table>
+<tr><th>モデル</th><th>現行の重み</th><th>旧い重み</th><th>変化</th></tr>
+<tr><td>Jev 1.13.0 (TypeSafe のホスト版)</td><td class="n">81.05</td><td class="n">81.45</td><td class="n no">−0.40</td></tr>
+<tr><td>Lux-9B</td><td class="n">77.40</td><td class="n">77.07</td><td class="n y">+0.33</td></tr>
+<tr><td>Nox-4B</td><td class="n">73.09</td><td class="n">72.42</td><td class="n y">+0.67</td></tr>
+<tr><td>Sol-2B</td><td class="n">66.32</td><td class="n">65.48</td><td class="n y">+0.84</td></tr>
+<tr><td>Kev-9B (他者の公開モデル)</td><td class="n">71.89</td><td class="n">72.01</td><td class="n no">−0.12</td></tr>
+<tr><td>Qwen3.5-9B (未調整)</td><td class="n">69.73</td><td class="n">69.70</td><td class="n">+0.03</td></tr>
+<tr><td>Eos-0.8B</td><td class="n">61.89</td><td class="n">61.19</td><td class="n y">+0.70</td></tr>
+<tr><td>Kai-0.6B</td><td class="n">53.52</td><td class="n">53.05</td><td class="n y">+0.47</td></tr>
+</table>
+
+<p>重みの変更で Decision の 5 モデルは全員上がり、Jev と Kev-9B は下がりました (未調整の Qwen はほぼ変わりません)。ただし差の大きさは 1 点未満で、<b>順位は入れ替わりません</b>。
+3 人のレビュアーもこの点で一致していて、「後から決めた重みが差を少し盛ったが、公開モデルの中での首位という結論を作ったわけではない」という読みです。
+問題はむしろ別の所にあります。論文 §5.1 は「much of the benchmark was observed repeatedly during development」と書き、Kai の候補の 1 つを BoolQ で 18.75 点落ちたという理由で出荷しませんでした。
+つまりこのベンチマークは<b>開発中の選択にも使われた</b>ので、新しい問題での性能としては読めません。
+さらに Lux の学習データには、推論パネルと同じ出所の Cosmos QA・SQuAD 2.0・SNLI が入っています (<code>ATTRIBUTIONS.md</code>)。</p>
+
+<h3>Lux の方式が伸ばしたもの、伸ばさなかったもの</h3>
+<p>Lux は Qwen3.5-9B から作られていて、表 2 には未調整の Qwen3.5-9B も載っています。パネルごとに差を取ると、次の図になります。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="20" y="22" font-size="12.5" font-weight="600" fill="#10241b">Lux-9B − 未調整 Qwen3.5-9B (ポイント、benchmark.json の現行版から計算)</text>
+<line x1="250" y1="36" x2="250" y2="230" stroke="#3c5a4c"/>
+<g font-size="12">
+<text x="240" y="62" text-anchor="end" fill="#10241b">規則の判定 (Decisions)</text>
+<rect x="250" y="48" width="419" height="22" fill="#1f7a4d"/><text x="677" y="64" fill="#10241b">+10.47</text>
+<text x="240" y="100" text-anchor="end" fill="#10241b">組み合わせ (Composition)</text>
+<rect x="250" y="86" width="325" height="22" fill="#1f7a4d"/><text x="583" y="102" fill="#10241b">+8.13</text>
+<text x="240" y="138" text-anchor="end" fill="#10241b">読解 (Reading)</text>
+<rect x="250" y="124" width="13" height="22" fill="#8a5a12"/><text x="271" y="140" fill="#8a5a12">+0.32 (ほぼゼロ)</text>
+<text x="240" y="176" text-anchor="end" fill="#10241b">推論 (Inference)</text>
+<rect x="250" y="162" width="475" height="22" fill="#1f7a4d"/><text x="733" y="178" fill="#10241b">+11.88</text>
+<text x="240" y="214" text-anchor="end" fill="#10241b">他者の問題 (Transfer)</text>
+<rect x="250" y="200" width="180" height="22" fill="#1f7a4d"/><text x="438" y="216" fill="#10241b">+4.49</text>
+</g>
+</svg>
+<figcaption>図 3. Lux と未調整の元モデルのパネルごとの差 (追加学習・採点ヘッド・入力形式を合わせた差)。棒の長さは差に比例しています (1 ポイント = 40 px)。推論パネルは学習データと出所が同じなので、この伸びは新しい問題での力の証拠としては割り引いて読む必要があります。読解パネル (BoolQ と Belebele) はほとんど伸びていません。未調整の Qwen は「答えの文字の確率を読む」方式で測られています。</figcaption>
+</figure>
+
+<p>読解が伸びていないことは、第 48 章で私が自分で測った結果とも矛盾しません。
+Lux と未調整の Qwen3.5-9B に同じ RACE の 579 問を解かせると、点推定では未調整のほうが 1.2 ポイント高く (区間は 0 を含みます)、<b>どちらの測り方でも読解の大きな改善は見えません</b>。</p>
+
+<h2>4. 自分の GPU で動かせるか</h2>
+
+<p>重みは Apache-2.0 で、誰でも落とせます。ただし同梱の推論コードは、<b>AMD の GPU でしか起動しません</b>。
+Lux・Nox・Sol は、計算の部品 (Triton カーネル) の設定を AMD の MI300 系 (型番 gfx942) に合わせて固定しているので、GPU の型番を確かめてから読み込みます。Kai と Lex は PyTorch が ROCm 版 (<code>torch.version.hip</code>) でなければ止まります。</p>
+
+<figure>
+<svg viewBox="0 0 880 150" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<defs><marker id="b47" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#3c5a4c"/></marker></defs>
+<rect x="20" y="40" width="170" height="54" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="105" y="63" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">DecisionEngine</text>
+<text x="105" y="81" text-anchor="middle" font-size="11.5" fill="#3c5a4c">decision_api.py L90</text>
+<rect x="225" y="40" width="210" height="54" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="330" y="63" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">prepare_runtime_profile</text>
+<text x="330" y="81" text-anchor="middle" font-size="11.5" fill="#3c5a4c">L13, runtime.json を読む</text>
+<rect x="470" y="40" width="170" height="54" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="555" y="63" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8a5a12">gcnArchName</text>
+<text x="555" y="81" text-anchor="middle" font-size="11.5" fill="#8a5a12">== gfx942 ?</text>
+<rect x="675" y="40" width="185" height="54" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="767" y="63" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f2f2f">RuntimeError</text>
+<text x="767" y="81" text-anchor="middle" font-size="11.5" fill="#8f2f2f">L28 (L40S はここで停止)</text>
+<line x1="190" y1="67" x2="223" y2="67" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#b47)"/>
+<line x1="435" y1="67" x2="468" y2="67" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#b47)"/>
+<line x1="640" y1="67" x2="673" y2="67" stroke="#8f2f2f" stroke-width="1.6" marker-end="url(#b47)"/>
+<text x="657" y="58" text-anchor="middle" font-size="11.5" fill="#8f2f2f">違う</text>
+<text x="430" y="128" text-anchor="middle" font-size="11.5" fill="#3c5a4c">モデル本体 (decision_model.py) には GPU の種類に依存する所は無い。止めているのはカーネル設定の固定だけ</text>
+</svg>
+<figcaption>図 4. Lux の起動が NVIDIA の GPU で止まる経路 (<a href="https://huggingface.co/llm-semantic-router/Decision-1.0-Lux-9B/blob/bd45a30aee8c84032791c245c70f86dee5389cc8/code/decision_api.py#L13">decision_api.py</a>)。固定しているのは FLA の l2norm カーネルの Triton 設定で、数値を AMD 上で再現させるためのものです。</figcaption>
+</figure>
+
+<p>ほかにも欠けている物が 2 つあります。<b>HTTP のサーバが無い</b>ので、ブログの curl の例は「自分で System One 互換のエンドポイントを立てたら」という仮定の話です。
+そして<b>評価の問題文・正解・予測は配られていません</b> (<code>benchmark.json</code> にはパネルごとの正解数と区間だけ)。
+54 タスクの点数を第三者が再計算できるのは、集計値から加重平均を検算するところまでです。</p>
+
+<h2>5. Hermes 本体に実際に入っているもの</h2>
+
+<p>ルータ本体はよく作られています。ブログの主張を main (<code>4502249</code>) のコードと突き合わせた結果が次の表です。v0.4 のタグはまだ打たれていません (タグは v0.3.0 まで)。</p>
+
+<table>
+<tr><th>ブログの主張</th><th>コードの場所</th><th>状態</th></tr>
+<tr><td>外部の分類器の点数を信号として使える</td><td><a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/src/semantic-router/pkg/config/classifier_signal.go#L10-L27">classifier_signal.go</a> の <code>sequence_classifier</code> (共通の <code>http_classify</code> 契約)</td><td class="y">あり</td></tr>
+<tr><td>アプリが渡すヒントで経路を選べる (権限とは分離)</td><td><a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/src/semantic-router/pkg/classification/classifier_signal_metadata.go#L49">classifier_signal_metadata.go</a>。文字列の対応表で最大 32 個</td><td class="y">あり</td></tr>
+<tr><td>比べられる点数が揃ったときだけ確信度で選ぶ</td><td><a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/src/semantic-router/pkg/decision/selection.go#L30">selection.go</a> の <code>comparableConfidencePools</code></td><td class="y">あり</td></tr>
+<tr><td>自信が無ければ上位へ、複数に聞いて審判、など</td><td><code>pkg/looper/</code> の confidence・fusion・remom・workflows</td><td class="y">あり (Fusion と Workflows は実験扱い)</td></tr>
+<tr><td>本番の答えに影響させずに候補へ写しを送る</td><td><a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/src/semantic-router/pkg/extproc/shadow_dispatch.go#L72">shadow_dispatch.go</a></td><td class="y">あり。質の評価は別に要る、とブログも明記</td></tr>
+<tr><td>経路の理由を後から読める (Replay)</td><td><a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/src/semantic-router/pkg/routerreplay/store/store.go#L285">store.go</a>。<code>RequestID</code>、信号ごとに発火した規則、候補ごとの試行</td><td class="y">あり</td></tr>
+<tr><td>固定したタスクで、振り分けと単体を比べる (sr-bench 1.0)</td><td><a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/website/docs/benchmarking/sr-bench.md#L19-L39">sr-bench.md</a>。9 ベンチ、開発用と holdout を分離</td><td class="y">あり。公開タスクなので汚染ゼロではない、と自分で書いている</td></tr>
+<tr><td>Decision モデルをルータの中で使う</td><td>見つからない</td><td class="no">未出荷 (ブログも「next step」)</td></tr>
+</table>
+
+<p>tierbook にとって直接効くのは設定の形の変化です。tierbook は SR 用の設定を書き出す機能 (<code>export_vsr.py</code>) を持っていて、2026-08-30 に EKS 上で実際にルーティングさせて確認しています (<code>docs/results-router-on-a-cluster.md</code>)。
+その書き出しを、SR 自身の Go の設定ローダーに読ませました (EKS 上の Job で、2 つの版を順に clone して <code>config.Parse</code> を呼んだだけです)。</p>
+
+<pre><span class="c"># tierbook の同梱例から書き出した設定を、SR のローダーに読ませた結果</span>
+== router at v0.3.0
+<span class="k">ACCEPTED</span>
+== router at 450224936e59bdb6581a1f7411ebee292187c3a8
+<span class="r">REJECTED: deprecated config fields are no longer supported: routing.modelCards[0].quality_score,
+routing.modelCards[1].quality_score, providers.defaults.default_model,
+providers.models[0].backend_refs[0].type, providers.models[1].backend_refs[0].type</span></pre>
+
+<p>設定の版番号は main でも <code>"v0.3"</code> のままなのに、中身の 3 種類の項目が<b>黙って許されるのではなく起動時に拒否</b>されるようになっています
+(<a href="https://github.com/vllm-project/semantic-router/blob/450224936e59bdb6581a1f7411ebee292187c3a8/src/semantic-router/pkg/config/loader.go#L684-L708">loader.go L684-L708</a>)。
+版番号が同じなので、版で分岐する作りでは気付けません。直し方と、この発見が tierbook の設計に何を言っているかは第 50 章で扱います。</p>
+
+<h2>6. レビュー (AIR) で決めたこと</h2>
+
+<p>ここまでの読みと、次の章からの実験の計画を、Opus 5.5・GPT-6 Sol・GPT-6 Astra の 3 つに<b>別々に</b>渡して攻撃させました (3 つとも回答あり)。
+3 者が独立に一致したのは次の 4 点で、実験の設計をこの通りに変えました。</p>
+<ul>
+<li><b>比べる相手は 1 つに絞る。</b>学習の効き目を見るには、Lux と「Lux の元になった未調整の Qwen3.5-9B」を同じ問題で比べるしかない。ただしそれは「学習 + ヘッド + 入力形式」の合計の差で、学習だけの効果とは呼べない。</li>
+<li><b>合格線は結果を見る前に固定する。</b>判定の線 (差の区間が 0 を含むか、±2 ポイントの内側か) を先に書いた。</li>
+<li><b>移植の忠実度を先に確かめる。</b>参照出力が 5 問しかないなら「検証不能」と宣言し、以降の結果を「CUDA に移植した版の結果」と書く。</li>
+<li><b>振り分けの信号として見るなら、難しさの当たり具合 (AUC) を主指標にしない。</b>全員が解ける問題と全員が解けない問題を当てても、振り分けの得にはならない。</li>
+</ul>
+<p>Opus 5.5 だけが出した提案が 1 つあり、第 49 章の中心になりました。<b>「Lux のヘッドが読むのは後ろの位置だけなのだから、先頭の状態を 1 回だけ計算しても答えは変わらないはずだ。それを確かめるほうが速度比較より情報が多い」</b>という指摘です。</p>
+
+<h2>まだ言えないこと</h2>
+<ul>
+<li>Vela の 15 本の精度は、発表された数字 (分野の分類 85.15 など) を読んだだけで、自分では測っていません。第 50 章で使うのは分野の分類 1 本だけです。</li>
+<li>Jev 本体は API キーが無いので呼んでいません。Jev の数字はすべて Decision 側が記録したもの (<code>jev-1.13.0</code>、2026-09-21 のリクエスト) の引用です。</li>
+<li>ライセンスについて、Kai と Lex のトークナイザには Gemma の利用規約が付いています (mmBERT が Gemma 2 のトークナイザを使っているため)。学習データの一部は CC BY-SA です。商用で使う前には確認が要ります。</li>
+</ul>
+
+<p class="foot">
+一次資料: <a href="https://vllm-sr.ai/blog/decision-models/">Decision 1.0 のブログ</a> / <a href="https://vllm-sr.ai/blog/v0.4-vllm-sr-hermes-release/">v0.4 Hermes のブログ</a> / <a href="https://vllm-sr.ai/blog/vela-models">Vela 1.0 のブログ</a> / <a href="https://vllm-sr.ai/decision-paper.pdf">Decision 1.0 の論文</a> /
+Hugging Face の Lux (<code>bd45a30</code>)・Kai (<code>7185f51</code>)・Eos (<code>3c2d632</code>)・Nox (<code>0bb8335</code>) / SR の main <code>4502249</code>。<br>
+点数の再計算は <code>metrics/benchmark.json</code> のパネル値に重みを掛け直したもので、本文の表はすべてその出力です。
+</p>
+
+</div>
+</body>
+</html>

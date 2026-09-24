@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 49 章 文脈は 1 回読めばいい ― Lux に Prismyra の再利用を足す</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 50 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 8 部 第 49 章 &nbsp;/&nbsp;
+<a href="gateway-48-decision-measured.html">前章: 元のモデルとの差</a> &nbsp;/&nbsp; <a href="gateway-50-decision-into-tierbook.html">次章: tierbook へ</a></p>
+
+<h1>文脈は 1 回読めばいい ― Lux に Prismyra の再利用を足す<br>答えは変わらず、64 問で 20 倍速くなった</h1>
+
+<div class="lead">
+<p><b>この章の結論。</b>Decision の論文が「今後の課題」の 1 番目に挙げていた「質問の間で文脈の計算を共有する」を、公開されている Lux-9B の重みのまま、検証のコードを含めて 76 行で実装しました。
+<b>答えは 1 問も変わらず</b> (短い RACE 124 問・約 9,600 トークンに埋めた 157 問・振り分け用の Noul 300 問のすべてで答えの変化 0。確率の差は、fp32 で測れた短い RACE と Noul で最大 0.0017。埋めた問題は bf16 でだけ確かめた)、
+約 5,400 トークンの文脈に 64 問を聞く時間は <b>45.6 秒から 2.27 秒</b> (20 倍) になりました。</p>
+<p style="margin-bottom:0">これで、第 48 章で見た「長い文脈に強い Lux の方式」と、Prismyra の「1 回だけ読む」を同じモデルの上で組み合わせられることが分かりました。
+埋めた 157 問では、再利用版でも正解率は同梱の実装と同じ 87.90% でした。ただし bf16 では確率の値が最大 0.059 ずれるので、確率の質まで同じとは言えません。
+Prismyra が 35B で出していた速さ (64 問 1.22 秒) にはまだ届きませんが、差は 2 倍以内です。</p>
+</div>
+
+<h2>要約表</h2>
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>文脈を 1 回だけ計算しても答えが変わらないか</td><td>RACE 30 記事 124 問で元の実装と再利用版の確率を比べた (bf16 と fp32、束ね 1 と 8)。長い文脈 157 問 (bf16) と Noul 300 問 (bf16 と fp32) を追加</td><td>速さだけ測る</td><td>答えの変化はすべて 0 件。確率の差 (TV) は bf16 で最大 0.012〜0.059、fp32 で最大 0.0017 (合格線 0.005)。長い文脈の fp32 は L40S のメモリに載らず未確認</td><td>§2</td></tr>
+<tr><td class="n">2</td><td>質問が増えたときの時間</td><td>L40S で、約 1,300 と約 5,400 トークンの文脈に 1/4/16/64 問。温めた後の 5 回の中央値</td><td>論文の AMD の数字</td><td>5,400 トークン 64 問で 45,590 ms → 2,269 ms。1 問だけのときは 674 対 666 ms で同じ</td><td>§3</td></tr>
+<tr><td class="n">3</td><td>Prismyra と比べてどこにいるか</td><td>同じ GPU・同じ文脈・同じ質問で Prismyra (Qwen3.5-9B と Qwen3.6-35B) も測った</td><td>比べない</td><td>64 問: 再利用版 Lux 2,269、Prismyra 9B 2,484、35B 1,224 ms。9B 同士なら Lux の方が速い</td><td>§3</td></tr>
+<tr><td class="n">4</td><td>実装の上で何が要ったか</td><td>transformers 5.17.0 の cache を読んだ</td><td>—</td><td>標準の <code>batch_repeat_interleave</code> が線形注意の層で落ちるので、状態の複製を自分で書いた</td><td>§1</td></tr>
+</table>
+
+<h2>1. 何を変えたか</h2>
+
+<p>Lux の入力は、どの質問でも同じ「状態」の文字列から始まります (第 47 章の図 2)。
+Lux の骨格は Qwen3.5 で、前の位置しか見ない (因果的な) モデルなので、<b>先頭部分の計算結果は、後ろに何が続くかに関係なく同じ</b>です。
+そこで、先頭部分を 1 回だけ計算して「ここまで読んだ状態」を取っておき、質問ごとにその写しから続きだけを計算するようにしました。</p>
+
+<figure>
+<svg viewBox="0 0 880 266" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<defs><marker id="a49" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#3c5a4c"/></marker></defs>
+<text x="20" y="22" font-size="13" font-weight="600" fill="#8f2f2f">前: 同梱の実装 (質問 Q 個 = 状態を Q 回計算)</text>
+<g font-size="11.5">
+<rect x="20" y="34" width="330" height="26" fill="#fbeceb" stroke="#8f2f2f"/><text x="185" y="52" text-anchor="middle" fill="#8f2f2f">状態</text>
+<rect x="350" y="34" width="80" height="26" fill="#e6eef8" stroke="#1d4e8f"/><text x="390" y="52" text-anchor="middle" fill="#1d4e8f">質問 1</text>
+<rect x="20" y="66" width="330" height="26" fill="#fbeceb" stroke="#8f2f2f"/><text x="185" y="84" text-anchor="middle" fill="#8f2f2f">状態</text>
+<rect x="350" y="66" width="80" height="26" fill="#e6eef8" stroke="#1d4e8f"/><text x="390" y="84" text-anchor="middle" fill="#1d4e8f">質問 2</text>
+<rect x="20" y="98" width="330" height="26" fill="#fbeceb" stroke="#8f2f2f"/><text x="185" y="116" text-anchor="middle" fill="#8f2f2f">状態</text>
+<rect x="350" y="98" width="80" height="26" fill="#e6eef8" stroke="#1d4e8f"/><text x="390" y="116" text-anchor="middle" fill="#1d4e8f">質問 3</text>
+</g>
+<text x="460" y="84" font-size="12" fill="#8f2f2f">計算量 ≈ Q × (状態 + 質問)</text>
+<text x="20" y="168" font-size="13" font-weight="600" fill="#1f7a4d">後: 再利用版 (状態は 1 回、質問は写しから)</text>
+<g font-size="11.5">
+<rect x="20" y="182" width="330" height="26" fill="#e8f4ec" stroke="#1f7a4d"/><text x="185" y="200" text-anchor="middle" fill="#0f4a2e">状態 (1 回だけ)</text>
+<rect x="380" y="182" width="170" height="26" fill="#fff" stroke="#10241b"/><text x="465" y="200" text-anchor="middle" fill="#10241b">読んだ状態の写し ×Q</text>
+<line x1="350" y1="195" x2="378" y2="195" stroke="#3c5a4c" stroke-width="1.6" marker-end="url(#a49)"/>
+<rect x="590" y="176" width="80" height="22" fill="#e6eef8" stroke="#1d4e8f"/><text x="630" y="192" text-anchor="middle" fill="#1d4e8f">質問 1</text>
+<rect x="590" y="204" width="80" height="22" fill="#e6eef8" stroke="#1d4e8f"/><text x="630" y="220" text-anchor="middle" fill="#1d4e8f">質問 2</text>
+<rect x="590" y="232" width="80" height="22" fill="#e6eef8" stroke="#1d4e8f"/><text x="630" y="248" text-anchor="middle" fill="#1d4e8f">質問 3</text>
+<line x1="550" y1="195" x2="588" y2="187" stroke="#3c5a4c" stroke-width="1.3" marker-end="url(#a49)"/>
+<line x1="550" y1="197" x2="588" y2="215" stroke="#3c5a4c" stroke-width="1.3" marker-end="url(#a49)"/>
+<line x1="550" y1="199" x2="588" y2="243" stroke="#3c5a4c" stroke-width="1.3" marker-end="url(#a49)"/>
+</g>
+<text x="690" y="208" font-size="12" fill="#1f7a4d">≈ 状態 + Q × 質問</text>
+</svg>
+<figcaption>図 1. 前と後。Lux のヘッドが読むのは各選択肢の塊の最後と行の最後で、どれも質問側にあるので、状態の部分の計算を共有しても読む値は (数学的には) 変わりません。写すのは、全注意の 8 層のキーと値 (KV) と、Gated DeltaNet の 24 層の畳み込みの状態と再帰の状態です。</figcaption>
+</figure>
+
+<p>実装の中心はこれだけです (<code>luxreuse.py</code> より。Decision 本体のコードには手を入れていません)。</p>
+
+<pre><span class="c"># 全ての質問で共通の token の先頭部分。ただしヘッドが読む最初の位置より前で切る</span>
+P = min(common_prefix(ids), min(min(e["candidate_positions"]) for e in enc))
+pre = backbone(input_ids=ids[0][:P], use_cache=<span class="k">True</span>)          <span class="c"># 状態を 1 回だけ読む</span>
+<span class="k">for</span> group <span class="k">in</span> batches_of_8(questions):
+    cache = copy.deepcopy(pre.past_key_values)
+    repeat_cache(cache, len(group))                             <span class="c"># 写しを束の数だけ増やす</span>
+    h = backbone(input_ids=tails, attention_mask=mask, past_key_values=cache)
+    c = h[j, candidate_positions - P];  q = h[j, query_position - P]
+    p = softmax(head(c, q) / temperature)                       <span class="c"># Lux 自身のヘッドと温度</span></pre>
+
+<p>「共通の先頭部分」は、文字列ではなく<b>トークンの列</b>で取っています。Lux は状態と質問を 1 つの文字列として区切りごとにトークン化するので、状態の末尾と質問の先頭の境目でトークンが変わる可能性があるからです。
+トークン列で最長の共通部分を取れば、境目で何が起きても写しから続けた計算は元と同じ入力になります。</p>
+
+<div class="note"><b>[注意] transformers に足りなかった物。</b>
+質問を 8 個ずつ束ねて流すには、読んだ状態の写しを束の数だけ増やす必要があります。transformers 5.17.0 の <code>DynamicCache.batch_repeat_interleave</code> はそのための関数ですが、
+Qwen3.5 の線形注意の層 (<code>LinearAttentionLayer</code>) にはこの関数が無く、<code>AttributeError</code> で落ちます。
+そこで、層ごとにキー・値・畳み込みの状態・再帰の状態の 4 つを複製する 10 行を自分で書きました。</div>
+
+<h2>2. 答えは本当に変わらないか</h2>
+
+<p>数学的には同じでも、計算の区切りが変わると丸め誤差の出方が変わります。以下の bf16 と fp32 は計算に使う数の精度で、bf16 は 16 ビット (速いが粗い、普段の設定)、fp32 は 32 ビット (遅いが細かい) です。特に Gated DeltaNet は 64 トークンずつの塊で計算するので、先頭部分で一度切ると塊の境目がずれます。
+そこで、第 48 章と同じ RACE の最初の 30 記事 124 問を、元の実装と再利用版の両方で解かせ、確率の差 (TV 距離。2 つの確率の分布がどれだけ違うかを 0〜1 で表す量) を測りました。
+合格線は結果を見る前に「全問で TV ≤ 0.005、答えは完全一致。bf16 で届かなければ fp32 で判定する」と決めていました。</p>
+
+<table>
+<tr><th>計算の精度</th><th>束ね</th><th>答えが変わった問</th><th>TV の中央値</th><th>TV の 99% 点</th><th>TV の最大</th><th>判定</th></tr>
+<tr><td>bf16 (普段の設定)</td><td class="n">1</td><td class="n">0 / 124</td><td class="n">0.00014</td><td class="n">0.0307</td><td class="n no">0.0404</td><td>合格線を超える</td></tr>
+<tr><td>fp32</td><td class="n">1</td><td class="n">0 / 124</td><td class="n">0.000006</td><td class="n">0.00076</td><td class="n y">0.0017</td><td class="y">合格</td></tr>
+<tr><td>fp32</td><td class="n">8</td><td class="n">0 / 124</td><td class="n">0.000007</td><td class="n">0.00057</td><td class="n y">0.0010</td><td class="y">合格</td></tr>
+</table>
+
+<p>fp32 で差が 20 分の 1 以下に縮み、事前の線に合格したので、bf16 の差は<b>丸め誤差が主な原因</b>だと考えられます。束ねても (右詰めの詰め物が入っても) 差は増えませんでした。
+逆に言うと、<b>bf16 の Lux は、計算の区切り方だけで確率が最大 0.04 ゆれるモデル</b>です。</p>
+
+<p>速さを測った設定 (bf16、束ね 8) と、第 50 章で使った Noul の質問でも確かめました。</p>
+
+<table>
+<tr><th>対象</th><th>精度</th><th>問の数</th><th>答えが変わった問</th><th>TV の中央値</th><th>TV の最大</th><th>正解率 (同梱 / 再利用)</th></tr>
+<tr><td>RACE を約 9,600 トークンに埋めた問題 (第 48 章 §4)</td><td>bf16</td><td class="n">157</td><td class="n">0</td><td class="n">0.0004</td><td class="n">0.0590</td><td class="n">87.90% / 87.90%</td></tr>
+<tr><td>RouterBench の依頼 100 件 × Noul 3 つ (第 50 章)</td><td>bf16</td><td class="n">300</td><td class="n">0</td><td class="n">0.0021</td><td class="n">0.0117</td><td>—</td></tr>
+<tr><td>同上</td><td>fp32</td><td class="n">300</td><td class="n">0</td><td class="n">0.00006</td><td class="n y">0.0004</td><td>—</td></tr>
+</table>
+
+<p>長い文脈の fp32 は、9B を 32 ビットで載せると L40S (44.4 GiB) に 9,600 トークンの行が 1 本も入らず、確かめられていません。bf16 では答えも正解率も完全に一致しています。</p>
+
+<h2>3. どれだけ速くなったか</h2>
+
+<p>RACE の記事をつなげて約 1,300 トークンと約 5,400 トークンの文脈を作り、RACE の質問を 1・4・16・64 個聞きました。
+同じ L40S で、1 回温めてから 5 回測った中央値です。Prismyra は同じ文字列を <code>engine.ask</code> に渡しました (35B は受け付けの制限で group 8)。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="20" y="22" font-size="12.5" font-weight="600" fill="#10241b">約 5,400 トークンの文脈に 64 問 (1 秒 = 13 px)</text>
+<line x1="230" y1="34" x2="230" y2="232" stroke="#3c5a4c"/>
+<g font-size="12">
+<text x="220" y="58" text-anchor="end" fill="#10241b">Lux (同梱の実装)</text>
+<rect x="230" y="44" width="593" height="24" fill="#8f2f2f"/><text x="815" y="61" text-anchor="end" fill="#fff" font-weight="600">45.6 秒</text>
+<text x="220" y="104" text-anchor="end" fill="#10241b">Lux (再利用版)</text>
+<rect x="230" y="90" width="29.5" height="24" fill="#1f7a4d"/><text x="268" y="107" fill="#10241b">2.27 秒 (20 倍速い、答えは同じ)</text>
+<text x="220" y="150" text-anchor="end" fill="#10241b">Prismyra (Qwen3.5-9B)</text>
+<rect x="230" y="136" width="32.3" height="24" fill="#1d4e8f"/><text x="271" y="153" fill="#10241b">2.48 秒</text>
+<text x="220" y="196" text-anchor="end" fill="#10241b">Prismyra (Qwen3.6-35B)</text>
+<rect x="230" y="182" width="15.9" height="24" fill="#1d4e8f"/><text x="255" y="199" fill="#10241b">1.22 秒</text>
+</g>
+</svg>
+<figcaption>図 2. 64 問にかかる時間を棒の長さに比例させた図。同梱の実装は 64 問ぶん状態を読み直すので、ほかの 3 つとは桁が違います。</figcaption>
+</figure>
+
+<table>
+<tr><th>文脈</th><th>質問数</th><th>Lux 同梱</th><th>Lux 再利用</th><th>Prismyra 9B</th><th>Prismyra 35B</th></tr>
+<tr><td rowspan="4">約 1,300 トークン</td><td class="n">1</td><td class="n y">139</td><td class="n">187</td><td class="n no">453</td><td class="n">216</td></tr>
+<tr><td class="n">4</td><td class="n">617</td><td class="n y">197</td><td class="n">451</td><td class="n">225</td></tr>
+<tr><td class="n">16</td><td class="n">2,609</td><td class="n">397</td><td class="n">559</td><td class="n y">334</td></tr>
+<tr><td class="n">64</td><td class="n no">10,693</td><td class="n">1,194</td><td class="n">1,352</td><td class="n y">1,006</td></tr>
+<tr><td rowspan="4">約 5,400 トークン</td><td class="n">1</td><td class="n">674</td><td class="n">666</td><td class="n no">1,154</td><td class="n y">431</td></tr>
+<tr><td class="n">4</td><td class="n">2,845</td><td class="n">700</td><td class="n">1,161</td><td class="n y">433</td></tr>
+<tr><td class="n">16</td><td class="n">11,524</td><td class="n">1,005</td><td class="n">1,309</td><td class="n y">547</td></tr>
+<tr><td class="n">64</td><td class="n no">45,590</td><td class="n">2,269</td><td class="n">2,484</td><td class="n y">1,224</td></tr>
+</table>
+<p style="font-size:13.5px;color:#3c5a4c">単位は ms。文脈の長さは Lux のトークナイザで 1,325 と 5,414、Prismyra で 1,215 と 5,304 (書式が違うため)。</p>
+
+<p>読み取れることは 3 つです。</p>
+<ul>
+<li><b>1 問だけなら再利用しても得はありません</b> (約 1,300 トークンで 139 対 187 ms、写しを作る手間の分だけ遅い)。4 問から逆転し、64 問では 9〜20 倍の差になります。Prismyra の README が「4 問未満なら普通の推論エンジンを使え」と書いているのと同じ形です。</li>
+<li><b>9B 同士なら、再利用版の Lux は Prismyra より速い。</b>Prismyra の高速カーネルは MoE の Qwen3.6-35B 専用で (<code>kernels/qwen3_moe.py</code> の <code>MEASURED_CONFIG</code>)、密な Qwen3.5-9B では予備の経路で動きます。1 問のとき 453 ms は、同じ transformers の経路で素直に 1 回流す Lux の 139 ms より 3 倍遅く、予備の経路の固定の重さが原因ではないかと考えていますが、書式や計算量の違いも含むので確かめていません。</li>
+<li><b>測った条件の多くで一番速いのは 35B の Prismyra でした</b> (短い文脈の 1〜4 問では Lux の方が速い)。1 回に動くパラメータが 3B の MoE で、専用カーネルが揃っていることが効いていると考えています。Lux のヘッドを 35B に載せる重みは存在しないので、「ヘッドの良さ」と「この速さ」は今のところ別のモデルにあります。</li>
+</ul>
+
+<h2>4. これで何ができるようになったか</h2>
+
+<p>第 48 章の結果と合わせると、次の 3 つを 1 つのモデルで組み合わせる道が開けました。
+Lux の方式による<b>長い文脈での確率の崩れにくさ</b>、1 回だけ読むことによる<b>質問数あたりの安さ</b>、そして同梱の実装と<b>同じ答え</b>です。
+ただし 3 つは別々に測ったもので、確率の同値は短い文脈の fp32 で、答えと正解率の一致は長い文脈の bf16 で、速さは bf16 で確かめています。
+Decision の側から見ると、論文の「今後の方向」の 1 番目 (「An identical causal prefix could be computed once and branched across questions, reusing attention key/value caches together with Gated DeltaNet recurrent and convolutional states」) が、再学習なしで公開重みのまま成り立つことの実証です。
+Prismyra の側から見ると、「学習済みヘッドを枝の最後の状態に載せる」という自分の <code>ACCURACY.md</code> の次の候補に、すでに学習済みで長い文脈に強い実物が 1 つ見つかった、ということです。</p>
+
+<div class="box"><b>この章の成果をどこに入れるかは、まだ決めていません。</b>
+選択肢は 2 つあります。(a) Decision の上流 (<code>llm-semantic-router</code> のリポジトリ) に、再利用版の推論経路として提案する。
+(b) Prismyra に「Decision 互換のヘッドを読む」読み出しを 1 つ足し、Lux を Prismyra の fork の仕組みで動かす。
+どちらも外に出る変更なので、第 50 章の最後の判断待ちに入れました。</div>
+
+<h2>まだ言えないこと</h2>
+<ul>
+<li>事前の合格線 (fp32 で TV ≤ 0.005) で同値を確かめたのは、短い Choice の 124 問と Noul の 300 問です。埋めた 157 問は答えと正解率の一致だけで、fp32 の確率の同値は L40S のメモリに載らず確かめていません。Score、255 個の選択肢、1 万トークンを超える文脈も未確認です。</li>
+<li>速度は束ね 8 のままで、束の大きさや CUDA graph の最適化はしていません。Prismyra 35B との 2 倍の差のうち、どれだけが仕組みでどれだけがモデルの大きさかは分けていません。</li>
+<li>速度の比較は 1 台の L40S で、同時に来る複数の利用者は扱っていません。</li>
+</ul>
+
+<p class="foot">
+環境: 東京リージョンの EKS、L40S 1 枚、transformers 5.17.0、flash-linear-attention 0.5.2 (L40S では GDN の計算が PyTorch 実装と FLA カーネルで 1e-5 以内に一致)。
+Lux は Hugging Face の <code>bd45a30</code>。時間は「状態 + 全質問」を 1 回答え終わるまでの壁時計時間で、モデルの読み込みは含みません。<br>
+AIR (第 47 章 §6) で Opus 5.5 が出した「後ろの位置しか読まないなら先頭を共有しても答えは変わらないはず」という指摘を、事前に決めた合格線で確かめたものです。
+</p>
+
+</div>
+</body>
+</html>
