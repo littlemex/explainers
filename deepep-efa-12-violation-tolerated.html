@@ -197,6 +197,10 @@ mode violate-i1,  8 iterations: 0 not constant, 0 not integral, 0 out of range</
     <div class="warn">
       <p><b>ただしこれは構成についての主張で、カーネル一般についての主張ではありません。</b>2 rank・GPU 1 枚ずつ・<code>kNumParts = 1</code>・<code>kNumSubParts = 1</code>・128 token・192 channel。part が複数ある形は、counter とそれを正当化する header のあいだにもっと余地があります。</p>
     </div>
+
+    <div class="warn">
+      <p><b>さらなる訂正 (2026-09-24)。</b>ここでの「耐える」は、実は<b>弱い検査しか通していませんでした</b>。行が定数か・token 数未満かを見るだけで、<b>combine が返す合計が本当に正しい値かは 1 回も照合していません</b>。その後、送信元ごとの乱数から経路を独立に再計算し、combine の合計を正確な値と照合する検査 (答え合わせの機械) を作って掘り直したところ、<b>2 回目以降の反復で combine が壊れます</b>。128 個の答えのうち 126 個が間違い、誤りはいつも「相手 1 台分の値だけが前の回のまま残っている」という同じ形でした。つまり DeepEP は、データが着く前にバッファを読んでいます。<b>この回の結論「unordered カーネルは I1 違反に耐える」は撤回します。</b>詳細は <a href="./deepep-efa-14-oracle-retraction.html">14</a>。</p>
+    </div>
   </section>
 
   <section>
@@ -208,11 +212,12 @@ mode violate-i1,  8 iterations: 0 not constant, 0 not integral, 0 out of range</
       <tr><td>BAR mapping なら届く</td><td>同じ状況で 0 ms。payload と flag の順序も保たれる</td></tr>
       <tr><td>エミュレータで dispatch と combine が通る</td><td>combine 込みで 5 回中 5 回</td></tr>
       <tr><td>unordered カーネルは I1 違反に耐える</td><td>全ステップ強制・8 反復で破損 0。受理が header 門番だから</td></tr>
+      <tr><td class="no">→ 撤回 (2026-09-24)</td><td>combine を独立オラクルで照合すると、2 回目以降の反復で 128 個中 126 個が誤り。前回はそこを検査していなかった。詳細は 14</td></tr>
       <tr><td>ページ固定メモリの確保と解放をデータパスに置けない</td><td>凍結時のスタックが <code>cuMemFreeHost</code> を名指し</td></tr>
     </table>
 
     <h3>言えないこと</h3>
-    <p>part が複数ある構成での I1 の必要性。より多い rank での挙動。そして<b>エミュレータが順序違反を検出できること</b>は、まだ示せていません。示せたのは「この構成では検出すべき違反が存在しない」ことです。検出器としての較正は、破損が起きる構成を見つけてからの話になります。</p>
+    <p>part が複数ある構成での I1 の必要性。より多い rank での挙動。<span style="color:#b5401f">(訂正 2026-09-24: 「エミュレータが順序違反を検出できることは、まだ示せていない」は撤回します。combine を独立オラクルで照合する検査に変えたところ、violate-i1 は 2 回目以降の反復で確実に検出できました。検出できなかったのは、この回のテストが弱かったからです。詳細は 14。)</span></p>
 
     <h3>道具として残ったもの</h3>
     <p>回数ではなく日付を持つパン屑、入場と退場を数える driver 呼び出しの在庫表、凍結を検出してからスタックを採る watcher、そして古いバイナリで測ることを致命的に止める gate。どれも DeepEP に固有ではなく、<b>止まったものを調べる</b>作業一般に使えます。</p>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 14: 答え合わせの機械が、前回の「耐える」を壊した</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 14</p>
+  <h1>答え合わせの機械が、前回の「耐える」を壊した</h1>
+  <p>各行の中身を送信元ごとに独立で計算し直すオラクル (答え合わせの機械) を作ったら、壊れるはずの試験がちゃんと壊れて、第 12 回の結論が撤回になった記録</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>答え合わせの機械を作る</h2>
+    <p class="lead">これまでの検査は「dispatch が返ったか」「値が定数か」しか見ていませんでした。中身が本当に正しいかを、送信元ごとに独立に計算し直して確かめる機械を作りました。</p>
+
+    <p>各行は「どの token か・どの送信元 (rank) か・何回目 (iteration) か」という 3 つの情報と、その 3 つから決まる中身を運びます。受信側はここが要です。<b>送信元ごとに割り振った乱数の種から、経路 (その token がどのエキスパートに送られるか) を受信側だけで独立に計算し直します。</b>送った側の記録を信じるのではなく、受信側が「本来ならこう届くはずだ」を自分で再現するということです。</p>
+
+    <p>そのうえで、届いた行を 1 行ずつ突き合わせます。</p>
+
+    <ul class="steps">
+      <li>エキスパートの番号と重みが、計算し直した経路と一致するか</li>
+      <li>中身 (payload) が、その token・その送信元・その回数から決まる値と一致するか</li>
+      <li>欠けている行・重複している行・古い回の中身が混ざっている行を、それぞれ名前をつけて数える</li>
+    </ul>
+
+    <p>combine (エキスパートの答えを元の rank へ返して重み付き加算する処理) も同じ考え方で照合します。受信側が実際に掛けた倍率から決まる<b>正確な合計</b>を計算しておき、DeepEP が返した値と 1 個ずつ比べます。</p>
+
+    <div class="key">
+      <p><b>正しい経路 (<code>srd</code> モード) では、dispatch が 256 行中 256 行、combine が 128 個中 128 個で一致しました。</b>3 回繰り返して同じ結果です。「通った」ではなく「1 行も違わない」まで確認できたのは、この機械が初めてです。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>わざと壊す試験 (陰性対照) が、ちゃんと見逃さないか</h2>
+    <p class="lead">検査が甘いと、壊れた実行も「通った」に見えます。だから壊すべき試験がちゃんと壊れることを、先に確認します。</p>
+
+    <table>
+      <tr><th>試験</th><th>やったこと</th><th>結果</th></tr>
+      <tr><td>corrupt</td><td>7 回に 1 回、データを壊す</td><td class="no">256 行中 21 行が不一致 (約 8 %)</td></tr>
+      <tr><td>drop</td><td>11 回に 1 回、データを捨てる</td><td class="no">DeepEP がタイムアウトする</td></tr>
+      <tr><td>violate-i1</td><td>signal (到着通知) が payload (データ本体) より先に見えるようにする</td><td class="no">2 回目以降の combine で、128 個中 126 個が誤る</td></tr>
+    </table>
+
+    <p>violate-i1 の誤りは、どれも同じ形をしていました。<b>相手 1 台分の値だけが、前の回のまま残っている</b>という形です。たとえば正解が <code>39 = 13 × 3</code> になるはずの場所で、実際には <code>29 = 13 × 1 + 8 × 2</code> が返りました。<code>8</code> は前の回にその相手が送った値です。今回の値がまだ着いていないうちに、DeepEP がバッファを読みに行き、古い値をそのまま数えてしまったということです。</p>
+
+    <div class="warn">
+      <p><b>第 12 回「わざと壊したら、壊れなかった」の結論を撤回します。</b>あの回で使っていた検査は、行が定数か・token 数未満かしか見ておらず、<b>combine の合計が正しい値かを 1 回も照合していませんでした</b>。強い検査に変えると、DeepEP はデータが届く前にバッファを読んでいる、つまり<b>I1 (signal はデータの全バイトが着いた後にしか見えない、という約束) を破ると 2 回目以降の combine が壊れる</b>ことが分かります。「unordered カーネルは契約より頑健」ではなく、「弱い検査がそう見せていた」が正しい説明でした。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>GDRCopy を使わないと DeepEP が止まる理由の、いまの最有力候補</h2>
+    <p class="lead">GDRCopy (GPU の BAR 領域を直接書く仕組み) が使えないマシンでは、エミュレータは CUDA のコピーに戻ります。そこで DeepEP が止まる理由を、今回初めて特定できました。犯人は解放 (free) ではありませんでした。</p>
+
+    <p>DeepEP には JIT (Just-In-Time。実行するときにカーネルをコンパイルして読み込む仕組み) があり、dispatch の途中で <code>cuModuleLoad</code> を呼びます。これが、エミュレータの側が出す 2 本のコピー (<code>cuMemcpyHtoDAsync</code> と <code>cuMemcpyDtoHAsync</code>) と互いに待ち合って止まっていました。</p>
+
+    <div class="key">
+      <p>通常なら 1 ms もかからずに戻る呼び出しが、<b>3 本とも 5.6 秒以上戻ってきません</b>。<code>cuModuleLoad</code> は、コピー 2 本より <b>2 ms 先に</b>呼ばれていました。呼び出し元をたどると <code>ElasticBuffer::dispatch</code> → <code>Compiler::build</code> → <code>KernelRuntimeCache::get</code> → <code>KernelRuntime</code> → <code>cuModuleLoad</code> という経路です。</p>
+    </div>
+
+    <p>第 10 回・第 11 回で見えていた「常駐カーネルがいるとコピーが届かない」という一般化は、この節と合わせて読み直すと言い過ぎだったことが分かります。実測では、<b>同じプロセスで他に何もしていなければ、常駐カーネルがいてもコピーは 1〜2 ms で届きます</b>。止めるのは、同じプロセス内で並行して走る、<b>そのカーネルの終了を待つ種類の呼び出し</b>だけです。測った範囲では <code>cuMemFree</code> / <code>cuMemFreeHost</code> が止め、<code>cuCtxSynchronize</code> / <code>cuMemAlloc</code> / <code>cuMemAllocHost</code> / VMM map (仮想メモリのマッピング) は止めませんでした。止まったとき、カーネルは <b>19.3 秒後に諦めています</b>。さらに、<b>別プロセスからの書き込み</b> (CUDA IPC 経由、または <code>ncclMemAlloc</code> と同じ確保方法で作った VMM 領域をファイル記述子で渡したもの) は、親プロセスが解放している最中でも届きました。</p>
+
+    <div class="warn">
+      <p><b>ただし今回 DeepEP が止まった理由は、この free の話とは別です。</b>候補として最有力なのは <code>cuModuleLoad</code> (JIT のモジュール読み込み) がコピーと待ち合っている、という説明で、<b>観測は今のところ 1 回だけ</b>です。resident_copy_probe (常駐カーネル probe) には modload を割り込ませる試験も用意してあるので、この説明が本当に成り立つかは<b>そのプローブでの再現確認が進行中</b>です。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>「何も見えなかった」を証拠にするには、先に見え方を確かめる</h2>
+    <p class="lead">今回の JIT の犯人捜しは、測定器そのものを作り直すところから始まりました。</p>
+
+    <p>最初の計測器は <code>LD_PRELOAD</code> で libcuda の公開関数を包むものでした。これで DeepEP 自身の呼び出しは見えます。ところが CUDA の runtime (PyTorch や NCCL の内部) は <code>cuGetProcAddress</code> という別の経路で関数を取りに行くので、<b>この包みを素通りしてしまいます</b>。<code>cuGetProcAddress</code> 自体を差し替える方法も試しましたが、runtime が自分自身を問い合わせ直す作りになっていたため、<b>PyTorch を壊しました</b> (「context is destroyed」というエラーで落ちる)。</p>
+
+    <p>最終的に、NVIDIA の CUPTI (driver がすべての呼び出しの入口と出口を通知してくれる公式の仕組み) に切り替えました。そのうえで、<b>PyTorch 経由の <code>cuMemFree_v2</code> を実際に数えられることを自己テストで確かめました</b>。「何も見えなかった」を PyTorch や NCCL の呼び出しが無かった証拠として使う前に、まず「見えるはずのものが、実際に見えるか」を確認したということです。</p>
+
+    <div class="key">
+      <p><b>教訓。</b>何も見えなかった、が証拠になるのは、見えるはずのものが見えると先に確かめたときだけです。第 10 回の「driver の中にいるのは 1 本だけでした」という観測も、当時の測定器 (LD_PRELOAD のみ) が runtime の呼び出しを見ていなかった以上、<b>下限だった</b>と考えるべきです。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>いま言えることと、まだできていないこと</h2>
+
+    <table>
+      <tr><th>状態</th><th>内容</th></tr>
+      <tr><td class="ok">できる</td><td>GDRCopy が使えるマシンなら、1 台の上で 2 プロセスを 2 ノードに見立てて、DeepEP の dispatch と combine が動き、答え合わせも全部通る</td></tr>
+      <tr><td class="ok">できる</td><td>わざと壊す試験 (corrupt / drop / violate-i1) を、答え合わせの機械が見逃さない</td></tr>
+      <tr><td class="no">未達</td><td>GDRCopy が使えないマシンで動かすこと (§3 の理由で止まる)</td></tr>
+      <tr><td class="no">未達</td><td>本物の EFA との比較 (emulator 対 実 EFA-GDA backend)</td></tr>
+      <tr><td class="no">未達</td><td>1 ホストに GPU が複数ある構成</td></tr>
+      <tr><td class="no">未達</td><td>3 ノード以上の構成</td></tr>
+      <tr><td class="no">未達</td><td>vLLM 経由での動作 (DeepEP 側のホストメモリ破壊が別に残っていて、そこで止まっている)</td></tr>
+    </table>
+
+    <p>今後の道は 2 つに分かれます。<b>本物の EFA との比較</b>には、RDMA 書き込みと GDRCopy 2.5 以上の両方が使えるマシンが要ります (§2 で見た aws-ofi-nccl の GIN の条件と同じです)。<b>GDRCopy が使えないマシンで動かす</b>には、別プロセスから届ける方式が候補になります。ただしその場合、<b>NCCL が実際に登録した窓の上で動くこと</b>、<b>データより先に到着通知が見えないこと (I1 を守ること)</b>、<b>窓の後片付けの手順</b>という 3 条件を満たす必要があり、どれもまだ検証していません。</p>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-13-silent-instruments.html">← 13: 測定器が黙っていた 7 回</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
