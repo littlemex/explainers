@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 54 章 学習させれば振り分けに使えるか ― 5 割に見えた数字と、残った 1 割</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 54 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 9 部 第 54 章 &nbsp;/&nbsp;
+<a href="gateway-53-head-or-backbone.html">前章: ヘッドか骨格か</a></p>
+
+<h1>学習させれば振り分けに使えるか<br>5 割に見えた数字と、残った 1 割</h1>
+
+<div class="lead">
+<p><b>この章の結論。</b>第 50 章では、学習なしの決定モデルは振り分けの信号にならないと分かりました。そこで SR が描く次の一手どおりに、Lux の内部の数値 (隠れ状態) を固定の特徴にして、RouterBench の結果から振り分けを<b>学習</b>させました。</p>
+<p>安い側を mistral-7b にすると、見たことのないデータセットでも賞金の <b>53.5%</b> を取りました。しかしこの数字は、かなりの部分が安いモデルの壊れ方と重なっていました。mistral は 4,424 問中 2,904 問で「A」とだけ答えていて、
+学習したルータは、その 2,904 問の中で mistral が外す問題 (= 正解が A でない問題) を AUC 0.84 で見分けていました。<b>正解が A かを読み取っている可能性が高い</b>のですが、経路は確かめていません。A 以外を答えた 1,520 問だけでは 30.1% でした。</p>
+<p style="margin-bottom:0">安い側を、そうした偏りの小さい mixtral にすると、残った信号は<b>賞金の 1 割ほど</b>でした。一番厳しい分け方 (仕事の系統ごと外す) で +9.0%、語の出現を数えるだけの特徴 (TF-IDF) より +6.3 ポイント上です。
+事前登録した「有用」の条件は形式上満たしましたが、小さい信号です。</p>
+</div>
+
+<h2>要約表</h2>
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>学習させると信号になるか</td><td>Lux (凍結) で依頼を読み、Noul の行の 3 か所の隠れ状態 (12,288 次元) から ridge 回帰で「GPT-4 に回したときの得」を予測。捕獲率は第 50 章と同じ式、区間はデータセット単位のブートストラップ</td><td>学習なしの確率をそのまま使う (第 50 章)</td><td>mistral の組で未見のデータセット +53.5% [+48.2, +58.7]、TF-IDF は +13.3%</td><td>§1</td></tr>
+<tr><td class="n">2</td><td>その 5 割は本物か</td><td>mistral の回答を読み、文字だけの答えを数えた。A と答えた問題の中で、ルータが「mistral が外す」を当てられるかを測った</td><td>数字をそのまま信じる</td><td>2,904 / 4,424 問で「A」。その中での的中率は 27.7%。ルータは外れを AUC 0.84 で見分ける。A 以外の 1,520 問では +30.1%</td><td>§2</td></tr>
+<tr><td class="n">3</td><td>壊れ方の小さい組ではどうか</td><td>安い側を mixtral-8x7b (文字だけの答えのうち A は 29.7%) にし、3 通りの分け方で測った</td><td>mistral だけ見る</td><td>問題単位 +17.5% (TF-IDF +21.4%、データセット名の表引き +20.6% の両方に負け)、未見のデータセット +13.0% (TF-IDF と差 +1.9 [−3.3, +6.8])、未見の系統 +9.0% [+4.7, +14.5] (差 +6.3 [+0.7, +13.3])</td><td>§3</td></tr>
+<tr><td class="n">4</td><td>MMLU に引っ張られていないか</td><td>MMLU (項目の 77%) とそれ以外、文字だけで答えた問題の除外で分けて測った</td><td>全体の比 1 つだけ</td><td>未見の系統ではどこで切っても Lux が上 (MMLU +9.6 対 +4.9、それ以外 +9.7 対 −2.5)</td><td>§3</td></tr>
+</table>
+
+<h2>1. 何を学習させたか</h2>
+
+<p>第 50 章と同じ RouterBench の 4,424 問を使い、Lux には「専門知識や多段の推論が要るか」の Noul を 1 回聞いて、その行の 3 か所 (行の最後と、true・false それぞれの選択肢の最後) の隠れ状態を取り出しました。
+これを固定の特徴として、ridge 回帰 (線形の回帰に、係数を小さく保つ罰を足したもの) で「GPT-4 の正誤 − 安いモデルの正誤」を予測させます。罰の強さは、学習側の中だけで分けた 3 分割で選びました。</p>
+
+<p>評価の分け方は 3 通りです。<b>問題単位</b> (同じデータセットの別の問題で学習)、<b>データセット単位</b> (評価するデータセットは学習に一度も出てこない)、<b>系統単位</b> (MMLU の 57 科目や中国語の問題群などをひとまとめにして外す)。
+比べる相手は、同じ回帰に語の出現を数えた特徴 (TF-IDF、学習は要るがモデルは要らない) を入れたもの、データセット名や Vela の分野での表引き、そして第 50 章の学習なしの確率です。
+どれも結果を見る前に決めた手順で、事前登録の「有用」は「データセット単位で区間の下限が 5% を越え、かつ TF-IDF を上回る」でした。</p>
+
+<h2>2. 5 割に見えた数字</h2>
+
+<p>最初の結果は驚くほど良く、mistral の組で問題単位 +59.2%、データセット単位 +53.5%、系統単位 +44.1% でした。この連載はこれまで「学習したルータは 1 つのカテゴリの表引きに負ける」を繰り返し確かめてきたので、まず漏れを疑いました。</p>
+
+<p>見つかったのは RouterBench の mistral-7b の答え方です。4,424 問中 2,904 問で、mistral は「A」とだけ答えていました (文字だけで答えた 3,075 問のうち 94.4% が A)。
+その 2,904 問で mistral が当たっていたのは 27.7% で、これは 4 択の正解が A である割合とほぼ同じです。
+つまり、この組の「安いモデルが当たるか」は、選択式ではほぼ「正解が A か」と同じです。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<defs><marker id="a54" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#8f2f2f"/></marker></defs>
+<rect x="20" y="80" width="170" height="70" rx="8" fill="#fff" stroke="#3c5a4c"/>
+<text x="105" y="108" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">選択式の問題</text>
+<text x="105" y="128" text-anchor="middle" font-size="11.5" fill="#3c5a4c">(MMLU など)</text>
+<rect x="240" y="30" width="200" height="60" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="340" y="56" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f2f2f">mistral: いつも「A」</text>
+<text x="340" y="75" text-anchor="middle" font-size="11.5" fill="#8f2f2f">当たる = 正解が A</text>
+<rect x="240" y="140" width="200" height="60" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="340" y="166" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1d4e8f">Lux (9B) が問題を読む</text>
+<text x="340" y="185" text-anchor="middle" font-size="11.5" fill="#1d4e8f">自分で解ける</text>
+<rect x="500" y="85" width="190" height="60" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="595" y="111" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8f2f2f">「正解は A ではない」</text>
+<text x="595" y="130" text-anchor="middle" font-size="11.5" fill="#8f2f2f">を当てる (AUC 0.84)</text>
+<rect x="730" y="85" width="130" height="60" rx="8" fill="#8f2f2f"/>
+<text x="795" y="111" text-anchor="middle" font-size="12.5" font-weight="600" fill="#fff">捕獲率 53.5%</text>
+<text x="795" y="130" text-anchor="middle" font-size="11.5" fill="#fff">に見える</text>
+<line x1="190" y1="105" x2="238" y2="65" stroke="#3c5a4c" stroke-width="1.4"/>
+<line x1="190" y1="125" x2="238" y2="165" stroke="#3c5a4c" stroke-width="1.4"/>
+<line x1="440" y1="165" x2="498" y2="125" stroke="#8f2f2f" stroke-width="1.8" marker-end="url(#a54)"/>
+<line x1="440" y1="65" x2="498" y2="105" stroke="#8f2f2f" stroke-width="1.4" stroke-dasharray="5 4"/>
+<line x1="690" y1="115" x2="728" y2="115" stroke="#8f2f2f" stroke-width="1.8" marker-end="url(#a54)"/>
+<text x="440" y="236" text-anchor="middle" font-size="11.5" fill="#3c5a4c">A 以外を答えた 1,520 問だけで測ると 30.1%。偏りと重なった分は大きいが全部ではない</text>
+</svg>
+<figcaption>図 1. 疑われる経路 (推測を含む)。安いモデルが決まった文字しか答えないと、「安いモデルが外すか」は「正解はその文字か」になり、問題を解ける読み手がそれを当てるだけで振り分けに勝って見えます。</figcaption>
+</figure>
+
+<p>確かめ方は 2 つです。mistral が A と答えた 2,904 問の中で、学習したルータの点数が「mistral が外す問題」を見分ける力を測ると AUC 0.84 でした。正解が A かどうかを読み取っている可能性が高いのですが、問題の難しさやデータセットの手がかりなど別の経路も否定できていません。
+そして A 以外を答えた 1,520 問だけで捕獲率を測ると、53.5% が 30.1% に下がりました。<b>A への偏りと重なった分は大きいのですが、全部ではありません</b> (ただし 1,520 問は分布の違う部分集合なので、差の 23 ポイントをそのまま「見せかけの量」とは読めません)。
+残りの 30% にも、mistral の別の壊れ方 (書式の失敗など) が混ざっている可能性があり、調べていません。</p>
+
+<div class="bad"><b>[訂正] 第 50 章の主な組は、この mistral の組でした。</b>
+第 50 章の学習なしの信号の数字 (最良 +7.0%) もこの交絡を含んでいます。第 50 章には訂正を入れ、交絡の小さい mixtral の組では学習なしの信号はどれも正にならなかった (Lux の 3 つは −1.2〜−3.4%、35B の 3 つは −1.4〜−7.5%) ことを明記しました。</div>
+
+<h2>3. 残った 1 割</h2>
+
+<p>mixtral-8x7b も 4,424 問中 3,435 問で文字だけを答えますが、そのうち A は 29.7% (4 択なら偏りが無くて 25%) で、mistral の 94.4% ほど偏っていません。こちらの組で同じことを測りました。</p>
+
+<figure>
+<svg viewBox="0 0 880 290" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="20" y="22" font-size="12.5" font-weight="600" fill="#10241b">mixtral-8x7b → GPT-4 の捕獲率 (0.1 = 200 px)。緑 = Lux の特徴で学習、灰 = TF-IDF で学習</text>
+<line x1="250" y1="34" x2="250" y2="272" stroke="#3c5a4c"/>
+<g font-size="12">
+<text x="240" y="62" text-anchor="end" fill="#10241b">問題単位の分割</text>
+<rect x="250" y="46" width="350" height="16" fill="#1f7a4d"/><text x="608" y="59" fill="#10241b">+17.5%</text>
+<rect x="250" y="64" width="428" height="16" fill="#9aa9a1"/><text x="686" y="77" fill="#10241b">+21.4%</text>
+<text x="240" y="132" text-anchor="end" fill="#10241b">未見のデータセット</text>
+<rect x="250" y="116" width="260" height="16" fill="#1f7a4d"/><text x="518" y="129" fill="#10241b">+13.0%</text>
+<rect x="250" y="134" width="222" height="16" fill="#9aa9a1"/><text x="480" y="147" fill="#10241b">+11.1% (差 +1.9 [−3.3, +6.8])</text>
+<text x="240" y="202" text-anchor="end" fill="#10241b">未見の系統</text>
+<rect x="250" y="186" width="180" height="16" fill="#1f7a4d"/><text x="438" y="199" fill="#10241b">+9.0% [+4.7, +14.5]</text>
+<rect x="250" y="204" width="54" height="16" fill="#9aa9a1"/><text x="312" y="217" fill="#10241b">+2.7% (差 +6.3 [+0.7, +13.3])</text>
+<text x="218" y="257" text-anchor="end" fill="#10241b">(参考) 学習なし</text>
+<rect x="226" y="244" width="24" height="16" fill="#8f2f2f"/><text x="258" y="257" fill="#8f2f2f">−1.2% (第 50 章)</text>
+</g>
+</svg>
+<figcaption>図 2. 分け方が厳しくなるほど両方とも下がりますが、TF-IDF の方が大きく下がり、未見の系統では Lux の特徴との差が有意になります。同じデータセットの別の問題で学習できる問題単位の分割では、語の出現だけの方が良く、データセット名の表引き (+20.6%) も Lux の特徴を上回ります。</figcaption>
+</figure>
+
+<table>
+<tr><th>分け方</th><th>切り方</th><th>問の数</th><th>Lux の特徴で学習</th><th>TF-IDF で学習</th></tr>
+<tr><td rowspan="4">未見のデータセット</td><td>全体</td><td class="n">4,424</td><td class="n">+13.0%</td><td class="n">+11.1%</td></tr>
+<tr><td>文字だけの答えを除く</td><td class="n">989</td><td class="n">+19.0%</td><td class="n">+17.3%</td></tr>
+<tr><td>MMLU だけ</td><td class="n">3,420</td><td class="n">+12.0%</td><td class="n">+12.1%</td></tr>
+<tr><td>MMLU 以外</td><td class="n">1,004</td><td class="n y">+15.4%</td><td class="n">+7.1%</td></tr>
+<tr><td rowspan="4">未見の系統</td><td>全体</td><td class="n">4,424</td><td class="n y">+9.0%</td><td class="n">+2.7%</td></tr>
+<tr><td>文字だけの答えを除く</td><td class="n">989</td><td class="n y">+7.5%</td><td class="n">+2.9%</td></tr>
+<tr><td>MMLU だけ</td><td class="n">3,420</td><td class="n y">+9.6%</td><td class="n">+4.9%</td></tr>
+<tr><td>MMLU 以外</td><td class="n">1,004</td><td class="n y">+9.7%</td><td class="n">−2.5%</td></tr>
+</table>
+
+<p>読み取れることは 3 つです。</p>
+<ul>
+<li><b>事前登録の「有用」は形式上満たしました</b> (未見のデータセットで下限 +8.1% &gt; 5%、点推定 +13.0% &gt; TF-IDF の +11.1%)。ただしこの分け方では TF-IDF との差は区別できません。</li>
+<li><b>未見の系統では、Lux の特徴が TF-IDF より上</b>でした (全体の差 +6.3 [+0.7, +13.3])。内訳 (MMLU とそれ以外、文字だけの答えを除く) でも点推定は同じ向きですが、内訳ごとの区間は出していない探索的な値です。</li>
+<li>ただし大きさは<b>賞金の 1 割ほど</b>で、一番厳しい分け方の下限 (+4.7%) は、第 50 章の合格線 (5%) のわずかに下です。MMLU が 77% を占めるので、系統単位の全体の値は「MMLU 以外で学んで MMLU を当てる」に強く引っ張られています。</li>
+</ul>
+
+<h2>4. tierbook にとっての意味</h2>
+
+<p>tierbook は「学習したものは提案であって証拠ではない」(<code>predict.py</code>) とし、別の問題の組での区間の下限で認めるかどうかを決める仕組みです。今回の結果は、ちょうどその仕組みが役に立つ形をしています。</p>
+
+<ul>
+<li><b>mistral の 5 割は、下限で見ても通ってしまう数字</b>でした (+48.2% が下限)。区間は安いモデルの壊れ方との重なりを見抜けません。気付けたのは、<b>安いモデルの答えそのものを読んだこと</b>です。
+「振り分けの得のラベルを使う前に、安いモデルの答えの分布を数える」は、どの研究でも要る測定として記録する価値があります (tierbook の方針どおり、拒否の規則ではなく測定として)。</li>
+<li><b>ルータ自身が問題を解ける強さを持つと、ラベルの壊れ方を読み取れてしまう可能性がある</b>。決定モデルが配信先より賢い場合には、この交絡が入り得ます。</li>
+<li>mixtral で残った信号は、tierbook の線で見ると「下限が合格線の近くを行き来する小さい信号」です。<b>今の段階で型を足して取り込む理由にはなりません</b>が、第 50 章で「今はやらない」とした判断 (外の判定器を照合できる型) を、測定の記録として残す対象が 1 つ増えました。</li>
+</ul>
+
+<h2>まだ言えないこと</h2>
+<ul>
+<li>特徴は Lux の 1 つの質問の行だけで、回帰は線形です。質問を変える、層を変える、非線形にすると大きさは変わる可能性があります。</li>
+<li>RouterBench の 1 つの標本・1 回の実行で、MMLU が 77% を占めます。</li>
+<li>mistral の残りの 30% の中身と、mixtral にも A への偏り (文字だけの答えの 29.7%) が少し残っていることの影響は、分けきれていません。</li>
+<li>決定モデル自体を RouterBench で学習させる (Kai の fine-tuning の道具など) は試していません。今回は内部の数値を固定したままの回帰です。</li>
+</ul>
+
+<p class="foot">
+特徴: Lux-9B (<code>bd45a30</code>) の Noul「Does this request require expert knowledge or multi-step reasoning to answer correctly?」の行の query 位置と true/false 候補の終端 (各 4,096 次元)、bf16。
+回帰: 双対形の ridge、λ ∈ {0.1, 1, 10, 100, 1000} を学習側の内側 3 分割で選択。TF-IDF は語を 16,384 個の枠に振り分けた出現数。
+事前登録は 2026-09-24 17:30 JST (<code>PREREG.md</code> の D)。
+</p>
+
+</div>
+</body>
+</html>
