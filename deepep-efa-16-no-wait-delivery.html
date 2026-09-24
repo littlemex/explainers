@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 16: 待たない配達</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 16</p>
+  <h1>待たない配達</h1>
+  <p>コピーの後で待つのをやめただけで、GDRCopy 無しの経路が 45 分でも終わらない状態から 570 秒まで縮まった。途中で見つけた穴と、取り下げた案、まだ分かっていないことの記録</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>待たない配達</h2>
+    <p class="lead">第 15 回で測ったとおり、2 つ目のコンテキストは <b>完了を待つたびに</b> GPU の時分割の代金を払う (H100 で 2.4 ms)。出すだけなら数 µs で済む。</p>
+
+    <p>そこで、GDRCopy を使わないプロセスに限って、次の 3 つを<b>完了を待たずに</b>出すようにしました。</p>
+
+    <ul class="steps">
+      <li>受信側が届いたデータを窓へ書き込むコピー</li>
+      <li>到着通知 (signal) の書き込み</li>
+      <li>送信側が、送るデータをいったん積んで運ぶ読み出し</li>
+    </ul>
+
+    <p>中継に使うバッファは、<b>輪番の枠</b> (既定 128 枠、1 枚 1 相手あたり秒速およそ 430 メガバイトに相当) で持ち、枠ごとにイベントを 1 つ付けます。<b>枠を再利用するときは、まずそのイベントを問い合わせて</b>、まだ前の仕事が残っていればそこでだけ待ちます。待つのが既定ではなく、<b>聞いてから必要なときだけ待つ</b>という順番です。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>なぜ順序が崩れないか</h2>
+    <p class="lead">待たずに出すと聞くと、順番が崩れそうに思えるが、崩れない仕組みが 3 つある。</p>
+
+    <ul class="steps">
+      <li><b>コピーも到着通知も 1 本のストリームに出す。</b>ストリームは出した順に着地するので、出す順番さえ守れば着地の順番も守られる</li>
+      <li><b>通知の合計値は、ロックの中で取り出してそのまま出す。</b>その合計に含まれる相手ごとの取り分は、その相手のスレッドが<b>自分のデータを先に出してから</b>足したものなので、データは通知より先に (か、同じ順で) 着地する</li>
+      <li><b>送信側は、通信路ごとの待ち行列を、スケジューラが送り出した順のまま流す。</b>まだ読み出し中の単位が前にいれば、後ろの単位はその場で待つ</li>
+    </ul>
+
+    <div class="key">
+      <p><b>操作の単位が 1 つでも待ち行列に残っているあいだは、その操作を完了と報告しません。</b>完了を報告すると、NCCL 側は「もう送信元のメモリを書き換えてよい」と判断してしまうからです。だから「完了した」という返事そのものが、実際に送り終えたことの証拠になるように作られています。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>結果</h2>
+
+    <table>
+      <tr><th>構成</th><th>H100 の 2 ホストで DeepEP 自身の試験 <code>test_ep.py</code></th></tr>
+      <tr><td>GDRCopy あり</td><td>85 秒</td></tr>
+      <tr><td>GDRCopy なし、毎回コピーの後に待つ (第 15 回)</td><td class="no">45 分でも終わらなかった</td></tr>
+      <tr><td>GDRCopy なし、待たない配達 (今回)</td><td class="ok">570 秒で全設定が通過</td></tr>
+    </table>
+
+    <p>GDRCopy ありの 85 秒と比べれば <b>まだ約 6.7 倍遅い</b>ものの、45 分たっても終わらなかった状態からは大きく縮みました。答え合わせは、20 回の繰り返し、枠を 2 つに絞ってわざと枠不足を起こした場合、カーネル方式の到着通知、のすべてで一致します。<b>I1 違反 (第 12 回・第 14 回で見た約束破り) も、きちんと検出されました。</b>速くなっても、壊れるべきときに壊れることは保たれています。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>同時に見つけて塞いだ穴: 窓の貸し出し</h2>
+    <p class="lead">待たない配達を作る途中で、別の穴が見つかった。窓 (window) が消えたあとに書き込んでいた。</p>
+
+    <p>受信スレッドはそれまで、<b>窓を調べる → ソケットからペイロードを読む → 窓に書き込む</b>、という 3 段の動きをしていました。この途中で、その窓の登録が解除されると、<b>解放済みのメモリに書き込んでいた</b>ことになります。</p>
+
+    <div class="key">
+      <p><b>修正。</b>いまは、ペイロードを読み終えてから窓を<b>「借りる」</b>形にしました。書き込みが終わったら、その借りを返します。窓の登録解除は、<b>貸し出し中の書き込みがすべて終わるまで待ちます</b>。この待ちを試験のコードから外すと、<b>必ず落ちる</b>ことも確かめました。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>取り下げた最初の案</h2>
+    <p class="lead">待たない配達の最初の案は、答え合わせには通ったが、レビューで 3 つの穴が見つかって取り下げた。</p>
+
+    <p>最初に試したのは、<b>受信側だけ</b>を 8 枠の輪番にする案でした。答え合わせの機械は全部通りましたが、次の 3 点が残っていました。</p>
+
+    <ul class="steps">
+      <li>複数のスレッドが同時に待つと、<b>未完了のコピーを数える共有カウンタが二重に引かれうる</b></li>
+      <li>登録解除の際にキューを流す処理が、<b>窓を閉じる前に来ていた</b> (§4 の窓の貸し出しがまだ無い状態だった)</li>
+      <li>8 枠では、枠を再利用するたびに<b>1 フレームあたり約 300 µs の待ちが残った</b> (待たない配達が目指す、ほぼ待たない状態には届かない)</li>
+    </ul>
+
+    <div class="warn">
+      <p><b>取り下げ。</b>この案は採用せず、窓の貸し出し (§4) だけを残して、配達の側は §1・§2 の設計に作り直しました。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>まだ分かっていないこと</h2>
+    <p class="lead">正直に書く。約束を破る試験を非同期で回すと、後片付けの途中でときどき落ちる。</p>
+
+    <p><code>violate-i1</code> (I1 の約束をわざと破る試験) を待たない配達で回すと、<b>後片付けの途中で時々ヒープ破壊で落ちます</b> (待たない配達で 4 回中 2 回、待つ配達では 4 回中 0 回)。壊れた場所には、<b>ヒープの古い時点の中身が書き戻されていました</b>。</p>
+
+    <p>仮説を 2 つ立てて直しましたが、<b>どちらも症状を止められませんでした</b>。プロセス終了時のグローバルな破棄が原因という仮説と、後片付けの最中に何かを送っていることが原因という仮説です。直しても止まらなかったので、<b>両方とも否定されました</b>。</p>
+
+    <div class="warn">
+      <p><b>約束どおりの試験では、一度もこの落ち方が起きていません。</b>I1 の約束を破られたあとの DeepEP の挙動は、そもそも保証の外です。原因を追いかけ続けるより、記録に留めています。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">7</span>いま言えることと、まだできていないこと</h2>
+
+    <table>
+      <tr><th>状態</th><th>内容</th></tr>
+      <tr><td class="ok">できる</td><td>GDRCopy 無しでも、待たない配達で DeepEP 自身の試験が 570 秒で全設定通過 (毎回待つ版は 45 分でも終わらなかった)</td></tr>
+      <tr><td class="ok">できる</td><td>20 反復・枠不足・カーネル方式の到着通知のいずれでも答え合わせが一致し、I1 違反も検出できる</td></tr>
+      <tr><td class="ok">できる</td><td>窓の貸し出しにより、登録解除中の書き込みで解放済みメモリを踏まない</td></tr>
+      <tr><td class="no">未達</td><td>GDRCopy ありの 85 秒までは詰めきれていない (約 6.7 倍の差が残る)</td></tr>
+      <tr><td class="no">未達</td><td><code>violate-i1</code> と待たない配達を組み合わせたときの、後片付け中のヒープ破壊 (原因不明、2 つの仮説は否定済み)</td></tr>
+      <tr><td class="no">未達</td><td>本物の EFA との比較 (第 15 回の壁が残っている)、1 ホストに GPU が複数ある構成、3 ノード以上の構成、vLLM 経由での動作</td></tr>
+    </table>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-15-own-context.html">← 15: 自分専用のコンテキストに移したら、GDRCopy なしで動いた</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
