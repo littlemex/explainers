@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 56 章 Prismyra の速さを削る ― 53% が詰め物、8 つに割れた正規化、1 問なら 1 回で読む</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 56 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 10 部 第 56 章 &nbsp;/&nbsp;
+<a href="gateway-55-prismyra-trained.html">前章: Decider と Lux を抜く</a></p>
+
+<h1>Prismyra の速さを削る<br>計算の 53% が詰め物だった、正規化が 8 つに割れていた、1 問なら 1 回で読めばいい</h1>
+
+<div class="lead">
+<p><b>この章の結論。</b>第 55 章で学習させた Prismyra 35B を、Decider-4B と同じ条件 (HTTP 経由、毎回ちがう文書) で比べました。
+5.4k トークンの文書に 64 問を投げると、エンジンを直接呼んで <b>1,224 ms から 712 ms</b> まで縮みました。HTTP 経由では 760 ms で、Decider の 1,008 ms より 25% 速い値です。</p>
+<p style="margin-bottom:0">効いた変更は 3 つです。</p>
+<ol>
+<li>質問を長さ順に並べて、詰め物 (パディング) の計算を減らした</li>
+<li>8 つに割れていた正規化の計算を 1 つにまとめた</li>
+<li>質問が 1 問なら、文書と一緒に 1 回で読むようにした</li>
+</ol>
+<p style="margin-bottom:0">ただし<b>短い文書に少しの質問を投げる場合は、まだ Decider に負けています</b> (1.2k トークンに 1 問で 111 ms 対 83 ms)。</p>
+</div>
+
+<h2>要約表</h2>
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>時間はどこで使われているか</td><td>PyTorch のプロファイラで、64 問の 1 回分の GPU の計算を計算の種類ごとに集計した</td><td>推測で手を付ける</td><td>文書を読む 323 ms、質問を解く 635 ms。専門家の計算 246 ms、FP8 の行列計算 130 ms、コピー 約 130 ms</td><td>§1</td></tr>
+<tr><td class="n">2</td><td>詰め物はどれだけか</td><td>64 問の本当の長さと、揃えた後の長さを数えた</td><td>—</td><td>本当は 3,846 トークン分、計算は 8,192 トークン分。<b>53% が詰め物</b></td><td>§2</td></tr>
+<tr><td class="n">3</td><td>長さ順に組を作る</td><td>同じ文書・同じ 64 問、毎回ちがう先頭行、5 回の中央値</td><td>一度に処理する数を増やすだけ (効かない)</td><td>956 → 792 ms</td><td>§2</td></tr>
+<tr><td class="n">4</td><td>正規化をまとめる</td><td>同上。元の計算と誤差 0.0 で一致することを確かめてから置き換えた</td><td>—</td><td>792 → 712 ms。1 問でも 435 → 380 ms</td><td>§3</td></tr>
+<tr><td class="n">5</td><td>1 問なら 1 回で読む</td><td>HTTP 経由、毎回ちがう文書</td><td>分けて読む (今まで)</td><td>1.2k トークンに 1 問 214 → 111 ms、5.4k に 1 問 378 → 272 ms</td><td>§4</td></tr>
+<tr><td class="n">6</td><td>Decider と比べる</td><td>同じ HTTP の測り方 (第 52 章)</td><td>—</td><td>5.4k トークンではすべての問数で勝ち。1.2k トークンでは 64 問だけ勝ち、1〜16 問は負け</td><td>§5</td></tr>
+<tr><td class="n">7</td><td>効かなかったもの</td><td>それぞれ前後で同じ条件</td><td>—</td><td>専門家の計算の設定調整は約 4% (全体では見えない)、paged 形式、64 問を 1 回で処理、計算の記録と再生</td><td>§6</td></tr>
+</table>
+
+<h2>1. どこで時間を使っているか</h2>
+
+<p>計算を速くする前に、まず 64 問の 1 回分を計算の種類ごとに集計しました。GPU の計算の合計は 891 ms で、実際にかかった 958 ms とほぼ同じです。
+<b>ほとんどは GPU の計算そのもので、CPU が指示を出す待ち時間は少ない</b>ことになります。一番大きいのは専門家 (MoE) の計算で、次が FP8 の行列計算、その次がデータのコピーでした。</p>
+
+<p>専門家の計算を調べると、1 回に処理するトークンが 128 個でも 8,192 個でも、かかる時間は 1.4〜3.2 ms でした。256 個の専門家の重み (1 層あたり 805 MB) を毎回全部読み込むからです。
+つまり、<b>質問を解く計算を 1 回回すごとに、中身が少なくても 60 ms ほどかかる</b>ということです。</p>
+
+<h2>2. 計算の 53% が詰め物だった</h2>
+
+<p>Prismyra は、一度に処理する質問を同じ長さに揃えます。短い質問の後ろには詰め物を足し、その計算結果は捨てます。
+今までは「その依頼で一番長い質問」を区切りのよい長さに丸めて、全部の質問に使っていました。RACE の 64 問は 42〜98 トークンなので、全部が 128 トークンに揃えられていました。</p>
+
+<figure>
+<svg viewBox="0 0 880 200" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="440" y="20" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">64 問で計算したトークン数 (棒の長さはそのままの比)</text>
+<text x="20" y="62" font-size="12" fill="#10241b">本当の長さ</text>
+<rect x="190" y="48" width="301" height="22" fill="#1f7a4d"/><text x="497" y="64" font-size="12" fill="#0f4a2e">3,846</text>
+<text x="20" y="102" font-size="12" fill="#10241b">今まで (全部 128)</text>
+<rect x="190" y="88" width="301" height="22" fill="#1f7a4d"/><rect x="491" y="88" width="340" height="22" fill="#fbeceb" stroke="#8f2f2f"/><text x="661" y="104" text-anchor="middle" font-size="12" fill="#8f2f2f">詰め物 4,346 (53%)</text>
+<text x="20" y="142" font-size="12" fill="#10241b">長さ順、32 問ずつ</text>
+<rect x="190" y="128" width="301" height="22" fill="#1f7a4d"/><rect x="491" y="128" width="120" height="22" fill="#fdf3e2" stroke="#8a5a12"/><text x="617" y="144" font-size="12" fill="#8a5a12">5,376 (28%)</text>
+<text x="440" y="185" text-anchor="middle" font-size="11.5" fill="#3c5a4c">長さが近い質問どうしを組にし、組ごとに一番長い質問に合わせる (8 トークン単位)</text>
+</svg>
+<figcaption>図 1. 詰め物の量。長さ順に組を作るだけで、捨てる計算が 53% から 28% に減る。</figcaption>
+</figure>
+
+<p>直し方は単純で、質問を長さ順に並べてから組を作り、組ごとに、その組で一番長い質問に合わせるだけです。一度に処理する数は 32 にしました。
+32 にしたのは、§1 のとおり 1 回回すごとに約 60 ms かかるので、回数が少ないほど得だからです。これで 64 問が 956 ms から 792 ms になりました。</p>
+
+<p>では一度に 64 問を処理すれば、もっと速くなるでしょうか。実際には 930 ms で、かえって遅くなりました。64 問を 1 つの組にすると、全部を一番長い 98 トークン (実際は 104) に揃えることになり、詰め物が増えるからです。
+回数を減らす得と、詰め物が増える損の釣り合いで、今の質問の長さでは 32 が一番速くなりました。</p>
+
+<h2>3. 8 つに割れていた正規化</h2>
+
+<p>集計の中には、小さな計算が大量に並んでいました。たどると、GDN 層 (状態を持ちながら文章を読み進める層) の出力の正規化です。
+<code>rms_norm(x) × 重み × silu(ゲート)</code> という 1 つの式が、型の変換・2 乗・平均・平方根の逆数・掛け算 2 回・silu・型の戻しの 8 つの計算に分かれて、30 層それぞれで毎回呼ばれていました。</p>
+
+<p>これを、同じ順序で同じ丸め方をする 1 つの Triton の計算 (<code>FusedGatedRMSNorm</code>) にまとめました。入れる前に元の計算と同じ入力で比べ、誤差が 0.0 であることを確かめています。
+64 問が 792 ms から 712 ms になり、1 問でも 435 ms から 380 ms になりました。まとめた計算の GPU 時間は約 50 ms でしたが、縮んだ時間は 80 ms でした。GPU に計算を指示する回数も減ったからです。</p>
+
+<h2>4. 1 問なら 1 回で読む</h2>
+
+<p>Prismyra は「文書を 1 回読み、質問ごとに枝分かれする」仕組みです。質問がたくさんあると、この仕組みは大きく効きます。
+でも <b>質問が 1 問なら、枝分かれで共有するものがありません</b>。枝分かれの計算 1 回 (約 107 ms) がそのまま上乗せになります。
+そこで 1 問のときは、文書と質問をつなげて 1 回で読み、最後の位置で答えを読むようにしました。読む単語も位置も、枝分かれしたときと同じです。</p>
+
+<table>
+<tr><th>HTTP 経由、毎回ちがう文書</th><th>枝分かれ (今まで)</th><th>1 回で読む</th></tr>
+<tr><td>1.2k トークンに 1 問</td><td class="n">214 ms</td><td class="n y">111 ms</td></tr>
+<tr><td>5.4k トークンに 1 問</td><td class="n">378 ms</td><td class="n y">272 ms</td></tr>
+</table>
+
+<p>BoolQ と Kev の評価セットは 1 文書に 1 問なので、この変更で計算が変わります。採点し直すと BoolQ は 90.25 で同じ、Kev は 85.47 から 85.34 (764 問中 1 問の差) でした。</p>
+
+<h2>5. Decider と比べる</h2>
+
+<figure>
+<svg viewBox="0 0 880 330" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="440" y="20" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">HTTP 経由、毎回ちがう文書での中央値 (ms、短いほど速い)</text>
+<text x="215" y="44" text-anchor="middle" font-size="12.5" font-weight="600" fill="#3c5a4c">1.2k トークンの文書</text>
+<text x="655" y="44" text-anchor="middle" font-size="12.5" font-weight="600" fill="#3c5a4c">5.4k トークンの文書</text>
+<g font-size="11.5" fill="#10241b">
+<text x="20" y="80">1 問</text><text x="20" y="140">4 問</text><text x="20" y="200">16 問</text><text x="20" y="260">64 問</text>
+<text x="460" y="80">1 問</text><text x="460" y="140">4 問</text><text x="460" y="200">16 問</text><text x="460" y="260">64 問</text>
+</g>
+<g>
+<rect x="80" y="66" width="36.2" height="14" fill="#1f7a4d"/><rect x="80" y="82" width="27.0" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="80" y="126" width="73.1" height="14" fill="#1f7a4d"/><rect x="80" y="142" width="45.7" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="80" y="186" width="76.9" height="14" fill="#1f7a4d"/><rect x="80" y="202" width="60.0" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="80" y="246" width="162.0" height="14" fill="#1f7a4d"/><rect x="80" y="262" width="171.0" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="520" y="66" width="88.7" height="14" fill="#1f7a4d"/><rect x="520" y="82" width="169.3" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="520" y="126" width="125.5" height="14" fill="#1f7a4d"/><rect x="520" y="142" width="149.3" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="520" y="186" width="132.4" height="14" fill="#1f7a4d"/><rect x="520" y="202" width="175.8" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="520" y="246" width="248.0" height="14" fill="#1f7a4d"/><rect x="520" y="262" width="328.9" height="14" fill="#e6eef8" stroke="#1d4e8f"/>
+</g>
+<g font-size="11" fill="#10241b">
+<text x="121" y="77">111</text><text x="112" y="93">83</text>
+<text x="158" y="137">224</text><text x="131" y="153">140</text>
+<text x="162" y="197">236</text><text x="145" y="213">184</text>
+<text x="247" y="257">497</text><text x="256" y="273">524</text>
+<text x="614" y="77">272</text><text x="694" y="93">519</text>
+<text x="651" y="137">385</text><text x="674" y="153">458</text>
+<text x="658" y="197">406</text><text x="701" y="213">539</text>
+<text x="773" y="257">760</text><text x="844" y="273" text-anchor="end" fill="#1d4e8f">1,008</text>
+</g>
+<g font-size="11.5"><rect x="300" y="300" width="12" height="12" fill="#1f7a4d"/><text x="318" y="311" fill="#10241b">Prismyra 35B (学習済み)</text>
+<rect x="500" y="300" width="12" height="12" fill="#e6eef8" stroke="#1d4e8f"/><text x="518" y="311" fill="#10241b">Decider-4B</text></g>
+</svg>
+<figcaption>図 2. 棒の長さはそのままの比。5.4k トークンの文書では全部の問数で緑が短い (速い)。1.2k トークンでは 64 問のときだけ緑が短い。</figcaption>
+</figure>
+
+<p>負けている条件の原因は、はっきりしています。2 問以上あると、Prismyra は「文書を読む」計算と「質問を解く」計算を別々に回し、後者に 1 回あたり約 100 ms の固定費がかかります。
+Decider は 4B の小さいモデルで、この固定費がもともと小さいのです。長い文書ほど、Decider は文書を読むのに時間がかかり、Prismyra の固定費が目立たなくなります。</p>
+
+<h2>6. 試して効かなかったもの</h2>
+
+<table>
+<tr><th>試したこと</th><th>結果</th><th>理由</th></tr>
+<tr><td>専門家の計算の設定を L40S 向けに調整した (1 回の処理量ごとに 432 通りを試した)</td><td class="n">計算単体で約 4%、全体では見えない</td><td>重みを読む時間が大半で、設定では変わらない</td></tr>
+<tr><td>paged 形式 (文書の記憶を質問ごとに複製しない)</td><td class="n no">973 ms (元は 956)</td><td>複製のコピーはもともと大きくなかった</td></tr>
+<tr><td>64 問を 1 回で処理する</td><td class="n no">930 ms (32 問ずつなら 792)</td><td>全部を一番長い質問に揃えるので、詰め物が増える</td></tr>
+<tr><td>計算の手順を記録して再生する (CUDA graph)</td><td class="n">4 問なら 1 回 102.9 → 41.9 ms の見込み。ただし使えなかった</td><td>記録は同じメモリ領域の使い回しが前提。今の形式では記録が文書の長さに縛られ、paged 形式では記録中に CPU から GPU へのコピーが混ざって失敗した</td></tr>
+</table>
+
+<p>最後の行が、短い文書に少しの質問を投げる場合の負けを埋める一番の候補です。計算の手順を記録して再生すると、GPU に指示を出す手間が消え、4 問の組の計算は 1 回 102.9 ms から 41.9 ms になると測れています。
+ただしそのためには、キャッシュを使い回す仕組みを入れ、paged 形式の記録を妨げている箇所を直す必要があります。今回は手を付けず、入れかけた変更は取り消しました。</p>
+
+<h2>まだ言えないこと</h2>
+<ul>
+<li>どれも L40S 1 枚での測定です。Prismyra の元の性能の記録は RTX PRO 6000 のもので、数字は直接は比べられません。</li>
+<li>短い文書に 1〜16 問を投げる場合は、まだ Decider に負けています。</li>
+<li>GDN 層の頭数の複製を省く改良は、今の transformers のバージョンでは確認の段階で断られ、外れたままです (全体の約 3%)。</li>
+</ul>
+
+<p class="foot">
+測定: L40S 1 枚、Qwen3.6-35B-A3B-FP8 に第 55 章の LoRA を混ぜ込んだもの、group 32。文書は RACE の記事をつないだもの (1,245 トークンと 5,335 トークン)、質問はその記事の RACE の問い。
+毎回、先頭に違う 1 行を足して、使い回しが効かないようにした。HTTP は System One 互換のサーバ (第 51 章) 経由。Decider は第 52 章と同じ測定。
+</p>
+
+</div>
+</body>
+</html>

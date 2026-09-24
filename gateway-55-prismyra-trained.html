@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 55 章 Prismyra で Decider-4B と Lux-9B を抜く ― 読み方そのものを学習し、配信の前に混ぜ込む</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 56 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 10 部 第 55 章 &nbsp;/&nbsp;
+<a href="gateway-54-learned-routing.html">前章: 学習させた振り分け</a> &nbsp;/&nbsp; <a href="gateway-56-prismyra-faster.html">次章: 速さを削る</a></p>
+
+<h1>Prismyra で Decider-4B と Lux-9B を抜く<br>答えの読み方そのものを学習し、配信の前に重みへ混ぜ込む</h1>
+
+<div class="lead">
+<p><b>この章の結論。</b>Prismyra に、学習済みの決定モデル 2 つ (Decider-4B と Lux-9B) を上回らせることを目標にしました。目標は、事前に決めた 5 つの評価セットです。
+Prismyra が動かしている Qwen3.6-35B-A3B に小さな追加部品 (LoRA) を付け、Prismyra が答えを読むときと<b>まったく同じ量</b> (選択肢の文字の確率) で学習させ、配信の前に重みへ混ぜ込みました。
+結果、<b>5 つの評価セットのすべてで、点推定では 2 つを上回りました</b>。差が統計的にはっきりしたのは、RACE では 2 つとも、10k トークンの長い文脈では Lux に対してだけです。Kev の評価セットは、2 つとも区間の下限がちょうど 0 で、ぎりぎりです。</p>
+<p style="margin-bottom:0">混ぜ込んだ後の重みは、形も数の型も元と同じなので、Prismyra の速い計算部品がそのまま働き、<b>速さは学習前と変わりません</b>。
+ただし 1 つだけ負けが残っています。学習で一度も見せていない種類の問題 (228 問) では、Decider に点推定で 2.6 ポイント負けています (区間は 0 をまたぐ)。</p>
+</div>
+
+<h2>要約表</h2>
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>何を学習させるか</td><td>Prismyra の読み出しと同じ位置・同じ選択肢の文字で、正解の文字の確率を上げる損失。train 分割だけの 7,018 問、1 エポック、GPU 2 枚で 3 時間</td><td>専用の採点ヘッドを足す (第 53 章で裏付けなし)</td><td>学習する数は 1,917 万個 (本体の 0.05%)。専門家 (routed experts) には触らない</td><td>§1</td></tr>
+<tr><td class="n">2</td><td>配信の速さを落とさないか</td><td>差分ゼロの LoRA を混ぜ込み、RACE 579 問を元の重みと比べた</td><td>配信のたびに LoRA を足す (計算が増える)</td><td>再量子化の誤差 0.0、579 問すべて同じ答え、確率の差も 0.0。学習済みを混ぜても速さは同じ (64 問 955.8 ms 対 959.9 ms)</td><td>§2</td></tr>
+<tr><td class="n">3</td><td>目標を抜いたか</td><td>事前登録の 5 セット。Decider と Lux の実測は第 52 章と同じ行。差は同じ問題どうしの対応付きブートストラップ</td><td>—</td><td>5 セットとも点推定で上。RACE は 2 つとも有意、10k は Lux にだけ有意、Kev は区間の下限が 0.00</td><td>§3</td></tr>
+<tr><td class="n">4</td><td>どこが伸びたか</td><td>学習前の Prismyra 35B との差</td><td>—</td><td>10k の長い文脈 +10.8 [+5.1, +17.2]、Kev の評価セット +4.1 [+2.0, +6.3]、RACE +0.7 [−0.5, +1.9]</td><td>§3</td></tr>
+<tr><td class="n">5</td><td>長い文脈だけの学習では足りないか</td><td>長文 1,800 問だけで同じ学習をした 2 本目</td><td>混合データの 1 本目</td><td>長文は 1 本目と同程度 (7k 95.54、10k 92.99) だが、Kev の評価セットは 82.07 で目標 (82.85) に届かない</td><td>§3</td></tr>
+<tr><td class="n">6</td><td>j score (隠れ状態を読む信号) を足すか</td><td>学習に使っていない 2,200 問で線形の見分け器を作り、5 セットで「この答えは当たりそうか」を見分ける力 (AUROC) を比べた</td><td>最大確率をそのまま使う</td><td>どのセットでも最大確率に勝てない (RACE 0.627 対 0.891、Kev 0.871 対 0.880)。取り込まない</td><td>§4</td></tr>
+</table>
+
+<h2>1. 何を、どう学習させたか</h2>
+
+<p>Prismyra は、文脈を 1 回読んで状態を保存し、質問ごとに枝分かれ (fork) して、選択肢の文字 (A、B、…や yes、no) の確率を読みます。
+そこで学習の損失も、<b>その読み出しと同じもの</b>にしました。質問の書式は Prismyra の <code>readout.plan</code> が作るものをそのまま使い、最後の位置の隠れ状態に出力層 (unembedding) の選択肢の行を掛けて、選択肢の中だけで正規化した確率の対数を最大にします。
+文章を生成させる学習ではないので、答えの確率が揃う方向にだけ学習が進みます。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="440" y="22" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">学習から配信まで、速さに効く部分は何も変えない</text>
+<rect x="20" y="50" width="250" height="150" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="145" y="74" text-anchor="middle" font-size="13" font-weight="600" fill="#1d4e8f">学習 (GPU 2 枚、3 時間)</text>
+<text x="145" y="100" text-anchor="middle" font-size="12" fill="#10241b">FP8 の重みは FP8 のまま置く</text>
+<text x="145" y="122" text-anchor="middle" font-size="12" fill="#10241b">計算のときだけ bf16 に戻す</text>
+<text x="145" y="144" text-anchor="middle" font-size="12" fill="#10241b">LoRA は 250 か所 (注意・GDN・共有専門家)</text>
+<text x="145" y="166" text-anchor="middle" font-size="12" fill="#10241b">損失 = 選択肢の文字の確率</text>
+<text x="145" y="188" text-anchor="middle" font-size="12" fill="#8a5a12">256 個の専門家には触らない</text>
+<path d="M270 125 L310 125" stroke="#10241b" stroke-width="2" marker-end="url(#a55)"/>
+<rect x="315" y="50" width="250" height="150" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="440" y="74" text-anchor="middle" font-size="13" font-weight="600" fill="#8a5a12">配信の前に混ぜ込む (4 分)</text>
+<text x="440" y="100" text-anchor="middle" font-size="12" fill="#10241b">触った 250 行列だけ bf16 に戻す</text>
+<text x="440" y="122" text-anchor="middle" font-size="12" fill="#10241b">W + (α/r)·B·A を足す</text>
+<text x="440" y="144" text-anchor="middle" font-size="12" fill="#10241b">128×128 の塊ごとに FP8 へ戻す</text>
+<text x="440" y="166" text-anchor="middle" font-size="12" fill="#10241b">他の重みと設定は 1 バイトも変えない</text>
+<path d="M565 125 L605 125" stroke="#10241b" stroke-width="2" marker-end="url(#a55)"/>
+<rect x="610" y="50" width="250" height="150" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="735" y="74" text-anchor="middle" font-size="13" font-weight="600" fill="#0f4a2e">配信 (Prismyra そのまま)</text>
+<text x="735" y="100" text-anchor="middle" font-size="12" fill="#10241b">フォルダを指すだけ</text>
+<text x="735" y="122" text-anchor="middle" font-size="12" fill="#10241b">速い計算部品がすべて同じ形で入る</text>
+<text x="735" y="144" text-anchor="middle" font-size="12" fill="#10241b">LoRA の計算は配信時に 0 回</text>
+<text x="735" y="166" text-anchor="middle" font-size="12" fill="#10241b">64 問 955.8 ms (学習前 959.9)</text>
+<defs><marker id="a55" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#10241b"/></marker></defs>
+<text x="440" y="235" text-anchor="middle" font-size="11.5" fill="#3c5a4c">LoRA を配信のたびに足すと、全部の層で小さな行列計算が 2 回ずつ増える。前もって混ぜれば 0 回</text>
+</svg>
+<figcaption>図 1. 学習・混ぜ込み・配信の 3 段。変えるのは注意層・GDN 層・共有専門家の 250 行列だけで、配信で使う形は元と同じ。</figcaption>
+</figure>
+
+<p>35B の重みは FP8 で 35 GB あり、44 GiB の GPU には bf16 に戻した形では載りません。そこで重みは FP8 のまま置き、行列の掛け算のときだけ、その場で 128×128 の塊ごとに bf16 へ戻して計算させました。
+専門家の層 (256 個) は、層ごとに全部をまとめて戻し、1 回のまとめた掛け算にします。これで 1 問あたり 16 秒かかっていた処理が、GPU 1 枚あたり 0.32 問/秒になりました。
+途中で 2 回、メモリ不足で止まりました。原因は、戻すときに 32 ビットの一時領域 (1 層あたり 2 GiB) を作っていたことで、小分けにして 16 ビットへ直接書き込むように直しました。</p>
+
+<p>学習データは train 分割だけから作り、評価の問題とは本文と問いの両方で重なりを除いています。中身は次のとおりです。</p>
+<ul>
+<li>RACE の短い本文と、別の記事に埋めた長い本文</li>
+<li>BoolQ、MMLU の補助 train、SciQ、QNLI、ツイートの攻撃性判定</li>
+<li>自前で作った規則の当てはめ問題 3 種類</li>
+</ul>
+<p><b>感情の分類、言い換えの判定 (PAWS)、例外の条項を含む規則</b>の 3 種類は、Kev の評価セットの「見せていない種類」として丸ごと学習から外しました。</p>
+
+<h2>2. 混ぜ込んでも速さは変わらない</h2>
+
+<p>LoRA を配信のたびに足すと、全部の層で小さな行列計算が増えます。そこで、学習した差分を前もって重みに足し、元の FP8 の形式 (e4m3、128×128 の塊ごとに 1 つの拡大率) に戻しました。
+戻すときに誤差が入らないかを確かめるため、まず<b>差分がゼロ</b>の LoRA を混ぜ込みました。</p>
+
+<ul>
+<li>FP8 に戻したときの誤差は 0.0 でした。</li>
+<li>RACE の 579 問では、答えが元の重みと全部一致し、確率の差も 0.0 でした。</li>
+</ul>
+
+<p>本物の LoRA を混ぜた重みでも、Prismyra の速い計算部品は全部同じ数だけ入りました。質問 64 問の速さは 955.8 ms で、学習前の 959.9 ms と同じです。</p>
+
+<h2>3. 目標を抜いたか</h2>
+
+<table>
+<tr><th>評価セット</th><th>学習前の Prismyra 35B</th><th>Decider-4B</th><th>Lux-9B</th><th>学習後 (1 本目)</th><th>Decider との差</th><th>Lux との差</th></tr>
+<tr><td>RACE (短い本文、579 問)</td><td class="n">95.16</td><td class="n">93.78</td><td class="n">93.09</td><td class="n y">95.85</td><td class="n y">+2.07 [+0.35, +3.63]</td><td class="n y">+2.76 [+0.86, +4.66]</td></tr>
+<tr><td>BoolQ (400 問)</td><td class="n">89.50</td><td class="n">89.50</td><td class="n">89.00</td><td class="n y">90.25</td><td class="n">+0.75 [−1.75, +3.50]</td><td class="n">+1.25 [−1.25, +3.75]</td></tr>
+<tr><td>7k トークンに埋めた RACE (157 問)</td><td class="n">85.35</td><td class="n">91.08</td><td class="n">89.81</td><td class="n y">93.63</td><td class="n">+2.55 [−0.64, +6.37]</td><td class="n">+3.82 [−0.64, +8.28]</td></tr>
+<tr><td>10k トークンに埋めた RACE (157 問)</td><td class="n">83.44</td><td class="n">91.08</td><td class="n">87.90</td><td class="n y">94.27</td><td class="n">+3.18 [−0.64, +7.01]</td><td class="n y">+6.37 [+1.91, +10.83]</td></tr>
+<tr><td>Kev の評価セット (764 問)</td><td class="n">81.28</td><td class="n">82.46</td><td class="n">82.85</td><td class="n y">85.34</td><td class="n">+2.88 [+0.00, +5.76]</td><td class="n">+2.49 [+0.00, +5.10]</td></tr>
+<tr><td>うち見せていない種類 (228 問)</td><td class="n">69.74</td><td class="n">79.82</td><td class="n">74.12</td><td class="n">77.19</td><td class="n no">−2.63 [−8.33, +3.07]</td><td class="n">+3.07 [−1.75, +7.89]</td></tr>
+</table>
+
+<p>Kev の評価セットの 2 行は、区間の下限がちょうど 0.00 で、ぎりぎりです。表には載せていない学習前の Prismyra 35B との差は +4.06 [+1.96, +6.28] で、こちらははっきりしています。
+学習前の Prismyra 35B の BoolQ は、第 52 章と同じ「そのまま読む」の値 (89.50) です。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="440" y="20" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">正解率 (80% から 100% の範囲を拡大)</text>
+<g font-size="11.5" fill="#3c5a4c">
+<text x="120" y="285" text-anchor="middle">RACE</text><text x="270" y="285" text-anchor="middle">BoolQ</text><text x="420" y="285" text-anchor="middle">7k に埋めた</text><text x="570" y="285" text-anchor="middle">10k に埋めた</text><text x="720" y="285" text-anchor="middle">Kev 764 問</text>
+</g>
+<line x1="40" y1="265" x2="860" y2="265" stroke="#3c5a4c"/>
+<text x="36" y="84" text-anchor="end" font-size="11" fill="#3c5a4c">100</text><text x="36" y="269" text-anchor="end" font-size="11" fill="#3c5a4c">80</text>
+<g>
+<rect x="72" y="124.8" width="22" height="140.2" fill="#bfc9c3"/>
+<rect x="96" y="137.5" width="22" height="127.5" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="120" y="143.9" width="22" height="121.1" fill="#fdf3e2" stroke="#8a5a12"/>
+<rect x="144" y="118.4" width="22" height="146.6" fill="#1f7a4d"/>
+<text x="155" y="114.4" text-anchor="middle" font-size="11" fill="#0f4a2e">95.8</text>
+<rect x="222" y="177.1" width="22" height="87.9" fill="#bfc9c3"/>
+<rect x="246" y="177.1" width="22" height="87.9" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="270" y="181.8" width="22" height="83.2" fill="#fdf3e2" stroke="#8a5a12"/>
+<rect x="294" y="170.2" width="22" height="94.8" fill="#1f7a4d"/>
+<text x="305" y="166.2" text-anchor="middle" font-size="11" fill="#0f4a2e">90.2</text>
+<rect x="372" y="215.5" width="22" height="49.5" fill="#bfc9c3"/>
+<rect x="396" y="162.5" width="22" height="102.5" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="420" y="174.3" width="22" height="90.7" fill="#fdf3e2" stroke="#8a5a12"/>
+<rect x="444" y="138.9" width="22" height="126.1" fill="#1f7a4d"/>
+<text x="455" y="134.9" text-anchor="middle" font-size="11" fill="#0f4a2e">93.6</text>
+<rect x="522" y="233.2" width="22" height="31.8" fill="#bfc9c3"/>
+<rect x="546" y="162.5" width="22" height="102.5" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="570" y="191.9" width="22" height="73.1" fill="#fdf3e2" stroke="#8a5a12"/>
+<rect x="594" y="133.0" width="22" height="132.0" fill="#1f7a4d"/>
+<text x="605" y="129.0" text-anchor="middle" font-size="11" fill="#0f4a2e">94.3</text>
+<rect x="672" y="253.2" width="22" height="11.8" fill="#bfc9c3"/>
+<rect x="696" y="242.2" width="22" height="22.8" fill="#e6eef8" stroke="#1d4e8f"/>
+<rect x="720" y="238.6" width="22" height="26.4" fill="#fdf3e2" stroke="#8a5a12"/>
+<rect x="744" y="215.6" width="22" height="49.4" fill="#1f7a4d"/>
+<text x="755" y="211.6" text-anchor="middle" font-size="11" fill="#0f4a2e">85.3</text>
+</g>
+<g font-size="11.5">
+<rect x="300" y="34" width="12" height="12" fill="#bfc9c3"/><text x="318" y="45" fill="#10241b">学習前の Prismyra 35B</text>
+<rect x="300" y="52" width="12" height="12" fill="#e6eef8" stroke="#1d4e8f"/><text x="318" y="63" fill="#10241b">Decider-4B</text>
+<rect x="480" y="34" width="12" height="12" fill="#fdf3e2" stroke="#8a5a12"/><text x="498" y="45" fill="#10241b">Lux-9B</text>
+<rect x="480" y="52" width="12" height="12" fill="#1f7a4d"/><text x="498" y="63" fill="#10241b">学習後の Prismyra</text>
+</g>
+</svg>
+<figcaption>図 2. 5 つの評価セット。緑の棒 (学習後) が全部で一番高い。一番伸びたのは長い文脈の 2 つで、学習前は Decider と Lux に大きく負けていた。棒の高さは 80% を底にしている。</figcaption>
+</figure>
+
+<p>伸びが一番大きいのは、長い文脈に埋めた 2 つのセットです (10k トークンで +10.8 ポイント)。学習データの中の「別の記事に埋めた RACE」(1,318 問) が効いたと考えられます。
+比べるために、長文 1,800 問だけで同じ学習をした 2 本目も作りました。</p>
+
+<ul>
+<li>長い文脈では、1 本目とほぼ同じでした (7k 95.54、10k 92.99)。</li>
+<li>Kev の評価セットは 82.07 で、目標の 82.85 に届きませんでした。長文だけでは、規則の当てはめや分類の書式は身につかないということです。</li>
+</ul>
+
+<p>第 53 章では「長い文脈に強くなるのに専用の採点ヘッドは要らない」ことまでしか言えませんでした。今回の結果はその続きになります。同じ骨格・同じ読み方のまま、<b>骨格に小さな追加部品を付けて学習するだけで、長い文脈の崩れがほぼ消えました</b>。
+ただし、この比較は「ヘッドだけを学習」と「骨格も学習」を同じデータでそろえたものではありません。</p>
+
+<h2>4. j score は取り込まない</h2>
+
+<p>依頼には「j score (箱の内部の状態を読む信号) も取り込めそうなら取り込む」とありました。Prismyra が答えを読む位置の隠れ状態 (2,048 次元) は、答えを出すときにもう計算しているので、線形の見分け器を 1 回掛けるだけなら遅くなりません。
+学習に使っていない 2,200 問で「この答えは当たりか」を見分ける線形の見分け器を作り、5 つの評価セットで比べました。</p>
+
+<table>
+<tr><th>評価セット</th><th>最大確率</th><th>1 位と 2 位の差</th><th>隠れ状態の見分け器</th><th>隠れ状態 + 最大確率</th></tr>
+<tr><td>RACE</td><td class="n y">0.891</td><td class="n">0.889</td><td class="n no">0.627</td><td class="n no">0.653</td></tr>
+<tr><td>BoolQ</td><td class="n">0.854</td><td class="n">0.854</td><td class="n">0.854</td><td class="n">0.856</td></tr>
+<tr><td>7k に埋めた</td><td class="n">0.952</td><td class="n">0.953</td><td class="n no">0.680</td><td class="n no">0.729</td></tr>
+<tr><td>10k に埋めた</td><td class="n y">0.879</td><td class="n">0.878</td><td class="n no">0.764</td><td class="n no">0.786</td></tr>
+<tr><td>Kev の評価セット</td><td class="n y">0.880</td><td class="n">0.877</td><td class="n">0.871</td><td class="n">0.873</td></tr>
+<tr><td>うち見せていない種類</td><td class="n y">0.835</td><td class="n">0.826</td><td class="n">0.813</td><td class="n">0.817</td></tr>
+</table>
+
+<p>数字は AUROC で、「当たる答え」と「外れる答え」をどれだけ正しく順番に並べられるかを表します (1.0 が完璧、0.5 は当てずっぽう)。
+隠れ状態の見分け器は、作るのに使ったデータの中では 0.873 まで出ましたが、評価セットでは<b>一度も最大確率を上回りませんでした</b>。学習で最大確率そのものがよく揃ったので、隠れ状態から足せる情報が残っていないと考えられます。
+これは以前の比較 (margin 0.84 対 j score 0.81) と同じ向きです。</p>
+
+<h2>まだ言えないこと</h2>
+<ul>
+<li>学習で見せていない種類の問題では、Decider に点推定で負けています。種類を増やした 3 本目 (11,118 問) の学習を進めています。</li>
+<li>どれも 1 回の学習、1 回の評価です。短い本文のセットでの 1〜2 ポイントの差は、ぶれの範囲に入ります。</li>
+<li>長い文脈の 2 セットは 40 記事 157 問で、区間が広いです。</li>
+<li>Kev の評価セットは Kev にとって自前の開発用セットです。Lux の論文は学習に使っていないとしていますが、Decider については名前の照合しかしていません (第 52 章)。</li>
+</ul>
+
+<p class="foot">
+学習: Qwen3.6-35B-A3B-FP8、LoRA rank 16・alpha 32、AdamW 学習率 1e-4、勾配の蓄積 8、1 エポック (438 段)、最大 12,500 トークン、GPU は L40S 2 枚 (ピーク 40.7 GiB)。
+評価: L40S 1 枚、group 32、長さ順の組分け。区間は同じ問題どうしの対応付きブートストラップ 4,000 回。Decider と Lux の値は第 52 章と同じ実行。
+</p>
+
+</div>
+</body>
+</html>
