@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 19: 2 台をまたいで vLLM が動いた</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 19</p>
+  <h1>2 台をまたいで vLLM が動いた</h1>
+  <p>1 台の中の 2 ランクから、2 台の実機をまたぐ 1 ランクずつへ。答えの正しさまで確かめた記録</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>何をしたか</h2>
+    <p class="lead">1 台の中の 2 ランクではなく、実機 2 台をまたぐ 1 ランクずつで vLLM を動かした。</p>
+
+    <p>H100 を 1 枚ずつ積んだ<b>2 台</b> (p5.4xlarge) に、vLLM の data parallel のランクを<b>1 つずつ</b>置きました。DeepEP V2 のノードをまたぐ通信は、エミュレータ (TCP の上で SRD のふるまいを再現する NCCL のプラグイン) が運びます。モデルは <b>OLMoE-1B-7B</b> (MoE、64 エキスパート、1 台に 32 ずつ) です。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>結果</h2>
+
+    <p><code>The capital of France is</code> という入力に対して、<code>Paris.\n\nThe capital of the United States is Washington, D.C. …</code> と答えました。<b>これは、DeepEP を使わない対照と 1 文字も違いません。</b></p>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>途中で見つけて直したエミュレータの欠陥</h2>
+    <p class="lead">環境変数を読む関数が、書き換え中の一覧を読んで落ちた。</p>
+
+    <p>最初の 2 台の回では、NCCL の通信の進捗を進めるスレッドが、エミュレータの中の <code>getenv</code> (環境変数を読む関数) で落ちました。<code>getenv</code> は<b>環境変数の一覧をロックなしでたどります</b>。DeepEP はバッファを作るときに <code>setenv</code> (環境変数を書き換える関数) を呼ぶので、<b>この 2 つが同時に動くと、書き換え中の一覧を読んで落ちます</b>。</p>
+
+    <div class="key">
+      <p>エミュレータは、通信の進捗処理のたびに環境変数を読んでいました。<b>繰り返し通る場所ではすべて、最初の 1 回だけ読んで、それ以降は覚えておいた値を使う</b>ように直しました。直した次の回で成功しました。</p>
+    </div>
+
+    <div class="warn">
+      <p><b>正直に書きます。</b>落ちた回・直った回とも、それぞれ<b>1 回ずつの観測</b>です。ここに書いているのは「何回中何回」という割合ではなく、<b>仕組みとしてなぜ落ちるか、直したら 1 回成功したという事実</b>です。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>これで何ができるようになったか (誇張しない)</h2>
+
+    <p><b>できるようになったこと。</b>EFA の無い環境で、DeepEP V2 を使う<b>本物の推論ワークロード</b>を、複数のノードにまたがって、<b>答えの正しさまで</b>確かめられます。1 台で 2 ランク、GDRCopy なし (非同期の配達)、2 台で 1 ランクずつ、のどれでも正しい答えになりました。</p>
+
+    <div class="warn">
+      <p><b>できないこと。</b>本番の通信の代わりにはなりません。中身は<b>TCP</b>で、速さは本物の EFA と比べられません。本物の EFA との比較は、p5 では <code>aws-ofi-nccl</code> 側の制約 (第 15 回) のため、まだ実施していません。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>ここまでの構成の一覧</h2>
+
+    <table>
+      <tr><th>構成</th><th>GDRCopy</th><th>結果</th></tr>
+      <tr><td>1 台 2 ランク、RTX PRO 6000 (vLLM 0.28、構造体を修正)</td><td>あり</td><td class="ok">正解</td></tr>
+      <tr><td>同じ構成</td><td>なし (非同期の配達)</td><td class="ok">正解</td></tr>
+      <tr><td>1 台 2 ランク、H100 (vLLM 0.30.0)</td><td>あり</td><td class="ok">正解 (3 回)</td></tr>
+      <tr><td>2 台、1 ランクずつ、H100 (vLLM 0.30.0)</td><td>あり</td><td class="ok">正解</td></tr>
+    </table>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-18-vllm-culprit.html">← 18: vLLM が動いた。犯人は vLLM 自身だった</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
