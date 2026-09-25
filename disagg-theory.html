@@ -2658,7 +2658,184 @@ inter_token_latency = (request_latency - time_to_first_token) / (output_sequence
 <li>ここでの結論は g7.48xlarge × 2、並列度 8、Qwen3.5-9B、形 A の負荷に限る。他の機械やモデルでは、天井の値も状態の置き場の数も変わる。</li>
 </ul></div>
 
-<h2>27. 使い方</h2>
+<h2>27. g7.48xlarge × 2 で分離構成が勝つ条件</h2>
+
+<p class="lead">GPU 8 枚の機械 2 台 (g7.48xlarge × 2、合計 16 GPU、並列度 8) で、同じ 16 GPU を統合 2 台に使うか、読む係 1 台と書く係 1 台に分けるかを比べた。<b>分離が勝つのは、1 文字あたりの間隔 (TPOT) の約束が、統合がその負荷で出せる間隔より厳しく、しかも最初の 1 文字まで (TTFT) の約束が、読む係 1 台の待ちと受け渡しの時間を吸える程度に緩いときだけ</b>である。受け渡しが TCP の場合はさらに、運ぶ量が 1 秒あたり約 5 万トークンの天井より十分下にあることが要る。この 3 つの条件は、それぞれ実測した 1 つの仕組みから出てくる。</p>
+
+<table>
+<tr><th>#</th><th>なぜ調べたか</th><th>どう測ったか</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>約束の組ごとに、どちらが勝つか</td><td>要求ごとの記録から、TTFT と TPOT の上限の組 42 通りについて、両方を守れた呼び出しの割合を数える。90 % 以上を合格とする</td><td>1 組の約束だけで比べる (前章まで何度もこれで結論が反転した)</td><td class="y">到着 12 では統合はどの約束でも合格しない。分離 EFA は TTFT 10 秒・TPOT 50 ms 以上で合格。到着 2 では TPOT 20 ms 以下を守れるのは分離だけ</td><td>27.2</td></tr>
+<tr><td class="n">2</td><td>統合の間隔はなぜ負荷で崩れるか</td><td>書きの生涯のうち、読みで止められた時間の割合を 1 回ごとの記録から数える</td><td>書きの 1 歩が遅くなると考える</td><td class="no">読みが優先なので、書きの生涯の半分 (中央値 50-52 %) が読みで止まる。TPOT の p90 は到着 2 / 4 / 8 / 12 で 22 / 35 / 72 / 132 ms</td><td>27.3</td></tr>
+<tr><td class="n">3</td><td>分離の最初の 1 文字はなぜ負荷で崩れるか</td><td>読む係に来る新しいトークンの量を、最も混む 30 秒で数え、読む係 1 台が読める量と比べる</td><td>受け渡しのせいと考える</td><td class="no">読む係 1 台の天井は 1 秒あたり約 2 万トークン。到着 8 で 19.7k、到着 12 で 21.3k に達し、TTFT の p90 は 3.2 秒、9.6 秒</td><td>27.4</td></tr>
+<tr><td class="n">4</td><td>TCP の分離はなぜ先に崩れるか</td><td>受け渡しで運ぶトークンの量を、最も混む 30 秒で数える</td><td>回線の帯域で割る</td><td class="no">TCP の天井は 1 秒あたり約 5 万トークン。到着 4 で 49.3k に張り付き、TTFT の p90 は 5.7 秒 (EFA は同じ到着で 1.5 秒)</td><td>27.5</td></tr>
+<tr><td class="n">5</td><td>分離に他の得はあるか</td><td>キャッシュの当たりと、全体を捌き終わるまでの時間を比べる</td><td>約束の合否だけを見る</td><td class="y">キャッシュ率 78-80 % 対 67-71 %。到着 12 で全体を捌き終わるまで 239 秒対 341-351 秒</td><td>27.6</td></tr>
+</table>
+
+<h3>27.1 比べ方</h3>
+
+<p>負荷は形 A (エージェントの会話が積み上がる形、入力の平均約 4,550 トークン、出力 256 トークン、1 つの作業が 5-15 回の呼び出し) で、作業の到着を 30 秒間だけ続けて止め、全部が終わるまで待つ。到着の数字は 1 秒あたりに始まる作業の数である。負荷を出すクライアントは 8 プロセスに分けた版 (26.1 節) を使った。</p>
+
+<p>統合は 2 台がそれぞれ読みも書きもこなし、呼び出しを交互に配る。分離は 1 台が読む係、もう 1 台が書く係で、読み終わった KV (過去の文脈の記憶) を受け渡す。受け渡しの経路は EFA (NIXL の LIBFABRIC) と TCP (NIXL の UCX) の 2 通りである。</p>
+
+<p>実測のない点はシミュレータで補った。統合の到着 2 と 4、分離 EFA の到着 2、分離 TCP の到着 8 がそれで、表では「予測」と書いてある。シミュレータの当たりは 26.6 節のとおりで、分離では TTFT の p90 を -32 % から -5 %、TPOT を ±12 % 以内で当てる。統合の到着 2 と 4 の予測は、1 プロセスのクライアントで測った以前の値 (TTFT p90 322-332 ms、TPOT p50 約 27 ms) とも近い (予測 326 ms、29.8 ms)。</p>
+
+<h3>27.2 勝ち負けの地図</h3>
+
+<p>各欄は、両方の約束を 90 % 以上守れた構成のうち、守れた割合がいちばん高いものと、その割合である。緑は分離、黄は統合、赤の「-」はどれも 90 % に届かない。「のみ」は、その構成だけが合格したことを示す。</p>
+
+<p class="foot" style="margin:14px 0 4px"><b>到着 2</b> (統合 予測, 分離 EFA 予測, 分離 TCP 実測)</p>
+<table>
+<tr><th>TPOT の上限</th><th>TTFT 0.5 秒</th><th>TTFT 1 秒</th><th>TTFT 2 秒</th><th>TTFT 3 秒</th><th>TTFT 5 秒</th><th>TTFT 10 秒</th></tr>
+<tr><td class="n">15 ms</td><td class="n no">-</td><td class="n y">分離 EFA のみ 95 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td></tr>
+<tr><td class="n">20 ms</td><td class="n no">-</td><td class="n y">分離 EFA のみ 95 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td></tr>
+<tr><td class="n">30 ms</td><td class="n mid">統合 のみ 98 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+<tr><td class="n">40 ms</td><td class="n mid">統合 のみ 98 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+<tr><td class="n">50 ms</td><td class="n mid">統合 のみ 98 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+<tr><td class="n">75 ms</td><td class="n mid">統合 のみ 98 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+<tr><td class="n">100 ms</td><td class="n mid">統合 のみ 98 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+</table>
+<p class="foot" style="margin:14px 0 4px"><b>到着 4</b> (統合 予測, 分離 EFA 実測, 分離 TCP 実測)</p>
+<table>
+<tr><th>TPOT の上限</th><th>TTFT 0.5 秒</th><th>TTFT 1 秒</th><th>TTFT 2 秒</th><th>TTFT 3 秒</th><th>TTFT 5 秒</th><th>TTFT 10 秒</th></tr>
+<tr><td class="n">15 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">20 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 TCP のみ 94 %</td></tr>
+<tr><td class="n">30 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 TCP のみ 94 %</td></tr>
+<tr><td class="n">40 ms</td><td class="n mid">統合 のみ 96 %</td><td class="n mid">統合 のみ 98 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td><td class="n y">分離 EFA 100 %</td></tr>
+<tr><td class="n">50 ms</td><td class="n mid">統合 のみ 97 %</td><td class="n mid">統合 のみ 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+<tr><td class="n">75 ms</td><td class="n mid">統合 のみ 97 %</td><td class="n mid">統合 のみ 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+<tr><td class="n">100 ms</td><td class="n mid">統合 のみ 97 %</td><td class="n mid">統合 のみ 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td><td class="n mid">統合 100 %</td></tr>
+</table>
+<p class="foot" style="margin:14px 0 4px"><b>到着 8</b> (統合 実測, 分離 EFA 実測, 分離 TCP 予測)</p>
+<table>
+<tr><th>TPOT の上限</th><th>TTFT 0.5 秒</th><th>TTFT 1 秒</th><th>TTFT 2 秒</th><th>TTFT 3 秒</th><th>TTFT 5 秒</th><th>TTFT 10 秒</th></tr>
+<tr><td class="n">15 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">20 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">30 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">40 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 EFA のみ 93 %</td><td class="n y">分離 EFA のみ 100 %</td></tr>
+<tr><td class="n">50 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 EFA のみ 93 %</td><td class="n y">分離 EFA のみ 100 %</td></tr>
+<tr><td class="n">75 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n mid">統合 のみ 91 %</td><td class="n mid">統合 のみ 91 %</td><td class="n y">分離 EFA 93 %</td><td class="n y">分離 EFA 100 %</td></tr>
+<tr><td class="n">100 ms</td><td class="n no">-</td><td class="n mid">統合 のみ 94 %</td><td class="n mid">統合 のみ 97 %</td><td class="n mid">統合 のみ 97 %</td><td class="n mid">統合 98 %</td><td class="n y">分離 EFA 100 %</td></tr>
+</table>
+<p class="foot" style="margin:14px 0 4px"><b>到着 12</b> (統合 実測, 分離 EFA 実測)</p>
+<table>
+<tr><th>TPOT の上限</th><th>TTFT 0.5 秒</th><th>TTFT 1 秒</th><th>TTFT 2 秒</th><th>TTFT 3 秒</th><th>TTFT 5 秒</th><th>TTFT 10 秒</th></tr>
+<tr><td class="n">15 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">20 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">30 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">40 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td></tr>
+<tr><td class="n">50 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 EFA のみ 92 %</td></tr>
+<tr><td class="n">75 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 EFA のみ 92 %</td></tr>
+<tr><td class="n">100 ms</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n no">-</td><td class="n y">分離 EFA のみ 92 %</td></tr>
+</table>
+
+<p>地図から読める形は 1 つである。<b>分離が勝つ欄は、どの到着でも表の左下ではなく「TPOT が厳しく TTFT が緩い」右上寄りに集まる。</b>そして負荷が上がるほど、統合が合格できる欄は減り (到着 12 で 0 欄)、分離が合格できる欄は TTFT の緩い側へ押しやられる (到着 12 では TTFT 10 秒の列だけ)。</p>
+
+<h3>27.3 条件 1: TPOT の約束が、統合がその負荷で出す間隔より厳しいこと</h3>
+
+<p>統合のエンジンは、読みの要求が待っていれば必ず読みを先に回す (SGLang の決まり。1 回ごとの記録でも、書きを回したときに待ち行列が空でなかったことは 7,438 回中 0 回)。そのあいだ、書き中の要求は全員止まる。書きの 1 歩そのものは速い (本数 150 本超で約 37 ms) が、書きの生涯の半分が読みで止められているので、1 文字あたりの間隔は負荷とともに伸びる。</p>
+
+<p>分離の書く係は読みを一切しないので止められない。書く係の間隔は 1 歩の時間とほぼ同じで、本数が増えても 30 ms 台に収まる。</p>
+
+<figure><svg viewBox="0 0 880 250" width="100%" role="img">
+<text x="20" y="22" font-size="13" font-weight="bold" fill="#10241b">TPOT の p90 (ms)、到着ごと</text>
+<line x1="60" y1="210" x2="840" y2="210" stroke="#10241b"/>
+<g font-size="12" fill="#10241b"><text x="150" y="230" text-anchor="middle">到着 2</text><text x="340" y="230" text-anchor="middle">到着 4</text><text x="530" y="230" text-anchor="middle">到着 8</text><text x="720" y="230" text-anchor="middle">到着 12</text></g>
+<rect x="112" y="181.01" width="36" height="28.990000000000002" fill="#8a5a12"/><text x="130" y="176.01" text-anchor="middle" font-size="11">22</text>
+<rect x="152" y="191.8" width="36" height="18.2" fill="#1f7a4d"/><text x="170" y="186.8" text-anchor="middle" font-size="11">14</text>
+<rect x="302" y="164.63" width="36" height="45.37" fill="#8a5a12"/><text x="320" y="159.63" text-anchor="middle" font-size="11">35</text>
+<rect x="342" y="169.05" width="36" height="40.95" fill="#1f7a4d"/><text x="360" y="164.05" text-anchor="middle" font-size="11">32</text>
+<rect x="492" y="116.52999999999999" width="36" height="93.47000000000001" fill="#8a5a12"/><text x="510" y="111.52999999999999" text-anchor="middle" font-size="11">72</text>
+<rect x="532" y="163.85" width="36" height="46.15" fill="#1f7a4d"/><text x="550" y="158.85" text-anchor="middle" font-size="11">36</text>
+<rect x="682" y="38.27000000000001" width="36" height="171.73" fill="#8a5a12"/><text x="700" y="33.27000000000001" text-anchor="middle" font-size="11">132</text>
+<rect x="722" y="152.67" width="36" height="57.330000000000005" fill="#1f7a4d"/><text x="740" y="147.67" text-anchor="middle" font-size="11">44</text>
+<rect x="80" y="40" width="12" height="12" fill="#8a5a12"/><text x="98" y="51" font-size="12">統合 (到着 2, 4 は予測)</text><rect x="260" y="40" width="12" height="12" fill="#1f7a4d"/><text x="278" y="51" font-size="12">分離 EFA (到着 2 は予測)</text>
+</svg><figcaption>棒の高さは TPOT の p90 に比例。統合は読みに止められる時間が増えるので負荷とともに伸び、分離は書きの 1 歩の時間のままでほとんど伸びない</figcaption></figure>
+
+<p>したがって「TPOT の約束 &lt; 統合のその負荷での TPOT」が分離の勝ちの必要条件になる。到着 8 なら TPOT の約束が 72 ms より厳しいとき、到着 12 なら 132 ms より厳しいときで、それより緩い約束なら統合も同じ約束を守れる。</p>
+
+<h3>27.4 条件 2: TTFT の約束が、読む係 1 台の待ちを吸える程度に緩いこと</h3>
+
+<p>分離では 16 GPU のうち読みに使えるのは 1 台 (8 GPU) だけで、統合の半分である。満杯の読み (8,192 トークン) は 1 回約 0.42 秒なので、読む係 1 台が 1 秒あたりに新しく読めるのは約 2 万トークンが上限になる。キャッシュが効く分 (分離の読む係は 78-80 %) を差し引いた「新しく読む量」がこの天井に近づくと、読み待ちの行列が伸び、最初の 1 文字までの時間が伸びる。</p>
+
+<table>
+<tr><th>分離 EFA</th><th>新しく読む量 (平均)</th><th>最も混む 30 秒</th><th>天井に対して</th><th>TTFT の p90</th></tr>
+<tr><td>到着 4</td><td class="n">9.1k/s</td><td class="n">14.7k/s</td><td class="n y">75 %</td><td class="n">1,491 ms</td></tr>
+<tr><td>到着 8</td><td class="n">13.4k/s</td><td class="n">19.7k/s</td><td class="n mid">100 %</td><td class="n">3,228 ms</td></tr>
+<tr><td>到着 12</td><td class="n">15.0k/s</td><td class="n">21.3k/s</td><td class="n no">109 %</td><td class="n no">9,643 ms</td></tr>
+</table>
+
+<p>統合は 2 台とも読むので、同じ到着 12 でも TTFT の p90 は 1,184-1,770 ms に収まる。分離の TTFT には、これに受け渡しの時間 (EFA で中央値 170 ms 前後、26.5 節) が加わる。<b>分離は最初の 1 文字を売って、1 文字あたりの間隔を買う</b>構成であり、その売値は読む係の天井への近さで決まる。</p>
+
+<h3>27.5 条件 3: TCP なら、受け渡しの量が天井より十分下にあること</h3>
+
+<p>読む係から書く係へは、入力の全トークン分の KV を渡す (キャッシュ済みの分も含む)。TCP の受け渡しは、同時に何本流しても 1 秒あたり約 5 万トークンで止まる (26.5 節)。</p>
+
+<table>
+<tr><th>受け渡しで運ぶ量</th><th>平均</th><th>最も混む 30 秒</th><th>TCP の天井に対して</th><th>TTFT の p90</th></tr>
+<tr><td>分離 TCP 到着 2</td><td class="n">26.9k/s</td><td class="n">41.0k/s</td><td class="n mid">82 %</td><td class="n">1,115 ms</td></tr>
+<tr><td>分離 TCP 到着 4</td><td class="n">38.2k/s</td><td class="n">49.3k/s</td><td class="n no">99 %</td><td class="n no">5,671 ms</td></tr>
+<tr><td>分離 EFA 到着 12</td><td class="n">68.3k/s</td><td class="n">97.2k/s</td><td class="n">(天井なし)</td><td class="n">9,643 ms (原因は読む係)</td></tr>
+</table>
+
+<p>TCP の分離は到着 4 で受け渡しの天井に張り付き、読む係にまだ余裕がある (最も混む 30 秒で 10.3k/s) のに TTFT が崩れる。EFA は到着 12 で 1 秒あたり 9.7 万トークンを運んでも受け渡しは律速にならず、崩れるのは読む係のほうである。<b>TCP と EFA の違いは、分離がどちらの天井で先に止まるかの違い</b>として現れる。</p>
+
+<h3>27.6 分離の副次的な得</h3>
+
+<ul>
+<li><b>キャッシュが効く。</b>読む係が 1 台なので、同じ作業の次の呼び出しは必ず同じエンジンに来て、前の入力ちょうどまで当たる。キャッシュ率は 78-80 % で、2 台に交互に配る統合の 67-71 % より高い。新しく読む量が 3 割ほど減る。</li>
+<li><b>同じ仕事を早く終える。</b>到着 12 で全体を捌き終わるまで、分離 EFA は 239 秒、統合は 341-351 秒 (到着 8 では 166 秒対 244 秒)。1 文字あたりが速いので、作業の呼び出しが早く次へ進む。ただしこれは最初の 1 文字の遅れと引き換えである。</li>
+</ul>
+
+<h3>27.7 条件のまとめ</h3>
+
+<div class="box">
+<p><b>g7.48xlarge × 2 で分離が統合に勝つのは、次の 3 つが同時に成り立つときである。</b></p>
+<ol>
+<li><b>TPOT の約束 &lt; 統合のその負荷での TPOT の p90。</b>到着 2 / 4 / 8 / 12 で 22 / 35 / 72 / 132 ms。これより緩い約束なら統合も守れる。</li>
+<li><b>TTFT の約束 &gt; 分離のその負荷での TTFT の p90。</b>読む係に来る新しいトークンが、最も混む時間帯で 1 秒あたり約 2 万トークンより十分下なら数百 ms から 1.5 秒、天井に達すると数秒から 10 秒になる。</li>
+<li><b>(TCP の場合) 受け渡しで運ぶトークンが、最も混む時間帯で 1 秒あたり約 5 万トークンより十分下。</b>形 A ではおよそ到着 2 までで、到着 4 で崩れる。EFA にはこの条件がない。</li>
+</ol>
+<p style="margin:0">この 3 つのどれかを外すと統合が勝つか、どちらも合格しない。地図 (27.2 節) の分離の欄は、すべてこの 3 つを満たす位置にある。</p>
+</div>
+
+<div class="warn"><b>[この章の範囲と穴]</b>
+<ul>
+<li>測ったのは g7.48xlarge (GPU 8 枚) × 2 台だけである。g7.12xlarge など GPU の少ない機械では、読む係の天井も並列度も変わるので、この数字は使えない。</li>
+<li>負荷は形 A だけで、入力が極端に長い形 (18 章) や混在の形 (23 章) では天井に届く到着が変わる。</li>
+<li>分離 EFA の到着 8 と 12 は 1 回ずつの測定で、統合の到着 12 は 3 回で TTFT p90 が ±20 % 揺れた。表の境目の欄は、揺れで入れ替わりうる。</li>
+<li>統合の到着 2 と 4、分離 EFA の到着 2、分離 TCP の到着 8 はシミュレータの予測である。</li>
+<li>合格の線を 90 % に置いた。99 % に置けば、裾に弱い分離の欄はさらに減る。</li>
+</ul></div>
+
+<h2>28. 使い方</h2>
+
+<h3>実測に合わせたシミュレータ (26-27 章) の実装の場所</h3>
+
+<p>26-27 章のシミュレータと測定の道具は、リポジトリ <code>littlemex/data-science</code> の <code>investigations/disagg-theory/</code> にある。リンクはこの章を書いた時点のコミット <code>e266713c</code> に固定してある。依存は Python と NumPy だけで、GPU は要らない。要求ごとの測定記録はリポジトリに含めていないので、測定を再現するときは下の道具で記録を取り直す。</p>
+
+<table>
+<tr><th>ファイル</th><th>役割</th></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/des.py"><code>des.py</code></a></td><td>離散事象シミュレータの本体。統合 (<code>simulate_unified</code>) と分離 (<code>simulate</code>)。読みの折れ線の式、書き 1 歩の式、キャッシュの状態の置き場 (1,646 枠、呼び出し 1 回 2 枠、古い順に消す)、受け渡しの並列窓口 (EFA 4 窓口、TCP 2 窓口)、クライアントの行き帰りの時間。定数にはすべて、どの測定から来たかのコメントがある</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/unified_read_ratio.json"><code>unified_read_ratio.json</code></a></td><td>読み 1 回の時間の、式に対する比の実測の分布 (大きさの区間ごと)。シミュレータは読みのたびにここから引いて掛ける</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/winmap.py"><code>measure/winmap.py</code></a></td><td>27.2 節の勝ち負けの地図を作る</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/closed.py"><code>measure/closed.py</code></a></td><td>作業の続きをシミュレータ自身に生ませる閉じた形で、統合の全測定と採点する</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/replay.py"><code>measure/replay.py</code></a></td><td>実測の届く時刻をそのまま流す再生。エンジンの模型だけを試す (26.2 節)</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/handoff_ps.py"><code>measure/handoff_ps.py</code></a></td><td>受け渡しの時間を 2 台の記録から結び、窓口の模型と帯域の分け合いの模型を当てる (26.5 節)</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/patch_scheduler_loop.py"><code>measure/patch_scheduler_loop.py</code></a>、<a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/patch_run_batch.py"><code>measure/patch_run_batch.py</code></a></td><td>SGLang のスケジューラに、計算 1 回ごとの記録を 1 行足す。エンジンの起動前にコンテナの中で実行する</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/patch_tokenizer_manager.py"><code>measure/patch_tokenizer_manager.py</code></a></td><td>受付係に、受け取った時刻とエンジンへ渡した時刻の記録を足す (26.1 節)</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/measure/front.py"><code>measure/front.py</code></a></td><td>空いているとき・一斉に送ったときの、送信からエンジン到着までの時間を測る</td></tr>
+<tr><td><a href="https://github.com/littlemex/data-science/blob/e266713c448af4879fdec53e765a092aefbe1a00/investigations/disagg-theory/split.py"><code>split.py</code></a></td><td>すべての実測値と、取り下げた見立ての記録簿</td></tr>
+</table>
+
+<p>シミュレータを 1 つの測定記録に当てるときは、リポジトリの <code>investigations/disagg-theory/</code> で次を実行する。記録の置き場所を環境変数で渡す。</p>
+
+<pre>export RECORDS=$HOME/records
+python3 des.py gsplit-a EFA
+python3 measure/winmap.py</pre>
+
+<h3>初期の理論模型 (1-21 章)</h3>
+
+
 
 <p>コードは 6 ファイル、依存は標準ライブラリだけで、GPU も不要である。</p>
 
