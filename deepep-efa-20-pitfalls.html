@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 20: 検証で踏んだ罠 (結果を誤読しかけた順に)</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:17px;margin:22px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  td.n{font-weight:700;color:var(--g1);width:2.4em}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}table{font-size:12.5px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 20</p>
+  <h1>検証で踏んだ罠 (結果を誤読しかけた順に)</h1>
+  <p>タスク実行の仕組み、計測器、環境、考え方。この一連の検証で踏んだ 23 個の罠を、何が起きたか・なぜ誤読しかけたか・どう防ぐかの 3 点でまとめる</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">A</span>タスク実行の仕組み</h2>
+    <p class="lead">JSON に書いたコマンドを 1 本のシェルで流す、自作の実行器で踏んだ罠。</p>
+
+    <table>
+      <tr><th>#</th><th>何が起きたか</th><th>なぜ誤読しかけたか</th><th>どう防ぐか</th></tr>
+      <tr>
+        <td class="n">1</td>
+        <td><code>commands</code> の要素のうち <code>#</code> で始まるものは、中に改行やコードが入っていても丸ごと捨てられる。コメントと <code>if</code> 文を 1 つの要素にまとめたら、変数が未定義のまま実行されて落ちた</td>
+        <td>コメントのつもりで書いた行が、実は <code>if</code> 文まで含んだ 1 要素になっていて、その全体が「コメント行」として捨てられているとは見た目で分からない</td>
+        <td>コメントとコードは、必ず別の要素に分ける</td>
+      </tr>
+      <tr>
+        <td class="n">2</td>
+        <td>数値を読む関数が <code>0</code> を「未指定」と同じに扱うため、<code>=0</code> で機能を切るつもりのスイッチが効かなかった</td>
+        <td>「非同期なし」のつもりで用意した比較用の 2 つの回 (A/B) が、実は両方とも非同期のまま動いていた</td>
+        <td><code>0</code> を有効な値として取るスイッチは、数値としてではなく文字列で比較する</td>
+      </tr>
+      <tr>
+        <td class="n">3</td>
+        <td>実行器がリモートへ環境変数を渡すとき、値に空白が入っていると分割される</td>
+        <td>複数の値を渡したつもりでも、一部しか伝わっていないことに気づきにくい</td>
+        <td>複数値はカンマ区切りにして、タスク側で空白に戻す</td>
+      </tr>
+      <tr>
+        <td class="n">4</td>
+        <td>段ごとの完了印が残っていると、その段は飛ばされて「OK」と表示される</td>
+        <td>「OK」の表示だけを見て、vLLM が実際に動いたと誤読しかけた。実際は前回の印を見て素通りしただけだった</td>
+        <td>再実行するときは強制オプションを使い、印を無視して実際に走らせる</td>
+      </tr>
+      <tr>
+        <td class="n">5</td>
+        <td>出力を「先頭 N 行」で切ると、成否を示す行がその外側にあって見えなくなる</td>
+        <td>表示された範囲だけを見て、成功したと誤読しかけた</td>
+        <td>回数や成否は、ログ全体から数える</td>
+      </tr>
+      <tr>
+        <td class="n">6</td>
+        <td>同じホストで 2 つのタスクを同時に走らせると、実行用の一時スクリプトを共有しているので壊れる</td>
+        <td>片方の失敗が、もう片方のタスクの内容そのもののせいだと誤読しかけた</td>
+        <td>同じホストで同時に走らせない、または一時スクリプトの名前をタスクごとに分ける</td>
+      </tr>
+      <tr>
+        <td class="n">7</td>
+        <td>配備するとソースの更新時刻が新しくなり、「ビルドがソースより古い」検査に引っかかって止まる</td>
+        <td>検査で止まったのを見て、ソースかビルドの内容そのものに問題があると誤読しかけた</td>
+        <td>配備のあとは必ずビルドし直す</td>
+      </tr>
+      <tr>
+        <td class="n">8</td>
+        <td>手元の検査を、配備と同じバックグラウンドの命令に混ぜると、エラーの行を見落とす</td>
+        <td>まとめて後から見る出力の中に検査のエラーが埋もれ、「問題なし」と誤読しかけた</td>
+        <td>検査は前面で走らせて結果を見てから、配備する</td>
+      </tr>
+      <tr>
+        <td class="n">9</td>
+        <td>行末のバックスラッシュの次の行がコメントだと、その行は「代入だけ」の行として働く</td>
+        <td>そこに <code>env</code> などのコマンドを挟むと元の動きが変わるのに、見た目上はコメントが 1 行入っただけに見える</td>
+        <td>行末のバックスラッシュの直後にコメント行を置かない</td>
+      </tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">B</span>計測器と道具</h2>
+    <p class="lead">計測器そのものの死角が、対象についての結論に見えてしまう罠。</p>
+
+    <table>
+      <tr><th>#</th><th>何が起きたか</th><th>なぜ誤読しかけたか</th><th>どう防ぐか</th></tr>
+      <tr>
+        <td class="n">10</td>
+        <td><code>LD_PRELOAD</code> で libcuda の関数を包む方式では、CUDA runtime (PyTorch や NCCL の中) の呼び出しが見えない。runtime は <code>cuGetProcAddress</code> で関数を取るため。差し替えようとしたら PyTorch が壊れた</td>
+        <td>「何も見えなかった」を「呼ばれていない」証拠として誤読しかけた。実際は計測器の死角だった</td>
+        <td>CUPTI (driver が公式に呼び出しを通知する仕組み) に切り替え、「見えるはずのものが見える」ことを自己テストで先に確かめる</td>
+      </tr>
+      <tr>
+        <td class="n">11</td>
+        <td>Ubuntu の apport は、同じプログラムのクラッシュを 1 件しか残さない</td>
+        <td>2 件目以降のクラッシュのコアが無いのを見て、「クラッシュしなかった」と誤読しかけた</td>
+        <td>コアの出力先を変え、上限を <code>prlimit</code> で上げる (ハードリミットが 0 だと <code>ulimit</code> では上げられない)</td>
+      </tr>
+      <tr>
+        <td class="n">12</td>
+        <td>gdb の下では、タイミングが変わって落ちなくなる不具合があった</td>
+        <td>gdb 下で再現しないのを見て、「直った」と誤読しかけた</td>
+        <td>コアを後から読む。タイミングを変えないので、この種の不具合を見失わない</td>
+      </tr>
+      <tr>
+        <td class="n">13</td>
+        <td>AddressSanitizer と CUDA は、既定の設定だと CUDA の初期化で衝突する。AddressSanitizer は、計装したコードのヒープへの書き込みしか見ない</td>
+        <td>「何も報告が無い」を「そこには欠陥が無い」と誤読しかけた。実際は VMM の領域や、計装していないライブラリの書き込みが見える範囲の外だった</td>
+        <td><code>protect_shadow_gap=0</code> を設定する。見える範囲を先に確認してから、報告の有無を判断する</td>
+      </tr>
+      <tr>
+        <td class="n">14</td>
+        <td>CPython のデバッグ用メモリ管理 (<code>PYTHONMALLOC=debug</code>) は、あふれを解放の時点で捕まえる。確保元の記録 (<code>PYTHONTRACEMALLOC</code>) まで付けると、vLLM の起動が遅くなりすぎて、vLLM 自身の時間切れで止まった</td>
+        <td>起動が止まったのを見て、また別の欠陥が起きたと誤読しかけた。実際は計測器自体の重さが原因だった</td>
+        <td>必要な情報の量に応じて計測器の重さを選ぶ。まず <code>PYTHONMALLOC=debug</code> だけで試す</td>
+      </tr>
+      <tr>
+        <td class="n">15</td>
+        <td>compute-sanitizer が出す大量の API エラーの多くは、NCCL の初期化時の、想定内の確認だった</td>
+        <td>エラーの件数の多さを見て、GPU のメモリ違反が大量に起きていると誤読しかけた</td>
+        <td>NCCL 初期化時の想定内の確認と、GPU のメモリ違反の報告を区別して読む</td>
+      </tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">C</span>環境</h2>
+    <p class="lead">環境固有の値は書かないが、環境の性質そのものが結論を誤らせた罠。</p>
+
+    <table>
+      <tr><th>#</th><th>何が起きたか</th><th>なぜ誤読しかけたか</th><th>どう防ぐか</th></tr>
+      <tr>
+        <td class="n">16</td>
+        <td>EFA の SRD は IP ではないので、セキュリティグループに「自分自身のグループ宛て」の送信規則が要る。<code>0.0.0.0/0</code> の送信規則だけでは届かない</td>
+        <td>通信が届かないのを見て、「EFA が壊れている」と誤読しかけた (9 月にそう書いた)</td>
+        <td>セキュリティグループの送信規則に、自分自身のグループ宛てを追加する</td>
+      </tr>
+      <tr>
+        <td class="n">17</td>
+        <td>p5 の EFA には、libfabric の fabric が 2 つある (<code>efa</code> と <code>efa-direct</code>)。どちらが選ばれるかで使える機能が変わる (第 15 回・第 16 回の aws-ofi-nccl の件)</td>
+        <td>同じインスタンスタイプ・同じ EFA デバイスなのに機能の有無が変わるのを見て、環境が不安定だと誤読しかけた</td>
+        <td>どちらの fabric が選ばれているかを確認する</td>
+      </tr>
+      <tr>
+        <td class="n">18</td>
+        <td>Deep Learning AMI の CUDA toolkit には <code>cuobjdump</code> が無く、DeepEP の JIT が理由を言わずに落ちる</td>
+        <td>理由の無い失敗を見て、DeepEP やコードそのものの欠陥だと誤読しかけた</td>
+        <td><code>cuobjdump</code> の有無を先に確認する</td>
+      </tr>
+      <tr>
+        <td class="n">19</td>
+        <td>vLLM の起動の時間切れ (<code>VLLM_ENGINE_READY_TIMEOUT_S</code>) は、API サーバの起動から数える。コンパイルに時間がかかると、エンジンが動き出す前に切れる。最初の要求も、初回の JIT で 2 分以上かかることがある</td>
+        <td>時間切れやリクエストの遅さを見て、「止まっている」と誤読しかけた</td>
+        <td>コンパイルにかかる時間を見込んで時間切れの値を設定する。最初の要求が遅いのは止まっているのではないと理解しておく</td>
+      </tr>
+      <tr>
+        <td class="n">20</td>
+        <td>1 枚の GPU を 2 ランクで分けると、vLLM は相手ランクの使用分を差し引いて見積もる。そのため、片方の KV キャッシュが極端に小さくなる</td>
+        <td>片方のランクだけ KV キャッシュが小さいのを見て、設定ミスや別の欠陥だと誤読しかけた</td>
+        <td>1 枚の GPU を複数ランクで分けるときは、KV キャッシュの見積もりが相手の分を差し引いて計算されることを踏まえる</td>
+      </tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">D</span>考え方</h2>
+    <p class="lead">個別の罠の下に共通していた、3 つの姿勢。</p>
+
+    <table>
+      <tr><th>#</th><th>何が起きたか</th><th>なぜ誤読しかけたか</th><th>どう防ぐか</th></tr>
+      <tr>
+        <td class="n">21</td>
+        <td>「見えなかった」を、対象が無かった証拠として使ってしまう</td>
+        <td>計測器の死角を、対象の不在と取り違える</td>
+        <td>見えるはずのものが見えることを、先に自己テストで確かめる</td>
+      </tr>
+      <tr>
+        <td class="n">22</td>
+        <td>1 つの症状に対して仮説を 3 回立てて、3 回とも否定された</td>
+        <td>「直しても症状が変わらなかった」ことを、直した内容が間違っていた証拠だと誤読しかけた</td>
+        <td>否定された修正でも、それ自体として正しいものは残してよい。ただし「原因だった」とは書かない</td>
+      </tr>
+      <tr>
+        <td class="n">23</td>
+        <td>原因を名指しできた</td>
+        <td>名指しした時点で「分かった」と思い込みかけたが、取り除いて消えることを見るまでは確認になっていない</td>
+        <td>対照実験 (原因だけを取り除く) で「消えること」まで示す。回数が少ないときは、割合ではなく観測として書く</td>
+      </tr>
+    </table>
+
+    <div class="key">
+      <p>D の 3 点は、A・B・C のすべての罠に共通する形をしています。<b>見えなかったものを不在の証拠にしない。否定された修正も残す。名指しは対照実験で確かめる。</b>この 3 つを守ると、個別の罠を踏んだあとの回復が速くなります。</p>
+    </div>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-19-two-host-vllm.html">← 19: 2 台をまたいで vLLM が動いた</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
