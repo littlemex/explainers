@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 57 章 次の設計: 枝刈り・RLCD・内部の信号を答えに添える</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="gateway-index.html">&larr; シリーズ目次（全 57 章）</a> &nbsp;/&nbsp;
+<a href="index.html">全体の目次</a> &nbsp;/&nbsp; 第 11 部 第 57 章 &nbsp;/&nbsp;
+<a href="gateway-56-prismyra-faster.html">前章: 速さを削る</a></p>
+
+<h1>次の設計: 枝刈り・RLCD・内部の信号を答えに添える<br>1 本の論文、1 つのリポジトリ、6 本のレビューから決めたこと</h1>
+
+<div class="lead">
+<p><b>この章の結論。</b>第 56 章の続きとして、次の 3 つを始める前に、何をどう測るかを決めました。</p>
+<ol>
+<li><b>構造化枝刈り</b>で、さらに速くする</li>
+<li>確率が正直になるように学習する <b>RLCD</b> (Reinforcement Learning for Calibrated Decisions、較正された決定のための強化学習) を試す</li>
+<li>モデルの内部の状態 (j score) から、答えに添えて返せる情報を探す</li>
+</ol>
+<p>材料は、Jacobian lens の論文 (arXiv:2607.15495)、CLM (Contrastive Language Models) のリポジトリ、そして 3 つの AI (Opus 5.5、GPT-6 Sol、GPT-6 Astra) による 2 回ずつ計 6 本のレビューです。</p>
+<p style="margin-bottom:0">決めたことの要点は 3 つです。</p>
+<ul>
+<li><b>枝刈りの本命は 2 つ。</b>「使われない専門家を外す」と「答えが読める層より上を切る」です。前者について、残す専門家の数ごとに、ルーターの重み (どの専門家にどれだけ回すか) を何割残せるかを実測しました。</li>
+<li><b>RLCD は、ここでは強化学習である必要がありません。</b>確率の分布がそのまま手に入るので、正しい Brier を直接小さくすれば済みます。</li>
+<li><b>内部の信号は、先行研究の失敗の形に合わせて評価を組みます。</b>前回の j score は「答えが当たりか」の予測で最大確率に負けました。今回は、狙うものごとに評価を分けます。</li>
+</ul>
+</div>
+
+<h2>要約表</h2>
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った・どう決めた</th><th>他の選択肢</th><th>結果・決定</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>どこを削れば速くなるか</td><td>第 56 章の分析: 1 回の計算ごとに 256 個の専門家の重みを全部読む</td><td>一度に選ぶ専門家の数を 8 から 6 に減らす</td><td>専門家の数を減らせば、1 回ごとの固定費が減る。選ぶ数を減らすと、文書を読む計算だけが減る</td><td>§1</td></tr>
+<tr><td class="n">2</td><td>何個まで専門家を外せるか</td><td>学習に使っていない 600 問を Prismyra に通し、層ごとに各専門家が受けたルーターの重みを合計した</td><td>1 つの小さな標本で決める</td><td>上位 128 個 (半分) で平均 91.5%、最も偏らない層でも 78.6%。上位 192 個で平均 98.5%、最低 93.1%</td><td>§2</td></tr>
+<tr><td class="n">3</td><td>外しても計算の決まりは保たれるか</td><td>transformers のルーターのコードを読んだ</td><td>—</td><td>上位 8 個の確率は毎回割り直している。専門家の行を切り出しても決まりは同じで、外した専門家の代わりに次の候補が入るだけ</td><td>§2</td></tr>
+<tr><td class="n">4</td><td>層を切る目安</td><td>論文の Jacobian lens を、Prismyra が読む位置と選択肢の文字だけに絞って作る</td><td>ブロックの影響度 (入力と出力の違い) で選ぶ</td><td>測定中</td><td>§3</td></tr>
+<tr><td class="n">5</td><td>RLCD をどう作るか</td><td>3 つのレビュー</td><td>選んだ 1 つの選択肢の確率に報酬を返す REINFORCE</td><td>正しい多クラス Brier を直接小さくする。REINFORCE は確かめ用。温度を合わせるだけの較正も比較に置く</td><td>§4</td></tr>
+<tr><td class="n">6</td><td>「このモデルが自力で解けるか」の信号 (self_solve)</td><td>3 つのレビュー</td><td>貪欲生成 1 回の正誤をラベルにする</td><td>生成の条件ごとに複数回解かせて成功率をラベルにし、配信と同じ統合後のモデルから特徴を取る。データセットの種類を当てるだけの見かけの良さを、種類ごとの評価で除く</td><td>§5</td></tr>
+<tr><td class="n">7</td><td>セキュリティ・個人情報の信号</td><td>3 つのレビュー</td><td>「セキュリティ」を 1 つのラベルにする</td><td>個人情報の有無、命令の乗っ取り、セキュリティの話題の 3 つに分ける。正例と負例は同じ出典から対で作る</td><td>§6</td></tr>
+<tr><td class="n">8</td><td>CLM から何を取り入れるか</td><td>リポジトリのコードを読んだ</td><td>—</td><td>凍結した隠れ状態に小さな部品を載せる形は取り入れる。文書を質問ごとに読み直す点は取り入れない</td><td>§7</td></tr>
+</table>
+
+<h2>1. どこを削れば速くなるか</h2>
+
+<p>第 56 章で分かったのは、質問を解く計算を 1 回回すたびに、256 個の専門家の重み (1 層あたり 805 MB) を全部読み込むので、中身が少なくても約 60 ms かかることでした。
+構造化枝刈り (まとまった単位で丸ごと外す枝刈り) で効きそうな単位は 2 つあります。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="440" y="20" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">2 つの枝刈りが削るもの</text>
+<rect x="30" y="40" width="380" height="170" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="220" y="64" text-anchor="middle" font-size="13" font-weight="600" fill="#0f4a2e">(A) 専門家を外す (幅の枝刈り)</text>
+<g>
+<rect x="60" y="80" width="18" height="60" fill="#1f7a4d"/><rect x="82" y="80" width="18" height="60" fill="#1f7a4d"/><rect x="104" y="80" width="18" height="60" fill="#1f7a4d"/><rect x="126" y="80" width="18" height="60" fill="#1f7a4d"/>
+<rect x="148" y="80" width="18" height="60" fill="#fbeceb" stroke="#8f2f2f" stroke-dasharray="3 2"/><rect x="170" y="80" width="18" height="60" fill="#fbeceb" stroke="#8f2f2f" stroke-dasharray="3 2"/>
+<rect x="192" y="80" width="18" height="60" fill="#1f7a4d"/><rect x="214" y="80" width="18" height="60" fill="#fbeceb" stroke="#8f2f2f" stroke-dasharray="3 2"/><rect x="236" y="80" width="18" height="60" fill="#1f7a4d"/><rect x="258" y="80" width="18" height="60" fill="#fbeceb" stroke="#8f2f2f" stroke-dasharray="3 2"/>
+</g>
+<text x="300" y="115" font-size="12" fill="#10241b">… 256 個</text>
+<text x="220" y="165" text-anchor="middle" font-size="12" fill="#10241b">あまり使われない専門家を丸ごと外す</text>
+<text x="220" y="187" text-anchor="middle" font-size="12" fill="#0f4a2e">1 回ごとに読む重みが減る → 固定費が減る</text>
+<rect x="470" y="40" width="380" height="170" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="660" y="64" text-anchor="middle" font-size="13" font-weight="600" fill="#1d4e8f">(B) 上の層を切る (深さの枝刈り)</text>
+<g>
+<rect x="520" y="80" width="200" height="12" fill="#1d4e8f"/><rect x="520" y="95" width="200" height="12" fill="#1d4e8f"/><rect x="520" y="110" width="200" height="12" fill="#1d4e8f"/><rect x="520" y="125" width="200" height="12" fill="#1d4e8f"/>
+<rect x="520" y="140" width="200" height="12" fill="#fbeceb" stroke="#8f2f2f" stroke-dasharray="3 2"/><rect x="520" y="155" width="200" height="12" fill="#fbeceb" stroke="#8f2f2f" stroke-dasharray="3 2"/>
+</g>
+<text x="730" y="115" font-size="12" fill="#10241b">答えが読める層</text>
+<text x="730" y="160" font-size="12" fill="#8f2f2f">ここより上は不要</text>
+<text x="660" y="190" text-anchor="middle" font-size="12" fill="#1d4e8f">文書を読む計算も質問の計算も層の数に比例して減る</text>
+<text x="440" y="235" text-anchor="middle" font-size="11.5" fill="#3c5a4c">外した後は LoRA で精度を戻し、配信の前に混ぜ込む (第 55 章と同じ流れ)</text>
+</svg>
+<figcaption>図 1. 幅の枝刈り (A) は 1 回ごとの固定費を削り、深さの枝刈り (B) は全部の計算を比例して削る。</figcaption>
+</figure>
+
+<p>3 つのレビューは、一度に選ぶ専門家の数を 8 個から 6 個に減らす案にそろって反対しました。質問を解く計算では、1 回に数百〜数千のトークンが流れるので、選ぶ数を減らしても 256 個のほぼ全部に誰かが回り、読む重みは変わらないからです。
+選ぶ数を減らして効くのは、計算量で決まる「文書を読む」側だけです。</p>
+
+<h2>2. 何個まで専門家を外せるか</h2>
+
+<p>学習に使っていない 600 問を Prismyra に通し、層ごとに、各専門家が受けたルーターの重み (上位 8 個に選ばれたときの割り直した確率) を合計しました。
+文書を読む計算と質問を解く計算の両方を数えています。上位 K 個の専門家が全体の何割を受け持っているかは次のとおりです。</p>
+
+<table>
+<tr><th>残す専門家の数 (256 個中)</th><th>40 層の平均</th><th>一番偏りの小さい層</th></tr>
+<tr><td>192 個 (4 分の 3)</td><td class="n">98.5%</td><td class="n">93.1%</td></tr>
+<tr><td>128 個 (半分)</td><td class="n">91.5%</td><td class="n">78.6%</td></tr>
+<tr><td>96 個 (8 分の 3)</td><td class="n">84.1%</td><td class="n">66.9%</td></tr>
+</table>
+
+<p>半分に減らしても、平均では 9 割以上の重みが残る専門家に行っていました。ただし層によっては 2 割以上が外す専門家に行くので、層ごとに残す数を変える余地があります。
+レビューで挙がった注意点は次の 4 つで、どれも計画に入れました。</p>
+<ul>
+<li>頻度だけでは、めったに使われないが特定の課題で決定的な専門家を落とす。そこで、答えを読む位置での重みも別に数え、外した後の選択肢の分布の変化 (KL) で確かめる。</li>
+<li>どの K にするかは、評価の 5 セットではなく、学習に使っていない train の行で決める。</li>
+<li>精度を戻す学習では、LoRA に加えてルーターの重みも学習させ、枝刈り前のモデルの確率分布に近づける学習 (蒸留) も併用する。</li>
+<li>専門家の数が変わると、vLLM の計算部品の設定表が合わなくなる。数ごとに計算単体の時間を測ってから精度を見る。</li>
+</ul>
+
+<h2>3. 答えが読める層を探す (Jacobian lens)</h2>
+
+<p>Jacobian lens の論文 (arXiv:2607.15495、Anthropic) は、途中の層の状態が「最終的にどの単語を出させやすいか」を線形に読み取る方法を提案しています。
+途中の層に小さなずれを加えたときに、出力がどう動くか (Jacobian) を、たくさんの文脈で平均するだけです。論文によると、読み取れる中身がまとまっているのは中間の層だけで、層は次の 3 つに分かれます。</p>
+<ul>
+<li>最初の約 3 分の 1: 中身がまだない</li>
+<li>長い中間の帯: 作業場 (workspace)</li>
+<li>最後の数層: 出力を組み立てる帯</li>
+</ul>
+<p>中間の帯の中身を消しても、普通の文章の予測はほとんど壊れず、壊れるのは頭の中での多段の推論だけでした。</p>
+
+<p>Prismyra が読むのは、1 つの位置と、宣言された選択肢の文字だけです。そこで lens も、その位置のその文字に絞って作ります。層 l・文字 t ごとに、読み出しの値を層 l の状態で微分したものを学習用の文脈で平均し、それを層ごとの読み取りの向きにします。
+答えがある層で最終層と同じくらい読めるなら、その層より上を切り、切った後のモデルを LoRA で学習し直します。これが (B) の深さの枝刈りです。文書を読む計算も質問を解く計算も、切った層の数に比例して減ります。</p>
+
+<p>第 8 章 (Jev シリーズ) で、深さ 0.25 付近の読み取りが選択肢の並び順の影響を減らし、質問ごとに最良の深さが違うことを学習ゼロで測っていました。今回はそれを、学習済みの Prismyra 35B と 40 層すべてで測ります。<b>測定中です。</b></p>
+
+<h2>4. RLCD をどう作るか</h2>
+
+<p>RLCD は TypeSafe が Jev の学習に使うと説明している手法で、公開されているのは目的だけです。「確率 0.8 と言ったものは 8 割当たる」ように確率を正直にすることが狙いで、正答率を上げることではありません (Jev シリーズ第 3 章)。
+最初の計画は「選択肢を 1 つ選ばせ、その確率が正誤とどれだけずれたかを報酬にする」でした。3 つのレビューはこれにそろって 2 つの問題を指摘しました。</p>
+
+<ul>
+<li><b>その報酬は正直さを促さない。</b>選んだ選択肢の正誤とその確率のずれは、全選択肢の Brier と同じではありません。4 択では、真の確率を言うのが最適になるとは限りません。</li>
+<li><b>強化学習である必要がない。</b>Prismyra は選択肢の確率分布をそのまま計算するので、期待報酬は閉じた式で書けて直接微分できます。サンプルを取る REINFORCE は、同じ目的をばらつき付きで推定するだけです。そもそも第 55 章の学習の損失 (正解の対数確率) は、正直さを促す採点 (proper scoring rule) の一つです。</li>
+</ul>
+
+<p>そこで、正しい多クラス Brier (全選択肢の確率と正解の 0/1 の差の 2 乗の和) を直接小さくする学習を本体にします。REINFORCE は、同じ勾配になることを確かめるためだけに回します。
+比べる相手として、温度を 1 つ合わせるだけの較正も置きます。評価は、較正の誤差 (ECE)、Brier、正答率、そして「正答率 95% を保ったまま任せられる割合」です。その割合の閾値は、評価セットではなく別のデータで決めてから当てます。</p>
+
+<h2>5. 「このモデルが自力で解けるか」を答えに添える (self_solve)</h2>
+
+<p>依頼は、振り分けの判断のために「このモデル (いまは Qwen3.6-35B-A3B) が普通の LLM として解いたら、1 回で解けそうか」の自信を出すことです。
+2023〜2024 年の研究 (レビューが挙げたもの: 自分が答えを知っているかを当てる P(IK)、正誤の予測は課題をまたぐとほぼ通用しないという報告) から、この信号は隠れ状態に入っている可能性が高い一方、見かけの良さに騙されやすいことも分かっています。</p>
+
+<figure>
+<svg viewBox="0 0 880 230" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Hiragino Kaku Gothic ProN,sans-serif">
+<text x="440" y="20" text-anchor="middle" font-size="12.5" font-weight="600" fill="#10241b">内部の信号を答えに添える位置 (配信の時間を増やさない)</text>
+<rect x="30" y="50" width="330" height="60" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="195" y="76" text-anchor="middle" font-size="13" font-weight="600" fill="#1d4e8f">文書を読む (もともとの計算)</text>
+<text x="195" y="97" text-anchor="middle" font-size="12" fill="#10241b">最後のトークンの隠れ状態 (選んだ層だけ)</text>
+<path d="M360 80 L420 80" stroke="#10241b" stroke-width="2" marker-end="url(#a57)"/>
+<rect x="425" y="50" width="200" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="525" y="76" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0f4a2e">線形の見分け器</text>
+<text x="525" y="97" text-anchor="middle" font-size="12" fill="#10241b">2,048 次元の内積 1 回</text>
+<path d="M625 80 L680 80" stroke="#10241b" stroke-width="2" marker-end="url(#a57)"/>
+<rect x="685" y="40" width="170" height="80" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="770" y="64" text-anchor="middle" font-size="12" fill="#10241b">self_solve</text>
+<text x="770" y="84" text-anchor="middle" font-size="12" fill="#10241b">個人情報・乗っ取り</text>
+<text x="770" y="104" text-anchor="middle" font-size="12" fill="#10241b">(頼まれたときだけ)</text>
+<rect x="30" y="140" width="330" height="55" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="195" y="164" text-anchor="middle" font-size="13" font-weight="600" fill="#1d4e8f">質問を解く (もともとの計算)</text>
+<text x="195" y="184" text-anchor="middle" font-size="12" fill="#10241b">選択肢の文字の確率 = 今の答え</text>
+<defs><marker id="a57" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#10241b"/></marker></defs>
+<text x="620" y="175" text-anchor="middle" font-size="11.5" fill="#3c5a4c">既定では切っておく。入れたときの時間は必ず測る</text>
+</svg>
+<figcaption>図 2. 見分け器は、文書を読むときにもう計算している隠れ状態に掛けるだけなので、計算の回数は増えない。取り出しと保持の手間は、入れたときに実測する。</figcaption>
+</figure>
+
+<p>レビューを受けて、評価の組み方を次のように決めました。</p>
+<ul>
+<li><b>ラベルは「生成の条件ごとの成功率」にする。</b>貪欲生成 1 回の正誤ではなく、配信で使う温度と、考える (thinking) モードの有無ごとに、問題あたり 5〜10 回解かせた成功率にします。thinking のありとなしは別の信号として扱います。</li>
+<li><b>特徴は、配信と同じ統合後のモデルから取る。</b>配信時に手に入るのはそれだけだからです。アダプターを作り直したら、見分け器も作り直します。</li>
+<li><b>データセットの種類を当てるだけの良さを除く。</b>GSM8K と MMLU-Pro では正答率がそもそも違うので、種類を当てるだけで全体の見分けの成績は高く出ます。主な指標は種類の中での見分けの成績にし、「種類と長さだけ」の予測に対する上積みを報告します。</li>
+<li><b>比べる相手を強くする。</b>次の 3 つと比べます。
+  <ul>
+  <li>文の埋め込みに線形の予測器を載せたもの</li>
+  <li>「この問題を正しく解けますか」と Prismyra に聞いた答え (較正したもの)</li>
+  <li>データセットの種類ごとの正答率</li>
+  </ul></li>
+<li><b>振り分けの得を測る。</b>同じ問題を強いモデルにも解かせ、「決めた正答率を保ったまま、このモデルに残せる割合」と費用を測ります。強いモデルも解けない問題を回しても得がないからです。</li>
+<li><b>読む位置を比べる。</b>最後のトークン、全トークンの平均、GDN 層の再帰の状態 (文書全体の要約で、もう計算している) を比べます。</li>
+</ul>
+
+<h2>6. セキュリティと個人情報の信号</h2>
+
+<p>依頼の中心は、「出力には出てこないが、内部ではセキュリティや個人情報だと判断している」ことを取り出せるか、そして今の質問の形で十分か、それとも深い層と出力の層は違うのか、です。
+レビューは 3 つとも、まず「セキュリティ」という 1 つのラベルが、別々の 3 つを混ぜていると指摘しました。そこで次の 3 つに分けます。</p>
+
+<table>
+<tr><th>信号</th><th>正例と負例の作り方</th><th>比べる相手</th></tr>
+<tr><td>個人情報を含むか</td><td>同じ文で、個人情報を自然な別の語に置き換えたものを負例にする (「[NAME]」のような伏せ字の跡で当てられないように)</td><td>正規表現、Presidio。メールや電話番号は正規表現にほぼ勝てないので、文脈で決まる個人情報に絞る</td></tr>
+<tr><td>命令の乗っ取り (prompt injection)</td><td>同じ課題に乗っ取りの文を混ぜたものと混ぜないものを対にする。攻撃の手口ごとに分けて評価する</td><td>Llama Prompt Guard</td></tr>
+<tr><td>セキュリティの話題か</td><td>正当なセキュリティの相談、攻撃文の引用、無関係な文を同じ出典から集める</td><td>文の埋め込みの予測器</td></tr>
+</table>
+
+<p>「深い層と出力は違うか」は、次の 3 つを<b>同じ入力で</b>並べて測ります。</p>
+<ol>
+<li>質問して読む (今の Prismyra の形)</li>
+<li>質問せずに、層ごとの隠れ状態に見分け器を掛ける</li>
+<li>Jacobian lens で「password」「private」などの語の読み取りを見る</li>
+</ol>
+<p>語のリストは結果を見る前に固定します。食い違いは「質問した答えと見分け器の誤りが重ならない問題」として定義し、中身を分類します。
+評価は、実際に起こりそうな割合での適合率と、誤検知の割合を固定したときの検出率にします。珍しいものを探す用途では、誤検知が効いてくるからです。</p>
+
+<p><b>隠れ状態そのものは記録に残しません。</b>隠れ状態から元の文をかなり復元できることが知られているので、個人情報を見つけるために隠れ状態を保存するのは本末転倒です。残すのは数値の出力だけにします。</p>
+
+<h2>7. CLM から何を取り入れるか</h2>
+
+<p>CLM (Contrastive Language Models) は、Jev と同じ System One 形式の API で答える公開のモデルです。リポジトリのコードから読み取れる作りは次のとおりです (ブログは Notion で描画されるため、ここでは読んでいません)。</p>
+<ul>
+<li>凍結した Qwen3-8B の最後のトークンの埋め込み (4,096 次元) に、学習する射影部品を状態用と行動用に 1 つずつ載せ、512 次元に落とす。部品の大きさは、リポジトリの説明では 2,000 万個の値。</li>
+<li>2 つの似ている度合い (余弦) に拡大率を掛けて、選択肢の確率にする。</li>
+<li>学習は、状態と、実際に取った行動を引き寄せる対照学習 (InfoNCE)。質問と答え 6,000 万組、難しい誤答 3,000 万件、エージェントの行動記録 100 万件の 3 段階。</li>
+<li>選択肢の埋め込みは使い回す。状態は、質問の指示を足して質問ごとに埋め込み直す。</li>
+<li>リポジトリは、Jev と同程度の成績で最大 9 倍速いこと、軽い追加学習で検証器として Terminal-Bench 2.1 で 87.6%、DeepSWE で 81.6% を出したことを主張している (ここでは確かめていない)。</li>
+</ul>
+
+<table>
+<tr><th>CLM の設計</th><th>Prismyra にとって</th></tr>
+<tr><td>凍結した隠れ状態に小さな部品を載せて学習する</td><td class="y">§5・§6 の見分け器と同じ形。部品が小さくて済むことの裏付けになる</td></tr>
+<tr><td>選択肢の文章を埋め込み、似ている度合いで選ぶ</td><td class="y">Prismyra は選択肢の文字 1 トークンしか読めない (長い選択肢は拒否する)。自由な候補を並べ替える機能を足すなら、この形が候補になる</td></tr>
+<tr><td>状態を質問ごとに埋め込み直す</td><td class="no">Prismyra は文書を 1 回読んで枝分かれする。質問が多いほど、こちらが有利</td></tr>
+<tr><td>最大 2,048 トークンで切る (既定)</td><td class="no">Prismyra は 1 万トークンの文書で精度を確かめている (第 55 章)</td></tr>
+</table>
+
+<h2>まだ言えないこと</h2>
+<ul>
+<li>専門家の枝刈りは、重みの受け持ちを数えただけで、精度と速さはまだ測っていません。</li>
+<li>Jacobian lens で答えが何層目で読めるかは測定中です。</li>
+<li>self_solve、セキュリティ、個人情報のどれも、まだデータを作っていません。この章は設計の記録です。</li>
+<li>レビューが挙げた先行研究 (P(IK)、正誤の予測が課題をまたがないという報告、乗っ取りの検出など) は、この章では読み直していません。</li>
+</ul>
+
+<p class="foot">
+専門家の受け持ち: Prismyra 35B (第 55 章の学習済み) に、学習に使っていない train の行 450 問と長文 150 問を 1 問ずつ枝分かれで通し、上位 8 個に選ばれたときの割り直した確率を、層ごとに専門家別に合計した。
+レビュー: 同じ計画文を 3 つの AI に別々に渡した (枝刈り・RLCD の計画と、内部の信号の計画で 2 回)。
+</p>
+
+</div>
+</body>
+</html>
