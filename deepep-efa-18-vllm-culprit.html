@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 18: vLLM が動いた。犯人は vLLM 自身だった</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:920px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:26px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14.5px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:var(--code);color:#dbefe4;border-radius:12px;padding:16px 18px;overflow:auto;font-size:13.5px;line-height:1.65}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .steps{counter-reset:s;padding:0;list-style:none;margin:16px 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 46px;border-bottom:1px dashed var(--line)}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:30px;height:30px;
+    background:var(--g2);color:#fff;border-radius:50%;text-align:center;line-height:30px;font-weight:700}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .mid{color:#8a6d1f;font-weight:700}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 18</p>
+  <h1>vLLM が動いた。犯人は vLLM 自身だった</h1>
+  <p>4 つの計測器を 1 つずつ潰し、最後に残った場所を捕まえたら、そこは DeepEP でもエミュレータでもなかった</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>症状</h2>
+    <p class="lead">vLLM で DeepEP V2 を使うと、起動の途中で Python の中が壊れていた。</p>
+
+    <p>vLLM で DeepEP V2 を使うと、<b>起動の途中 (モデルの読み込み直後) で Python の中でセグフォルトしていました</b>。一度だけ、最後まで動いた回もありましたが、答えは <code>perturbed is perturbed is …</code> という壊れた文字列でした。DeepEP を使わない対照は <code>Paris.</code> と正しく答えます。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>犯人を絞った順番 (消去法)</h2>
+    <p class="lead">1 つの計測器は、見える範囲が決まっている。範囲を 1 つずつ潰していく。</p>
+
+    <table>
+      <tr><th>調べた場所</th><th>使った道具</th><th>結果</th></tr>
+      <tr><td>(a) エミュレータ</td><td>AddressSanitizer 付きでビルド</td><td class="ok">報告なし。ヒープ上の 512 バイトの窓への書き込みは、すべて正当だった</td></tr>
+      <tr><td>(b) DeepEP 本体</td><td>AddressSanitizer 付きでビルド</td><td class="ok">報告なし</td></tr>
+      <tr><td>(c) GPU 側</td><td>compute-sanitizer (範囲外アクセスを調べる道具)</td><td class="ok">違反なし</td></tr>
+      <tr><td>(d) 第 17 回の D7 (窓の登録解除漏れ)</td><td>窓の登録・登録解除のログ</td><td class="ok">窓の破棄が起きていないので、当てはまらない</td></tr>
+    </table>
+
+    <div class="key">
+      <p>ここまでで、<b>エミュレータ・DeepEP の host 側・GPU カーネル</b>の 3 つが外れました。残る場所は、それ以外のどこかです。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>決め手</h2>
+    <p class="lead">CPython 自身のデバッグ用メモリ管理が、両ランクで同じ場所を捕まえた。</p>
+
+    <p>CPython のデバッグ用メモリ管理 (<code>PYTHONMALLOC=debug</code>、Python が確保した領域の前後を見張って、余分な書き込みを捕まえる仕組み) を使うと、<b>両ランクで同じ場所</b>が引っかかりました。<b>56 バイトとして確保した領域の直後の 8 バイトが上書き</b>されていて、その領域を解放したのは vLLM の <code>_check_gin_support</code> でした。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>原因</h2>
+    <p class="lead">vLLM が申告したバージョンと、実際に受け取る構造体の大きさが合っていなかった。</p>
+
+    <p>vLLM 0.28 は、NCCL の通信路の性質を受け取る構造体 (<code>ncclCommProperties</code>) を、ctypes (C の構造体を Python から使う仕組み) で定義しています。その定義は<b>NCCL 2.31 より前の並び</b> (56 バイト) のままでした。ところが vLLM は NCCL を呼ぶときに「自分は NCCL 2.31 以上だ」と申告します。</p>
+
+    <p><b>NCCL 2.31 は、申告されたバージョンをそのまま信じて</b>、2.31 で増えたフィールドまで書き込みます。構造体全体としては 144 バイトです。つまり、vLLM が確保した 56 バイトの後ろに、<b>88 バイトが余分に書き込まれていました</b>。捕まった 8 バイトは、ちょうどオフセット 56 にある <code>commHash</code> (ハッシュ値を入れる場所) に当たります。</p>
+
+    <div class="warn">
+      <p><b>NCCL 側にも防ぐ手はありました。</b>構造体の先頭には <code>size</code> (呼び出し側が用意した構造体の大きさ) を書く場所があります。NCCL がそこを見て、申告されたバージョンではなく、実際に用意された大きさに合わせて書き込んでいれば、この事故は起きませんでした。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>証明</h2>
+    <p class="lead">この定義だけを直したら、症状は消え、答えも正しくなった。</p>
+
+    <p>vLLM のこの定義だけを、<b>NCCL 2.31 と同じ 144 バイトに直しました</b>。すると、それまで毎回起きていたセグフォルトが消え、<b>2 回中 2 回とも起きませんでした</b>。vLLM は DeepEP V2 とエミュレータの上で<b>初めて起動を完了</b>し、答えは <code>Paris.\n\nThe capital of the United States is Washington, D.C. …</code> になりました。これは、DeepEP を使わない対照の答えと<b>1 文字も違いません</b>。</p>
+
+    <div class="key">
+      <p>9 月に見えていた <code>perturbed is perturbed is …</code> という壊れた答えも、<b>同じヒープ破壊で説明がつきます</b>。壊れた回だけ最後まで走り、それ以外は途中でセグフォルトしていた、という関係です。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>教訓</h2>
+    <p class="lead">「落ちるのは呼んだ直後」でも、犯人はその名前とは限らない。</p>
+
+    <p>「落ちるのは DeepEP を呼んだ直後」だからといって、<b>犯人が DeepEP とは限りません</b>。計測器ごとに見える範囲が決まっているので、見える範囲を 1 つずつ潰していくと、<b>最後に残った場所が犯人になります</b>。今回は、エミュレータ・DeepEP・GPU カーネルの 3 つを潰して初めて、vLLM 自身という場所が残りました。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">7</span>意味すること (誇張しない)</h2>
+    <p class="lead">これは vLLM 側への報告事項であり、範囲を正しく書く。</p>
+
+    <p>これは<b>vLLM への報告事項</b>です。DeepEP V2 を NCCL 2.31 以上で使う vLLM の利用者<b>全員に関係しうる</b>問題です。今回確かめたのは<b>vLLM 0.28 と NCCL 2.31 から 2.32 の組み合わせ</b>で、本物の EFA 上ではまだ確認していません。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">8</span>おまけ: 最初の生成が遅い件</h2>
+    <p class="lead">止まっていたのではなく、初回の準備に時間がかかっていた。</p>
+
+    <p>起動が完了したあと、<b>最初の生成には 2 分以上かかりました</b>。これは、初回だけ発生するカーネルのその場コンパイル (JIT) などの準備によるもので、<b>止まっていたわけではありません</b>。2 回目以降の生成はこの時間を必要としません。</p>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-17-teardown-crash.html">← 17: 「後片付けで落ちる」の正体</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
