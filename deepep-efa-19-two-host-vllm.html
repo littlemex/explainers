@@ -167,7 +167,73 @@
   </section>
 
   <section>
-    <h2><span class="num">8</span>これで何ができるようになったか (誇張しない)</h2>
+    <h2><span class="num">8</span>GDRCopy なしが 79 倍速くなった: MPS</h2>
+    <p class="lead">別のコンテキストを使うと、GPU の計算を「順番待ち」してしまうのが遅さの正体だった。「同時に使う」形に変えたら、大きく速くなった。</p>
+
+    <h3>なぜ遅かったか</h3>
+    <p>GDRCopy が無いとき、エミュレータは自分専用の CUDA コンテキストからコピーします (第 15 回)。ところが、アプリのカーネルが GPU の SM (計算をする部品) をすべて使って常駐しているあいだ、この<b>別のコンテキストは「順番が来たときだけ」しか使わせてもらえません</b>。RTX PRO 6000 の全 SM を使う常駐カーネルがある状態で測ると、<b>コピー 1 回 (完了を待つところまで含めて) に 2,283 マイクロ秒</b>かかりました。</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 720 230" role="img" aria-label="MPS が無いと順番待ちになり、MPS があると同時に進む">
+        <text x="20" y="28" font-size="14" font-weight="700" fill="#0f5132">MPS なし ―― 順番待ち (時分割)</text>
+        <rect x="20" y="40" width="680" height="30" rx="6" fill="#eef4f0" stroke="#d9e5df"/>
+        <rect x="20" y="40" width="140" height="30" fill="#8fd6b4"/>
+        <rect x="160" y="40" width="40" height="30" fill="#f0b6a3"/>
+        <rect x="200" y="40" width="140" height="30" fill="#8fd6b4"/>
+        <rect x="340" y="40" width="40" height="30" fill="#f0b6a3"/>
+        <rect x="380" y="40" width="140" height="30" fill="#8fd6b4"/>
+        <rect x="520" y="40" width="40" height="30" fill="#f0b6a3"/>
+        <rect x="560" y="40" width="140" height="30" fill="#8fd6b4"/>
+        <text x="90" y="60" text-anchor="middle" font-size="11" fill="#0f5132">常駐カーネル</text>
+        <text x="180" y="60" text-anchor="middle" font-size="10" fill="#b5401f">待</text>
+        <text x="450" y="88" text-anchor="middle" font-size="12" fill="#4a5d54">別コンテキストのコピーは、順番が来た一瞬だけ進む ―― 1 回 2,283 µs</text>
+
+        <text x="20" y="128" font-size="14" font-weight="700" fill="#0f5132">MPS あり ―― 同時に進む</text>
+        <rect x="20" y="140" width="680" height="30" rx="6" fill="#eef4f0" stroke="#d9e5df"/>
+        <rect x="20" y="140" width="680" height="30" fill="#8fd6b4"/>
+        <text x="360" y="160" text-anchor="middle" font-size="11" fill="#0f5132">常駐カーネル (ずっと動いている)</text>
+        <rect x="20" y="178" width="680" height="20" rx="5" fill="#eaf5ef" stroke="#198754"/>
+        <rect x="20" y="178" width="680" height="20" fill="#43b581" opacity="0.85"/>
+        <text x="360" y="192" text-anchor="middle" font-size="11" fill="#08281c">別コンテキストのコピーも、ずっと動いている ―― 1 回 8.8 µs</text>
+
+        <text x="360" y="222" text-anchor="middle" font-size="12.5" fill="#4a5d54">同じ GPU の同じ時間を、順番待ちするか、同時に使うかの違い</text>
+      </svg>
+      <p class="cap">上: MPS が無いと、別コンテキストは常駐カーネルの合間の一瞬しか進めない。下: MPS があると、両方が同時に進む。</p>
+    </div>
+
+    <h3>試した案 1: green context</h3>
+    <p><b>コピー 1 回が 8.9 マイクロ秒</b>になりました (約 256 倍速い)。ただし green context (CUDA の軽量な追加コンテキストの仕組み) は、<b>アプリ自身の内部ロックを共有します</b>。アプリがモジュールを読み込むとき ―― DeepEP はその場でカーネルをコンパイルして読み込みます (第 10 回) ―― <b>コピーが 20 秒間止まりました</b>。vLLM の上では 64 件配達したところで止まり、DeepEP のカーネルがタイムアウトしました。</p>
+
+    <div class="warn">
+      <p><b>DeepEP の上では使えません。</b>オプトインの設定として残しますが、既定では使いません。</p>
+    </div>
+
+    <h3>試した案 2: MPS</h3>
+    <p><b>MPS</b> (NVIDIA が持つ、<b>複数のコンテキストが同時に GPU を使える仕組み</b>) を使いました。別コンテキストは<b>アプリのコンテキストと同時に</b>動き、<b>自分専用のロック</b>を持ちます。コピー 1 回は <b>8.8 マイクロ秒</b>で、<b>モジュールの読み込みが起きても止まりません</b>。</p>
+
+    <h3>vLLM での実測</h3>
+    <p>128 本の同じ要求を同時に送り、<b>128 本すべての答えが一致</b>することを確かめました。</p>
+
+    <table>
+      <tr><th>経路</th><th>MPS なし</th><th>MPS あり</th></tr>
+      <tr><td>GDRCopy なし</td><td class="no">1,655 秒</td><td class="ok">21 秒 (約 79 倍速い。続けて 3 回: 22・20・20 秒)</td></tr>
+      <tr><td>GDRCopy あり</td><td>77〜91 秒</td><td>79 秒</td></tr>
+      <tr><td>NCCL 内蔵の TCP 実装 (基準、第 7 回)</td><td colspan="2">90 秒</td></tr>
+    </table>
+
+    <div class="key">
+      <p><b>いちばん速いのは「GDRCopy なし + MPS」</b>です。GDRCopy が使えない環境でも、GDRCopy がある環境と同じくらいの速さになりました。</p>
+    </div>
+
+    <h3>検査は今も効く</h3>
+    <p>順序の約束をわざと破る (<code>violate-i1</code>) と、答えは <code>a theTEXPORT is the to the time …</code> のような壊れた文字列になり、<b>実行は失敗</b>します。速くしても、壊れるべきときに壊れることは変わっていません。</p>
+
+    <h3>安全のための対策</h3>
+    <p>MPS のサーバは<b>専用のパイプ用ディレクトリ</b>を使い、実行が終わると<b>止まります</b>。<b>GPU 上に他のプロセスが動いている間は起動しません</b>。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">9</span>これで何ができるようになったか (誇張しない)</h2>
 
     <p><b>できるようになったこと。</b>EFA の無い環境で、DeepEP V2 を使う<b>本物の推論ワークロード</b>を、複数のノードにまたがって、<b>答えの正しさまで</b>確かめられます。1 台で 2 ランク、GDRCopy なし (非同期の配達)、2 台で 1 ランクずつ、のどれでも正しい答えになりました。</p>
 
@@ -177,7 +243,7 @@
   </section>
 
   <section>
-    <h2><span class="num">9</span>ここまでの構成の一覧</h2>
+    <h2><span class="num">10</span>ここまでの構成の一覧</h2>
 
     <table>
       <tr><th>構成</th><th>GDRCopy</th><th>結果</th></tr>
@@ -186,6 +252,8 @@
       <tr><td>1 台 2 ランク、RTX PRO 6000 (vLLM 0.30.0、エミュレータ経由を確認済み)</td><td>あり</td><td class="ok">正解。32 本同時 32 本一致 (20 秒)</td></tr>
       <tr><td>同じ構成</td><td>なし (非同期の配達)</td><td class="ok">正解。32 本同時 32 本一致 (394 秒)</td></tr>
       <tr><td>同じ構成、backend は NCCL 2.32 の TCP 実装 (基準)</td><td>あり (NCCL 自身が要求)</td><td class="ok">正解。32 本同時 32 本一致 (31 秒)、128 本同時も一致 (90 秒)</td></tr>
+      <tr><td>同じ構成、MPS あり</td><td>なし</td><td class="ok">正解。128 本同時 128 本一致 (21 秒、続けて 3 回: 22・20・20 秒)</td></tr>
+      <tr><td>同じ構成、MPS あり</td><td>あり</td><td class="ok">正解。128 本同時 128 本一致 (79 秒)</td></tr>
       <tr><td>1 台 2 ランク、H100 (vLLM 0.30.0)</td><td>あり</td><td class="ok">正解 (3 回)</td></tr>
       <tr><td>2 台、1 ランクずつ、H100 (vLLM 0.30.0)</td><td>あり</td><td class="ok">正解</td></tr>
       <tr><td>2 台、1 ランクずつ、H100 (vLLM 0.30.0)</td><td>なし (非同期の配達)</td><td class="ok">正解 (全体で 489 秒)</td></tr>
