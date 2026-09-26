@@ -52,7 +52,7 @@
 <header>
   <p class="kicker">DEEPEP と EFA ・ 21</p>
   <h1>DeepEP が届き終わる前の記録を読んでいた (H4)</h1>
-  <p>本物の検査をやっと走らせたら、DeepEP 自身の中に、まだ書き終わっていない記録を読んでしまう場所が見つかった</p>
+  <p>本物の検査をやっと走らせたら、DeepEP 自身の中に、まだ書き終わっていない記録を読んでしまう場所が見つかった。原因は特定し、直した (第 7 節)</p>
 </header>
 <main>
   <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
@@ -148,6 +148,10 @@
     <div class="warn">
       <p><b>DeepEP のどの行が原因かは、まだ特定できていません。</b>手がかりは 1 つあります。キャッシュされた dispatch は「通知用の warp」を使わない形で動くため、channel と QP の対応、そして完了通知の番号の割り振りが、通常の dispatch (handle を作る側) とキャッシュされた dispatch (それを再利用する側) で<b>違っています</b>。</p>
     </div>
+
+    <div class="key">
+      <p><b>解明しました。</b>原因は、まさにこの channel と QP の対応のずれでした。詳しくは第 7 節。</p>
+    </div>
   </section>
 
   <section>
@@ -158,7 +162,79 @@
       <li><b>エミュレータが約束を破っている</b>可能性 ―― 失敗するすべてのモードで、弱い通知の契約 (第 12 回・第 14 回で見た I1) は<b>守られています</b></li>
       <li><b>2 つの書き込みが同じ相手の同じ場所に重なっている</b>可能性 ―― 新しく作った検出の仕組みで調べても、<b>重なりは見つかりません</b>でした</li>
       <li><b>検査自身の比べ方が間違っている</b>可能性 ―― 古い回の行が紛れ込んでいるといった不具合は<b>見つかりません</b>でした</li>
+      <li><b>送信側が、送り終える前に送信用のバッファを書き換えている</b>可能性 ―― 送り出す瞬間の中身を控えておき、届いた瞬間に読まれた中身と比べても、<b>差はありませんでした</b></li>
     </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">7</span>原因が分かった: 合図の番号の取り合い</h2>
+    <p class="lead">DeepEP 自身のコードの中に、しきり合わせの合図と、部品の合図が、同じ番号を取り合う場所があった。</p>
+
+    <h3>どうやって見つけたか (順番に)</h3>
+    <p>まず、2 つの見立てを消しました。<b>「送信側が、送り終える前に送信用のバッファを書き換えていた」</b>という見立ては、送り出す瞬間の中身を控えて届いた瞬間の中身と比べても差が無く、消えました。<b>「検査そのものが間違っている」</b>という見立ても、第 6 節のとおり消えました。</p>
+
+    <p>次に、DeepEP の受信側が守るべき決まり (invariant) に注目しました。<b>「合図が届いた数 (landed) は、見えているヘッダーの数 (num_valid) を絶対に超えない」</b>という決まりです。これが破れていないかを、その場で表示する検査を <b>DeepEP 自身の GPU コードの中</b>に差し込みました。</p>
+
+    <div class="warn">
+      <p><b>最初の 1 回目は、何も表示されませんでした。</b>ところが、「この検査は動いています」という<b>必ず出るはずの表示すら出ませんでした</b>。調べると、DeepEP の JIT (その場でカーネルをコンパイルする仕組み) は、<b>手元のチェックアウトではなく、インストール済みのパッケージの方のヘッダーを読んでいた</b>のです。<b>「何も出なかった」は「動いていない」の証拠にはなりません</b> ―― これも第 20 回で繰り返し出てきた形の罠でした (項目 45)。</p>
+    </div>
+
+    <p>正しいヘッダーに検査を差し込み直すと、<b>キャッシュされた dispatch のときだけ</b>、<b>すべてのランクで</b>、<b>channel 0 の part 0 と 1 だけ</b>、<code>landed 3 &gt; num_valid 2</code> という表示が出ました。実行の最後に数を合わせ直す処理 (drain) も、<b>合図が 1 個多い (3 個届いたのに 2 個のはず)</b> と報告しました。<b>毎回、必ず</b>起きていました。</p>
+
+    <h3>原因</h3>
+    <p>DeepEP には、ランク同士のタイミングを合わせる「しきり」があります (<code>gin_barrier_wo_local_sync</code>)。この「しきり」は<b>いつも QP 0 の上で、番号 0 から (ランク数 − 2) までの合図</b>を使います。通常の dispatch は「通知用」の分を確保するので、<b>データを運ぶ channel は QP 0 を使いません</b>。ところが<b>キャッシュされた dispatch には通知用の分が無い</b>ため、<b>channel 0 の part の合図 (番号 0〜3) が、しきりと同じ QP 0 の同じ番号に乗ってしまいます</b>。</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 720 300" role="img" aria-label="QP 0 の合図の番号を、しきり合わせと channel 0 が取り合う">
+        <text x="20" y="26" font-size="14" font-weight="700" fill="#0f5132">通常の dispatch ―― QP 0 はしきり合わせだけの持ち物</text>
+        <rect x="20" y="38" width="330" height="46" rx="8" fill="#eaf5ef" stroke="#198754"/>
+        <text x="185" y="66" text-anchor="middle" font-size="12.5" fill="#0f5132">QP 0: しきり合わせの合図 (0〜ランク数-2)</text>
+        <rect x="390" y="38" width="310" height="46" rx="8" fill="#eef4f0" stroke="#d9e5df"/>
+        <text x="545" y="66" text-anchor="middle" font-size="12.5" fill="#4a5d54">別の QP: channel 0 の part 合図</text>
+
+        <text x="20" y="118" font-size="14" font-weight="700" fill="#0f5132">キャッシュされた dispatch ―― QP 0 を 2 つが取り合う</text>
+        <rect x="20" y="130" width="680" height="56" rx="8" fill="#fdf1ec" stroke="#f0b6a3"/>
+        <text x="360" y="152" text-anchor="middle" font-size="12.5" fill="#b5401f" font-weight="700">QP 0 の同じ番号 0〜3 を、しきり合わせと channel 0 の part 合図が両方使う</text>
+        <text x="360" y="172" text-anchor="middle" font-size="11.5" fill="#4a5d54">(通知用の分が無いので、channel 0 が QP 0 に入り込む)</text>
+
+        <rect x="40" y="204" width="290" height="42" rx="8" fill="#eef4f0" stroke="#d9e5df"/>
+        <text x="185" y="222" text-anchor="middle" font-size="11.5" fill="#0f5132">速いランク: 次の回のしきり合図を先に出す</text>
+        <text x="185" y="238" text-anchor="middle" font-size="11" fill="#4a5d54">(自分の channel 0 はもう届いている)</text>
+
+        <path d="M330 225 L390 225" stroke="#b5401f" stroke-width="2" marker-end="url(#a21b)"/>
+        <defs><marker id="a21b" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#b5401f"/></marker></defs>
+
+        <rect x="390" y="204" width="290" height="42" rx="8" fill="#fdf1ec" stroke="#f0b6a3"/>
+        <text x="535" y="222" text-anchor="middle" font-size="11.5" fill="#b5401f">遅いランク: まだ届いていない channel 0 の数に紛れ込む</text>
+        <text x="535" y="238" text-anchor="middle" font-size="11" fill="#4a5d54">(自分のデータより先に、この合図だけ着く)</text>
+
+        <rect x="120" y="258" width="480" height="34" rx="8" fill="#eaf5ef" stroke="#198754"/>
+        <text x="360" y="280" text-anchor="middle" font-size="12.5" fill="#0f5132">受信側は「もう全部届いた」と早合点し、届き切っていない記録を読む</text>
+      </svg>
+      <p class="cap">QP 0 の番号を、しきり合わせと channel 0 の part 合図が取り合う。並び替えで、速いランクの次回のしきり合図が、遅いランクの channel 0 の数に先に紛れ込むと、受信側は 1 個早く「全部届いた」と判断してしまう。</p>
+    </div>
+
+    <p>先に自分の回を終えたランクが、<b>次の回のしきり合わせの合図</b>を出すと、まだ自分の channel 0 を実行中の遅いランクでは、<b>その合図が自分の channel 0 の数として数えられてしまいます</b>。並び替えが起きる環境では、この合図が<b>データより先に届く</b>ことがあり、受信側は「もう全部届いた」と<b>1 個早く早合点</b>して、届き切っていない記録を読んでしまいます。</p>
+
+    <h3>これまでの観察すべてに説明がつく</h3>
+    <ul>
+      <li><b>キャッシュされた dispatch だけが失敗する</b> ―― 通知用の分が無いのは、キャッシュされた dispatch だけだから</li>
+      <li><b>相手ごとの順番が保たれていれば起きない</b> ―― 順番が保たれていれば、しきり合わせの合図はデータより<b>後に</b>届く</li>
+      <li><b>2 ランクだと失敗しにくい</b> ―― 取り合う番号が「0 から ランク数 − 2」なので、2 ランクなら番号 0 だけしか取り合わない</li>
+      <li><b>操作を 1 かたまりで送ると気づかれない</b> ―― 早合点で受理された記録は、半分書きの記録ではなく<b>前の回の完全な記録</b>のままで、この検査では前の回もちょうど同じトークンの記録だったため、見た目には違いが出なかった</li>
+    </ul>
+
+    <h3>直し方</h3>
+    <p>キャッシュされた dispatch でも、通常の dispatch と<b>同じように QP 0 を確保</b>するようにしました (patch 0011)。変えたのは<b>定数 1 つ</b> (<code>kReserveNotifyQP = true</code>) です。ホスト側の channel 数の決め方は、もともと<b>同じ選択をしていました</b> ―― GPU 側だけが取り残されていました。</p>
+
+    <div class="key">
+      <p><b>結果。</b>直したあと、<code>srd</code> は 3 ランクで<b>3 回中 3 回、通過</b> (直前は 7 回中 0 回)。4 ランクと <code>defer-one</code> も通過します。差し込んだ検査は、<b>どの起動でも黙って (何も表示せず) いる</b>ようになりました。この直した DeepEP の上で vLLM を動かすと、対照とまったく同じ答えを返し、<b>128 本同時要求も 128 本すべて一致</b>します。英語と日本語、両方の PR 文面を用意しました。</p>
+    </div>
+
+    <div class="warn">
+      <p><b>まだ終わっていないこと。</b>順序を守るカーネルと、直接送る dispatch も、QP の決め方は<b>同じ仕組み</b>を使っています。これらが、キャッシュされた dispatch の中で、しきり合わせと<b>ぶつかるかどうかは、まだ測っていません</b>。</p>
+    </div>
   </section>
 
   <div class="nav">
