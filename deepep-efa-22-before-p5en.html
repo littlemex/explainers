@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepEP と EFA - 22: p5en の前に 1 台でできることを全部やった</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df; --code:#0d2b20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85;font-size:17px}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:56px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 12px;font-size:31px;letter-spacing:.02em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+  .back{display:inline-block;margin:6px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:28px 30px;margin:26px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:24px;margin:0 0 6px;border-left:6px solid var(--g3);padding-left:14px}
+  h2 .num{color:var(--g3);font-weight:700;margin-right:8px}
+  h3{color:var(--g2);font-size:19px;margin:22px 0 6px}
+  p{margin:12px 0}
+  .lead{color:var(--sub);font-size:15px;margin:0 0 18px;padding-left:20px}
+  .key{background:#eaf5ef;border:1px solid var(--g4);border-radius:12px;padding:16px 20px;margin:18px 0}
+  .key b{color:var(--g1)}
+  .warn{background:#fdf1ec;border:1px solid #f0b6a3;border-radius:12px;padding:14px 18px;margin:16px 0;font-size:15.5px}
+  .warn b{color:#b5401f}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:18px;margin:18px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13.5px;color:var(--sub);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--g1);color:#fff}
+  tr:nth-child(even) td{background:#f3f9f6}
+  .ok{color:#0f5132;font-weight:700}
+  .no{color:#b5401f;font-weight:700}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:30px 0 0;font-size:15px}
+  .nav a{color:var(--g2);text-decoration:none}
+  a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:23px}section{padding:22px 18px}table{font-size:12px}}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+</style>
+<body>
+<header>
+  <p class="kicker">DEEPEP と EFA ・ 22</p>
+  <h1>p5en の前に 1 台でできることを全部やった</h1>
+  <p>本物の EFA を借りる前に、1 台の RTX PRO 6000 でできることを、検出の仕組み・他のカーネル・レビュー・検査のまとめまで全部やり切った記録</p>
+</header>
+<main>
+  <a class="back" href="./deepep-efa-index.html">← シリーズ目次</a>
+
+  <section>
+    <h2><span class="num">1</span>エミュレータ自身が、この種の欠陥に気づけるようになった</h2>
+    <p class="lead">DeepEP のコードを書き換えて検査を差し込まなくても、エミュレータだけで気づけるようになった。</p>
+
+    <p>第 21 回の原因は、<b>1 つの合図カウンタを、2 つの違う目的で増やしていた</b>ことでした。<b>put の完了通知</b>と、<b>しきり合わせのようなむき出しの合図</b>です。エミュレータに、この<b>2 つの目的で増やされているカウンタを見つけたら警告する仕組み</b>を足しました。</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 720 220" role="img" aria-label="1 つのカウンタを 2 つの目的で増やすと、エミュレータが気づく">
+        <rect x="40" y="30" width="260" height="50" rx="8" fill="#eaf5ef" stroke="#198754"/>
+        <text x="170" y="60" text-anchor="middle" font-size="12.5" fill="#0f5132">put の完了通知 (データが届いた合図)</text>
+        <rect x="420" y="30" width="260" height="50" rx="8" fill="#fdf1ec" stroke="#f0b6a3"/>
+        <text x="550" y="60" text-anchor="middle" font-size="12.5" fill="#b5401f">むき出しの合図 (しきり合わせなど)</text>
+
+        <path d="M200 80 L340 130" stroke="#198754" stroke-width="2" marker-end="url(#a22a)"/>
+        <path d="M520 80 L380 130" stroke="#b5401f" stroke-width="2" marker-end="url(#a22b)"/>
+        <defs>
+          <marker id="a22a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#198754"/></marker>
+          <marker id="a22b" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#b5401f"/></marker>
+        </defs>
+
+        <rect x="260" y="130" width="200" height="50" rx="10" fill="#fff" stroke="#12211a" stroke-width="1.5"/>
+        <text x="360" y="152" text-anchor="middle" font-size="12.5" fill="#12211a" font-weight="700">同じ 1 つのカウンタ</text>
+        <text x="360" y="170" text-anchor="middle" font-size="11" fill="#4a5d54">増えた理由が分からない</text>
+
+        <rect x="150" y="195" width="420" height="22" rx="6" fill="#eaf5ef" stroke="#198754"/>
+        <text x="360" y="211" text-anchor="middle" font-size="12" fill="#0f5132">エミュレータが、この形を見つけたら警告する</text>
+      </svg>
+      <p class="cap">同じカウンタを、データが届いた合図としきり合わせの合図の両方で増やすと、受信側は「何が届いたのか」を取り違える。この形自体をエミュレータが検出する。</p>
+    </div>
+
+    <p>第 21 回の修正 (patch 0011) を<b>外して</b>実行すると、<b>3 つの相手のすべて</b>で、しきり合わせの番号 0 と 1 について<b>警告</b>が出ました。修正を<b>入れた</b>ままだと、<b>警告は 0 件</b>です。</p>
+
+    <div class="key">
+      <p>これまでは、H4 (第 21 回) を見つけるのに<b>DeepEP のコードを書き換えて検査を差し込む</b>必要がありました。<b>今は、エミュレータだけでこの種の欠陥に気づけます</b>。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>他のカーネルも確かめた</h2>
+    <p class="lead">同じ欠陥が他の経路にも潜んでいないかを、ひととおり確かめた。</p>
+
+    <table>
+      <tr><th>経路</th><th>結果</th></tr>
+      <tr><td>直接送る dispatch (順番どおり・並び替えあり、3 回中 3 回)</td><td class="ok">通過、検出の仕組みからの警告も無し</td></tr>
+      <tr><td>順序を守るカーネルのキャッシュされた dispatch (H5、別の問題)</td><td class="no">順番どおりでも失敗する</td></tr>
+      <tr><td>DeepEP に SM と QP の数を自動で決めさせた場合</td><td class="no">DeepEP 自身の上限の検査で失敗 (188 個の SM を持つ GPU で、自動で決めた数が上限を超えた)</td></tr>
+    </table>
+
+    <div class="warn">
+      <p><b>H5 は、この先を追いません。</b>順序を守るカーネルは、順番を保証しない EFA が使うカーネルでは<b>ありません</b>。記録には残しますが、追いかける先はここではありません。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>combine 側はもともと QP 0 を確保していた</h2>
+    <p class="lead">今回の直し方は、まったく新しい発明ではなく、もう半分にあった作り方に合わせただけだった。</p>
+
+    <p>combine (エキスパートの答えを元の rank へ返す処理) は、キャッシュされているときも<b>もともと QP 0 を確保</b>していました (<code>get_qp_mode&lt;..., true&gt;</code>)。今回の修正は、<b>dispatch 側を combine 側と同じ作り方に合わせただけ</b>です。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>厳しいレビュー (3 ラウンド)</h2>
+    <p class="lead">出す前に、指摘を受けて直す作業を 3 回繰り返した。</p>
+
+    <h3>修正パッチ本体への指摘</h3>
+    <ul>
+      <li><b>QP が 1 個しかない場合。</b>QP が 1 個だけなら、その 1 個 (QP 0) がいつも使われます。<b>静的な検査で、QP を 2 個以上にすることを求める</b>ようにしました (Python 側は、もともと最低 2 個を求めていました)</li>
+      <li><b>「追い越しが、届き切っていない記録の原因」を事実として書いていた。</b>実際に<b>観測したこと</b>と、そこから<b>推測したこと</b>を分けて書き直しました</li>
+      <li><b>速さへの影響を「測っていない」と明記。</b>QP 0 を確保すると、データを運ぶ QP が 1 個減ります。この代償は<b>p5en で測る</b>と明記しました</li>
+      <li><b>再現できる手順と、検査の差分を追加。</b>誰でも同じ結果を再現できる手順と、差し込んだ検査のコードそのものを添えました</li>
+    </ul>
+
+    <h3>エミュレータのコードへの指摘 (8 件の修正)</h3>
+    <p>例えば次のようなものです。<b>スナップショット (送信前の中身を控える機能) は、待たない配達 (第 16 回) の下では拒否する</b>ようにしました (何も比べられないため)。<b>重なりの検出は、明示的に有効にしたときだけ動く</b>ようにしました。<b>2 つの目的で増やされているカウンタの記録は、通信路ごとではなく通信の集まり (communicator) ごと</b>に持つようにしました。<b>比較には整数のアドレスを使う</b>ようにしました。<b>green context (第 19 回) の SM の最小数は、名前の付いた定数</b>にしました。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>1 台での検証のまとめ (タスク 120)</h2>
+    <p class="lead">正しく動くはずの回も、わざと壊す回も、望んだとおりの結果になることを 1 本の実行でまとめて確かめた。</p>
+
+    <p>1 台の中でできる検査を<b>すべて 1 回でまとめて回すタスク</b>を作りました。<b>8 つの実行すべてが、望んだ結果</b> (通るべき回は通り、わざと壊す回は落ちる) になり、<b>全体で 40 分</b>でした。</p>
+
+    <table>
+      <tr><th>実行</th><th>望む結果</th><th>時間</th><th>備考</th></tr>
+      <tr><td>vLLM、対照 (エミュレータ無し)</td><td class="ok">通る</td><td>232 秒</td><td></td></tr>
+      <tr><td>vLLM、GDRCopy あり、32 本同時</td><td class="ok">通る</td><td>287 秒</td><td>32 本中 32 本一致</td></tr>
+      <tr><td>vLLM、待たない配達 + MPS、128 本同時</td><td class="ok">通る</td><td>269 秒</td><td>128 本中 128 本一致</td></tr>
+      <tr><td>vLLM、順序の約束をわざと破る</td><td class="no">落ちる</td><td>―</td><td>1 本だけの答えは対照と<b>たまたま</b>一致したが、32 本同時では<b>32 本中 6 本しか一致せず</b>、これで検出</td></tr>
+      <tr><td>vLLM、わざとデータを壊す</td><td class="no">落ちる</td><td>―</td><td></td></tr>
+      <tr><td>DeepEP 自身の検査、並び替えあり</td><td class="ok">通る</td><td>456 秒</td><td>修正あり</td></tr>
+      <tr><td>DeepEP 自身の検査、順番どおり</td><td class="ok">通る</td><td>209 秒</td><td>修正あり</td></tr>
+      <tr><td>DeepEP 自身の検査、修正を外す</td><td class="no">落ちる</td><td>226 秒</td><td></td></tr>
+    </table>
+
+    <div class="key">
+      <p><b>「1 本だけの答えがたまたま対照と一致した」行は、大事な教訓です。</b>落ちるはずの検査が、1 回だけなら見た目には気づかれないことがあります。<b>落ちないはずのない検査 (陰性対照) を、必ずセットで用意する</b>ことの理由がここにあります。<b>落ちることのない検査は、検査ではありません。</b></p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>p5en での計画</h2>
+    <p class="lead">本物の EFA を借りる前に、聞くべき質問の順番と、そのための準備を決めておく。</p>
+
+    <p>2 台の <b>p5en</b> (本物の EFA、GPU が直接 NIC を叩く経路を持つ機材) を借りたときに<b>答えるべき質問</b>を、優先順位の高い順に整理しました (<code>docs/P5EN-RUNBOOK.md</code>)。</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 720 240" role="img" aria-label="p5en で答える 3 つの質問、優先順位の高い順">
+        <rect x="30" y="20" width="660" height="56" rx="10" fill="#eaf5ef" stroke="#198754"/>
+        <text x="360" y="44" text-anchor="middle" font-size="13.5" fill="#0f5132" font-weight="700">問い 1: 本物の EFA-GDA で H4 が起きるか、patch 0011 で直るか</text>
+        <text x="360" y="64" text-anchor="middle" font-size="11.5" fill="#4a5d54">エミュレータの外で、初めて確かめる</text>
+
+        <path d="M360 76 L360 100" stroke="#4a5d54" stroke-width="2" marker-end="url(#a22c)"/>
+        <defs><marker id="a22c" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#4a5d54"/></marker></defs>
+
+        <rect x="30" y="100" width="660" height="56" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="360" y="124" text-anchor="middle" font-size="13.5" fill="#0f5132" font-weight="700">問い 2: エミュレータと、本物の通信路の結果を比べる</text>
+        <text x="360" y="144" text-anchor="middle" font-size="11.5" fill="#4a5d54">同じ形の検査を両方で回す</text>
+
+        <path d="M360 156 L360 180" stroke="#4a5d54" stroke-width="2" marker-end="url(#a22c)"/>
+
+        <rect x="30" y="180" width="660" height="56" rx="10" fill="#eef4f0" stroke="#d9e5df"/>
+        <text x="360" y="204" text-anchor="middle" font-size="13.5" fill="#12211a" font-weight="700">問い 3: 本番と同じ形 (1 台に 8 ランク、ホスト間は EFA) を試す</text>
+        <text x="360" y="224" text-anchor="middle" font-size="11.5" fill="#4a5d54">1 枚の GPU の機材では作れない構成</text>
+      </svg>
+      <p class="cap">時間が足りなくなったときに、最も大事な答えが失われないように、優先順位を先に決めておく。</p>
+    </div>
+
+    <p>タスク 70 に、<b>1 台あたりのランク数</b> (<code>HOST_PROCS=8</code>)、<b>本物の EFA-GDA backend</b> (<code>NCCL_GIN_TYPE=5</code>)、<b>NCCL 内蔵の TCP 実装</b> (<code>nccl-socket</code>)、<b>修正の有無の切り替え</b>、<b>性能検査の切り替え</b>を追加しました。</p>
+
+    <div class="warn">
+      <p><b>2 台では、しきり合わせの番号 0 だけが重なります。</b>エミュレータ上での失敗の割合は<b>約半分</b>でした。<b>各項目は最低 5 回繰り返します</b> ―― 1 回通っただけでは証明になりません (第 20 回の項目 43)。<b>最後の実行は、借りた時間の終わりの 40 分前までに終えます</b>。</p>
+    </div>
+  </section>
+
+  <div class="nav">
+    <a href="./deepep-efa-21-torn-read.html">← 21: DeepEP が届き終わる前の記録を読んでいた (H4)</a>
+    <a href="./deepep-efa-index.html">目次 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+</body>
+</html>
