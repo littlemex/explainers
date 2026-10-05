@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prismyra の速さ: 場面ごとの vLLM との勝ち負け</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 16px 10px}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:10px;text-align:left}
+figcaption b{color:var(--gd)}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+svg{display:block;margin:0 auto;max-width:100%;height:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="prismyra-thinking.html">Prismyra の技術まとめ</a> &nbsp;/&nbsp; 速さ</p>
+
+<h1>Prismyra の速さ<br>場面ごとに勝ち負けが変わる、その境目</h1>
+
+<div class="lead">
+<p><b>結論から。</b>Prismyra が速いのは「質問が多い」「文書がまとまって来る」場面で、vLLM の <b>1.1〜12 倍</b>です。逆に「質問が 1〜3 個しかない」場面と「文書がまばらに届いて締め切りに間に合わせたい」場面では、<b>今も vLLM に負けています</b>。すべて同じ NVIDIA L40S 1 枚、同じ Qwen/Qwen3.6-35B-A3B-FP8 系モデルでの実測です。</p>
+<p style="margin-bottom:0"><b>読み方の注意。</b>「正しさを完全に保つ」工夫(batch-invariance、<a href="prismyra-mechanism.html">仕組みのページ</a>参照)を入れると、まとめて答える場面の速さは 1.4〜1.6 倍から 1.1〜1.3 倍まで下がります。この文書の数字は、特に書かない限り<b>正しさを保った状態(既定の設定)</b>のものです。</p>
+</div>
+
+<h2>0. 要約表</h2>
+
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測ったか</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td>1</td><td>すぐ答えを返したい短い 1 問(例: 頼みごとの振り分け)でどちらが速いか</td><td>Kiro の実際の 20 の振り分け依頼、L40S、ウォームアップ 2 回 + 本番 5 回の中央値、Python 直接と HTTP の両方</td><td>決定モデル Strands Decider 2B、生成エンジン SGLang の /v1/score</td><td class="y">43.4〜44.7 ms。Decider(93〜103 ms)の半分以下。SGLang(44.8 ms)とほぼ同じ</td><td>2</td></tr>
+<tr><td>2</td><td>1 文書に質問が 1〜3 個しかない場面でどちらが速いか</td><td>RACE 記事 20 本、1 文書あたりの質問数を 1 から振って、録画は両方オフで比較</td><td>vLLM(同じ重み、1 問 1 リクエスト、prefix cache オン)</td><td class="no">1 問: 223.8 ms 対 119.6 ms(vLLM が 1.87 倍速い)。4 問でも同じ比。12 問で初めて互角</td><td>3</td></tr>
+<tr><td>3</td><td>1 文書に質問が多い(〜128)場面でどちらが速いか</td><td>同じ 5,000 トークン前後の文書、質問数を 1〜128 まで振る</td><td>同上</td><td class="y">64 問: 320.2 ms 対 3,095 ms(9.7 倍)。128 問: 502.6 ms 対 6,103 ms(12.1 倍)</td><td>2</td></tr>
+<tr><td>4</td><td>文書が複数まとまって同時に来る場面でどちらが速いか</td><td>約 290 トークンの文書 8 本・各 4 問を、1 本ずつ読む場合とまとめて 1 回で読む場合で比較</td><td>1 本ずつ順番に読む(この仕組みを使わない場合)</td><td class="y">読む速さ 6.4 倍、読んで答える速さ 5.3 倍(0.989 秒 → 0.154 秒 / 1.968 秒 → 0.372 秒)</td><td>5</td></tr>
+<tr><td>5</td><td>さばける量そのもの(両方を飽和させて測った上限)はどちらが大きいか</td><td>vLLM は同時実行数を 16〜384 まで振って頭打ちを確認、Prismyra は <code>open_batch</code> の文書数を振って頂点を確認。368 文書 RACE で両方同じ条件</td><td>—</td><td class="y">vLLM の頭打ち 53〜56 問/秒に対し、正しさを完全に保った Prismyra は 59〜70 問/秒(1.07〜1.33 倍)</td><td>7</td></tr>
+<tr><td>6</td><td>文書が 1 件ずつ、まばらに届く(到着率が低い)場面で、締め切りに間に合うか</td><td>到着率 10 文書/秒の open-loop(ポアソン到着)、368 文書、締め切り 500 ms、両方同条件で測定</td><td>—</td><td class="no">vLLM 締め切り内 0.875 に対し Prismyra 0.575(負け)。問/秒はほぼ同じ(34.9 対 36.0)</td><td>6</td></tr>
+<tr><td>7</td><td>文書がどっと届く(到着率が高い)場面で、問/秒と締め切りはどうなるか</td><td>到着率 20〜80 文書/秒の open-loop、同条件</td><td>—</td><td class="warn">問/秒は Prismyra が 1.07〜1.12 倍勝つが、締め切り内の割合は<b>両方とも</b>20 文書/秒から急落し実用的でなくなる</td><td>6</td></tr>
+<tr><td>8</td><td>長い文書(数万トークン)でも速さを保てるか</td><td>文脈長を 3,040〜52,224 トークンまで振り、1 回の分岐の時間とメモリの読み込みピークを測る</td><td>—</td><td class="warn">短い文脈では幅を変えても速さは一定(1.02 倍)だが、24,327 トークンでは幅を 1→32 にすると 1.51 倍遅くなる。52,224 トークンは読む前に拒否される</td><td>8</td></tr>
+</table>
+
+<h2>1. 短い 1 問 — 決定モデルより速く、生成エンジンの最速構成と同等</h2>
+
+<p>すぐ答えを返したい短い 1 問(頼みごとの振り分けなど)は、起動時に長さの区切りごとに録画した計算をそのまま再生します(<a href="prismyra-mechanism.html">仕組みのページ</a>の CUDA graph)。</p>
+
+<table>
+<tr><th>方式</th><th>1 問の時間(中央値)</th><th>比べ方</th></tr>
+<tr><td>Prismyra(録画あり、Python 直接)</td><td class="n y">43.4 ms</td><td>Kiro の 20 問、L40S、ウォームアップ 2 + 本番 5</td></tr>
+<tr><td>Prismyra(録画あり、HTTP 込み)</td><td class="n y">44.7 ms</td><td>同上、<code>prismyra-serve</code> 経由</td></tr>
+<tr><td>決定モデル Strands Decider 2B(HTTP)</td><td class="n no">93〜103 ms</td><td>同じ 20 問</td></tr>
+<tr><td>生成エンジン SGLang <code>/v1/score</code>(HTTP)</td><td class="n">44.8 ms</td><td>同じトークン列・同じ選択肢を渡した場合</td></tr>
+</table>
+
+<p>決定は 20 問中 19 問が SGLang と一致し、接戦の 1 問だけ経路の違いで反転しました。答えは 579 問 + 20 問 + HTTP 100 回のどこでも 1 件も変わらず、確率の差の最大は 0.0 でした。</p>
+
+<h2>2. 1 文書に質問が少ない(1〜3 問) — ここは負けている</h2>
+
+<p>Prismyra は文書を読む分だけ固定費を先に払うので、質問が少ないと払った分を回収できません。vLLM は 1 問だけでも軽く済み、質問が増えるほど線形に重くなります。</p>
+
+<figure>
+<svg viewBox="0 0 880 260" width="100%" style="max-width:880px" role="img" aria-label="質問数と1文書あたりの時間、交点12">
+<rect x="70" y="30" width="300" height="190" fill="#8f2f2f" opacity="0.06"/>
+<text x="220" y="48" font-size="12" fill="#8f2f2f" text-anchor="middle">1〜12 問: vLLM が速い</text>
+<line x1="70" y1="220" x2="840" y2="220" stroke="#10241b" stroke-width="1.5"/>
+<line x1="70" y1="30" x2="70" y2="220" stroke="#10241b" stroke-width="1.5"/>
+<text x="455" y="248" font-size="12" fill="#3c5a4c" text-anchor="middle">1 文書あたりの質問数</text>
+<text x="70" y="236" font-size="11.5" fill="#3c5a4c" text-anchor="middle">1</text>
+<text x="370" y="236" font-size="11.5" fill="#3c5a4c" text-anchor="middle">12</text>
+<text x="840" y="236" font-size="11.5" fill="#3c5a4c" text-anchor="middle">64</text>
+<text x="55" y="220" font-size="11.5" fill="#3c5a4c" text-anchor="end">0</text>
+<text x="55" y="40" font-size="11.5" fill="#3c5a4c" text-anchor="end">ms/文書</text>
+<polyline points="70,187 170,187 270,186 370,186 470,185 650,169 840,117" fill="none" stroke="#1f7a4d" stroke-width="2.5"/>
+<text x="650" y="155" font-size="12" fill="#1f7a4d">Prismyra(ほぼ横ばい)</text>
+<polyline points="70,203 170,202 270,198 370,186 470,175 650,127 840,31" fill="none" stroke="#1d4e8f" stroke-width="2.5"/>
+<text x="470" y="98" font-size="12" fill="#1d4e8f">vLLM(質問数に比例して増える)</text>
+<circle cx="370" cy="186" r="6" fill="#8a5a12"/>
+<text x="370" y="166" font-size="12" fill="#8a5a12" text-anchor="middle">12 問で交点</text>
+</svg>
+<figcaption>1 問での比は 0.54(vLLM が 1.87 倍速い)、4 問でも同じ 0.54。vLLM の 1 文書あたりの時間は質問数にほぼ比例して伸び、Prismyra はほぼ横ばいなので、2 本の線は<b>必ず 1 回だけ</b>交わります。それが 12 問です。</figcaption>
+</figure>
+
+<table>
+<tr><th>1 文書あたりの質問数</th><th>Prismyra(問/秒)</th><th>vLLM(問/秒)</th><th>比</th></tr>
+<tr><td>1</td><td class="n">4.48</td><td class="n">8.30</td><td class="n no">0.54</td></tr>
+<tr><td>4</td><td class="n">17.63</td><td class="n">32.37</td><td class="n no">0.54</td></tr>
+<tr><td>8</td><td class="n">34.77</td><td class="n">49.27</td><td class="n no">0.71</td></tr>
+<tr><td>12</td><td class="n">52.25</td><td class="n">50.30</td><td class="n y">1.04</td></tr>
+</table>
+
+<p>この区間では vLLM が正しい選択です。複数文書を 1 回で読む仕組み(<a href="prismyra-mechanism.html">仕組みのページ</a>の open_batch)を使っても、1 文書あたりの質問数そのものが少ない以上、この表自体は変わりません——open_batch は「文書が複数まとまっている」場面専用の勝ち筋です。</p>
+
+<h2>3. 1 文書に質問が多い(〜128) — ここは大きく勝っている</h2>
+
+<table>
+<tr><th>質問数</th><th>Prismyra</th><th>vLLM</th><th>倍率</th></tr>
+<tr><td>16</td><td class="n">228.1 ms</td><td class="n">839 ms</td><td class="n y">3.7 倍</td></tr>
+<tr><td>32</td><td class="n">229.5 ms</td><td class="n">1,591 ms</td><td class="n y">6.9 倍</td></tr>
+<tr><td>64</td><td class="n">320.2 ms</td><td class="n">3,095 ms</td><td class="n y">9.7 倍</td></tr>
+<tr><td>128</td><td class="n">502.6 ms</td><td class="n">6,103 ms</td><td class="n y">12.1 倍</td></tr>
+</table>
+
+<p>質問が 32 を超えるたびに通過が 1 回増えますが、1 回の通過は約 92 ms で、vLLM の「質問 1 個 = 47 ms」が積み重なるほうがずっと速く重くなります。</p>
+
+<h2>4. 文書がたくさん同時に来る — まとめて読むと 5〜6 倍</h2>
+
+<table>
+<tr><th>到着した人数</th><th>方式</th><th>件/秒</th><th>最初の答えが届く時間</th><th>中央値</th></tr>
+<tr><td>8</td><td>1 件ずつ処理</td><td class="n">4.15</td><td class="n">248.1 ms</td><td class="n">1,092.7 ms</td></tr>
+<tr><td>8</td><td>まとめて 1 回の通過</td><td class="n y">20.68(5.0 倍)</td><td class="n">383.1 ms</td><td class="n y">385.4 ms</td></tr>
+</table>
+
+<p>最初の人の答えはむしろ遅くなります(248 ms → 383 ms)。1 人だけなら 262 ms で済む通過に、残り 7 人分を一緒に運ぶからです。<b>最初の人がほかの 7 人のスループットの代金を払う</b>構造で、全員が待っている場面では正しい取引ですが、最初の人の応答時間そのものが大事な場面では逆の取引になります。</p>
+
+<h2>5. 大量にさばく — 両方を飽和させて初めて意味のある比較</h2>
+
+<p>片方だけが席数の壁に当たっている状態で測った問/秒は「下限」でしかありません。vLLM は同時実行数を 16〜384 まで振って頭打ちを確認し、Prismyra は文書数(group)を振って頂点を確認しました。</p>
+
+<table>
+<tr><th>方式</th><th>設定</th><th>問/秒</th></tr>
+<tr><td>vLLM</td><td><code>max_num_seqs=256</code>、同時実行 16 以上</td><td class="n">53〜56(頭打ち)</td></tr>
+<tr><td>Prismyra(open_batch、正しさの工夫なし)</td><td>group=32、文書数32</td><td class="n y">77.6〜90.2(1.4〜1.6 倍)</td></tr>
+<tr><td>Prismyra(open_batch、batch-invariance 込み)</td><td>group=32・64</td><td class="n y">61.7〜70.3(1.10〜1.33 倍)</td></tr>
+</table>
+
+<div class="warn"><p style="margin:0"><b>正しさを完全に保つと、速さの優位は縮む。</b>行数に関係なく同じ答えを保証する工夫(batch-invariance)を入れると、まとめて答える場面の速さが単独で 10%、まとめて答える場面で 22〜23% 遅くなります。それでも vLLM の頭打ちは上回りますが、優位の大きさ(1.4〜1.6 倍 → 1.10〜1.33 倍)は正しさの代金として縮みます。</p></div>
+
+<h2>6. 文書がぽつぽつ届く(低い到着率) — ここは今も負けている</h2>
+
+<p>368 文書を同じプールから、ポアソン到着(到着のタイミングがランダムに散らばる、現実の「ぽつぽつ届く」状態の模し方)で両方に流し、締め切り(キューに入ってから答えが揃うまで)500 ms 内に収まった割合を比べました。</p>
+
+<table>
+<tr><th>到着率</th><th>vLLM 問/秒</th><th>vLLM 締め切り内</th><th>Prismyra 問/秒</th><th>Prismyra 締め切り内</th></tr>
+<tr><td>10 文書/秒</td><td class="n">36.00</td><td class="n y">0.875</td><td class="n">34.89</td><td class="n no">0.575</td></tr>
+</table>
+
+<p>問/秒そのものはほぼ同じですが、<b>締め切りに間に合う割合では vLLM が勝っています</b>。原因は、Prismyra のワーカースレッドが 1 本しかなく、1 回の通過(約 224 ms)が終わるまで次を一切始められないことです(<a href="prismyra-mechanism.html">仕組みのページ</a>)。到着率 10(平均 100 ms に 1 件)でも、1 回の通過の実コストがそれより長いため、到着のばらつきで複数件が固まった瞬間にキューが伸びます。2026-10-05 時点で未解決です。</p>
+
+<h2>7. 文書がどっと届く(高い到着率) — 問/秒は勝つが、どちらも間に合わない</h2>
+
+<table>
+<tr><th>到着率</th><th>vLLM 問/秒</th><th>vLLM 締め切り内</th><th>Prismyra 問/秒</th><th>Prismyra 締め切り内</th></tr>
+<tr><td>20</td><td class="n">54.54</td><td class="n no">0.031</td><td class="n y">58.86</td><td class="n no">0.025</td></tr>
+<tr><td>40</td><td class="n">55.34</td><td class="n no">0.003</td><td class="n y">59.67</td><td class="n no">0.003</td></tr>
+<tr><td>60</td><td class="n">55.03</td><td class="n no">0.002</td><td class="n y">59.14</td><td class="n no">0.002</td></tr>
+<tr><td>80</td><td class="n">55.08</td><td class="n no">0.002</td><td class="n y">59.36</td><td class="n no">0.002</td></tr>
+</table>
+
+<p>問/秒では Prismyra が 1.07〜1.12 倍勝ちますが、<b>この到着率では両方とも実用的な締め切り内の割合を失います</b>。この 1 枚の L40S・この 35B モデルの計算量が、40 文書/秒以上の到着率にはもう追いつけないという、エンジンの差ではなくハードウェアの限界です。</p>
+
+<h2>8. 長い文書 — 幅が速さを壊し始める長さがある</h2>
+
+<table>
+<tr><th>文脈トークン数</th><th>幅 1 行での分岐時間</th><th>幅 32 行での分岐時間</th><th>幅による倍率</th></tr>
+<tr><td>3,040</td><td class="n">250.1 ms</td><td class="n">254.1 ms</td><td class="n y">1.02 倍</td></tr>
+<tr><td>24,327</td><td class="n">238.3 ms</td><td class="n">360.4 ms</td><td class="n no">1.51 倍</td></tr>
+</table>
+
+<p>短い文脈では分岐の幅(質問の数)を変えても速さは一定ですが、長い文脈ではそうではありません。各行の計算が文書の長さに比例して重くなるため、短い文脈ではその比例分が無視できる一方、長い文脈では無視できなくなるからです。さらに、文書を<b>読む</b>こと自体のメモリピークは質問の数と無関係に増え続け(1 トークンあたり約 235,582 バイト)、ある長さを超えると読む前に拒否されます(52,224 トークンは拒否、26,112 トークンは読めた)。この長さを超えて質問を減らしても速くはならず、<b>短くするしかありません</b>。長い文書での答えの正しさの低下は<a href="prismyra-accuracy.html">精度のページ</a>で扱います。</p>
+
+<h2>9. 試したが効かなかったこと(短い一覧)</h2>
+
+<ul>
+<li>このカード専用に MoE カーネルの設定を 432 通り総当たりで調整: カーネル単体で 4% 速くなったが、全体では測定できる差なし。</li>
+<li>ページ化された記憶領域を既定の group 幅で使う: 956 ms が 973 ms に<b>遅くなった</b>(group 幅を固定した場合、メモリの節約効果も実測で 0)。</li>
+<li>録画を「2 回目に見た形は録る」「あと 3 回来るなら録る」「あと 7 回来るなら録る」の 3 つの固定ルール: いずれも実測で負け(ある条件では録画なしの 102.07 問/秒が、録画ありで 47.21 問/秒まで落ちた)。</li>
+<li>group 幅を 64 に広げてスループットを買う: 1 回の通過の実コストは group 32 と 64 で測定誤差の範囲で同じであり、見かけの差はスケジューリングのばらつきで、仕組み側の利得ではなかった。</li>
+<li>トークン化を呼び出し元のスレッドで先に済ませる: 直感的には節約だが、スレッドが分散する分だけ到着のタイミングが広がり、スループットは 20.37 件/秒から 13.44 件/秒に<b>悪化した</b>。</li>
+</ul>
+
+<p class="foot">
+出典: 公開リポジトリ github.com/littlemex/Prismyra の <code>README.md</code>・<code>docs/PERFORMANCE.md</code>・<code>docs/SHORT-INPUT-SPEED</code> 系の実測記録。すべて NVIDIA L40S 1 枚、Qwen/Qwen3.6-35B-A3B-FP8 系モデル、比較相手は同じ重み・同じ GPU 上の vLLM(prefix caching オン)。<br>
+関連ページ: <a href="prismyra-mechanism.html">仕組み</a>・<a href="prismyra-accuracy.html">精度</a>・<a href="prismyra-routing.html">使い方の形</a>。全体の入口: <a href="prismyra-thinking.html">Prismyra の技術まとめ</a>。
+</p>
+
+</div>
+</body>
+</html>

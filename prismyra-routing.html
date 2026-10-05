@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prismyra の使い方の形: 迷った問題だけ強いモデルに回す</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 16px 10px}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:10px;text-align:left}
+figcaption b{color:var(--gd)}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+svg{display:block;margin:0 auto;max-width:100%;height:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="prismyra-thinking.html">Prismyra の技術まとめ</a> &nbsp;/&nbsp; 使い方の形</p>
+
+<h1>迷った問題だけ強いモデルに回す<br>Prismyra 自身の確信度だけから作った判定器</h1>
+
+<div class="lead">
+<p><b>結論から。</b>Prismyra が出す答えの確信度(確率の形)<b>だけ</b>から作った軽い判定器が、答えが怪しい上位 15〜20% の問題を選び出し、そこだけをもっと強いモデル(Kimi K3)に回す仕組みです。学習にも候補選びにも一度も使っていない<b>4 つの独立な問題集合</b>すべてで、Prismyra 単体より +5 点前後の正解率を確かめました。一方で、この仕組みの費用を安くする工夫は 6 つ試して<b>どれも確認用の集合で再現しませんでした</b>。</p>
+<p style="margin-bottom:0"><b>なぜ成立するか。</b><a href="prismyra-accuracy.html">精度のページ</a>で見たとおり、Prismyra の間違いの 43.6% は「同じ重みに考えさせれば直る」もので、知識不足はごく少数です。だから、間違えそうな問題だけを選んで、もっと計算するモデルに回すことには理屈のうえで取り分があります。</p>
+</div>
+
+<h2>0. 要約表</h2>
+
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測ったか</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td>1</td><td>この判定器は、確率のしきい値だけで選ぶより良いか</td><td>学習に使っていない 4,900 問を 60/40 に分け、15% を回したときの正解率を比較</td><td>Prismyra の確信度が低い順に回す(しきい値の手)</td><td class="y">判定器 84.80% 対 しきい値 83.37%、差 +1.43pt [+0.51, +2.35]</td><td>2</td></tr>
+<tr><td>2</td><td>この形は、まだ誰も見ていない問題集合でも再現するか</td><td>4 つの独立な鍵付き集合(それぞれ約 2,000〜2,050 問)で、同じ判定器(選び直さない)を 1 回だけ適用</td><td>—</td><td class="y">4 つすべてで、Prismyra 単体より有意に高い。15〜20% を回して +5.10〜+5.90 点(ある集合)、+1.51〜+6.47 点相当(他の集合)</td><td>3</td></tr>
+<tr><td>3</td><td>この判定器が選ぶ問題は、本当に正解が怪しいだけか(ラベル自体の誤りではないか)</td><td>3 つの審判モデルに、答えを隠して正解を 3 段階評価させる</td><td>——</td><td class="warn">「3 強モデルが揃って正解と違う」問題の約 23〜29% は、審判も「正解が明らかに誤り」と判定。この分は関門の集合から除外して測る</td><td>—</td></tr>
+<tr><td>4</td><td>費用を4分の1以下に抑える工夫は見つかるか</td><td>6 つの候補を、選ぶための集合で選び、確認用の鍵付き集合で 1 回だけ確かめる</td><td>出力上限、費用見積もりでの選び直し、安いモデルの2段構え(2種)、Kimi を「考えない」設定、回す割合を広げる</td><td class="no">6 つ全部、選ぶための集合では合格ラインに達したのに、確認用の集合では毎回 2〜16 点ほど届かず不合格</td><td>4</td></tr>
+</table>
+
+<h2>1. 仕組み: Prismyra の出力だけで「迷い」を測る</h2>
+
+<p>判定器は、Prismyra のエンジンに手を加えません。<b>すでに返ってきた答えの確率だけ</b>から、5 つの特徴を計算します。</p>
+
+<ul>
+<li>一番大きい確率</li>
+<li>1 位の選択肢と 2 位の選択肢の確率差</li>
+<li>確率のエントロピー(確率の散らばり具合)</li>
+<li>対数選択肢数</li>
+<li>対数(1 + 文書の文字数)</li>
+</ul>
+
+<p>この 5 つを入力にした、ごく単純なロジスティック回帰(2 本、「強いモデルだけ正解」になる見込みと「Prismyra だけ正解」になる見込みをそれぞれ当てる)が判定器の全部です。値の高い順に問題を並べ、上位の何割を強いモデル(Kimi K3)に回します。</p>
+
+<figure>
+<svg viewBox="0 0 880 220" width="100%" style="max-width:880px" role="img" aria-label="判定器がKimi K3へ回す仕組み">
+<defs><marker id="arR1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="20" y="30" width="180" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="110" y="54" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">Prismyra が答える</text>
+<text x="110" y="74" font-size="11" fill="#3c5a4c" text-anchor="middle">質問 1 件、約 0.1 秒</text>
+<path d="M204 58 L246 58" stroke="#3c5a4c" stroke-width="2" marker-end="url(#arR1)"/>
+<rect x="250" y="30" width="190" height="56" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="345" y="54" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">5 つの特徴から判定</text>
+<text x="345" y="74" font-size="11" fill="#3c5a4c" text-anchor="middle">確率・差・エントロピーなど</text>
+<path d="M345 90 L345 130 L130 130" stroke="#1f7a4d" stroke-width="2" marker-end="url(#arR1)"/>
+<rect x="20" y="150" width="220" height="50" rx="8" fill="#eef7f1" stroke="#1f7a4d"/>
+<text x="130" y="170" font-size="12" fill="#0f4a2e" text-anchor="middle" font-weight="600">残り 80〜85%</text>
+<text x="130" y="188" font-size="11" fill="#3c5a4c" text-anchor="middle">Prismyra の答えをそのまま使う</text>
+<path d="M345 90 L345 130 L700 130" stroke="#8f2f2f" stroke-width="2" marker-end="url(#arR1)"/>
+<rect x="590" y="150" width="220" height="50" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="700" y="170" font-size="12" fill="#8f2f2f" text-anchor="middle" font-weight="600">上位 15〜20%(最も迷った問題)</text>
+<text x="700" y="188" font-size="11" fill="#3c5a4c" text-anchor="middle">Kimi K3 へ回し、その答えを採用</text>
+</svg>
+<figcaption>判定器が使うのは Prismyra 自身が出した確率だけで、エンジンのコードや Kimi K3 側には何も手を加えません。選ぶ割合(15% や 20%)はあらかじめ決めた固定値で、実行中に動的に変えてはいません。</figcaption>
+</figure>
+
+<h2>2. 確定した結果: 4 つの独立な集合すべてで再現</h2>
+
+<p>この仕組みは、学習と候補選びに使った問題集合(esc)の<b>外</b>で、4 回にわたって独立に作った「鍵をかけた」問題集合(作る前も作ったあとも中身を見ず、答えを採点する直前に初めて開ける集合)で確かめています。</p>
+
+<table>
+<tr><th>確認した集合</th><th>問題数</th><th>回す割合</th><th>Prismyra 単体</th><th>判定器+Kimi K3</th><th>差と 95% 区間</th></tr>
+<tr><td>lock(1 回目の鍵付き集合)</td><td>2,001(ラベル誤りを除いた後)</td><td>15%</td><td class="n">82.96%</td><td class="n y">88.06%</td><td class="n y">+5.10pt [+3.95, +6.35]</td></tr>
+<tr><td>lock(同上)</td><td>2,001</td><td>20%</td><td class="n">82.96%</td><td class="n y">88.86%</td><td class="n y">+5.90pt [+4.60, +7.20]</td></tr>
+<tr><td>lock2(2 回目)</td><td>402(迷った上位20%の中)</td><td>—</td><td class="n">31.89%</td><td class="n y">+6.47pt 相当(集合全体に換算)</td><td class="n">区間は未算出</td></tr>
+<tr><td>lock3(3 回目)</td><td>2,050</td><td>20%(上位)</td><td class="n">80.59%</td><td class="n y">82.10%(LoRA 容量実験 a6b 上での確認)</td><td class="n y">+1.51pt [+0.49, +2.59]</td></tr>
+</table>
+
+<p>どの集合でも、Prismyra 単体より強いモデルへ回したほうが<b>一貫して正解率が高い</b>という結論は崩れませんでした。回した問題の時間は Kimi K3 側で中央値 2 秒前後、全体にならした 1 問あたりの費用は約 0.002〜0.006 ドルです。</p>
+
+<h3>ラベルの誤りを除く手順</h3>
+
+<p>「3 つの強いモデル(Kimi K3・考えるモードの元モデル×2 回)が揃って正解と違う答えを選ぶ」問題を疑わしい問題とし、3 人の審判モデル(Opus・Astra・Fable)に、答えを隠して正解そのものを 3 段階(correct / defensible / wrong)で評価させます。疑わしい問題の<b>約 23〜29%</b> は、3 人全員が「正解が明らかに誤り」と判定しました(対照として選んだ「強いモデルが揃って正解と同じ」問題では、誤りの判定は 0 件)。この分は関門の集合から除いてから、判定器と Prismyra 単体を比べています。</p>
+
+<h2>3. 費用を安くする 6 つの工夫 — すべて確認用の集合で崩れた</h2>
+
+<p>強いモデルへ回す割合(15〜20%)の中でも、答えが長く「考える」問題ほど Kimi K3 の費用がかさみます。6 つの安くする工夫を、まず<b>選ぶための集合</b>で試し、合格した候補だけを<b>確認用の鍵付き集合</b>で 1 回だけ確かめました。</p>
+
+<table>
+<tr><th>工夫</th><th>選ぶための集合での結果</th><th>確認用の鍵付き集合での結果</th></tr>
+<tr><td>出力トークン数に上限を付ける</td><td class="no">伸びを 70% 取れる点では費用が満額の 72%以上(合格ラインの 25% に届かない)</td><td>—(選ぶための集合で不合格)</td></tr>
+<tr><td>費用の見込みで安い問題を先に選ぶ</td><td class="no">費用の見込みの予測力が決定係数 0.012 とほぼ無く、出力上限と同じ結果</td><td>—</td></tr>
+<tr><td>安いモデル(Nova Micro)に 2 回聞き、割れたら Kimi K3</td><td class="warn">伸び72.4%(合格)・費用38.8%(不合格)</td><td class="no">別の鍵付き集合で伸び 56.2%・費用 41.6%、両方不合格</td></tr>
+<tr><td>強いが比較的安いモデル(Nova Pro)に 2 回聞く</td><td class="no">伸び72.9%(合格)・費用29.4%(わずかに超過)</td><td>—</td></tr>
+<tr><td>Kimi K3 を「考えない」設定で呼ぶ</td><td class="y">伸び77.6%・費用14.1%(両方合格)</td><td class="no">別の鍵付き集合で伸び 67.9%(2.1 点差で不合格)、さらに別の集合で 65.3%(4.7 点差で不合格)</td></tr>
+<tr><td>「考えない」設定のまま回す割合を25%へ広げる</td><td class="y">4 点すべて合格、25%が最も余裕大</td><td class="no">別の鍵付き集合で伸び 65.3%(4.7 点差で不合格)、費用は 5 分の 1 以下まで余裕</td></tr>
+</table>
+
+<div class="warn"><p style="margin:0"><b>これは「選んだ勝者ほど縮む」という測定の罠(winner's curse)です。</b>1 つの問題集合で一番良く見えた候補ほど、別の集合で測ると縮む傾向が、4 回続けて同じ向きで起きました。費用の余裕(どの工夫も確認用の集合では 25% の決まりを大きく下回って安く済む)はあるのに、<b>伸びがいつも数点だけ足りません</b>。「迷った問題」の難しさの絶対値(判定器の値そのもの)は、問題集合が変わると意味がずれるため、同じ割合で切っても「どれだけ迷っているか」の中身が集合ごとに違う、というのが今の時点での一番ありそうな説明です。</p></div>
+
+<p>結論として、<b>強いモデルに丸ごと回す形(費用を削らない形)だけが、4 つの独立な集合すべてで確かめられています</b>。費用を 4 分の 1 以下に抑える追加の工夫は、まだ見つかっていません。</p>
+
+<h2>4. 別のエンジンの版でも同じ大きさの上乗せ(見積もり、未確定)</h2>
+
+<p>容量を増やした LoRA 版(<a href="prismyra-accuracy.html">精度のページ</a>の a6b)の上に、同じ「判定器+Kimi K3」を乗せる見積もりを行いました。a6b 自身の確信度から判定器を学習し直すと、判定の 1,960 問全体で+2.55〜+6.12 点(回す割合 5〜20%)という、Prismyra 公開版の上と同じくらいの大きさの上乗せになりました。</p>
+
+<div class="note"><p style="margin:0"><b>これは見積もりで、確定した結果ではありません。</b>学習に使っていない集合の上での計算にとどまり、まだ鍵をかけた集合では確かめていません。また、読み直し・自分の答えを見せ直すという 2 つの特徴を使わない簡略版(5 特徴)で見積もっています。</p></div>
+
+<h2>5. まだ分かっていないこと</h2>
+
+<ul>
+<li>費用を 4 分の 1 以下に抑える工夫は、6 つ試して 1 つも確認できていません。次に試す価値があるのは、判定器のスコアの絶対値ではなく、集合内での相対順位で回す割合を決める方法です(まだ試していません)。</li>
+<li>容量を増やしたエンジン(a6b)の上での上乗せは見積もりの段階で、鍵をかけた集合での確定測定はまだです。</li>
+<li>強いモデルへ回したときの時間(中央値約 2 秒)は、締め切りが厳しい場面(<a href="prismyra-performance.html">速さのページ</a>の「文書がぽつぽつ届く」場面)との組み合わせはまだ測っていません。</li>
+</ul>
+
+<p class="foot">
+出典: Prismyra の実機測定記録(東京の L40S・東京/スペインの判定実験)。審判モデルは Opus・GPT-6 Astra・Fable、強いモデルへの回し先は Kimi K3(Bedrock 経由)。区間は問題の復元抽出 4,000 回による 95% 区間、p 値は符号検定。費用は 2026-10 時点の公開料率に基づく実測。<br>
+関連ページ: <a href="prismyra-mechanism.html">仕組み</a>・<a href="prismyra-performance.html">速さ</a>・<a href="prismyra-accuracy.html">精度</a>。全体の入口: <a href="prismyra-thinking.html">Prismyra の技術まとめ</a>。
+</p>
+
+</div>
+</body>
+</html>

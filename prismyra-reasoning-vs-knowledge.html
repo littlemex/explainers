@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prismyra と「考える」機能: 知らないのか、考えないのか</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.big{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+.big>div{flex:1 1 220px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:14px 10px;
+background:var(--card)}
+.big b{display:block;font-size:28px;line-height:1.15;color:var(--gd);font-variant-numeric:tabular-nums}
+.big span{font-size:12.5px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="prismyra-thinking.html">Prismyra の技術まとめ</a> &nbsp;/&nbsp; 診断: 知らないのか、考えないのか</p>
+
+<h1>Prismyra と「考える」機能<br>間違いの半分近くは、知らないからではなく、考えないからだった</h1>
+
+<div class="lead">
+<p><b>結論から。</b>Prismyra (Qwen3.6-35B-A3B の上に作った判断用のモデル) が間違えた 227 問のうち、<b>知識が足りなかったのは多くて 12 問 (5.3%)</b> でした。<b>99 問 (43.6%) は、同じ重みに「考えて」から答えさせると解けました</b>。答えに要る知識はもう重みの中にあり、足りないのは答えを出すまでの計算の段数です。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>同じ 1,652 問を、Prismyra の読み出し (考えない、1 問約 0.1 秒) と、元のモデルに考えさせた答え (1 問約 5 秒) で解かせて比べました。両方が外した問題には、答えの手がかりになる事実を 1 文足して、もう一度解かせました。すべて東京の L40S での実測です。</p>
+</div>
+
+<h2>0. 要約表</h2>
+
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td>1</td><td>考えれば直るのかを知りたい</td><td>Prismyra 36 層の読み出し (A) と、元の 40 層に考えさせた答え (C) を、同じ 1,652 問で比べた</td><td>考える長さを何通りも変える (今回はしない)</td><td class="y">A 86.26% に対し C 88.86%。差は +2.60 点 [+1.15, +4.06]。C だけ正解 99 問、A だけ正解 56 問 (p = 0.0007)</td><td>2, 3</td></tr>
+<tr><td>2</td><td>どの種類の問題で効くか</td><td>問題の集まりごとに分けて同じ比較</td><td>—</td><td class="y">抽象代数の計算問題で 67 → 96 問 (100 問中)。JevBench の選ぶための半分で 88.14 → 97.46%。読解 (dev) と BoolQ では差が無い</td><td>1</td></tr>
+<tr><td>3</td><td>差は層を抜いたせいか、考えないせいか</td><td>元の 40 層に考えさせずに答えさせた (B) を足した</td><td>—</td><td>B は A より −3.27 点 (Prismyra の学習は効いている)。B → C は +5.87 点。差を作るのは考えるかどうか</td><td>1</td></tr>
+<tr><td>4</td><td>考えても解けない問題は、知識が無いせいか</td><td>A も C も外した 128 問に、Kimi K3 が書いた事実を 1 文足して、A と B をもう一度走らせた</td><td>正しい選択肢そのものを足す (答えを教えるだけなのでしない)</td><td class="no">事実を書けた 80 問のうち、直ったのは 12 問。そのうち 9 問は事実だけで答えが分かるもの</td><td>5</td></tr>
+<tr><td>5</td><td>残りの間違いは何か</td><td>両方が外した 109 問で、Kimi K3 の答えと照らした</td><td>—</td><td>88 問 (80.7%) は Kimi K3 も外す。両方が正解の問題で Kimi が外すのは 2.0% だけ。正解の付け方が揺れている問題が中心</td><td>4</td></tr>
+<tr><td>6</td><td>Prismyra 36 層は考えながら書けるか</td><td>36 層版に考えさせて Kev の 50 問</td><td>—</td><td class="no">50 問すべてが意味の無い文字の繰り返しになり、16,384 トークンの上限まで止まらなかった</td><td>7</td></tr>
+<tr><td>7</td><td>考えた文を読み出しに渡せるか</td><td>A の文書のあとに、C が考えた文を足して読ませた</td><td>—</td><td class="y">88.86% で C と同じ。1,650 / 1,652 問で正誤が C と一致</td><td>8</td></tr>
+<tr><td>8</td><td>迷ったときだけ考えるとどうなるか</td><td>A の一番大きい確率が 0.8 未満のときだけ C の答えを使う</td><td>問題の種類で切り替える</td><td>9.0% の問題だけ考えて 87.53%。全部考えたときの伸びの約半分</td><td>9</td></tr>
+<tr><td>9</td><td>考えるのにかかる量</td><td>1 問あたりの出力トークン数と時間</td><td>—</td><td>平均 693 トークン。1 問ずつなら平均 6.0 秒 (中央値 5.0 秒、L40S 2 枚)。読み出しは中央値 98 ms (L40S 1 枚)</td><td>—</td></tr>
+</table>
+
+<h2>1. 「考える」機能とは何か</h2>
+
+<p>Qwen3.6 のような最近のモデルは、答える前に<b>自分の考えを文章として書く</b>ことができます。モデルの説明書には、ふだんは考えるモードで動き、答えの前に <code>&lt;think&gt;</code> と <code>&lt;/think&gt;</code> で囲んだ文を出す、と書いてあります。この囲みの中で、モデルは「この式を変形すると…」「選択肢 B は本文と合わない…」と順番に書きながら答えに近づきます。考えるモードを切るには、チャットの設定で <code>enable_thinking</code> を <code>False</code> にします。</p>
+
+<p>なぜ書くと賢くなるのかというと、モデルは 1 つの語を出すたびに、決まった回数 (Qwen3.6 なら 40 層) しか計算できないからです。1 回の計算で足りない問題でも、途中の結果を文として書き出せば、次の語を出すときにその結果を読んで続きを計算できます。<b>書いた文が、計算のメモ帳の代わりになります</b>。そのぶん、考える文が長いほど時間がかかります。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="考えるモードと Prismyra の読み出しの違い">
+<defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<text x="20" y="28" font-size="13" fill="#0f4a2e" font-weight="600">考えるモード (元の Qwen3.6)</text>
+<rect x="20" y="40" width="170" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="105" y="73" font-size="12.5" fill="#0f4a2e" text-anchor="middle">文書 + 質問</text>
+<path d="M194 68 L222 68" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar1)"/>
+<rect x="226" y="40" width="420" height="56" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="436" y="64" font-size="12.5" fill="#1d4e8f" text-anchor="middle">&lt;think&gt; 考えを 1 語ずつ書く (平均 693 語) &lt;/think&gt;</text>
+<text x="436" y="84" font-size="11.5" fill="#3c5a4c" text-anchor="middle">書いた文を読み返して続きを計算する</text>
+<path d="M650 68 L678 68" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar1)"/>
+<rect x="682" y="40" width="90" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="727" y="73" font-size="12.5" fill="#0f4a2e" text-anchor="middle">答え B</text>
+<text x="800" y="73" font-size="12.5" fill="#1d4e8f">約 5 秒</text>
+
+<text x="20" y="170" font-size="13" fill="#0f4a2e" font-weight="600">Prismyra の読み出し</text>
+<rect x="20" y="182" width="170" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="105" y="215" font-size="12.5" fill="#0f4a2e" text-anchor="middle">文書 + 質問</text>
+<path d="M194 210 L222 210" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar1)"/>
+<rect x="226" y="182" width="150" height="56" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="301" y="207" font-size="12.5" fill="#8f2f2f" text-anchor="middle">&lt;think&gt;&lt;/think&gt;</text>
+<text x="301" y="226" font-size="11.5" fill="#3c5a4c" text-anchor="middle">空のまま閉じる</text>
+<path d="M380 210 L408 210" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar1)"/>
+<rect x="412" y="182" width="260" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="542" y="207" font-size="12.5" fill="#0f4a2e" text-anchor="middle">次の 1 語の確率を読むだけ</text>
+<text x="542" y="226" font-size="11.5" fill="#3c5a4c" text-anchor="middle">A 0.10 / B 0.72 / C 0.11 / D 0.07</text>
+<path d="M676 210 L704 210" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar1)"/>
+<rect x="708" y="182" width="64" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="740" y="215" font-size="12.5" fill="#0f4a2e" text-anchor="middle">B</text>
+<text x="790" y="215" font-size="12.5" fill="#1f7a4d">約 0.1 秒</text>
+<text x="20" y="282" font-size="11.5" fill="#3c5a4c">メモ帳 (考えの文) を使わないので速いが、40 層を 1 回通るだけの計算で答えを決める</text>
+</svg>
+<figcaption>Prismyra は、考える囲みを空のまま閉じ、答えの位置の確率だけを読みます (<code>evals/generate.py</code> の <code>NO_REASONING</code>、<code>docs/ACCURACY.md</code>)。速さの理由はここにあり、同時に、考えないと解けない問題を落とす理由もここにあります。</figcaption>
+</figure>
+
+<h2>2. 間違いの中身: 知らないのか、考えないのか</h2>
+
+<p>見分け方は単純です。<b>同じ重みに考えさせて解けるなら、知識は重みの中にある</b>ことになります。考えても解けない問題には、答えに要る事実を 1 文足して、もう一度解かせます。それで解けるなら、知識が足りなかったことになります。事実の文は Kimi K3 に書かせ、選択肢の記号や答えそのものは書かないようにさせました。</p>
+
+<figure>
+<svg viewBox="0 0 880 210" width="100%" style="max-width:880px" role="img" aria-label="Prismyra の間違い 227 問の内訳を長さどおりに描いた帯">
+<text x="20" y="28" font-size="13" fill="#0f4a2e" font-weight="600">Prismyra 36 層が間違えた 227 問 (帯の長さは数に比例)</text>
+<rect x="20" y="44" width="366" height="56" fill="#1f7a4d"/>
+<rect x="386" y="44" width="44" height="56" fill="#8a5a12"/>
+<rect x="430" y="44" width="252" height="56" fill="#8f2f2f"/>
+<rect x="682" y="44" width="178" height="56" fill="#9aa9a1"/>
+<text x="203" y="70" font-size="14" fill="#fff" text-anchor="middle" font-weight="600">考えれば直る 99</text>
+<text x="203" y="90" font-size="11.5" fill="#fff" text-anchor="middle">43.6%</text>
+<text x="408" y="78" font-size="12.5" fill="#fff" text-anchor="middle" font-weight="600">12</text>
+<text x="556" y="70" font-size="13" fill="#fff" text-anchor="middle" font-weight="600">どちらでも直らない 68</text>
+<text x="556" y="90" font-size="11.5" fill="#fff" text-anchor="middle">30.0%</text>
+<text x="771" y="70" font-size="12.5" fill="#fff" text-anchor="middle" font-weight="600">外の知識は要らない 48</text>
+<text x="771" y="90" font-size="11.5" fill="#fff" text-anchor="middle">21.1%</text>
+<path d="M408 104 L408 134" stroke="#8a5a12" stroke-width="1.5"/>
+<text x="408" y="152" font-size="12" fill="#8a5a12" text-anchor="middle">事実を足すと直る (知識不足) 5.3%</text>
+<text x="408" y="170" font-size="11.5" fill="#3c5a4c" text-anchor="middle">うち 9 問は事実の文だけで答えが分かる</text>
+<text x="556" y="196" font-size="11.5" fill="#3c5a4c" text-anchor="middle">多くは Kimi K3 も外す問題</text>
+</svg>
+<figcaption>緑の帯 (考えれば直る) が一番大きく、茶色の帯 (知識不足) はとても細いです。灰色の 48 問は、Kimi K3 が「本文だけで答えられ、外の知識は要らない」と答えた問題です。</figcaption>
+</figure>
+
+<p>逆に、Prismyra が正しく、考えさせたほうが外した問題も 56 問あります (BoolQ 18 問、攻撃的な投稿の判定 10 問など)。考えるモードは乱数を使うので、種を変えた 2 回目でも確かめました。直った 99 問のうち 85 問は 2 回目も直り (偶然の入れ替わりは 14 問)、外した 56 問のうち 44 問は 2 回目も外しました。<b>考えると本当に悪くなる問題もある</b>ということで、BoolQ と攻撃的な投稿の判定が中心です。</p>
+
+<h2>3. どこで効くか</h2>
+
+<p>考えることが効くのは、何段もの計算や判断が要る問題です。一番大きいのは抽象代数の計算問題 (たとえば「Q(√2, √3, √18) の Q 上の次数を求めよ」) で、考えさせると 100 問中 67 問が 96 問に増え、逆に落とした問題は 0 でした。文書を読んで答える問題 (読解、BoolQ) では、ほとんど差がありません。</p>
+
+<figure>
+<svg viewBox="0 0 880 330" width="100%" style="max-width:880px" role="img" aria-label="問題の集まりごとの、考えたときの差と 95% 区間">
+<text x="20" y="24" font-size="13" fill="#0f4a2e" font-weight="600">考えさせたときの差 (C − A、点) と 95% 区間</text>
+<line x1="330" y1="40" x2="330" y2="300" stroke="#10241b" stroke-width="1.5"/>
+<text x="330" y="318" font-size="11.5" fill="#3c5a4c" text-anchor="middle">0</text>
+<text x="490" y="318" font-size="11.5" fill="#3c5a4c" text-anchor="middle">+20</text>
+<text x="650" y="318" font-size="11.5" fill="#3c5a4c" text-anchor="middle">+40</text>
+<text x="210" y="318" font-size="11.5" fill="#3c5a4c" text-anchor="middle">−15</text>
+<line x1="490" y1="40" x2="490" y2="300" stroke="#d5e3da"/>
+<line x1="650" y1="40" x2="650" y2="300" stroke="#d5e3da"/>
+<g font-size="12.5" fill="#12241c">
+<text x="20" y="64">抽象代数の計算 (100 問)</text>
+<line x1="490" y1="60" x2="634" y2="60" stroke="#1f7a4d" stroke-width="3"/><circle cx="562" cy="60" r="6" fill="#1f7a4d"/><text x="660" y="64" fill="#1f7a4d">+29.0</text>
+<text x="20" y="104">JevBench 選ぶ半分 (118 問)</text>
+<line x1="357" y1="100" x2="459" y2="100" stroke="#1f7a4d" stroke-width="3"/><circle cx="405" cy="100" r="6" fill="#1f7a4d"/><text x="470" y="104" fill="#1f7a4d">+9.32</text>
+<text x="20" y="144">Kev 学習外 (114 問)</text>
+<line x1="323" y1="140" x2="428" y2="140" stroke="#8a5a12" stroke-width="3"/><circle cx="372" cy="140" r="6" fill="#8a5a12"/><text x="438" y="144" fill="#8a5a12">+5.26</text>
+<text x="20" y="184">Kev 近似 (600 問)</text>
+<line x1="346" y1="180" x2="387" y2="180" stroke="#1f7a4d" stroke-width="3"/><circle cx="366" cy="180" r="6" fill="#1f7a4d"/><text x="397" y="184" fill="#1f7a4d">+4.50</text>
+<text x="20" y="224">dev 読解 (400 問)</text>
+<line x1="316" y1="220" x2="360" y2="220" stroke="#8a5a12" stroke-width="3"/><circle cx="338" cy="220" r="6" fill="#8a5a12"/><text x="370" y="224" fill="#8a5a12">+1.00</text>
+<text x="20" y="264">BoolQ (400 問)</text>
+<line x1="296" y1="260" x2="340" y2="260" stroke="#8a5a12" stroke-width="3"/><circle cx="318" cy="260" r="6" fill="#8a5a12"/><text x="350" y="264" fill="#8a5a12">−1.50</text>
+</g>
+</svg>
+<figcaption>緑は区間が 0 を含まない (偶然では説明しにくい) もの、茶色は区間が 0 をまたぐもの。差が大きいのは計算や何段もの判断が要る集まりです。</figcaption>
+</figure>
+
+<p>層の数のせいではないことも確かめました。元の 40 層に考えさせずに答えさせると、抽象代数は 65 問で、Prismyra 36 層の 67 問とほぼ同じでした。40 層でも、考えなければ解けません。</p>
+
+<h2>4. Prismyra でそのまま考えさせることはできない</h2>
+
+<div class="bad"><p style="margin:0"><b>Prismyra 36 層に考えさせると、文章が壊れます。</b>Kev の 50 問すべてで、最初の数語から意味の無い文字の繰り返しになり、16,384 トークンの上限まで止まりませんでした。考えを閉じた問題は 0 でした。読み込みの間違いではないことは、答えの位置の確率が Prismyra の読み出しと 60 問中 58 問で同じ答えになることで確かめています。原因が「層を 4 つ抜いたこと」か「判断用の学習」かは、まだ分けていません。</p></div>
+
+<p>なので「Prismyra に考えるスイッチを付ける」はそのままでは使えません。考える文を書くのは、元の 40 層 (学習していないもの) にやらせることになります。</p>
+
+<h2>5. それでも使える道が 2 つある</h2>
+
+<h3>道 1: 考えた結果を、読み出しに移す (自分からの蒸留)</h3>
+
+<p>元の 40 層が書いた考えの文を Prismyra の文書のあとに足して読ませると、正解率は 88.86% で、考えさせたときとちょうど同じでした (1,652 問中 1,650 問で正誤が一致)。つまり Prismyra の読み方のままで、考えの結論を読み取れます。そこで「考えの文を読んだときの Prismyra の確率」を先生にして、「考えの文なしの Prismyra」をそれに近づけるように学習させます。これを自分からの蒸留 (同じモデルの、条件が良いときの答えをまねさせる学習) と呼びます。</p>
+
+<figure>
+<svg viewBox="0 0 880 220" width="100%" style="max-width:880px" role="img" aria-label="自分からの蒸留の流れ">
+<defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="20" y="30" width="200" height="56" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="120" y="54" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">元の 40 層が考える</text>
+<text x="120" y="74" font-size="11.5" fill="#3c5a4c" text-anchor="middle">学習のときだけ、1 回</text>
+<path d="M224 58 L262 58" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar2)"/>
+<rect x="266" y="30" width="260" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="396" y="54" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">文書 + 考えの文 → Prismyra</text>
+<text x="396" y="74" font-size="11.5" fill="#3c5a4c" text-anchor="middle">先生の確率 (正解率 88.86%)</text>
+<rect x="266" y="140" width="260" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="396" y="164" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">文書だけ → Prismyra</text>
+<text x="396" y="184" font-size="11.5" fill="#3c5a4c" text-anchor="middle">生徒の確率 (今は 86.26%)</text>
+<path d="M396 90 L396 136" stroke="#1f7a4d" stroke-width="2.5" marker-end="url(#ar2)"/>
+<text x="410" y="118" font-size="11.5" fill="#1f7a4d">近づける</text>
+<rect x="590" y="140" width="270" height="56" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="725" y="164" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">使うときは考えない</text>
+<text x="725" y="184" font-size="11.5" fill="#3c5a4c" text-anchor="middle">速さは今のまま (1 問約 0.1 秒)</text>
+<path d="M530 168 L586 168" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar2)"/>
+</svg>
+<figcaption>先生と生徒が同じモデルなので、確率の形がそろっていて、まねしやすいのが利点です。考える時間は学習のときに 1 回払うだけで、使うときの速さは変わりません。</figcaption>
+</figure>
+
+<div class="warn"><p style="margin:0"><b>どこまで移せるかは、まだ分かりません。</b>抽象代数のように何百語もの計算が要る問題を、1 回の読み出しにそのまま移せるとは限りません。Kimi K3 の答えだけを学ばせたときも、この種類は 100 問中 67 問から 68〜73 問にしか上がりませんでした。まず効くと見ているのは、JevBench の難しい判断のように、考えの文が短くて済む問題です。</p></div>
+
+<h3>道 2: 迷ったときだけ考える</h3>
+
+<p>Prismyra の答えの確率が低い (迷っている) ときだけ、元の 40 層に考えさせる方法です。学習は要らず、すぐ使えます。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="考える問題の割合と正解率の関係">
+<line x1="80" y1="250" x2="840" y2="250" stroke="#10241b" stroke-width="1.5"/>
+<line x1="80" y1="40" x2="80" y2="250" stroke="#10241b" stroke-width="1.5"/>
+<text x="460" y="286" font-size="12" fill="#3c5a4c" text-anchor="middle">考えさせた問題の割合</text>
+<text x="80" y="268" font-size="11.5" fill="#3c5a4c" text-anchor="middle">0%</text>
+<text x="232" y="268" font-size="11.5" fill="#3c5a4c" text-anchor="middle">20%</text>
+<text x="840" y="268" font-size="11.5" fill="#3c5a4c" text-anchor="middle">100%</text>
+<text x="70" y="250" font-size="11.5" fill="#3c5a4c" text-anchor="end">86%</text>
+<text x="70" y="146" font-size="11.5" fill="#3c5a4c" text-anchor="end">88%</text>
+<text x="70" y="42" font-size="11.5" fill="#3c5a4c" text-anchor="end">90%</text>
+<line x1="80" y1="146" x2="840" y2="146" stroke="#d5e3da"/>
+<polyline points="80,236 148,170 226,145 840,101" fill="none" stroke="#1f7a4d" stroke-width="2.5"/>
+<circle cx="80" cy="236" r="6" fill="#1d4e8f"/><text x="92" y="232" font-size="12" fill="#1d4e8f">考えない 86.26%</text>
+<circle cx="148" cy="170" r="6" fill="#1f7a4d"/><text x="160" y="186" font-size="12" fill="#1f7a4d">確率 0.8 未満だけ: 9.0% で 87.53%</text>
+<circle cx="226" cy="145" r="6" fill="#1f7a4d"/><text x="238" y="124" font-size="12" fill="#1f7a4d">0.95 未満だけ: 19.2% で 88.01%</text>
+<circle cx="840" cy="101" r="6" fill="#1f7a4d"/><text x="830" y="92" font-size="12" fill="#1f7a4d" text-anchor="end">全部考える 88.86%</text>
+</svg>
+<figcaption>考える問題を 1 割に絞るだけで、全部考えたときの伸び (+2.60 点) の約半分 (+1.27 点) が取れます。考える問題 1 つあたり約 5 秒と約 700 語がかかります。</figcaption>
+</figure>
+
+<div class="warn"><p style="margin:0"><b>確率だけでは拾えない問題がある。</b>抽象代数のように、考えれば直る問題で Prismyra は<b>自信をもって間違えて</b>います (その 99 問での Prismyra の確率の中央値は 0.892)。こうした問題は、確率でなく問題の種類 (計算、何段もの判断) で「考える側」に回すほうが合います。</p></div>
+
+<h2>6. 今回の作業への当てはめ</h2>
+
+<table>
+<tr><th>手</th><th>この結果から見た見込み</th><th>速さへの影響</th><th>今の状況</th></tr>
+<tr><td>考えの文からの自分への蒸留 (道 1)</td><td class="y">一番筋が良い。直せる間違いが一番多く (43.6%)、先生の正しさも 88.86% と確かめた</td><td class="y">変わらない</td><td>考えの文 1,652 問分はもう手元にある。NVFP4 36 層の次の学習候補に足す</td></tr>
+<tr><td>迷ったときだけ考える (道 2)</td><td class="y">学習なしで +1.27 点</td><td class="no">考える 1 割の問題だけ約 5 秒</td><td>速さを守りたい用途では使えない。精度が優先の用途の選択肢</td></tr>
+<tr><td>Kimi K3 から知識を移す</td><td class="no">知識不足は多くて 5.3% で、残りの多くは Kimi も外す</td><td class="y">変わらない</td><td>答えだけの蒸留は効きが小さかった。Kimi の理由の文を使う形は試験中</td></tr>
+<tr><td>Prismyra に考えるスイッチを付ける</td><td class="no">36 層版は考える文を書けない</td><td class="no">—</td><td>使えない</td></tr>
+</table>
+
+<h2>7. まだ分かっていないこと</h2>
+
+<ul>
+<li>考えるモードは乱数を使うので、種だけ変えて 2 回目も解かせました。選んだ答えは 96.3% の問題で同じで、2 回目の正解率は 88.08% (1 回目は 88.86%) でした。1 回目に「考えれば直る」とした 99 問のうち <b>85 問は 2 回目も直り</b>、抽象代数の 29 問と JevBench の 13 問は全部直りました。2 回目と読み出しの差は +1.82 点 [+0.36, +3.27] で、効く場所も向きも同じです。</li>
+<li>36 層版が考える文を書けない原因 (層を抜いたことか、判断用の学習か) は分けていません。</li>
+<li>何百語の計算が要る問題を、1 回の読み出しにどこまで移せるかは、これから学習して確かめます。</li>
+<li>事実を足す試しは、Kimi K3 が書いた事実に頼っています。80 問中 18 問は、事実と問いだけで答えが当たりました。事実が答えをほぼ言ってしまう問題を除くと、知識不足と言えるのは 3 問だけです。</li>
+</ul>
+
+<div class="lead">
+<p style="margin:0"><b>まとめ。</b>Prismyra の間違いは、知らないからではなく、考えないからが中心です。答えに要る知識は重みの中にあります。いちばん有望なのは、同じモデルが考えた結果を学習で読み出しに移すことで、こうすれば使うときの速さは変わりません。</p>
+</div>
+
+<p class="foot">
+測った日: 2026-10-03 (JST)。場所: 東京の EKS、L40S。<br>
+腕: A = Prismyra 36 層 FP8 の読み出し、B = Qwen3.6-35B-A3B-FP8 (40 層、学習なし) に考えさせない生成、C = B に考えさせた生成 (temperature 1.0、top_p 0.95、top_k 20、presence_penalty 1.5、上限 16,384 トークン。モデルの説明書の「考えるモード、一般向け」の値)、D = Prismyra 36 層に考えさせた生成。<br>
+問題: Kev 近似 dev 600、JevBench 選ぶ半分 118、Kev 学習外の選ぶ半分 114、dev 400、BoolQ 別 dev 400、記事の振り分け 20 (合計 1,652)。区間は問題を復元抽出して 4,000 回、p 値は符号検定。<br>
+記録: 事前登録と全結果 <code>/Users/akazawt/tmp/smr/redesign/THINKING-DIAGNOSIS.md</code>、集計 <code>/Users/akazawt/tmp/smr/think/res/ana_out.txt</code>、知識を足した試し <code>/Users/akazawt/tmp/smr/think/res/inj_out.txt</code>。モデルの説明: Hugging Face の Qwen/Qwen3.6-35B-A3B-FP8。<br>
+この文書の位置づけ: <a href="prismyra-accuracy.html">精度のまとめ</a> が参照する診断記録(なぜ「迷った問題を強いモデルに回す」仕組みが要るのかの根拠)。<br>
+次の章: <a href="prismyra-a5-a6-experiments.html">実験5・6・6b: 計算問題を足す、容量を増やす、見落としを直す</a>。全体の入口: <a href="prismyra-thinking.html">Prismyra の技術まとめ</a>。
+</p>
+
+</div>
+</body>
+</html>

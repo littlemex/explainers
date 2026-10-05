@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prismyra の仕組み: 1 回読むだけで多くの質問に答える構造</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+figure{margin:22px 0;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 16px 10px}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:10px;text-align:left}
+figcaption b{color:var(--gd)}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+svg{display:block;margin:0 auto;max-width:100%;height:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="prismyra-thinking.html">Prismyra の技術まとめ</a> &nbsp;/&nbsp; 仕組み</p>
+
+<h1>Prismyra の仕組み<br>文書を 1 回読み、質問だけを安く増やす構造</h1>
+
+<div class="lead">
+<p><b>結論から。</b>Prismyra が速いのは、1 つの仕掛けの上に積み上げた結果です。<b>文書を読んだ結果(KV キャッシュ)は質問どうしで共有できるが、質問ごとに書き込む状態は共有できない</b>という非対称性(fork)が土台にあり、その上に「複数の文書を 1 回で読む」「文書を置いたままにする(shelf)」「同じ形の計算を録画して再生する(CUDA graph)」「特定の質問の形専用に学習した軽い読み取り口(option-set head)」が積まれています。</p>
+<p style="margin-bottom:0"><b>このページでやったこと。</b>実際に動いているコード(<code>prismyra/cache.py</code>・<code>prismyra/schedule.py</code>・<code>prismyra/graphs.py</code>・<code>prismyra/heads.py</code>)が持つ構造を、実測数値つきで説明します。数値はすべて NVIDIA L40S 1 枚での実測です。</p>
+</div>
+
+<h2>1. 土台になる非対称性(fork)</h2>
+
+<p>文書を読んだあと、モデルの中には 2 種類の「覚えている内容」が残ります。1 つは文書そのものの読み(KV キャッシュ)で、<b>どの質問も読むだけで書き込まない</b>もの。もう 1 つは、質問ごとに答えを計算していく途中の状態(再帰層の状態)で、<b>質問ごとに書き込みが進む</b>ものです。</p>
+
+<figure>
+<svg viewBox="0 0 880 230" width="100%" style="max-width:880px" role="img" aria-label="共有できる状態とできない状態">
+<defs><marker id="arM1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="20" y="30" width="300" height="80" rx="10" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="170" y="58" font-size="13.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">文書の読み(KV キャッシュ)</text>
+<text x="170" y="80" font-size="12" fill="#3c5a4c" text-anchor="middle">質問はここを読むだけ、書き込まない</text>
+<text x="170" y="98" font-size="12" fill="#1f7a4d" text-anchor="middle" font-weight="600">→ 1 回書けば全質問に使える</text>
+
+<path d="M330 70 L430 70" stroke="#3c5a4c" stroke-width="2" marker-end="url(#arM1)"/>
+<path d="M330 70 L430 150" stroke="#3c5a4c" stroke-width="2" marker-end="url(#arM1)"/>
+<path d="M330 70 L430 190" stroke="#3c5a4c" stroke-width="2" marker-end="url(#arM1)"/>
+
+<rect x="434" y="46" width="200" height="48" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="534" y="74" font-size="12.5" fill="#1d4e8f" text-anchor="middle">質問1の自分だけの状態</text>
+<rect x="434" y="126" width="200" height="48" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="534" y="154" font-size="12.5" fill="#1d4e8f" text-anchor="middle">質問2の自分だけの状態</text>
+<rect x="434" y="166" width="200" height="48" rx="8" fill="#e6eef8" stroke="#1d4e8f" opacity="0.001"/>
+<text x="700" y="110" font-size="12" fill="#8f2f2f" text-anchor="middle">こちらは質問ごとに<br>コピーして持つ</text>
+</svg>
+<figcaption>読むだけの文書キャッシュは 1 本を全質問で共有し、書き込みが進む質問ごとの状態だけをコピーします。これにより、48 GiB のカードに同時に開ける文書の数が <b>3 個から 19 個</b>に増えました(文脈 3,040 トークン、既定の質問グループ幅)。答えは 1 ビットも変わりません。</figcaption>
+</figure>
+
+<p>この非対称性のおかげで、質問をまとめて計算する「分岐(branch)」どうしは互いの計算結果を見ることができません。理由は 2 つで、(1) 各分岐は自分の状態しか書かない、(2) 分岐の文は文書より<b>あとに</b>置かれ、注意機構は前方しか見ないため、構造的に他の分岐の文を読めません。だから分岐には他の分岐を隠すための特別な処理(マスク)が要りません。</p>
+
+<h2>2. まとめて答える単位(group)</h2>
+
+<p>モデルを 1 回動かす(1 回の通過)のにかかる時間は、1 つの質問を運ぶときも 32 個の質問を運ぶときもほぼ同じです。重さの大半は、どの専門家(MoE のエキスパート)の重みを読むかであって、質問の数ではないからです。そこで、質問は <code>group</code>(既定 32)という単位でまとめて 1 回の通過に乗せます。</p>
+
+<pre>かかる時間 ≈ 文書を読む時間 + 1回の通過の時間 × ceil(質問数 / group)</pre>
+
+<p>33 問目だけが新しい通過を 1 回払うことになり、32 問目までは「ほぼ無料」です。<code>group</code> はエンジンを作るときに 1 回だけ決める値で、文書キャッシュのメモリ量も同時に決めます(半分にすれば使うメモリも半分になる代わり、通過の回数が増えます)。</p>
+
+<h2>3. 複数の文書を 1 回で読む(open_batch)</h2>
+
+<p>1 枚のカードが 1 文書あたり 1.08 件/秒しか答えられなかった原因は、GPU の計算力ではなく、<b>1 回の通過の幅をすべて 1 つの文書の質問に使っていたこと</b>でした。vLLM のような生成エンジンの速さは逆の発想で、1 回の通過に複数の依頼のトークンを詰め込みます。<code>Prismyra(paged=True).open_batch([...])</code> がこの発想を Prismyra に持ち込みます。</p>
+
+<figure>
+<svg viewBox="0 0 880 180" width="100%" style="max-width:880px" role="img" aria-label="複数文書を1回の読みに連結する">
+<defs><marker id="arM2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<text x="20" y="26" font-size="13" fill="#0f4a2e" font-weight="600">8 つの文書を 1 本につなげて、境界だけをデータとして渡す</text>
+<rect x="20" y="40" width="70" height="40" fill="#e8f4ec" stroke="#1f7a4d"/><text x="55" y="64" font-size="11" text-anchor="middle" fill="#0f4a2e">文書1</text>
+<rect x="94" y="40" width="70" height="40" fill="#e6eef8" stroke="#1d4e8f"/><text x="129" y="64" font-size="11" text-anchor="middle" fill="#1d4e8f">文書2</text>
+<rect x="168" y="40" width="70" height="40" fill="#e8f4ec" stroke="#1f7a4d"/><text x="203" y="64" font-size="11" text-anchor="middle" fill="#0f4a2e">文書3</text>
+<text x="260" y="64" font-size="16" fill="#9aa9a1">… 8 本まとめて 1 回で読む</text>
+<text x="20" y="100" font-size="11.5" fill="#3c5a4c">境界は cu_seqlens(注意機構) / seq_starts(畳み込み)としてカーネルに渡す。境界をまたいだ計算は起きない</text>
+<path d="M20 128 L860 128" stroke="#d5e3da"/>
+<text x="20" y="150" font-size="12.5" fill="#1f7a4d" font-weight="600">読む速さ: 0.989 秒 → 0.154 秒(6.4 倍) / 読んで答える速さ: 1.968 秒 → 0.372 秒(5.3 倍)</text>
+</svg>
+<figcaption>8 文書(各約 290 トークン、質問 4 個ずつ)の実測。1 文書あたり約 110 ms が固定費(カーネル起動の待ち)なので、1 件ずつ読むとその固定費を 8 回払いますが、まとめて読むと 1 回で済みます。</figcaption>
+</figure>
+
+<p>これを安全に行うには 3 つのことが要りました。(1) 畳み込み層の状態が「バッチ全体で 1 行」になっていたのを文書ごとに分ける。(2) 連結して読んだときに文書ごとの境界をまたいで計算が漏れないことを確かめる。(3) ページ単位の記憶領域に、半端に余ったぶんを置く場所を確保する。これらはすべて実機のテストで「答えが 1 ビットも変わらない」ことを確認してから有効にしています。</p>
+
+<h2>4. 文書を置いたままにする(shelf)とスケジューラ</h2>
+
+<p><code>engine.open_shelf()</code> は、文書をカードに置いたままにして、問い合わせが来るたびに読み直さない仕組みです。文書の「ページ(KV キャッシュ)」はプールに残り、質問の計算に使う再帰状態だけがスナップショットとして取り出され、答えるときにコピーして使われます。</p>
+
+<table>
+<tr><th>場面</th><th>到着する文書/件数</th><th>読んだ文書数</th><th>読まずに答えた数</th><th>件/秒</th></tr>
+<tr><td>毎回違う文書</td><td>24</td><td>24</td><td>0</td><td class="n">14.60</td></tr>
+<tr><td>同じ文書が繰り返す</td><td>24</td><td>8</td><td>16</td><td class="n y">19.00(1.30倍)</td></tr>
+</table>
+
+<p>この shelf を実際にサーバーとして動かすのが <code>prismyra.schedule.Batcher</code> です。1 本のワーカースレッドが文書を取り出して 1 回の通過にまとめ、「今まさに何人並んでいるか」という事実だけを見て、少し待って他の到着を集めるべきかを自分で判定します(<code>backlogged</code>)。到着の速さそのものは教えられていません。</p>
+
+<div class="note"><p style="margin:0"><b>待ち方の工夫が解決しないこと。</b>この待ち方の工夫で改善できるのは「どのタイミングでまとめるか」だけです。本当のボトルネックは<b>ワーカースレッドが 1 本しかなく、1 回の通過(約 224 ms)が終わるまで次を一切始められないこと</b>です。これは文書が 1 件ずつ、まばらに届く場面の負け(<a href="prismyra-performance.html">速さのページ</a>)の直接の原因で、2026-10-05 時点ではまだ解消されていません。</p></div>
+
+<h2>5. 繰り返しを録画して再生する(CUDA graph)</h2>
+
+<p>1 回の通過の時間のうち、実際に GPU が計算していたのは半分以下でした。残りは、GPU が「次は何を計算するか」という命令を CPU から受け取るのを待っている時間です。CUDA graph は、この命令の並びを 1 回だけ録画し、次からは録画を再生するだけにする仕組みです。</p>
+
+<figure>
+<svg viewBox="0 0 880 150" width="100%" style="max-width:880px" role="img" aria-label="短い1問の録画と再生">
+<text x="20" y="26" font-size="13" fill="#0f4a2e" font-weight="600">短い 1 問(文脈 232 トークン)、起動時に長さの区切りごとに録画</text>
+<rect x="20" y="40" width="380" height="40" fill="#8f2f2f"/><text x="210" y="65" font-size="13" fill="#fff" text-anchor="middle">録画なし 92 ms (そのうち計算は 39.9 ms だけ)</text>
+<rect x="20" y="92" width="179" height="40" fill="#1f7a4d"/><text x="110" y="117" font-size="13" fill="#fff" text-anchor="middle">再生 43.4 ms</text>
+<text x="420" y="117" font-size="12" fill="#3c5a4c">カーネル起動 2,564 回 → 録画で待ち時間だけ消える</text>
+</svg>
+<figcaption>長さ区切り(64〜2,048 トークン)ごとに起動時に録画し、録画が録画なしと 1 ビットも違わないことを確かめてから使います。1 問あたり 97.7 ms → 43.4 ms(2.25 倍)、HTTP 込みでも 98.1 ms → 44.7 ms。</figcaption>
+</figure>
+
+<p>この録画が安全なのは、<b>行数(バッチサイズ)によって計算の順番を変えるかけ算</b>(ルーター、専門家の gate、再帰層の小さな入力の射影)だけを録画の外に出し、毎回「本物の行数」でその場で計算しているからです。行数で結果が変わらない部分(ブロック量子化された行列演算・注意機構・再帰層本体)だけを録画し、起動時に最短と最長の長さで録画なしの計算と 1 ビット単位で比較してから使います。</p>
+
+<p>文書をまたいで同じ録画を使い回すには、文書ごとに違う「書き込み位置のあまり(remainder = 文脈長 mod 16)」を揃える必要があり、これが録画をページ化された記憶領域(paged storage)と組み合わせる理由です。それでも録画が実際に当たる頻度は低く、<a href="prismyra-performance.html">速さのページ</a>で数字を示します。</p>
+
+<h2>6. 答えを「行数に関係なく」同じに保つ(batch-invariance)</h2>
+
+<p>複数の文書・複数の質問を 1 回の通過に混ぜると、GPU の行列演算ライブラリは<b>行数によって計算の順番を変えることがあります</b>。数学的には同じ答えのはずでも、浮動小数点の足し算の順番が変わると最後の桁がずれ、深い層を通るうちに積み重なって、ごくまれに決定(どの選択肢を選ぶか)まで変わります。原因を 1 つずつ切り分けた結果、最初にずれる場所は<b>専門家の割り振りを決めるルーターの行列演算</b>でした。</p>
+
+<p>直し方は、行数に依存しない固定タイルの実装(vLLM の batch-invariant モード)を、ディスパッチャへの登録だけに絞って有効にすることです。プロセス全体の副作用(TF32 の無効化など)を伴う全面モードではなく、必要な演算だけを差し替える形にしたことで、80 文書・11 バッチの本番相当のベンチマークで<b>不一致 0 件、確率の最大移動 0.000000</b>を達成しました。この正しさには速さの代償があり、具体的な数字は<a href="prismyra-performance.html">速さのページ</a>に書いています。</p>
+
+<h2>7. 特定の質問の形専用に学習した軽い読み取り口(option-set head)</h2>
+
+<p>既定の答えの読み方は、最後の位置の隠れ状態と、モデルがもともと持つ出力層(語彙の行列)の内積です。これは学習なしでどんな選択肢の組でも使えますが、<b>いつも同じ選択肢の組で聞く質問</b>(例: 「simple / medium / complex」の 3 択で頼みごとの難しさを分ける)には、その組専用の小さな読み取り口を学習して差し替えられます。</p>
+
+<pre>Prismyra(model, heads=設定ファイル)  # 設定ファイルは選択肢の組と重みファイルを書くだけ
+                                      # エンジンのコードには選択肢の語を一切書かない</pre>
+
+<p>登録した組と、質問が宣言した選択肢の組が完全に一致したときだけその head が答えを出し、違う組の質問は今までどおり内積で読みます。<b>両方の経路が混在しても、他の質問の答えは 1 ビットも変わりません</b>(実機テストで確認済み)。</p>
+
+<div class="box">
+<p style="margin:0"><b>実例: 頼みごとの難しさを 3 択で判定する head(P2)。</b>「 simple / medium / complex」の 3 択に出力層の 3 行だけ学習したやり方(H6)は、関門となる既存の判断を 1 ビットも動かさずに正解率を 87.05%→91.73% まで伸ばしました。さらに本体の重みは変えずに、2 層(2,048→256→3)の小さな頭を同じ 3 択専用に学習した候補(P2)は、学習にも候補選びにも使っていない鍵付き問題集合(300 問)で、比較対象の決定モデル(Strands Decider 2B)に対して <b>+22.63 点 [+16.46, +28.81]</b>(Kimi K3 以外の 2 つの審判モデルの一致を正解にした採点)という、偶然では説明できない差を記録しました。速さも元の読み出しと同じ水準(+1% 以内)でした。詳しい精度の数字は<a href="prismyra-accuracy.html">精度のページ</a>にまとめています。</p>
+</div>
+
+<h2>8. まだ分かっていないこと</h2>
+
+<ul>
+<li>CUDA graph の録画は、実際のサーバー運用(文書が次々と違う長さで来る)では、今のところ採算判定の基準に阻まれてほとんど使われません。「断った形を永久に見捨てない」設計に直した後も、1 件ずつ届く場面での速さの改善は確認できていません。</li>
+<li>録画と shelf を長時間同時に動かすと GPU メモリの空きがマージンを下回ることがあり、「本当に空きが無い」場合と「確保済みだが未使用のブロックが貯まっているだけ」の場合を区別する判定が入っていますが、2 本目の計算レーンを並列に動かす(lane 2 本化)余地はまだわずかに足りません。</li>
+<li>ページ化された記憶領域(paged storage)は、同じ group 幅であれば速さを損ないません(測定誤差の範囲)が、群の幅を広げても速さは買えません(詳細は速さのページ)。</li>
+</ul>
+
+<p class="foot">
+出典: 公開リポジトリ github.com/littlemex/Prismyra の <code>docs/FORK.md</code>・<code>docs/PERFORMANCE.md</code>・<code>docs/HEADS.md</code>・<code>docs/KERNELS.md</code>、および NVIDIA L40S 1 枚での実機測定。すべての数値は該当ドキュメントまたは実機テストに基づく実測値です。<br>
+関連ページ: <a href="prismyra-performance.html">速さ</a>・<a href="prismyra-accuracy.html">精度</a>・<a href="prismyra-routing.html">使い方の形</a>。全体の入口: <a href="prismyra-thinking.html">Prismyra の技術まとめ</a>。
+</p>
+
+</div>
+</body>
+</html>
