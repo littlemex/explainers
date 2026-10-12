@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>何時間もかかる作業の練習で、GPU を休ませずに回す — 論文クイックサマリー 第 22 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 22 回</span>
+<h1>何時間もかかる作業の練習で、GPU を休ませずに回す</h1>
+<p class="src">元の論文・記事: <a href="https://arxiv.org/abs/2609.33848" target="_blank" rel="noopener">Wang, Zhou et al. (Qwen), &quot;QwenGyre: An Elastic Reinforcement Learning Framework for Training xLong-Horizon Agents&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「1 回の作業に何時間もかかり、100 万語近くを読み書きする AI エージェントを強化学習で練習させるとき、GPU の割り当てを状況に合わせてその場で動かし、枝分かれした作業記録をむだなく学習用に整理する仕組み。最大 1.85 倍速くなった」という研究です。</b></p>
+<p>このページは、Qwen チームの英語の紹介投稿と論文の要旨（abstract）をもとにまとめています。</p>
+
+<h2>何が難しいのか</h2>
+<p>最近の AI エージェントは、1 回の作業が何時間も続き、環境と何百回もやりとりし、1 回で 100 万語近くを扱うこともあります（とても長い作業、xLong）。これを強化学習で練習させると、2 つの困りごとが出ます。</p>
+<table>
+<tr><th>#</th><th>困りごと</th><th>何が起きるか</th></tr>
+<tr><td>1</td><td>作業ごとの長さが大きくちがい、遅いものが長く終わらない</td><td>待っている間、たくさんの GPU が何もせずに休んでしまう</td></tr>
+<tr><td>2</td><td>作業の途中で記録を縮めたり、手下のエージェントを呼んだり、やり直したりして、記録が枝分かれする</td><td>同じ部分が何度も重なった記録ができ、学習がとてもむだになる</td></tr>
+</table>
+
+<h2>工夫 1：GPU の割り当てをその場で動かす（Elastic Scheduler）</h2>
+<p>強化学習では、GPU は「答案を書く係（rollout）」と「答案から学ぶ係（training）」の 2 つの仕事をします。</p>
+<table>
+<tr><th>やり方</th><th>中身</th><th>弱点（このページの補足）</th></tr>
+<tr><td>Colocate</td><td>同じ GPU が、書く仕事と学ぶ仕事を交代でやる</td><td>遅い答案を待つ間、全員が待たされる</td></tr>
+<tr><td>Async</td><td>書く GPU と学ぶ GPU を分けて、同時に動かす</td><td>分け方が固定なので、片方が忙しくもう片方がひまになることがある</td></tr>
+<tr><td>QwenGyre（Elastic）</td><td>忙しさに合わせて、GPU を書く係と学ぶ係の間で動かす。動かすときも、実行中の作業は止めない</td><td>—</td></tr>
+</table>
+<p>レストランで、注文が多い時間はホール係を厨房の手伝いに回し、すいたら戻すようなものです。お客さんの食事（実行中の作業）は途中で止めません。</p>
+
+<h2>工夫 2：枝分かれした記録を木の形に整理する（Trajectory Processor）</h2>
+<ul>
+<li>記録を縮めた、手下のエージェントを呼んだ、やり直した、といった枝分かれを、共通の出だしを共有する「木」の形に組み直す</li>
+<li>同じ部分は 1 回分にまとめ、学習に使う量が増えすぎないよう上限を設ける</li>
+<li>時間切れで終わらなかった作業も、そこまでの進み具合に点をつけて学習に使う</li>
+</ul>
+
+<h2>結果</h2>
+<table>
+<tr><th>#</th><th>何を比べたか</th><th>結果</th><th>何と比べてか</th></tr>
+<tr><td>1</td><td>練習の速さ</td><td>最大 1.85 倍</td><td>Colocate と比べて</td></tr>
+<tr><td>2</td><td>練習の速さ</td><td>最大 1.78 倍</td><td>Async と比べて</td></tr>
+<tr><td>3</td><td>最初から最後までの練習時間</td><td>約 44% 短縮</td><td>Async と比べて（紹介投稿より）</td></tr>
+<tr><td>4</td><td>リポジトリを丸ごと作る課題（NL2RepoBench）の正解率</td><td>52.5% → 58.5%（48 回直しただけで 6.0 ポイント上昇）</td><td>練習前と比べて</td></tr>
+</table>
+<p>4 は、Qwen の最大級のモデル（全体 2.4 兆、1 語ごとに使うのは 950 億）で、1 回の作業が約 70 万語という大きさで試した結果です。</p>
+
+<div class="note">このページは論文・記事を紹介した文章を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文・記事で確かめてください。</div>
+<footer>元の論文・記事: <a href="https://arxiv.org/abs/2609.33848" target="_blank" rel="noopener">https://arxiv.org/abs/2609.33848</a></footer>
+</div>
+</body>
+</html>
