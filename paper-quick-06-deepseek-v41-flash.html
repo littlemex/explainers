@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>長い仕事を続ける AI のために、読み込みを半分にしてメモを小さくする — 論文クイックサマリー 第 6 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 6 回</span>
+<h1>長い仕事を続ける AI のために、読み込みを半分にしてメモを小さくする</h1>
+<p class="src">元の論文・記事: <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf" target="_blank" rel="noopener">DeepSeek-AI, &quot;DeepSeek-V4.1 Technical Report&quot; (DeepSeek-V4.1-Flash)</a></p>
+
+<p class="lead"><b>ひとことで言うと、「何時間も作業を続ける AI 向けに、長い文章を読み込む手間をほぼ半分にし、読んだ内容のメモ（KV キャッシュ）を小さくして置き場所も工夫した大きなモデル」です。</b></p>
+
+<h2>たとえ話</h2>
+<p>AI が長い作業をすると、読まなければいけない資料（これまでのやりとり）がどんどん長くなります。資料を読むたびに全員が全部を読み直していたら大変です。DeepSeek-V4.1-Flash は「誰が何を読むか」「読んだメモをどこにしまうか」を細かく工夫しました。</p>
+
+<h2>基本の大きさ</h2>
+<table>
+<tr><th>項目</th><th>数</th><th>説明</th></tr>
+<tr><td>全体の大きさ</td><td>5,520 億（552B）</td><td>覚えている数字の総数。専門家をたくさん抱え、仕事ごとに一部だけ呼ぶ形（MoE）</td></tr>
+<tr><td>読み込みで使う量</td><td>約 80 億（8B）</td><td>全体の約 1.4%。長い資料を読むときは少しだけ動かす</td></tr>
+<tr><td>書き出しで使う量</td><td>160 億（16B）</td><td>読み込みの 2 倍。答えを書くときは全体を使う</td></tr>
+<tr><td>辞書（Engram）</td><td>1,960 億（196B）</td><td>「直前の数語」で引く辞書。GPU ではなくふつうのメモリに置き、使う前に先に取り寄せる</td></tr>
+<tr><td>層の数</td><td>40 層</td><td>読み込みは下の 20 層、書き出しは 40 層すべて</td></tr>
+</table>
+
+<h2>工夫 1：読む班と書く班に分ける（CED）</h2>
+<p>これまでは、長い資料を 40 層すべてに通していました。今回は、下の 20 層（読む班）だけが資料を読み、その最後の結果から、上の 20 層（書く班）が使うメモを直接作ります。書く班は資料を自分で読み直しません。だから長い資料ほど、読み込みの計算がほぼ半分になります。</p>
+
+<h2>工夫 2：「すぐ近くだけ見るメモ」はざっくり作り直す</h2>
+<p>このモデルは、資料全体から大事な所を探して見る仕組みと、直前の 128 語だけを見る仕組み（SWA）を組み合わせています。直前 128 語のメモは層ごとに別々なので、書き始める前に作り直す必要があります。</p>
+<p>層をまたいで影響が伝わるので、本当に正確に作り直すには 128 語 × 層の数ぶん読み直さなければなりません。そこで、どの層も直前 128 語だけを読み直す近似にしました（SWA Bounded Replay）。実験では性能はほとんど落ちませんでした。ただし紹介者は、結果が毎回まったく同じにならないなどの問題が出るかもしれない、と指摘しています。</p>
+
+<h2>工夫 3：メモのしまい場所を分ける</h2>
+<table>
+<tr><th>メモの種類</th><th>しまう場所</th><th>理由</th></tr>
+<tr><td>今まさに使っているメモ</td><td>GPU のメモリ</td><td>すぐ使うから</td></tr>
+<tr><td>あとで同じ資料が来たときに使い回すメモ</td><td>SSD やふつうのメモリ</td><td>長く取っておくから、安くて大きい場所へ</td></tr>
+<tr><td>直前 128 語のメモ</td><td>ふつうのメモリに短い間だけ。長期保存はしない</td><td>なくなったら工夫 2 の方法で文章から作り直せるので、保管する量を大きく減らせる</td></tr>
+</table>
+
+<h2>工夫 4：メモを層の間で使い回す（CSA2）</h2>
+<p>メモを小さくする工夫には、これまで「1 語あたりのメモを細くする」「何語かをまとめて 1 つにする」がありました。今回はさらに「上の層が下の層のメモを使い回す」という 3 つ目の方向を加えました。</p>
+<table>
+<tr><th>モード</th><th>メモ</th><th>「どこを見るか」の選び方</th></tr>
+<tr><td>Full</td><td>自分で作る</td><td>自分で全部探す</td></tr>
+<tr><td>Reindex</td><td>前の層のものを使う</td><td>自分の目線で選び直す</td></tr>
+<tr><td>Reuse</td><td>前の層のものを使う</td><td>前の層の選び方もそのまま使う（探す作業を省く）</td></tr>
+</table>
+<p>どのモードでも、「自分は何を知りたいか」と直前 128 語のメモは層ごとに自分で作ります。</p>
+
+<h2>工夫 5：二段階で絞り込む</h2>
+<p>図書館で、まず棚を選び、次にその棚の中から本を選ぶのと同じです。</p>
+<ul>
+<li>最初の層だけが資料全体（最大 100 万語）を探し、8 語を 1 まとまりとして最大 2,048 まとまり、つまり約 1.6 万語の候補を選ぶ</li>
+<li>それより上の層は、100 万語全体ではなくこの約 1.6 万語の中だけを探し、最後に 512 個に絞って読む</li>
+</ul>
+<p>100 万語 → 約 1.6 万語 → 512 個なので、最後に読むのは全体の約 2,000 分の 1 です。</p>
+
+<h2>そのほかの工夫</h2>
+<ul>
+<li><b>待ち時間をなくす計算（Single-Pass mHC）</b>：層の入口で情報を混ぜる割合を、自分の層ではなく一つ前の層で計算した値で決める。前の計算を待たなくてよくなるので、いくつもの計算を 1 回にまとめられ、メモリの読み書きが大きく減る。性能はほとんど落ちない</li>
+<li><b>先読みの下書き係（DSpark）</b>：本体の学習が終わってから、別に下書き係を学習させる。下書き係は次の 5 語を一度に予想し、自信の高さに応じて何語まとめて本体に確かめてもらうかを決める</li>
+<li><b>画像も最初から読める</b>：画像を読む部品を自前で学習した。画像を小さく切り分ける所は、よく使われる畳み込みではなく単純な掛け算にした。理由の一つは、学習のやり方 Muon と相性がよいこと。また、仕事を専門家に割り振るときの調整を、文字と画像で別々にしている</li>
+</ul>
+
+<h2>学習のさせ方</h2>
+<ul>
+<li>一度に学ぶ量が約 1 億語（100M token）ととても大きい</li>
+<li>最初は全部を見る方式で慣らしてから絞り込む方式へ移る、という順番を取らず、最初から 6.4 万語の資料で絞り込み方式のまま学習した</li>
+<li>34 兆語を学んだ時点で、読める長さを 100 万語に広げた</li>
+</ul>
+
+<h2>紹介者のコメント</h2>
+<ul>
+<li>長い作業を続ける AI を安く速く動かすための工夫を、モデルの形からメモの扱い、動かす仕組みまで幅広く取り入れている。答えを出すときだけでなく、長い作業記録を大量に作る強化学習や、事前学習でも得をする</li>
+<li>読む班と書く班に分ける考え方は YOCO などの研究ですでにあったが、これほど大きな実用モデルに載ったことで改めて注目されそう</li>
+<li>すべてを GPU のメモリに置かず、用途に合わせてふつうのメモリや SSD を使い分ける考え方が徹底している。辞書はふつうのメモリから先に取り寄せ、メモも長く取っておくものと短い間だけ使うものを分けている</li>
+<li>一方で、工夫を 1 つずつ外して比べる実験（Ablation）が少なく、どの工夫がどれだけ効いたのか、ほかの案と比べてなぜこの形を選んだのかは十分にはわからない</li>
+<li>それでも、ここで選ばれた方針は今後の大きなモデルづくりに影響を与えるだろう</li>
+</ul>
+
+<div class="note">このページは論文・記事を紹介した文章を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文・記事で確かめてください。</div>
+<footer>元の論文・記事: <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf" target="_blank" rel="noopener">https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf</a></footer>
+</div>
+</body>
+</html>
