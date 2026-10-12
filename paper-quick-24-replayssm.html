@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大きな状態を毎回書き戻さず、最近の入力だけ取っておく — 論文クイックサマリー 第 24 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 24 回</span>
+<h1>大きな状態を毎回書き戻さず、最近の入力だけ取っておく</h1>
+<p class="src">元の論文・記事: <a href="https://arxiv.org/abs/2610.13778" target="_blank" rel="noopener">Liou, Nover et al., &quot;ReplaySSM: Cache SSM Inputs, Not State&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「Mamba-2 などの SSM は、読んだ内容を決まった大きさの『まとめ帳』（状態）に書き込みながら進む。でも、まとめ帳が大きく、1 語ごとに読み出して書き戻すのが遅い。ReplaySSM は、まとめ帳は 16 語ごとにだけ保存し、その間は最近の入力を取っておいて必要なときに計算し直す。これでモデル全体の書き出しが 1.20〜1.47 倍速くなり、投機的デコードの処理量は最大約 2 倍になった」という研究です。</b></p>
+<p>紹介文: 岡野原 大輔（@hillbig）の X への投稿（2026 年 10 月 13 日）</p>
+
+<h2>何が遅かったのか</h2>
+<p>SSM は、ふつうの Attention のように過去の全部の語のメモ（KV キャッシュ）を持たず、決まった大きさのまとめ帳だけを持つので、速いと期待されていました。ところが、そのまとめ帳自体が大きいのです。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>説明</th></tr>
+<tr><td>1</td><td>SSM の層の数</td><td>40 層</td><td>Nemotron-3-Super-120B の例</td></tr>
+<tr><td>2</td><td>1 層のまとめ帳の大きさ</td><td>4 MiB（1 本の文章あたり）</td><td>—</td></tr>
+<tr><td>3</td><td>1 語書くたびに動かすデータ</td><td>約 320 MiB</td><td>40 層 × 4 MiB を読み出して、書き戻すので 2 倍</td></tr>
+</table>
+<p>特に一度に 256 本の文章を書くような場合は、文脈が 10 万語くらいになるまで、このまとめ帳の読み書きがモデル全体の遅さのいちばんの原因になりえます。</p>
+
+<h2>ReplaySSM のやり方</h2>
+<p>まとめ帳を毎回書き戻すのをやめ、一定の間隔（たとえば 16 語ごと）でだけ保存します。その間は、保存したまとめ帳と、それ以降の語の入力（Mamba-2 なら「どれだけ忘れるか」「キー」「値」）だけを取っておき、必要なときにまとめ帳を計算し直します（replay）。</p>
+<p>日記帳にたとえると、毎日日記帳を清書し直すのではなく、16 日ごとに清書して、その間はメモ用紙を重ねておくようなものです。こうすると、動かすデータの量は従来の約 58% になります。</p>
+<p>さらに、答えを出すだけなら、まとめ帳そのものを作り直す必要すらありません。キーと質問（クエリ）の掛け算を先にすると、まとめ帳を組み立てずに答えを直接出せます。</p>
+
+<h2>投機的デコードとの相性が良くなる</h2>
+<p>投機的デコードは、小さな下書き係が先に何語か書き、本体がまとめて確かめて、合っていた分だけ採用する速くするしくみです。</p>
+<table>
+<tr><th>やり方</th><th>候補を確かめるとき</th><th>何語採用するか決まったら</th></tr>
+<tr><td>これまで（vLLM など）</td><td>候補の語ごとに、処理した後のまとめ帳を全部保存しておく</td><td>採用した数に合うまとめ帳を選ぶ</td></tr>
+<tr><td>ReplaySSM</td><td>候補の語の入力を取っておくだけ</td><td>取っておいた入力の「どこまで使うか」の印を進めるだけ。不採用の語のために大きなまとめ帳を戻す必要がない</td></tr>
+</table>
+
+<h2>Gated DeltaNet でも使える</h2>
+<p>Gated DeltaNet（GDN）は、今のまとめ帳を見てから書き込む差分を決めるので、Mamba-2 より計算がややこしくなります。それでも、何語かの間のつながりを小さな三角形の連立方程式として解くことで、同じことができます。</p>
+
+<h2>桁数を減らしても誤差がたまらない</h2>
+<p>まとめ帳を少ない桁数の数（低精度）で持つと、丸めの誤差が次の更新に引き継がれ、長い文章を書くほど誤差がたまっていきます。ReplaySSM は、更新に使う保存版は桁数を多くして持ち、答えを出すだけの計算には別の桁数の少ない保存版を使います。こうして低精度の誤差が次の更新に伝わらないようにし、長い文章でも正確さが落ちるのを大きく抑えました。</p>
+
+<h2>紹介者のコメント</h2>
+<ul>
+<li>SSM は、過去の全部の語のメモを持たなくてよいので、速く書けると期待されていた。でも実際は、まとめ帳そのものが大きく、その読み書きが遅さの原因になっていた</li>
+<li>また、過去を 1 冊のまとめ帳にまとめてしまうので、KV キャッシュのように印を動かすだけで過去に戻ることができず、投機的デコードとも相性が悪かった</li>
+<li>ReplaySSM は、最近の入力はまとめ帳に書き込まずにメモとして取っておくことで、この制約を大きくゆるめた。決まった大きさのまとめ帳という SSM の長所を残しつつ、KV キャッシュのような柔軟な扱いも一部できるようにした点が大事</li>
+<li>一方で Attention の側でも、過去のメモを縮めたりまとめたり、一定の区間ごとに管理したりする研究が進んでいる。<a href="./paper-quick-13-context-language-models.html">Context Language Model</a>（クイック第 13 回）のように、モデル自身が過去の情報を管理するしくみも出ている</li>
+<li>記憶をどう表し、どう管理するかという点では、SSM と Attention の境目がだんだんあいまいになってきているように思える</li>
+</ul>
+
+<div class="note">このページは論文・記事を紹介した文章を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文・記事で確かめてください。</div>
+<footer>元の論文・記事: <a href="https://arxiv.org/abs/2610.13778" target="_blank" rel="noopener">https://arxiv.org/abs/2610.13778</a></footer>
+</div>
+</body>
+</html>
