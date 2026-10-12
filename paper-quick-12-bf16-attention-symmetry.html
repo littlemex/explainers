@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小さな丸め誤差が、学習の後半で 1000 倍にふくらむ — 論文クイックサマリー 第 12 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 12 回</span>
+<h1>小さな丸め誤差が、学習の後半で 1000 倍にふくらむ</h1>
+<p class="src">元の論文・記事: <a href="https://arxiv.org/abs/2609.34272" target="_blank" rel="noopener">Chen, Dong et al., &quot;Broken Symmetry in BF16 Attention: Why FlashAttention Gradients Blow Up Late in Training&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「AI を少ない桁数の数（BF16）で速く学習させると、注意の計算（attention）を逆向きにたどる所で小さな丸め誤差が出る。その誤差が学習の後半で雪だるま式にふくらみ、直す量が 1000 倍近くまで暴れる。原因は 2 つで、どちらも簡単な直し方がある」という研究です。</b></p>
+<p>紹介文: 岡野原 大輔（@hillbig）の X への投稿（2026 年 10 月 5 日）</p>
+
+<h2>何が起きたか</h2>
+<ul>
+<li>最初の約 250 億語（25B token）までは普通に学習できていた</li>
+<li>その後、AI を直す量の大きさ（勾配ノルム）が 1000 倍近くまで大きくなり、最終的な成績も悪くなった</li>
+<li>特にひどかった 2 つの層で、注意の計算の逆向き部分だけを桁数の多い数（FP32）で計算し直すと、モデル全体の直す量が 100 分の 1 以下に下がった</li>
+</ul>
+<p>つまり、暴れていた直す量の大部分は、モデルそのものではなく、FlashAttention（注意の計算を速くする部品）の計算誤差から来ていました。</p>
+
+<h2>原因 1：引き算と掛け算の順番</h2>
+<p>注意の計算では、いちばん大きい点数を全体から引いてから使います。こうすると、いちばん大きい点数は本来ちょうど 0 になります。FlashAttention は速くするために「大きさをそろえる掛け算」と「いちばん大きい点数を引く引き算」を 1 回の命令（FMA）でまとめて行うので、丸め誤差でちょうど 0 にならないことがあります。このわずかな誤差が、逆向きの計算でふくらみます。</p>
+<p><b>直し方</b>：先に引き算をしてから掛け算をする、と順番を変えるだけで大部分が消えます。</p>
+
+<h2>原因 2：「合計 0」のきまりが崩れる</h2>
+<h3>もともとのきまり</h3>
+<p>softmax（点数を確率に変える計算）には、全部の点数に同じ数を足しても結果が変わらない、という性質があります。テストの点数が全員一律 10 点上がっても、順位は変わらないのと同じです。</p>
+<p>だから「全員を同じだけ上げ下げする方向」には直す意味がなく、直す量を全部足すとちょうど 0 になる、というきまりがあります。</p>
+<h3>何が崩れるか</h3>
+<p>FlashAttention は途中で、直す量を桁数の少ない BF16 に変えてから計算を続けます。このとき丸め誤差で、合計がわずかに 0 からずれます。すると、本来は消えるはずの「全部のキーの平均」の成分が、質問側（query）の直す量に混ざってしまいます。</p>
+<h3>なぜ後半になって暴れるのか</h3>
+<ul>
+<li>学習が進むとキー（key）の大きさが大きくなり、わずかなずれが大きく引き伸ばされる。やがて本物の直す量より、ずれから来たにせものの方が大きくなることがある</li>
+<li>にせものの直す量のせいで質問とキーの大きさがさらに大きくなり、ずれがもっと引き伸ばされる。このくり返しで暴れる</li>
+</ul>
+<p><b>直し方（GProj）</b>：BF16 に変えたあと、直す量の合計がもう一度ちょうど 0 になるように調整します。これだけで、質問とキーの直す量の誤差は、桁数の多い FP32 で計算したときとほぼ同じまで小さくなります。</p>
+
+<h3>QK normalization との関係</h3>
+<p>質問とキーの大きさをそろえる仕組み（QK normalization）を使うモデルでは、大きさが育たないので、誤差が大きく引き伸ばされる状態には入りにくいと考えられます。ただし誤差そのものを直すわけではなく、ふくらむのを抑えているだけです。</p>
+
+<h2>紹介者のコメント</h2>
+<ul>
+<li>学習の初めにはほとんど見えず、学習が進んで特定の状態に入ったときに少しずつ出てくるので、とてもやっかいな問題</li>
+<li>モデルの中にはいくつかの「変えても結果が同じ」性質があり、それに対応するきまり（保存則）が逆向きの計算にもある。少ない桁数の計算でこのきまりがわずかに崩れると、最初は小さな誤差でも、学習とのくり返しでふくらみ、学習全体を不安定にすることがある</li>
+<li>この論文は BF16 を扱っているが、最近は FP8 や FP4 など、もっと少ない桁数での学習も広がっている。どの層やどの計算にどの桁数を使うかは、今はかなり試してみて決めている</li>
+<li>こうした性質ときまりを理解できれば、「どの誤差は許せて、どの誤差は仕組みとして危ないのか」を見分けられる。そうすれば、もっと少ない桁数でも安全に学習し、安定さや最終的な成績を保ったり良くしたりできるかもしれない</li>
+</ul>
+
+<div class="note">このページは論文・記事を紹介した文章を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文・記事で確かめてください。</div>
+<footer>元の論文・記事: <a href="https://arxiv.org/abs/2609.34272" target="_blank" rel="noopener">https://arxiv.org/abs/2609.34272</a></footer>
+</div>
+</body>
+</html>
