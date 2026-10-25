@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自作 CPU と現代 CPU の距離 ― 骨格は変わらない、総復習</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 24 回 (最終回)</p>
+  <span class="level lv-e">Expert</span>
+  <h1>自作 CPU と現代 CPU の距離 ― 骨格は変わらない、総復習</h1>
+  <p>スーパースカラ・アウトオブオーダー・投機実行・多段キャッシュ。名前は難しいが、どれも rj32 で見た仕組みを「賭けて増やす」方向に伸ばしただけで、骨格 (命令を取り出し・解読し・実行し・書き戻す) は変わらない</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 01〜23 回のすべて (このシリーズの総復習です)</p>
+  <p class="intro">rj32 のような CPU と、手元のパソコンやスマートフォンに載っている現代の CPU の間には、クロック周波数や命令数で何百倍もの差があります。しかし、その差を生んでいる技術 (スーパースカラ・アウトオブオーダー実行・投機実行・多段キャッシュ) は、どれも魔法ではなく、このシリーズで見てきた仕組みを「1 つずつ増やす」「賭けに出る」方向に発展させたものです。最終回では、この距離を 1 つずつ測り、最後に「それでも変わらない骨格」が何かを確認します。クイズは第 01〜23 回の知識を組み合わせて答える総復習です。</p>
+
+  <!-- ===== 解説パート 1: それでも変わらない骨格 ===== -->
+  <section>
+    <h2>1. それでも変わらない骨格</h2>
+    <p>第 01 回で見た通り、CPU の仕事は「命令を取り出し (fetch) → 解読する (decode) → 実行する (execute) → 結果を書き戻す (writeback)」の繰り返しです。rj32 も、手元のパソコンに載っている現代の CPU も、この骨格は変わりません。違うのは、<b>この 4 つの仕事のそれぞれを、1 クロックにどれだけ、どれくらい賭けてやるか</b>という量の問題です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="rj32と現代CPUが共有する骨格の図">
+        <rect x="20" y="20" width="580" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="310" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">共通の骨格: fetch → decode → execute → writeback</text>
+        <rect x="20" y="100" width="280" height="70" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="160" y="125" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">rj32</text>
+        <text x="160" y="145" font-size="12" text-anchor="middle" fill="#12211a">1 クロックに 1 命令、順番通り</text>
+        <rect x="320" y="100" width="280" height="70" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="460" y="125" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">現代の CPU</text>
+        <text x="460" y="145" font-size="12" text-anchor="middle" fill="#12211a">複数命令・入れ替え・賭けながら進める</text>
+      </svg>
+      <p class="cap">図: 骨格 (4 つの仕事) は同じで、それぞれの仕事をどれだけ並列に・どれだけ賭けて行うかが違う。</p>
+    </div>
+    <p>この回では、この「賭けて増やす」方向への発展を 4 つ (スーパースカラ・アウトオブオーダー実行・投機実行・多段キャッシュ) に分けて、それぞれが rj32 の何を発展させたものかを確認します。</p>
+  </section>
+
+  <!-- ===== 解説パート 2: スーパースカラ ===== -->
+  <section>
+    <h2>2. スーパースカラ ― 1 クロックに複数命令</h2>
+    <p>第 23 回で見た性能の式の CPI (Cycles Per Instruction) は、rj32 のような単純なパイプラインでは良くても 1 止まりです。1 クロックに fetch できる命令は 1 個、execute できる命令も 1 個だからです。<b>スーパースカラ</b>は、decode や execute の回路を複数用意し、1 クロックに複数の命令を同時に処理できるようにする設計です。この時 CPI は 1 より小さくなり得るので、通常は逆数の<b>IPC (Instructions Per Cycle)</b> という言い方で「1 クロックに平均何命令処理できたか」を表します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="スーパースカラで1クロックに複数命令を処理する図">
+        <rect x="30" y="30" width="180" height="40" rx="6" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="55" font-size="13" text-anchor="middle" fill="#0f5132">rj32: 1 クロックに 1 命令</text>
+        <rect x="30" y="90" width="560" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="130" y="115" font-size="12.5" text-anchor="middle" fill="#5b3d80">ALU 命令</text>
+        <text x="330" y="115" font-size="12.5" text-anchor="middle" fill="#5b3d80">別の ALU 命令</text>
+        <text x="500" y="115" font-size="12.5" text-anchor="middle" fill="#5b3d80">load 命令</text>
+        <text x="310" y="155" font-size="13" text-anchor="middle" fill="#12211a">スーパースカラ: 同じ 1 クロックに 3 個の実行ユニットが同時に動く</text>
+      </svg>
+      <p class="cap">図: 実行ユニットを複数用意すれば、1 クロックで複数命令を同時に進められる。</p>
+    </div>
+    <p>第 07 回で見た ALU や第 08 回のレジスタファイルは、rj32 では 1 組しかありません。スーパースカラはこれを複数組に増やし、第 11 回のデコーダにも「同時に複数命令を解読する」という仕事を追加します。回路の規模は増えますが、骨格そのもの (デコードして ALU で実行する) は変わりません。</p>
+  </section>
+
+  <!-- ===== 解説パート 3: アウトオブオーダー実行 ===== -->
+  <section>
+    <h2>3. アウトオブオーダー実行 ― 命令の順番を入れ替える</h2>
+    <p>rj32 は第 15 回で見た通り、命令を書かれた順番通りに処理する「イン・オーダー」の CPU です。そのため、第 17 回で見たようにロード命令がメモリの応答を待っている間、<b>後ろの命令は全部足止めされます</b>。たとえ後ろの命令がそのロード命令の結果を全く必要としなくても、順番を守るために待たされてしまいます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="イン・オーダーとアウト・オブ・オーダーの違いの図">
+        <text x="310" y="20" font-size="13" text-anchor="middle" fill="#12211a">命令 A (load, 時間がかかる) → 命令 B (A の結果を使う) → 命令 C (A ・ B と無関係)</text>
+        <rect x="30" y="40" width="560" height="50" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="310" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">イン・オーダー (rj32)</text>
+        <text x="310" y="80" font-size="12" text-anchor="middle" fill="#12211a">C は無関係なのに、A の完了を待ってから実行される</text>
+        <rect x="30" y="110" width="560" height="50" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="310" y="130" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">アウト・オブ・オーダー</text>
+        <text x="310" y="150" font-size="12" text-anchor="middle" fill="#12211a">C は A を待たずに先に実行され、B だけが A の完了を待つ</text>
+      </svg>
+      <p class="cap">図: 順番を守る必要がない命令を先に実行することで、待ち時間を無駄にしない。</p>
+    </div>
+    <p>ただし、これには代償があります。第 08 回で見た rj32 のレジスタファイルは「読み 2 ポート・書き 1 ポート」という単純な構成でした。アウトオブオーダーで複数の命令が同時に進むと、<b>同じレジスタへ別々の命令が別々の時点で書き込む</b>という状況が起きやすくなり、「後から来た命令の結果を先に書いてしまう」ような間違った上書きを防ぐ必要が出てきます。これを解決する代表的な技法がレジスタリネーミング (同じ名前のレジスタを、実際には複数の実体に割り当て直す仕組み) です。骨格 (レジスタファイルに書き戻す) は同じですが、管理の複雑さが大きく増えます。</p>
+  </section>
+
+  <!-- ===== 解説パート 4: 投機実行 ===== -->
+  <section>
+    <h2>4. 投機実行 ― 当たるとは限らない賭けに出る</h2>
+    <p>第 23 回で見た通り、rj32 の <code>if.cc</code> によるスキップは「確定するまで律儀に 1 クロック待つ」という、外れのない確実な方式です。パイプラインの段数が増え、分岐の結果が確定するまでに何段もかかるようになると、この「確定を待つ」だけで大きな時間を失います。<b>投機実行</b>は、確定を待たずに「たぶんこちらだろう」と予測した方向へ先に実行を進めてしまう技法です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 180" role="img" aria-label="投機実行の当たりと外れの図">
+        <rect x="30" y="30" width="250" height="50" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="155" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">予測が当たった時</text>
+        <text x="155" y="68" font-size="12" text-anchor="middle" fill="#12211a">先に進めた分がそのまま得になる</text>
+        <rect x="330" y="30" width="270" height="50" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="465" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">予測が外れた時</text>
+        <text x="465" y="68" font-size="12" text-anchor="middle" fill="#12211a">進めた分を取り消す (フラッシュ) 必要がある</text>
+        <text x="310" y="120" font-size="13" text-anchor="middle" fill="#12211a">rj32 の if.cc: 常に 1 クロックだけ使う、外れのない確実な方式</text>
+        <text x="310" y="145" font-size="12.5" text-anchor="middle" fill="#4a5d54">投機実行: 当たればほぼ 0 クロック、外れれば大きなペナルティという賭け</text>
+      </svg>
+      <p class="cap">図: 確実に 1 クロック払う方式と、当たれば得・外れれば大きく損する賭けの方式の違い。</p>
+    </div>
+    <p>当たる割合が十分高ければ、平均するとこの賭けは得になります。しかし外れた時のペナルティは、パイプラインの段数が深いほど大きくなります。これは第 23 回の性能の式のうち、CPI の平均値をどちらの方向に動かすかという話で、骨格としては「次にどの命令を fetch するか」という第 1 回から変わらない判断を、確定前に先回りしているだけです。</p>
+  </section>
+
+  <!-- ===== 解説パート 5: キャッシュ階層 ===== -->
+  <section>
+    <h2>5. キャッシュ階層 ― 何段もの踏み台</h2>
+    <p>第 23 回で見た通り、rj32 がキャッシュ無しで済んでいるのは、使っているメモリが小さく CPU と同じ速さで読み書きできる内蔵ブロック RAM だからでした。現代の CPU が扱うプログラムやデータは、この内蔵メモリには到底収まりません。<b>キャッシュ階層</b>は、1 段の「小さいが速いメモリ」では足りない時に、速さの違う何段ものメモリを踏み台のように重ねる仕組みです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="キャッシュ階層のピラミッド図">
+        <text x="310" y="20" font-size="13" text-anchor="middle" fill="#12211a">rj32 の内蔵 BRAM</text>
+        <rect x="270" y="30" width="80" height="26" fill="#198754" opacity="0.4" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="310" y="48" font-size="11.5" text-anchor="middle" fill="#0f5132">CPU 直結</text>
+        <rect x="230" y="66" width="160" height="26" fill="#3d7dca" opacity="0.35" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="310" y="84" font-size="11.5" text-anchor="middle" fill="#1f4a68">L1 キャッシュ (小さい・最速)</text>
+        <rect x="190" y="102" width="240" height="26" fill="#7a5a9e" opacity="0.3" stroke="#5b3d80" stroke-width="1.5"/>
+        <text x="310" y="120" font-size="11.5" text-anchor="middle" fill="#5b3d80">L2 キャッシュ</text>
+        <rect x="140" y="138" width="340" height="26" fill="#c0492f" opacity="0.25" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="310" y="156" font-size="11.5" text-anchor="middle" fill="#b5401f">L3 キャッシュ</text>
+        <rect x="80" y="174" width="460" height="26" fill="#8a8a8a" opacity="0.25" stroke="#555" stroke-width="1.5"/>
+        <text x="310" y="192" font-size="11.5" text-anchor="middle" fill="#333">外部メモリ (DRAM、大きい・最も遅い)</text>
+      </svg>
+      <p class="cap">図: 上に行くほど小さく速く CPU に近い。rj32 の BRAM はこのピラミッドの頂点 1 段だけに相当する。</p>
+    </div>
+    <p>各段の役割は、第 23 回で見た「よく使うデータを近くに置く」という考え方を繰り返しているだけです。頂点 (L1) に収まらなければ 1 段下 (L2) を探し、そこにも無ければさらに下 (L3、そして外部メモリ) を探します。段数が増えるのは、CPU と外部メモリの速度差があまりに大きくなり、1 段だけでは「近くて速い」と「大きい」を同時に満たせなくなったからです。</p>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>(1) 複雑さは「組み合わせ」で増える。</b> スーパースカラ・アウトオブオーダー・投機実行は、それぞれ単独でも設計が難しい技術ですが、同時に使うと「どの命令をどの順番で、当てにいくか」の組み合わせが爆発的に増えます。第 19 回で見た rj32 のテストケースや、第 22 回で見た emurj によるソフトウェアでの先行検証という方針は、現代の CPU ではさらに重要になります。実機 (シリコン) に焼き込んでから間違いに気づくコストが、rj32 を FPGA に書き込み直すコストとは比較にならないほど大きいからです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 150" role="img" aria-label="確かめる場所ごとのコストの違いの図">
+        <rect x="30" y="30" width="160" height="40" fill="#198754" opacity="0.3" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">emurj (ソフトウェア)</text>
+        <rect x="220" y="30" width="200" height="40" fill="#3d7dca" opacity="0.3" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="320" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">FPGA (rj32 の実機)</text>
+        <rect x="450" y="30" width="150" height="40" fill="#c0492f" opacity="0.3" stroke="#b5401f" stroke-width="2"/>
+        <text x="525" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">シリコン</text>
+        <text x="310" y="105" font-size="13" text-anchor="middle" fill="#12211a">右へ行くほど、1 回の間違いに気づくコストが大きくなる</text>
+        <text x="310" y="128" font-size="12.5" text-anchor="middle" fill="#4a5d54">組み合わせが爆発的に増える技術ほど、左側 (安い場所) での検証が重要になる</text>
+      </svg>
+      <p class="cap">図: 確かめる場所が実機・量産に近づくほど、1 回の間違いのコストが跳ね上がる。</p>
+    </div>
+    <p><b>(2) 骨格が変わらないことは「簡単になる」ことを意味しない。</b> fetch ・ decode ・ execute ・ writeback という骨格、命令数×CPI×クロック周期という性能の式、メモリアドレス空間という考え方は、rj32 でも現代の CPU でも共通です。しかし、この回で見た 4 つの技術はどれも、骨格の「中身」を賭けや並列化で複雑にするもので、設計・検証のコストはその複雑さの分だけ増えます。</p>
+    <p><b>(3) 自分で作れる CPU から、距離は測れるようになった。</b> rj32 のような小さな CPU を自分で組み立てる経験は、スーパースカラや投機実行を積んだ CPU を作れるようにするわけではありません。しかし、このシリーズを通して見てきた骨格 (今回の第 1 節) を知っていれば、現代の CPU の技術解説を読んだ時に「それは骨格のどの部分を、どう賭けて増やしたものか」という距離を測れるようになります。それが、このシリーズの最終的な到達点です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li>Hennessy, Patterson, "Computer Architecture: A Quantitative Approach" (書名・著者のみ、リンクなし) ― スーパースカラ・アウトオブオーダー実行・投機実行・キャッシュ階層という、本回で扱う現代 CPU の技術の一次文献。</li>
+      <li>Hennessy, Patterson, "Computer Organization and Design" (書名・著者のみ、リンクなし) ― レジスタリネーミング、分岐予測の当たる割合とペナルティの関係の一次文献。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/README.md" target="_blank" rel="noopener">rj32: README.md</a> ― rj32 が現在 fetch/execute の 2 段パイプライン・ハーバード構成であることの根拠。本回全体で rj32 側の基準として参照。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj32: docs/instructions.md</a> ― <code>if.cc</code> によるスキップが常に 1 クロックで確実に完了するという、投機実行との対比の根拠。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-performance.html">← 第 23 回 性能の式</a><a href="./cpu-index.html">目次</a><span></span></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '第 04 回で見た 2 の補数表現と、第 07 回で見た ALU の設計を組み合わせる。ALU が「加算器を 1 つ作るだけで減算もできる」ようにする時、利用している 2 の補数の性質はどれか?',
+    opts: [
+      '引く数をビット反転してから 1 を加えた値 (2 の補数の負数) を、そのまま加算器に入れれば減算になる',
+      '2 の補数では、正の数と負の数でビット幅そのものが異なるため、専用の減算器が別途必要になる',
+      '2 の補数表現は符号なし整数専用の表現であり、そもそも減算には使えない',
+      '2 の補数では桁上がり (キャリー) が発生しないため、加算器をそのまま使っても結果は変わらない',
+      '2 の補数は 10 進数の桁をそのまま 2 進数に写し替えただけの表現で、加算器の再利用とは無関係'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>2 の補数では「ある数を引く」ことは「その数をビット反転して 1 を加えた値 (負数) を足す」ことと同じになる。これにより ALU は減算専用の回路を別に持たず、加算器と反転・+1 の仕組みだけで済ませられる。',
+      '2 の補数は正・負どちらの数も同じビット幅で表現できることが利点の 1 つで、ビット幅が異なるという説明は誤り。',
+      '2 の補数表現はむしろ符号付き整数を扱うための表現で、符号なし整数専用という説明は逆。',
+      'キャリー (桁上がり) は 2 の補数の演算でも通常通り発生し、第 04 回で見たオーバーフロー判定にも使われる。「発生しない」は誤り。',
+      '2 の補数は 2 進数のビットパターンそのものに意味を持たせる表現で、10 進数の桁を単純に写し替えたものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>減算を「反転して 1 を足してから加算する」という手順に変換します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="2の補数による減算の図"><text x="280" y="25" font-size="13" text-anchor="middle" fill="#12211a">A - B = A + (NOT B + 1)</text><rect x="40" y="45" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="115" y="70" font-size="12.5" text-anchor="middle" fill="#0f5132">B をビット反転 +1</text><line x1="190" y1="65" x2="250" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-mg1)"/><rect x="250" y="45" width="150" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="325" y="70" font-size="12.5" text-anchor="middle" fill="#5b3d80">同じ加算器で A + (-B)</text><defs><marker id="arr-mg1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 減算は「反転して 1 を足す」という前処理をするだけで、同じ加算器で計算できる。</p></div>'
+    }
+  },
+  {
+    q: '第 05 回で見たフリップフロップのセットアップ時間と、第 23 回で見た「クロック周期は 1 段の中の最長の経路で決まる」という関係を組み合わせる。セットアップ時間がクロック周期の計算に入る理由として最も適切なものは?',
+    opts: [
+      'セットアップ時間は消費電力を表す数値であり、クロック周期の計算とは無関係である',
+      '次のクロックの直前までに、フリップフロップへ入る信号が安定している必要があり、その安定に必要な時間もクロック周期の一部だから',
+      'セットアップ時間はフリップフロップの個数が増えるほど短くなるため、無視してよいほど小さくなる',
+      'セットアップ時間は命令のビット幅によって変化する値で、ALU の演算内容には影響されない',
+      'セットアップ時間はソフトウェア (アセンブラやコンパイラ) が調整する値であり、回路の設計とは関係がない'
+    ],
+    ans: 1,
+    exps: [
+      'セットアップ時間は消費電力の指標ではなく、フリップフロップが正しく値を取り込むために信号が安定していなければならない時間のこと。',
+      '<b>これが正解。</b>1 段の中の信号は、組み合わせ回路を通る時間 (伝搬遅延) に加えて、次の段のフリップフロップに取り込まれる直前にセットアップ時間だけ安定している必要がある。クロック周期はこの両方を含めた最長経路で決まる。',
+      'セットアップ時間はフリップフロップ 1 個ごとの物理的な特性で決まり、個数が増えても自動的に短くなるものではない。',
+      'セットアップ時間は回路 (フリップフロップ) の特性で決まり、どんな演算かという ALU の内容そのものには直接左右されない。',
+      'セットアップ時間は回路のタイミングの性質であり、アセンブラやコンパイラといったソフトウェアが調整するものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 クロックの中には、信号が通る時間とフリップフロップが取り込む直前の安定時間の両方が入ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="クロック周期にセットアップ時間が含まれる図"><rect x="30" y="30" width="300" height="40" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/><text x="180" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">組み合わせ回路を信号が通る時間</text><rect x="330" y="30" width="150" height="40" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="405" y="55" font-size="12" text-anchor="middle" fill="#b5401f">セットアップ時間</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">この 2 つを合わせた長さが、1 クロックの最低限の長さになる</text></svg>'
+          + '<p class="cap">図: クロック周期は「信号が通る時間」と「安定に必要な時間」の合計以上でなければならない。</p></div>'
+    }
+  },
+  {
+    q: '第 09 回で見たハーバード・アーキテクチャ (命令メモリとデータメモリが別) と、第 22 回で見た <code>cpudef.asm</code> の <code>#bankdef</code> を組み合わせる。<code>code</code> バンクが 0x0000、<code>data</code> バンクが 0x8000、<code>bss</code> バンクが 0x0000 から始まる設計が矛盾しない理由は?',
+    opts: [
+      'customasm が実行時にバンクの重複を検出し、自動的に番地を振り直してくれるから',
+      '<code>bss</code> バンクは実際には使われない予約領域であり、番地が重複しても実害がないから',
+      '<code>code</code> バンクは命令メモリ、<code>bss</code>/<code>data</code> バンクはデータメモリという別々の記憶装置を指すため、同じ番号でも別物として扱われるから',
+      'rj32 は実際にはハーバード・アーキテクチャではなく、ノイマン型として動作しているため番地の重複が起きないから',
+      '0x0000 という番地はシステム予約の特別な値で、どのバンクでも常に使われない決まりになっているから'
+    ],
+    ans: 2,
+    exps: [
+      'customasm はバンクの定義をそのまま使ってビット列を組み立てる道具で、重複を検出して自動的に番地を振り直すような機能は持たない。',
+      '<code>bss</code> は初期値を持たない変数の置き場所として実行中に読み書きされ、使われない領域ではない。',
+      '<b>これが正解。</b>第 09 回で見た通り、rj32 はハーバード・アーキテクチャで命令メモリとデータメモリが別の記憶装置。<code>code</code> バンクはその命令メモリ側、<code>bss</code>/<code>data</code> はデータメモリ側を指すので、同じ番号 0x0000 でも指している装置が違い、重複にならない。',
+      'rj32 の README には、命令メモリとデータメモリを分けたハーバード・アーキテクチャであることが明記されている。',
+      '0x0000 が特別な予約値として常に使われないという決まりは、<code>cpudef.asm</code> のどこにも存在しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ番号でも、指している記憶装置そのものが違えば衝突しません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="命令メモリとデータメモリの再確認"><rect x="40" y="30" width="200" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">命令メモリ (code)</text><text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">0x0000〜</text><rect x="320" y="30" width="200" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">データメモリ (bss/data)</text><text x="420" y="75" font-size="12" text-anchor="middle" fill="#12211a">0x0000〜 / 0x8000〜</text></svg>'
+          + '<p class="cap">図: 別の記憶装置であれば、同じ番号の番地が重複しても問題ない。</p></div>'
+    }
+  },
+  {
+    q: '第 13 回で見た rj32 の <code>if.cc</code> によるスキップと、この回で見た投機実行を組み合わせて比較する。2 つの方式の違いを、ペナルティの確実性という観点で最も正確に述べたものは?',
+    opts: [
+      '投機実行は外れることが原理的になく、<code>if.cc</code> より常に有利な方式である',
+      '<code>if.cc</code> はスキップのたびに毎回ペナルティが変動し、投機実行の方がむしろ予測可能である',
+      '両者は全く同じ仕組みで、呼び方が違うだけで実際の動作に差はない',
+      '<code>if.cc</code> は常に 1 クロックの確実なコスト、投機実行は当たりほぼ無料・外れ大ペナルティの賭けである',
+      '<code>if.cc</code> も投機実行も、どちらもパイプラインの段数には全く影響されない方式である'
+    ],
+    ans: 3,
+    exps: [
+      '投機実行は予測に基づいて先に進める以上、外れる可能性が常にある。原理的に外れないという説明は誤り。',
+      '<code>if.cc</code> のコストは第 23 回で見た通り常に 1 クロックで一定であり、「毎回変動する」という説明は誤り。むしろ投機実行の方が外れた時に大きく変動する。',
+      '<code>if.cc</code> は確定を待つ確実な方式、投機実行は先に賭けに出る方式で、動作もコストの性質も異なる。',
+      '<b>これが正解。</b><code>if.cc</code> は常に 1 クロックを使う確実な方式。投機実行は当たればストールをほぼ払わずに済むが、外れればそれまで進めた分を取り消す (フラッシュする) 大きなペナルティを払う。',
+      'パイプラインの段数が深くなるほど、確定を待つコストも投機失敗時のペナルティも大きくなる。「全く影響されない」は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文 (第 4 節) の対比をもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="確実なコストと賭けのコストの再確認"><rect x="40" y="30" width="220" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="150" y="60" font-size="13" text-anchor="middle" fill="#0f5132">if.cc: 常に 1 クロック</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#b5401f">投機実行: 当たり0 / 外れ大</text></svg>'
+          + '<p class="cap">図: 確実な小さいコストか、変動する大きなコストかの違い。</p></div>'
+    }
+  },
+  {
+    q: '第 10 回で見た命令セットの即値の幅、第 22 回で見た <code>imm</code> 命令の自動挿入、第 23 回で見た性能の式を組み合わせる。即値の幅を狭く設計することが、性能の式のどの項にどう影響するか、最も正確に述べたものは?',
+    opts: [
+      'クロック周期にのみ影響し、命令数や CPI には全く影響しない',
+      'CPI にのみ影響し、クロック周期や命令数には全く影響しない',
+      '即値の幅は性能の式のどの項にも影響せず、プログラムの見た目だけに関わる',
+      '即値の幅を狭くすると、CPI が自動的に 1 未満になり、むしろ性能は上がる',
+      '範囲を超える定数のたびに <code>imm</code> 命令が自動挿入され、性能の式の「命令数」の項を増やす方向に働く'
+    ],
+    ans: 4,
+    exps: [
+      '即値の幅がクリティカルパスの一部になる可能性はあるが、第 22 回で見た本質的な影響は命令数の増加であり、クロック周期だけに閉じた話ではない。',
+      'CPI (1 命令あたりの平均クロック数) は即値の幅そのものではなく、ハザードやストールのような要因で決まる。',
+      'プログラムの見た目だけの問題ではなく、実際に実行される命令の総数というプログラムの実行時間に直結する項に影響する。',
+      '即値の幅を狭くしても CPI が自動的に下がる保証はなく、むしろ <code>imm</code> 命令という余分な命令が増える方向に働く。',
+      '<b>これが正解。</b>第 22 回で見た通り、範囲を超える即値は <code>imm</code> 命令の自動挿入で補われ、同じ処理でも命令数が増える。これは第 23 回の性能の式の「命令数」の項をそのまま増やす方向に働く。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>命令数が増える経路を図にします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="即値幅から命令数への影響の再確認"><rect x="30" y="30" width="160" height="50" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="110" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">即値の幅が狭い</text><line x1="190" y1="55" x2="250" y2="55" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-mg5)"/><rect x="250" y="30" width="160" height="50" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="330" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f">imm 命令が増える</text><line x1="410" y1="55" x2="470" y2="55" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-mg5)"/><text x="520" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">命令数↑</text><defs><marker id="arr-mg5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 即値の幅の設計判断が、性能の式の命令数の項まで届く。</p></div>'
+    }
+  },
+  {
+    q: '第 11 回で見たハードワイヤードな命令デコーダ、第 14 回で見たマイクロコード方式、この回で見たスーパースカラを組み合わせる。1 クロックに複数命令を同時に解読するスーパースカラの設計が、デコーダに追加で要求することとして最も適切なものは?',
+    opts: [
+      '同時に解読できる回路 (またはマイクロコードの読み出し口) を、命令の数だけ並列に用意する必要がある',
+      'マイクロコード方式を使っている限り、デコーダは何も追加の対応をしなくても自動的に並列化される',
+      'ハードワイヤード方式を使っている限り、1 クロックに解読できる命令数には上限が存在しない',
+      'スーパースカラ化すると、デコーダはそもそも不要になり、命令は直接 ALU に送られるようになる',
+      'デコーダの並列化は命令セットのビット幅を減らすことで、回路を増やさずに実現できる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>第 11 回で見たハードワイヤードな組み合わせ回路も、第 14 回で見たマイクロコードの読み出し口も、1 クロックに 1 命令分しか解読できない構成では複数命令を同時に処理できない。スーパースカラにするには、解読する回路 (または読み出し口) そのものを命令の数だけ並列に増やす必要がある。',
+      'マイクロコード方式であっても、同時に読み出せる口を増やさなければ 1 クロックに複数命令を解読することはできず、自動的に並列化されるわけではない。',
+      'ハードワイヤード方式でも、1 クロックに解読できる命令数は用意した回路の数で決まる有限の値で、上限が存在しないという説明は誤り。',
+      'デコーダは命令の意味を判断して制御信号を作る役割を持ち、スーパースカラ化してもこの役割自体が不要になるわけではない。',
+      'ビット幅を減らすことと、同時に処理できる命令数を増やすことは別の問題で、ビット幅を減らすだけでは並列化は実現できない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>デコーダの口を複数用意する、という発展の方向を図にします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="デコーダを複数並べる図"><rect x="30" y="20" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">デコーダ 1 個 (rj32)</text><rect x="220" y="20" width="150" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="295" y="45" font-size="12" text-anchor="middle" fill="#5b3d80">デコーダ 2 個</text><rect x="400" y="20" width="150" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="475" y="45" font-size="12" text-anchor="middle" fill="#5b3d80">デコーダ 3 個</text><text x="290" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">スーパースカラ化は、デコーダの口を増やす方向への発展</text></svg>'
+          + '<p class="cap">図: 1 クロックに解読できる命令数は、用意したデコーダの数で決まる。</p></div>'
+    }
+  },
+  {
+    q: '第 08 回で見た rj32 のレジスタファイル (読み 2 ポート・書き 1 ポート) と、この回で見たアウトオブオーダー実行を組み合わせる。命令の順番を入れ替えて実行すると、レジスタファイルに関してどのような新しい問題が生じやすくなるか?',
+    opts: [
+      '読み出しポートの数が自動的に増え、2 ポートでは足りなくなる問題だけが生じる',
+      '同じ名前のレジスタへ、本来の順番とは違うタイミングで複数の命令が書き込もうとし、誤った上書きが起きやすくなる',
+      'レジスタファイルの書き込みポートが自動的に減り、1 ポートでは動作できなくなる',
+      'レジスタの個数そのものが実行時に変化し、r0 から r15 という番号付けが成立しなくなる',
+      'アウトオブオーダー実行では汎用レジスタという概念自体が不要になり、レジスタファイルを使わなくなる'
+    ],
+    ans: 1,
+    exps: [
+      '読み出しポートの不足は起こりうる課題の 1 つだが、本文で問題にしたのは「書き込みタイミングの入れ替わり」であり、読み出しポート数だけが生じる問題ではない。',
+      '<b>これが正解。</b>命令の順番を入れ替えると、本来は後から実行されるはずの命令が先に同じレジスタへ書き込んでしまうなど、書き込みの順序関係が崩れやすくなる。これを防ぐためにレジスタリネーミングのような仕組みが必要になる。',
+      '書き込みポートの数は回路として固定されており、命令の順番を入れ替えたからといって自動的に減るものではない。',
+      'レジスタの個数は命令セットの設計 (第 10 回) で決まる固定の値で、実行時の順番の入れ替えによって変化するものではない。',
+      'アウトオブオーダー実行でも、命令の計算結果はレジスタに書き戻される。レジスタファイルという骨格自体は変わらない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>順番が入れ替わると、同じレジスタへの書き込み順序が崩れやすくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 580 120" aria-label="書き込み順序が崩れる図"><text x="290" y="20" font-size="13" text-anchor="middle" fill="#12211a">命令 A (r1 に書く、遅い) → 命令 B (r1 に書く、速い)</text><rect x="30" y="40" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="155" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">B が先に書き、後で A が上書き</text><rect x="300" y="40" width="250" height="40" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="425" y="65" font-size="12.5" text-anchor="middle" fill="#0f5132">本来欲しいのは B の値が残る状態</text></svg>'
+          + '<p class="cap">図: 順番を入れ替えると、最後に残るべき値を保証する工夫が必要になる。</p></div>'
+    }
+  },
+  {
+    q: '第 17 回で見た rj32 のロード/ストアがバスの応答を待つ仕組みと、この回で見たキャッシュ階層を組み合わせる。キャッシュ階層が、この「待ち」の問題にどう働きかけるか、最も適切な説明は?',
+    opts: [
+      'キャッシュはロード/ストア命令そのものを不要にし、メモリへのアクセスを完全に無くす',
+      'キャッシュは常にメモリより大きな容量を持つため、待ち時間の問題とは無関係である',
+      'よく使うデータを CPU に近い段に置いておくことで、外部メモリまで取りに行く回数を減らし、待ちが発生する頻度を下げる',
+      'キャッシュを導入すると、バスの応答を待つ仕組み自体が完全に不要になり、第 17 回の設計はそもそも意味を失う',
+      'キャッシュは分岐予測専用の仕組みであり、ロード/ストアの待ち時間には関与しない'
+    ],
+    ans: 2,
+    exps: [
+      'キャッシュを使ってもロード/ストア命令という骨格は残る。命令そのものを不要にするわけではない。',
+      'キャッシュは容量よりも速さを優先した小さいメモリで、容量が大きいことが特徴ではない。待ち時間の問題そのものに直接関わる。',
+      '<b>これが正解。</b>よく使うデータを CPU の近くの速い段 (L1・L2 など) に置いておけば、外部メモリまで取りに行って待つ回数自体を減らせる。これは第 17 回で見た「待ち」が起きる頻度を下げる効果になる。',
+      'キャッシュにもデータが無い場合は、依然として外部メモリへのアクセスとその応答待ちが発生する。待つ仕組み自体が不要になるわけではない。',
+      '分岐予測 (第 4 節) とキャッシュ (第 5 節) は、この回で別々に説明した異なる技術で、キャッシュはメモリアクセスの速さに関わる仕組み。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>近くの段に見つかれば、外部メモリまで取りに行かずに済みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="キャッシュが待ちの頻度を下げる図"><rect x="40" y="30" width="200" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132">キャッシュに見つかる</text><text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">待ちが小さい、または無い</text><rect x="320" y="30" width="200" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f">外部メモリまで取りに行く</text><text x="420" y="75" font-size="12" text-anchor="middle" fill="#12211a">第 17 回で見た待ちが発生</text></svg>'
+          + '<p class="cap">図: キャッシュで見つかる頻度が高いほど、待ちの頻度は下がる。</p></div>'
+    }
+  },
+  {
+    q: '第 19 回で見た rj32 のテストケース、第 22 回で見た emurj によるソフトウェア先行検証、この回で見たアウトオブオーダー・投機実行を組み合わせる。これらの技術を追加すると、「先に安く確かめる」という方針がより重要になる、最も適切な理由は?',
+    opts: [
+      '命令の種類が増えるので、確かめる対象のドキュメントのページ数が増えるから',
+      'アウトオブオーダーや投機実行を使うとテストケース自体が不要になり、代わりに検証方針だけが重要になるから',
+      'クロック周波数が上がるので、実機での確認にかかる時間が常に短くなるから',
+      '命令の実行順序や予測の当たり外れの組み合わせが掛け算的に増え、シリコンに焼き込んでから間違いに気づくコストが非常に大きいから',
+      'アウトオブオーダーや投機実行は rj32 のイン・オーダーな設計とは無関係な部分にしか影響しないから'
+    ],
+    ans: 3,
+    exps: [
+      'ドキュメントのページ数が増えること自体は、検証方針の重要性とは直接関係のない話題。',
+      'アウトオブオーダーや投機実行を導入しても、第 19 回で見たようなテストケースによる動作確認は依然として必要であり、不要になるわけではない。',
+      'クロック周波数が上がっても、実機 (特にシリコン) での確認に必要な試作・計測の手間自体が短くなるとは限らない。',
+      '<b>これが正解。</b>命令の実行順序や分岐予測の当たり外れの組み合わせは、技術を重ねるほど掛け算的に増える。シリコンに焼き込んでから間違いに気づくコストは FPGA の書き込み直しより桁違いに大きいため、第 19・22 回で見た「先に安く確かめる」方針が一層重要になる。',
+      'アウトオブオーダーや投機実行は、まさに命令の順序やタイミングに関わる技術で、イン・オーダーな rj32 の設計と無関係とは言えない (第 3・4 節で見た対比そのもの)。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文 (第 6 節) のコストの違いをもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="確かめる場所ごとのコストの再確認"><rect x="30" y="30" width="150" height="40" fill="#198754" opacity="0.3" stroke="#0f5132" stroke-width="2"/><text x="105" y="55" font-size="12" text-anchor="middle" fill="#0f5132">emurj (安い)</text><rect x="400" y="30" width="150" height="40" fill="#c0492f" opacity="0.3" stroke="#b5401f" stroke-width="2"/><text x="475" y="55" font-size="12" text-anchor="middle" fill="#b5401f">シリコン (非常に高い)</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">組み合わせが増えるほど、安い場所での検証が重要になる</text></svg>'
+          + '<p class="cap">図: 技術を重ねるほど、安く確かめる場所の重要性が増す。</p></div>'
+    }
+  },
+  {
+    q: '第 01 回で見た「命令を取り出し→解読→実行→書き戻す」という CPU の骨格と、この回で見たスーパースカラ・アウトオブオーダー・投機実行・多段キャッシュを組み合わせる。これらの技術を全部備えた現代の CPU でも、第 01 回の骨格が変わらない理由として最も適切なものは?',
+    opts: [
+      '現代の CPU は骨格そのものを毎世代作り替えており、たまたま今の世代だけ rj32 と偶然似ているだけである',
+      '骨格を変えると既存のソフトウェアが一切動かなくなるため、法律で骨格の変更が禁止されている',
+      '現代の CPU はソフトウェアだけで動いており、ハードウェアとしての骨格という概念自体が既に存在しないから',
+      '骨格が変わらないのは単なる偶然で、技術的な必然性があるわけではない',
+      'どの技術も「いくつ・どの順で・当てにいくか」という量や賭け方を変えるだけで、仕事の種類そのものは置き換えていないから'
+    ],
+    ans: 4,
+    exps: [
+      '骨格が毎世代作り替えられているなら、このシリーズで rj32 を通して学んだ考え方が現代の CPU の理解に使えなくなってしまう。実際には共通の骨格が保たれている。',
+      '法律で骨格の変更が禁止されているという事実はなく、根拠のない説明。',
+      'スーパースカラ・アウトオブオーダー・投機実行・キャッシュはいずれもハードウェアの回路として実装される技術で、CPU のハードウェアとしての骨格は存在し続けている。',
+      '本文で見た 4 つの技術はいずれも仕組みと理由がはっきり説明できるもので、骨格が保たれているのは単なる偶然ではない。',
+      '<b>これが正解。</b>スーパースカラは「いくつ同時に」、アウトオブオーダーは「どの順で」、投機実行は「当てにいくか」、キャッシュは「どこに置くか」という、量や賭け方を変える発展であり、fetch・decode・execute・writeback という仕事の種類そのものを置き換えるものではない。これが、技術が増えても骨格が変わらない理由。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>第 1 節の図をもう一度、総復習として確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="骨格は共通で量と賭け方だけが違う図"><rect x="20" y="20" width="520" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">共通の骨格: fetch → decode → execute → writeback</text><text x="280" y="90" font-size="13" text-anchor="middle" fill="#12211a">違うのは「いくつ・どの順で・当てにいくか・どこに置くか」だけ</text><text x="280" y="112" font-size="12.5" text-anchor="middle" fill="#4a5d54">rj32 を知っていれば、この距離を測れるようになる</text></svg>'
+          + '<p class="cap">図: 技術が増えても、仕事の種類そのものは第 01 回から変わらない。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>入出力と割り込み ― ポーリングと割り込みの分かれ道</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 18 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>入出力と割り込み ― ポーリングと割り込みの分かれ道</h1>
+  <p>キーボードが押されたことを CPU はどう知るのか。聞きに行き続ける「ポーリング」と、呼ばれるまで待つ「割り込み」、2 つのやり方とその代償を整理する</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 13 回 <a href="./cpu-branches.html">分岐・ジャンプ・スキップ・サブルーチン</a>、第 17 回 <a href="./cpu-load-store-bus.html">ロード・ストアとメモリバス</a></p>
+  <p class="intro">CPU の外側には、メモリだけでなくキーボードや画面、タイマーといった「デバイス」もつながります。デバイスとのやり取りで最初に出てくる問いは、「デバイスの準備ができたことを CPU はどう知るか」です。答え方は大きく 2 つあります。CPU が自分から何度も聞きに行く<b>ポーリング</b>と、デバイスの方から CPU に声をかける<b>割り込み</b>です。この回では、両者の違いと、割り込みが起きた瞬間に CPU が何を守らなければならないかを、rj32 と Digital 付属のサンプル CPU を手がかりに整理します。</p>
+
+  <!-- ===== 解説パート 1: 聞きに行くか、呼ばれるまで待つか ===== -->
+  <section>
+    <h2>1. 聞きに行くか、呼ばれるまで待つか</h2>
+    <p>結論を先に言うと、デバイスの準備を知る方法は「CPU が繰り返し聞きに行く (ポーリング)」か「デバイスが CPU に声をかける (割り込み)」の 2 つしかありません。前者は作るのが簡単ですが CPU の時間を無駄にし、後者は CPU の時間を節約できますが、呼ばれた瞬間に何を守るかという新しい難しさを持ち込みます。</p>
+    <p>キーボードのキーが押されたかどうかを知りたいとします。ポーリングなら、CPU は「押されたか」「押されたか」と毎クロックのように聞きに行くループを回します。割り込みなら、CPU は他の仕事を続け、キーボード側が「押された」という信号線を立てたときだけ CPU がその仕事を中断して対応します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="ポーリングと割り込みの比較">
+        <text x="20" y="24" font-size="14" fill="#0f5132" font-weight="700">ポーリング</text>
+        <rect x="20" y="36" width="70" height="34" fill="#fff6ea" stroke="#b5401f"/><text x="55" y="58" font-size="12" text-anchor="middle">確認</text>
+        <rect x="95" y="36" width="70" height="34" fill="#fff6ea" stroke="#b5401f"/><text x="130" y="58" font-size="12" text-anchor="middle">確認</text>
+        <rect x="170" y="36" width="70" height="34" fill="#fff6ea" stroke="#b5401f"/><text x="205" y="58" font-size="12" text-anchor="middle">確認</text>
+        <rect x="245" y="36" width="70" height="34" fill="#e7f6ee" stroke="#198754"/><text x="280" y="58" font-size="12" text-anchor="middle">押下検出</text>
+        <text x="330" y="58" font-size="12.5" fill="#b5401f">同じ確認を何度も繰り返す ― CPU の時間を使う</text>
+        <text x="20" y="110" font-size="14" fill="#5b3d80" font-weight="700">割り込み</text>
+        <rect x="20" y="122" width="190" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="115" y="144" font-size="12" text-anchor="middle">他の仕事を実行中</text>
+        <rect x="210" y="122" width="60" height="34" fill="#efe8f7" stroke="#5b3d80"/><text x="240" y="144" font-size="12" text-anchor="middle">中断</text>
+        <rect x="270" y="122" width="90" height="34" fill="#fff6ea" stroke="#b5401f"/><text x="315" y="144" font-size="12" text-anchor="middle">対応処理</text>
+        <rect x="360" y="122" width="190" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="455" y="144" font-size="12" text-anchor="middle">元の仕事に戻る</text>
+        <text x="20" y="190" font-size="13" fill="#12211a">デバイス側が信号線を立てた瞬間だけ CPU が反応する</text>
+        <text x="20" y="212" font-size="13" fill="#4a5d54">ただし「中断」した瞬間に何を守るかという新しい問題が生まれる</text>
+      </svg>
+      <p class="cap">図: ポーリングは聞きに行く時間そのものが無駄、割り込みは中断と復帰の正しさが新しい課題になる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: メモリマップトI/O ===== -->
+  <section>
+    <h2>2. デバイスをアドレスとして扱う</h2>
+    <p>CPU がデバイスとやり取りする配線を、ロード・ストア命令が使うアドレス空間の一部に割り当ててしまう方法を<b>メモリマップト I/O</b> と呼びます。Digital 付属のサンプルでは <a href="https://github.com/hneemann/Digital/tree/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/IO" target="_blank" rel="noopener">GPI (汎用入力) / GPO (汎用出力)</a> のような部品が用意されていて、<a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/IO/readSelect.dig" target="_blank" rel="noopener">readSelect.dig</a> がアドレスの一部を見て「このアドレスは RAM ではなくこのデバイス宛てだ」と振り分けます。実際にこのサンプル CPU のアセンブリ (<a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/asm/ProcessorIntr.asm" target="_blank" rel="noopener">ProcessorIntr.asm</a>) では、キーボードをポート <code>0xe</code>、表示端末をポート <code>0xf</code> として <code>in</code>/<code>out</code> 命令で読み書きしています。</p>
+    <p>一方 rj32 は、<code>load</code>/<code>store</code> が使う通常のメモリ空間とは別に、<code>rcsr rd, csr</code>/<code>wcsr csr, rd</code> という専用の命令で読み書きする、最大 16 個の <b>CSR (control and status register)</b> という小さな空間を持たせる設計を選んでいます。<a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">docs/instructions.md</a> によれば、CSR はメモリのページ/バンク、割り込み、ユーザーモードからのレジスタ読み書きなどを制御する想定ですが、この命令自体はまだ実装されていません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="メモリマップトI/OとCSR空間の違い">
+        <rect x="20" y="20" width="280" height="80" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="42" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Digital サンプル: メモリマップト I/O</text>
+        <text x="160" y="64" font-size="12" text-anchor="middle" fill="#12211a">in/out 命令、ポート番号でデバイスを指す</text>
+        <text x="160" y="84" font-size="12" text-anchor="middle" fill="#12211a">readSelect がアドレスでデバイスを振り分け</text>
+        <rect x="340" y="20" width="280" height="80" rx="10" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="480" y="42" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">rj32: 専用 CSR 空間</text>
+        <text x="480" y="64" font-size="12" text-anchor="middle" fill="#12211a">rcsr/wcsr 命令、最大 16 個の CSR</text>
+        <text x="480" y="84" font-size="12" text-anchor="middle" fill="#12211a">load/store とは別の経路 (未実装)</text>
+        <text x="20" y="130" font-size="12.5" fill="#12211a">どちらも「デバイスを特別な命令で触る」のではなく</text>
+        <text x="20" y="150" font-size="12.5" fill="#12211a">「決まった番地・番号で触る」という考え方は共通している</text>
+        <text x="20" y="180" font-size="12.5" fill="#4a5d54">違いは、その番地・番号を load/store と同じ空間に混ぜるか、別の経路に分けるか</text>
+      </svg>
+      <p class="cap">図: デバイスへのアクセスを「決まった番地・番号」に対応づける点は共通、経路を分けるかどうかが設計判断。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: ポーリングと割り込みのCPU利用の比較 ===== -->
+  <section>
+    <h2>3. CPU の時間はどちらが得か</h2>
+    <p>Digital のマニュアルは、キーボード部品の出力の 1 つを<code>av</code> (available, データあり) と呼び、「この出力は割り込みを起こすために使える」と説明しています。<code>av</code> をポーリングで読みに行くか、<code>av</code> を割り込み線に直結するかで、CPU の使われ方が大きく変わります。</p>
+    <p>ポーリングでは、CPU は <code>av</code> を読みに行く命令を本来の仕事の間に挟み込み続けます。キーが押される頻度が低いほど、その確認の大部分が「まだ押されていない」という無駄な答えに終わります。割り込みでは、CPU は <code>av</code> を見に行く必要が無く、<code>av</code> が実際に立った瞬間だけ、ハードウェアが自動的に CPU の実行を中断させます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 210" role="img" aria-label="ポーリングと割り込みのCPU利用率比較">
+        <text x="20" y="22" font-size="13" fill="#0f5132" font-weight="700">ポーリング中の CPU</text>
+        <rect x="20" y="34" width="580" height="30" fill="#fff6ea" stroke="#b5401f"/>
+        <text x="90" y="54" font-size="11.5" text-anchor="middle" fill="#b5401f">確認</text>
+        <text x="180" y="54" font-size="11.5" text-anchor="middle" fill="#b5401f">確認</text>
+        <text x="270" y="54" font-size="11.5" text-anchor="middle" fill="#b5401f">確認</text>
+        <text x="360" y="54" font-size="11.5" text-anchor="middle" fill="#b5401f">確認</text>
+        <text x="450" y="54" font-size="11.5" text-anchor="middle" fill="#0f5132" font-weight="700">検出</text>
+        <text x="540" y="54" font-size="11.5" text-anchor="middle" fill="#b5401f">確認</text>
+        <text x="20" y="96" font-size="13" fill="#5b3d80" font-weight="700">割り込み中の CPU</text>
+        <rect x="20" y="108" width="400" height="30" fill="#e3edf5" stroke="#2f5f8a"/>
+        <text x="220" y="128" font-size="11.5" text-anchor="middle" fill="#1f4a68">本来の仕事を実行</text>
+        <rect x="420" y="108" width="60" height="30" fill="#fff6ea" stroke="#b5401f"/>
+        <text x="450" y="128" font-size="11" text-anchor="middle" fill="#b5401f">対応</text>
+        <rect x="480" y="108" width="120" height="30" fill="#e3edf5" stroke="#2f5f8a"/>
+        <text x="540" y="128" font-size="11.5" text-anchor="middle" fill="#1f4a68">仕事に戻る</text>
+        <text x="20" y="170" font-size="12.5" fill="#12211a">同じ時間の中で、割り込みは「本来の仕事」に使える時間が長い</text>
+        <text x="20" y="192" font-size="12.5" fill="#4a5d54">ただし av が立つ頻度が高すぎると、割り込みの対応自体が CPU を占有してしまう</text>
+      </svg>
+      <p class="cap">図: イベントが稀なら割り込みが得、イベントが頻発するならポーリングのほうが単純で済む場合もある。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 割り込みが起きた瞬間に何を守るか ===== -->
+  <section>
+    <h2>4. 割り込みが起きた瞬間に何を守るか</h2>
+    <p>割り込みの本当の難しさは「中断してよい場所」を正しく選ぶことにあります。rj32 の <code>imm</code>/<code>addc</code>/<code>subc</code> は、次の 1 命令に渡すための状態 (上位ビットやキャリー) を抱えたまま次のクロックに進む「接頭辞命令」です。<a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">docs/instructions.md</a> は「これらの命令と、それが修飾する命令の間に割り込みが起きると状態が失われるため、その状態が完全に渡り終わるまで割り込みを無効にする」と明記しています。</p>
+    <p>rj32 はレジスタの読み書きを行う <code>rets</code> 命令 1 つで割り込みの出入りを兼ねています。<code>K</code> (kernel mode) フラグが立っているかどうかで、使うレジスタ集合 (ユーザー用とシステム用の 2 組) と <code>PC</code> がまるごと切り替わります。ユーザーモードで実行中の命令が「割り込み要求線が高い」「割り込みが有効」「その命令が中断可能」という 3 条件を満たすと、その命令は <code>rets</code> であるかのように振る舞い、<code>K</code> を立てて実行場所をシステム側に切り替えます。このとき <code>PC</code> を進めないのが肝心な工夫で、システム側から <code>rets</code> で user モードに戻ったときに、中断されたはずの命令そのものから再開できます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 260" role="img" aria-label="rj32の割り込み発生から復帰までの流れ">
+        <rect x="20" y="20" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">ユーザーモード実行</text>
+        <text x="120" y="60" font-size="11.5" text-anchor="middle" fill="#12211a">K=0、ユーザー用レジスタ</text>
+        <line x1="120" y1="70" x2="120" y2="100" stroke="#0f5132" stroke-width="1.5" marker-end="url(#a18a)"/>
+        <rect x="20" y="104" width="200" height="50" rx="8" fill="#fff6ea" stroke="#b5401f" stroke-width="2"/>
+        <text x="120" y="126" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">割り込み要求が成立</text>
+        <text x="120" y="144" font-size="11" text-anchor="middle" fill="#12211a">(req 高・割込有効・中断可能)</text>
+        <line x1="220" y1="129" x2="300" y2="129" stroke="#b5401f" stroke-width="1.5" marker-end="url(#a18b)"/>
+        <rect x="300" y="104" width="200" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="400" y="126" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">rets 相当で切替</text>
+        <text x="400" y="144" font-size="11" text-anchor="middle" fill="#12211a">K=1、PC は進めない</text>
+        <line x1="400" y1="154" x2="400" y2="184" stroke="#5b3d80" stroke-width="1.5" marker-end="url(#a18c)"/>
+        <rect x="300" y="188" width="200" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="400" y="210" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">システムモードで処理</text>
+        <text x="400" y="228" font-size="11" text-anchor="middle" fill="#12211a">システム用レジスタを使う</text>
+        <polyline points="300,213 260,213 260,45 222,45" fill="none" stroke="#2f5f8a" stroke-width="1.5" marker-end="url(#a18d)"/>
+        <text x="255" y="165" font-size="11" text-anchor="end" fill="#12211a">rets でユーザーモードへ</text>
+        <text x="255" y="180" font-size="11" text-anchor="end" fill="#4a5d54">同じ PC から再開 (中断前と同じ命令)</text>
+        <defs>
+          <marker id="a18a" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker>
+          <marker id="a18b" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b5401f"/></marker>
+          <marker id="a18c" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b3d80"/></marker>
+          <marker id="a18d" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2f5f8a"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: rets 1 つで入りと戻りを兼ね、K フラグがレジスタ集合と PC をまとめて切り替える。PC を進めないことが復帰の正しさを支える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 2つの設計の比較 ===== -->
+  <section>
+    <h2>5. rj32 と Digital サンプルの設計比較</h2>
+    <p>rj32 と Digital 付属のサンプル CPU は、同じ問題 (割り込みへの出入り) を別の形で解いています。rj32 は専用の出入り命令を持たず、既存の <code>rets</code> を使い回して <code>K</code> フラグを反転させるだけです。これに対しサンプル CPU は <a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/asm/ProcessorIntr.asm" target="_blank" rel="noopener">ProcessorIntr.asm</a> に見るとおり、<code>enteri</code> (割り込みに入る)・<code>leavei</code> (割り込みから出る準備)・<code>reti</code> (割り込みから戻る) という専用の 3 命令を持ち、割り込みサービスルーチンを固定アドレス (<code>.org 2</code>、つまりアドレス 2 番) に置きます。</p>
+    <p>サンプル CPU の回路 (<a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/ProcessorIntr.dig" target="_blank" rel="noopener">ProcessorIntr.dig</a>) には <code>Bank-FF</code> という部品があり、割り込み中だけ別のレジスタバンクに物理的に切り替えます。これは rj32 の <code>K</code> フラグによるユーザー/システム用レジスタの切り替えと同じ発想で、どちらも「割り込みハンドラがユーザーのレジスタの値を壊さないようにする」という同じ目的を、専用のレジスタバンクをもう 1 組持たせることで解いています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="rj32とDigitalサンプルの割り込み設計比較">
+        <rect x="20" y="20" width="280" height="150" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="44" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">rj32</text>
+        <text x="40" y="68" font-size="12" fill="#12211a">出入り命令: rets 1 つ (K を反転)</text>
+        <text x="40" y="90" font-size="12" fill="#12211a">レジスタ: K で 2 組を切替</text>
+        <text x="40" y="112" font-size="12" fill="#12211a">復帰先: PC を増やさず同じ命令へ</text>
+        <text x="40" y="134" font-size="12" fill="#12211a">ベクタ: CSR が未実装で今は無い</text>
+        <rect x="340" y="20" width="280" height="150" rx="10" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="480" y="44" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Digital サンプル</text>
+        <text x="360" y="68" font-size="12" fill="#12211a">出入り命令: enteri/leavei/reti の 3 つ</text>
+        <text x="360" y="90" font-size="12" fill="#12211a">レジスタ: Bank-FF で別バンクに切替</text>
+        <text x="360" y="112" font-size="12" fill="#12211a">復帰先: reti が戻り先を復元</text>
+        <text x="360" y="134" font-size="12" fill="#12211a">ベクタ: 固定アドレス (.org 2)</text>
+        <text x="20" y="200" font-size="12.5" fill="#4a5d54">命令の数は違っても、「別のレジスタ集合」と「割り込み中は何もさせない区間」を持つ点は共通</text>
+      </svg>
+      <p class="cap">図: 出入りの命令数は違うが、別レジスタ集合を持つという解決の骨格は同じ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>接頭辞命令の途中は必ず割り込みを禁止する。</b> rj32 の <code>imm</code>/<code>addc</code>/<code>subc</code> のように、次の 1 命令に状態を渡す命令がある設計では、その状態がレジスタのどこにも保存されていない (次の命令に渡されるだけの一時的なもの) ことが多く、途中で割り込むと静かに失われます。rj32 の docs/instructions.md が「このため割り込みを無効にする」と明記しているのは、拡張命令を持つ ISA を作るときに必ず踏む落とし穴だからです。</p>
+    <p><b>別レジスタバンクか、スタック退避かは速度と回路規模のトレードオフ。</b> rj32 も Digital サンプルも別バンク方式を選び、割り込みが起きても現在のレジスタの値をどこにも書き出さずに済むようにしています。退避の命令が要らない分、割り込みへの応答が速くなりますが、レジスタをまるごと 2 組持つのでレジスタファイルの回路は単純に 2 倍になります。小さな CPU でバンクを増やせない場合は、ソフトウェアでスタックに退避する方式を選ぶしかなく、その分応答は遅くなります。</p>
+    <p><b>固定ベクタは「どのデバイスが呼んだか」を教えてくれない。</b> rj32 (CSR 実装後の想定) も Digital サンプルも、割り込みが起きると決まった 1 つのアドレスにジャンプするだけで、複数のデバイスが同じ割り込み線を共有している場合、どのデバイスが原因かはハンドラが CSR やメモリマップト I/O を読みに行って自分で調べる必要があります。これは「ベクタ化されていない割り込み」の典型的な制約で、デバイスの数が増えるほどハンドラ内の判定コストが増えていきます。</p>
+    <p><b>レベル信号はどこかで確認・解除する。</b> Keyboard の <code>av</code> のような「データがある間ずっと高い」信号を割り込み線にそのまま使うと、ハンドラが読み出しを終えて <code>av</code> が下がるまで、割り込みがずっと要求され続けます。ハンドラの最初で必ず該当のデータを読み出す (または専用のクリア操作をする) ことを保証する設計にしないと、無限に同じ割り込みが再発してハンドラから抜けられなくなります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 160" role="img" aria-label="レベル割り込みを解除し忘れる罠">
+        <rect x="20" y="20" width="270" height="110" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="155" y="44" font-size="13" text-anchor="middle" fill="#c0492f" font-weight="700">av を読まずにハンドラを抜ける</text>
+        <text x="155" y="68" font-size="12" text-anchor="middle" fill="#12211a">av は高いまま</text>
+        <text x="155" y="90" font-size="12" text-anchor="middle" fill="#12211a">reti 直後に再び割り込みが発生</text>
+        <text x="155" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">同じハンドラを無限に繰り返す</text>
+        <rect x="330" y="20" width="270" height="110" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="465" y="44" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">読み出してから抜ける</text>
+        <text x="465" y="68" font-size="12" text-anchor="middle" fill="#12211a">読み出しで av が下がる</text>
+        <text x="465" y="90" font-size="12" text-anchor="middle" fill="#12211a">reti の後は本来の仕事に戻れる</text>
+      </svg>
+      <p class="cap">図: av のようなレベル信号は、読み出して下げるまで解除されないことを設計に組み込む必要がある。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj32: docs/instructions.md</a> ― rcsr/wcsr の定義、K (kernel mode) フラグ、rets 命令の意味、割り込み時に interruptible な命令だけが rets 相当として扱われる規則の確認。</li>
+      <li><a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/asm/ProcessorIntr.asm" target="_blank" rel="noopener">Digital: src/main/asm/ProcessorIntr.asm</a> ― enteri/leavei/reti 命令と、固定アドレス (.org 2) に置かれた割り込みサービスルーチンの実例。</li>
+      <li><a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/core/PCintr.dig" target="_blank" rel="noopener">Digital: src/main/dig/processor/core/PCintr.dig</a> ― intr/reti 信号が PC の次の値を固定の割り込みベクタに切り替える部分の確認。</li>
+      <li><a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/ProcessorIntr.dig" target="_blank" rel="noopener">Digital: src/main/dig/processor/ProcessorIntr.dig</a> ― Bank-FF (レジスタバンク切り替え) と ioR/ioW 信号の確認。</li>
+      <li><a href="https://github.com/hneemann/Digital/tree/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/IO" target="_blank" rel="noopener">Digital: src/main/dig/processor/IO</a> ― GPI/GPO、Keyboard、readSelect.dig など、メモリマップト I/O のアドレス選択の実例。</li>
+      <li><a href="https://github.com/hneemann/Digital/releases/download/v0.31/Doc_English.pdf" target="_blank" rel="noopener">Digital 公式マニュアル (Doc_English.pdf) 第 5 章 IO - Peripherals</a> ― Keyboard の av (available) 出力が割り込みを起こせると明記している部分の確認に使用。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-load-store-bus.html">← 第 17 回 ロード・ストアとメモリバス</a><a href="./cpu-index.html">目次</a><a href="./cpu-testing-debug.html">第 19 回 テストとデバッグ →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'ポーリングと割り込みを比べたとき、本文の説明に最も近い記述はどれか？',
+    opts: [
+      'ポーリングは確認そのものが CPU の時間を使うが、割り込みは発生時だけ中断させる',
+      '割り込みは必ずポーリングより高速なので、どんな場合でも割り込みだけを使うべきである',
+      'ポーリングはハードウェアの変更が必要だが、割り込みはソフトウェアだけで実現できる',
+      '割り込みを使うと CPU は外部デバイスの状態を一切確認できなくなる',
+      'ポーリングと割り込みはどちらも同じ回路で、呼び方が違うだけの同じ仕組みである'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文で説明した通り、ポーリングは「まだ起きていない」という答えのために確認を繰り返す時間が無駄になり、割り込みはイベントが実際に起きた瞬間だけ CPU の実行を中断させる。',
+      '本文では「イベントが稀なら割り込みが得、頻発するならポーリングのほうが単純な場合もある」と説明しており、常に割り込みが優れているとは言えない。',
+      '逆である。割り込みは信号線とそれを検知するハードウェアが必要で、ポーリングはソフトウェアのループだけで実現できる。',
+      '割り込みを使っていても、ハンドラの中でデバイスの状態を読みに行くことはできる。確認が一切できなくなるわけではない。',
+      'ポーリングは CPU がループで確認する仕組み、割り込みはデバイス側の信号で CPU を中断させる仕組みであり、同じ回路ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の比較図のとおり、無駄になる確認の量が両者の違いを生みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="ポーリングと割り込みの時間の使われ方"><rect x="30" y="20" width="230" height="40" fill="#fff6ea" stroke="#b5401f"/><text x="145" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f">確認・確認・確認…検出</text><rect x="30" y="80" width="230" height="40" fill="#e3edf5" stroke="#2f5f8a"/><text x="145" y="105" font-size="12.5" text-anchor="middle" fill="#1f4a68">仕事…中断…対応…仕事</text></svg>'
+          + '<p class="cap">図: 確認そのものに時間を使うか、イベント発生時だけ中断するかの違い。</p></div>'
+    }
+  },
+  {
+    q: 'Digital 付属サンプルのメモリマップト I/O と、rj32 の CSR 空間を比べたときの説明として正しいものはどれか？',
+    opts: [
+      'メモリマップト I/O は load/store の空間に混ぜ、rj32 の CSR は rcsr/wcsr で別空間を使う',
+      'メモリマップト I/O も rj32 の CSR も、どちらも同じ load 命令だけでアクセスする仕組みである',
+      'rj32 の CSR はキーボードやディスプレイなどの汎用デバイス接続専用で、メモリマップト I/O は割り込み制御専用である',
+      'メモリマップト I/O は rj32 にしか存在せず、Digital サンプルには存在しない仕組みである',
+      'CSR はメモリの一部ではなく、消去すると二度と読み出せない使い捨てのレジスタである'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>メモリマップト I/O はデバイスを load/store と同じアドレス空間に置き、rj32 の CSR は rcsr/wcsr という専用命令で別の空間にアクセスする。',
+      'in/out もしくは load/store と同じ命令で触れるのがメモリマップト I/O であり、rj32 の CSR はそれとは異なる専用命令を使う。両者は同じ命令だけでアクセスするわけではない。',
+      'CSR はメモリのページ/バンク・割り込み・ユーザーモードからのレジスタ操作などを制御する想定で、汎用デバイス接続専用ではない。メモリマップト I/O も割り込み専用ではない。',
+      'メモリマップト I/O の考え方自体は Digital サンプルの GPI/GPO/readSelect で使われており、rj32 専用の仕組みではない。',
+      'CSR は書き込んだ値を読み出せる通常のレジスタ (control and status register) であり、使い捨てという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の比較図のとおり、経路を分けるかどうかが設計判断です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="メモリマップトI/OとCSRの経路の違い"><rect x="30" y="20" width="230" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="50" font-size="13" text-anchor="middle" fill="#0f5132">load/store と同じ空間に混ぜる</text><rect x="300" y="20" width="230" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="415" y="50" font-size="13" text-anchor="middle" fill="#5b3d80">rcsr/wcsr で別の空間</text></svg>'
+          + '<p class="cap">図: どちらも「決まった番地・番号」で触る点は同じだが、経路を分けるかどうかが異なる。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の docs/instructions.md が、imm/addc/subc のような接頭辞命令の実行中に割り込みを無効にする理由として説明しているのはどれか？',
+    opts: [
+      '接頭辞命令は電力を多く消費するため、割り込みと同時に動くと電圧が不足するから',
+      '接頭辞命令が次の命令に渡す状態は一時的なものであり、割り込みが割り込むと渡される前に失われてしまうから',
+      '接頭辞命令はユーザーモードでは実行できない特権命令だから',
+      '接頭辞命令の実行中は PC が止まり、割り込みの戻り先を記録できなくなるから',
+      '接頭辞命令は rets と同じ opcode を共有しており、競合を避ける必要があるから'
+    ],
+    ans: 1,
+    exps: [
+      '電力消費は docs/instructions.md の説明には含まれていない。',
+      '<b>これが正解。</b>docs/instructions.md は、接頭辞命令が次の命令に渡す状態 (imm の上位ビットやキャリーなど) がレジスタに保存されない一時的なものであり、その状態が完全に渡り終わるまで割り込みを無効にすると明記している。',
+      '接頭辞命令がユーザーモード専用/特権専用という区別は docs/instructions.md には記載されていない。',
+      'PC は接頭辞命令の間も通常どおり動作しており、「PC が止まる」という記述は誤り。',
+      'imm と rets は別々の opcode であり、opcode の競合が理由として説明されているわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>状態が受け渡される 2 命令の間に割り込みが入ると、その状態は消えてしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="接頭辞命令の状態受け渡し"><rect x="30" y="20" width="160" height="40" fill="#eaf5ef" stroke="#0f5132"/><text x="110" y="45" font-size="12.5" text-anchor="middle">imm 命令 (状態を持つ)</text><rect x="210" y="20" width="160" height="40" fill="#fbeeea" stroke="#c0492f"/><text x="290" y="45" font-size="12.5" text-anchor="middle" fill="#c0492f">ここで割込?</text><rect x="390" y="20" width="160" height="40" fill="#e3edf5" stroke="#2f5f8a"/><text x="470" y="45" font-size="12.5" text-anchor="middle">次の命令 (状態を使う)</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">間に割込が入ると、渡すはずの状態が失われる</text></svg>'
+          + '<p class="cap">図: 2 命令の間が割込に対して無防備だと、渡される予定の状態が消える。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 で、ユーザーモード実行中の命令が「割り込みが要求され、割り込みが有効で、中断可能」という条件を満たしたとき、rets 相当の動作で PC を進めないのはなぜか？',
+    opts: [
+      'PC を進めると番号が負になってしまい、回路上扱えなくなるため',
+      'K フラグの反転そのものに PC の値が必要なため、進めると反転できなくなるため',
+      'システムモードでの処理を速くするため、PC の加算回路を一時的に止める必要があるため',
+      'システムモードから rets で戻ったとき、中断されたはずの命令そのものから再開できるようにするため',
+      'PC を進めないことで、割り込みハンドラ自身が無限ループに入ることを強制するため'
+    ],
+    ans: 3,
+    exps: [
+      'PC が負になるという説明は docs/instructions.md のどこにも無く、技術的にも成立しない理由づけ。',
+      'K フラグの反転は専用のフリップフロップで行われ、PC の値そのものに依存する動作ではない。',
+      'PC の加算回路を止める必要があるという記述は無く、処理速度とは無関係の理由。',
+      '<b>これが正解。</b>docs/instructions.md は、PC を増やさないことで、システムモードから rets で user モードに戻ったとき、割り込みが起きなければ実行されていたはずの命令から再開できると説明している。',
+      '無限ループを強制する設計意図は無く、むしろ正しく 1 回だけ処理されて戻ることを目的としている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の流れ図のとおり、PC を進めないことで「中断前と同じ場所」に戻れます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="PCを進めない理由"><rect x="30" y="20" width="200" height="40" fill="#eaf5ef" stroke="#0f5132"/><text x="130" y="45" font-size="12.5" text-anchor="middle">命令X実行中に割込</text><rect x="330" y="20" width="200" height="40" fill="#efe8f7" stroke="#5b3d80"/><text x="430" y="45" font-size="12.5" text-anchor="middle">PC は命令Xのまま</text><rect x="180" y="80" width="200" height="40" fill="#e3edf5" stroke="#2f5f8a"/><text x="280" y="105" font-size="12.5" text-anchor="middle">rets で戻ると命令Xから再開</text></svg>'
+          + '<p class="cap">図: PC を進めなければ、戻ったときに命令 X をやり直すだけで済む。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 と Digital 付属サンプルの割り込みへの出入り方法の違いとして、本文の説明と一致するものはどれか？',
+    opts: [
+      'rj32 は enteri/leavei/reti の 3 命令、Digital サンプルは rets 1 命令で出入りする',
+      'rj32 も Digital サンプルも、どちらも専用の出入り命令を一切持たない',
+      'rj32 は rets 1 命令で K を反転させるだけ、Digital サンプルは enteri/leavei/reti の専用 3 命令を持つ',
+      'rj32 は割り込みごとに異なるベクタアドレスに飛ぶが、Digital サンプルは常に同じアドレスに飛ぶ',
+      'Digital サンプルは別レジスタバンクを使わず、常にスタックに退避する方式である'
+    ],
+    ans: 2,
+    exps: [
+      '命令の持ち主が逆になっている。enteri/leavei/reti を持つのは Digital サンプルで、rj32 は rets 1 つを使い回す。',
+      'rj32 は rets を、Digital サンプルは enteri/leavei/reti を持っており、「一切持たない」という記述は誤り。',
+      '<b>これが正解。</b>本文の比較のとおり、rj32 は既存の rets を使い回して K フラグを反転させるだけ、Digital サンプルは enteri/leavei/reti という専用の 3 命令を持つ。',
+      '本文では rj32 の CSR (割り込みベクタに関わる部分) はまだ未実装であり、Digital サンプルは固定アドレス (.org 2) に飛ぶと説明した。どちらも「複数の異なるベクタに飛ぶ」設計ではない。',
+      'Digital サンプルの回路には Bank-FF という別レジスタバンクへの切り替え部品があり、スタック退避方式ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の比較表 (図) のとおり、出入りの命令数が設計ごとに異なります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="出入り命令数の比較"><rect x="30" y="20" width="230" height="80" rx="8" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="48" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">rj32</text><text x="145" y="72" font-size="12" text-anchor="middle">rets 1 命令で K を反転</text><rect x="300" y="20" width="230" height="80" rx="8" fill="#efe8f7" stroke="#5b3d80"/><text x="415" y="48" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">Digital サンプル</text><text x="415" y="72" font-size="12" text-anchor="middle">enteri/leavei/reti の 3 命令</text></svg>'
+          + '<p class="cap">図: 命令の数は違うが、どちらも別レジスタ集合への切り替えを伴う。</p></div>'
+    }
+  },
+  {
+    q: 'Digital 付属サンプルの ProcessorIntr.dig にある Bank-FF (レジスタバンク切り替え) の役割として、本文の説明に最も近いものはどれか？',
+    opts: [
+      'ハンドラ用に別のレジスタ集合を用意し、ユーザー側の値を壊さずに済ませる',
+      'バンクを切り替えることで、クロック周波数を 2 倍に上げられるようにする',
+      'バンクの数だけ同時に複数のプログラムを並列実行できるようにする',
+      'バンクを切り替えることで、メモリの読み書き速度を高速化する',
+      'バンクはキャッシュの一種で、よく使うデータだけを保持する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文で説明した通り、Bank-FF は割り込み中だけ別のレジスタバンクに物理的に切り替え、ハンドラがユーザーのレジスタの値を壊さずに動けるようにする。rj32 の K フラグと同じ発想。',
+      'レジスタバンクの切り替えとクロック周波数の変更は無関係。',
+      'バンクの切り替えは割り込み/通常モードの 2 状態を切り替えるためのもので、複数プログラムの並列実行とは無関係。',
+      'メモリの読み書き速度とレジスタバンクの切り替えは別の仕組みで、直接の関係はない。',
+      'キャッシュとレジスタバンクは別の概念であり、Bank-FF はキャッシュとして説明されていない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>別バンクに切り替えることで、退避の命令を書かずに済みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="Bank-FFによるレジスタ退避の省略"><rect x="30" y="20" width="220" height="40" fill="#eaf5ef" stroke="#0f5132"/><text x="140" y="45" font-size="12.5" text-anchor="middle">通常バンク (ユーザー用)</text><rect x="310" y="20" width="220" height="40" fill="#efe8f7" stroke="#5b3d80"/><text x="420" y="45" font-size="12.5" text-anchor="middle">割込バンク (ハンドラ用)</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">退避命令を書かずに両方の値を同時に保持できる</text></svg>'
+          + '<p class="cap">図: 2 組のレジスタを持つことで、退避・復元のソフトウェア処理が要らなくなる。</p></div>'
+    }
+  },
+  {
+    q: '固定アドレス 1 つにジャンプするだけの「ベクタ化されていない割り込み」で、複数のデバイスが同じ割り込み線を共有している場合に起きることとして正しいものはどれか？',
+    opts: [
+      'どのデバイスが割り込みを起こしたかは自動的に CPU のレジスタに記録される',
+      'どのデバイスが割り込みを起こしたかをハンドラ自身が CSR やメモリマップト I/O を読んで調べる必要がある',
+      '複数デバイスが同時に割り込むと、CPU は自動的に対応する複数のハンドラへ同時に分岐する',
+      'ベクタ化されていない割り込みでは、デバイスを 1 つしか接続できない',
+      'ハンドラを書く必要が無くなり、ハードウェアがすべて自動的に処理する'
+    ],
+    ans: 1,
+    exps: [
+      'ハードウェアが自動的にどのデバイスかを記録する仕組みは、ベクタ化されていない設計には無い。',
+      '<b>これが正解。</b>固定アドレスに飛ぶだけの設計では、どのデバイスが割り込んだかの情報は渡されないため、ハンドラが CSR やメモリマップト I/O を読みに行って自分で判定する必要がある。',
+      'CPU は 1 度に 1 か所にしか分岐できないため、複数ハンドラへ同時に分岐することはできない。',
+      'デバイスを複数接続すること自体は可能で、判定が面倒になるだけであり、接続数の制限ではない。',
+      'ハンドラを書く必要が無くなるわけではなく、むしろ判定のコードを書く必要が増える。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>固定アドレスに飛ぶだけでは「誰が呼んだか」は分からず、調べる手間がハンドラ側に残ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="ベクタ化されていない割り込みの判定"><rect x="30" y="20" width="500" height="40" fill="#eaf5ef" stroke="#0f5132"/><text x="280" y="45" font-size="12.5" text-anchor="middle">デバイスA/B/C → 同じ固定アドレスへ</text><text x="280" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f">ハンドラが CSR/IO を読んで原因を判定する</text></svg>'
+          + '<p class="cap">図: 複数デバイスが同じ入口に飛ぶなら、原因の判定はソフトウェアの仕事になる。</p></div>'
+    }
+  },
+  {
+    q: '次の図は、ハンドラが av を読まずに reti で抜けた場合の挙動を示している。この図から読み取れる問題点として正しいものはどれか。<div class="fig"><svg viewBox="0 0 520 150" aria-label="avを読まずに抜けた場合の図"><rect x="20" y="20" width="160" height="40" fill="#fff6ea" stroke="#b5401f"/><text x="100" y="45" font-size="12" text-anchor="middle">割込発生 (av=1)</text><rect x="200" y="20" width="160" height="40" fill="#efe8f7" stroke="#5b3d80"/><text x="280" y="45" font-size="12" text-anchor="middle">ハンドラ (av 未読)</text><rect x="380" y="20" width="120" height="40" fill="#e3edf5" stroke="#2f5f8a"/><text x="440" y="45" font-size="12" text-anchor="middle">reti</text><rect x="200" y="90" width="160" height="40" fill="#fbeeea" stroke="#c0492f"/><text x="280" y="115" font-size="12" text-anchor="middle" fill="#c0492f">av はまだ 1</text><text x="280" y="140" font-size="11" fill="#4a5d54">reti 直後にまた割込が発生する</text></svg></div>',
+    opts: [
+      'reti 命令自体が壊れており、二度と使えなくなる',
+      'av を読まなかったことと図の挙動は無関係で、単なる偶然である',
+      'av を読まなかったことで CPU のクロックが停止してしまう',
+      'av が下がらないまま戻るので、同じ割り込みが reti の直後にまた発生してしまう',
+      'av を読まなかった場合、次に起きるのは全く別のデバイスの割り込みに限られる'
+    ],
+    ans: 3,
+    exps: [
+      'reti 命令自体は正しく動作しており、壊れるという説明は図にも本文にも無い。',
+      '図は av を読まなかったことと再発生を直接結びつけて示しており、無関係ではない。',
+      'クロックの停止は図に示されておらず、av 未読とクロック停止は無関係。',
+      '<b>これが正解。</b>図のとおり、av を読まずに抜けると av は高いままで、reti 直後にまた同じ割り込みが発生してしまう。',
+      '再発生するのは同じデバイスの割り込みであり、「別のデバイスに限られる」という記述は図とも一致しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>レベル信号は読み出して初めて下がる、という本文の説明をもう一度確認してください。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="avを読んで下げる手順"><rect x="30" y="30" width="230" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="60" font-size="13" text-anchor="middle" fill="#c0492f">読まない → av 高いまま → 再発生</text><rect x="300" y="30" width="230" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="415" y="60" font-size="13" text-anchor="middle" fill="#0f5132">読む → av 下がる → 正常復帰</text></svg>'
+          + '<p class="cap">図: av は読み出すまで下がらないので、ハンドラが読む手順を保証する必要がある。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 のレジスタファイルが 1 組 (16 本) しかなかった場合、割り込みハンドラがユーザーのレジスタの値を保存する方法として、本文の説明と最も整合するものはどれか？',
+    opts: [
+      'レジスタが 1 組しかなければ割り込み自体を実装できないため、CPU を作り直すしかない',
+      'ソフトウェアでスタックにレジスタの値を退避してから使い、戻る前に復元する必要があり、別バンク方式より応答が遅くなる',
+      'レジスタが 1 組でも、ハードウェアが自動的に退避と復元を行うため、プログラマは何もしなくてよい',
+      'レジスタが 1 組の場合、割り込みハンドラは常にレジスタ r0 だけを使うことに制限される',
+      'レジスタが 1 組の場合、割り込みの応答速度は別バンク方式と完全に同じになる'
+    ],
+    ans: 1,
+    exps: [
+      'レジスタが 1 組でも割り込み自体は実装可能で、退避の手段をソフトウェアに任せればよい。CPU を作り直す必要はない。',
+      '<b>これが正解。</b>本文で説明した通り、別バンクを持てない場合はソフトウェアでスタックに退避・復元する方式を選ぶしかなく、退避の命令が余計に挟まる分、別バンク方式より応答が遅くなる。',
+      'ハードウェアが自動で退避するのは別バンク方式の利点であり、レジスタが 1 組の場合はその自動化が無い。',
+      'レジスタ r0 だけに制限されるという記述は本文に無く、技術的にも必然性が無い。',
+      '退避・復元の命令が余計に挟まる分、別バンク方式より遅くなるのであり、「完全に同じ」にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>退避と復元の手間がそのまま応答の遅さになります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="別バンク方式とスタック退避方式の比較"><rect x="30" y="20" width="220" height="80" rx="8" fill="#e3edf5" stroke="#2f5f8a"/><text x="140" y="48" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">別バンク</text><text x="140" y="72" font-size="12" text-anchor="middle">退避命令が要らない・速い</text><rect x="300" y="20" width="230" height="80" rx="8" fill="#fff6ea" stroke="#b5401f"/><text x="415" y="48" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">スタック退避</text><text x="415" y="72" font-size="12" text-anchor="middle">退避・復元の命令が要る・遅い</text></svg>'
+          + '<p class="cap">図: 別バンクが無ければ、ソフトウェアでの退避・復元が応答速度の代償になる。</p></div>'
+    }
+  },
+  {
+    q: 'ある割り込み対応デバイスが「データがある間ずっと高い」レベル信号を割り込み線に使っている。ハンドラの実装として、本文の設計上の教訓に最も合致する手順はどれか？',
+    opts: [
+      '信号の確認はコンパイラが自動的に挿入するので、プログラマが意識する必要はない',
+      '信号の高さに関わらず、reti を実行した瞬間に信号は自動的に下がるので、何もしなくてよい',
+      'ハンドラの最後に CPU をリセットして信号を強制的に初期化する',
+      '信号が高いままでも、次の割り込みを無視する設定にしてしまえば問題は起きない',
+      'ハンドラの先頭でデータを読み出し (またはクリアし)、信号が下がるのを確認して reti で戻る'
+    ],
+    ans: 4,
+    exps: [
+      '信号の確認はデバイスごとの手順であり、コンパイラが自動的に挿入できる種類の処理ではない。プログラマがハンドラに明示的に書く必要がある。',
+      '誤り。reti はレジスタとモードを戻すだけの命令で、デバイス側の信号を下げる効果は無い。',
+      'リセットは割り込みの解除策として過剰で、他の処理中のデータも失われてしまう。',
+      '次の割り込みを無視する設定にすると、そのデバイスからの正当な通知も受け取れなくなってしまう。',
+      '<b>これが正解。</b>ハンドラの先頭でデータを読み出すか明示的にクリアし、信号が下がったことを確認してから reti で戻ることで、同じ割り込みの再発を防げる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文で確認した「読んで下げる」手順を、設計のチェックリストとして確認してください。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="レベル信号を正しく解除する手順"><rect x="30" y="30" width="500" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="280" y="56" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ハンドラ先頭でデータを読み出す (またはクリア)</text><text x="280" y="78" font-size="12" text-anchor="middle" fill="#12211a">信号が下がったことを確認して reti</text></svg>'
+          + '<p class="cap">図: レベル信号を使う割り込みは、必ず読み出し (解除) をハンドラの一部として保証する。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

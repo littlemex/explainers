@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アセンブラとコンパイラ ― ビット列を作る前に、まずエミュレータで確かめる</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 22 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>アセンブラとコンパイラ ― ビット列を作る前に、まずエミュレータで確かめる</h1>
+  <p>人間が書いた <code>add r1, 5</code> のような文字列から、CPU が読む 16 bit のビット列を作る仕組みと、それを FPGA に焼く前に安く確かめる道筋</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 10 回 <a href="./cpu-isa.html">命令セットの設計</a>、第 13 回 <a href="./cpu-branches.html">分岐・ジャンプ・スキップ・サブルーチン</a></p>
+  <p class="intro">CPU がどれだけ正しく動いても、人間が 16 bit のビット列を手で並べてプログラムを書くのは現実的ではありません。アセンブラは、<code>add r1, 5</code> のような読みやすい文字列を、CPU が読む 2 進数のビット列に機械的に変換する道具です。この回では、rj32 が実際に使っている <code>customasm</code> という汎用アセンブラの仕組み、ラベルの番地をどう計算するか、呼び出し規約の約束ごと、そして回路やハードウェアの手前でソフトウェアのエミュレータを使って先に確かめる、という開発の順序を見ていきます。</p>
+
+  <!-- ===== 解説パート 1: アセンブラがビット列を作る仕組み ===== -->
+  <section>
+    <h2>1. アセンブラがビット列を作る仕組み</h2>
+    <p>第 10 回で見たように、rj32 の命令は 16 bit のビット列の中に、命令の種類 (op)・レジスタ番号 (rd, rs)・即値といった情報を詰め込んでいます。アセンブラの仕事は、人間が読み書きしやすい文字列 (<code>add r3, 15</code> のような 1 行) を、この 16 bit のビット列に機械的に変換することです。rj32 は自分でアセンブラを書くのではなく、<code>customasm</code> という汎用のアセンブラに、<code>cpudef.asm</code> という「rj32 のルール」だけを書いたファイルを読ませる、という作り方をしています。</p>
+    <p><code>cpudef.asm</code> には 2 種類のルールがあります。1 つは <code>reg</code> や <code>op</code> のような<b>対応表</b> (レジスタ名 <code>r3</code> は数字の 3、即値形式の加算命令 <code>addi</code> は番号 0 など)。もう 1 つは <code>fmt_ri6</code> のような<b>組み立て方のルール</b>で、<code>rd`4 @ value`6 @ op`4 @ 0b11</code> のように「この順番でビットを並べてくれ」と書いてあります。<code>`4</code> は「4 bit に切り詰める」、<code>@</code> は「隣に並べる (連結する)」という意味です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="add r3, 15 がビット列になる図">
+        <rect x="20" y="20" width="160" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="100" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">add r3, 15</text>
+        <line x1="180" y1="40" x2="240" y2="40" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-t1)"/>
+        <rect x="240" y="20" width="340" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="410" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">対応表: addi → 0、r3 → 3</text>
+        <line x1="300" y1="60" x2="300" y2="100" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-t1)"/>
+        <rect x="60" y="100" width="500" height="40" rx="6" fill="#f3f9f6" stroke="#0f5132" stroke-width="2"/>
+        <text x="310" y="125" font-size="13" text-anchor="middle" fill="#12211a" font-family="monospace">rd(0011) @ value(001111) @ op(0000) @ fmt(11)</text>
+        <line x1="310" y1="140" x2="310" y2="170" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-t1)"/>
+        <rect x="160" y="170" width="300" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="310" y="192" font-size="13" text-anchor="middle" fill="#5b3d80" font-family="monospace">0011 001111 0000 11 (16 bit)</text>
+        <defs><marker id="arr-t1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 文字列 → 対応表で名前を数に変換 → ルールに従って並べる → 16 bit のビット列になる。</p>
+    </div>
+    <p>この作り方の利点は、<b>アセンブラ本体 (customasm) は rj32 のことを何も知らなくてよい</b>という点です。rj32 の命令セットが変わっても、変更するのは <code>cpudef.asm</code> だけで済みます。</p>
+  </section>
+
+  <!-- ===== 解説パート 2: ラベルと再配置 ===== -->
+  <section>
+    <h2>2. ラベルと再配置 ― 番地をどう計算するか</h2>
+    <p><code>jump mylabel</code> や <code>call fibonacci</code> のように、プログラムはまだ番地が決まっていない名前 (ラベル) へ飛びます。ラベルが実際に何番地かは、プログラム全体を一度並べてみるまで分かりません。そこでアセンブラは、まず全命令を仮に並べて各ラベルの番地を確定させ (1 回目の通過)、その番地を使って実際のジャンプ命令のビット列を組み立てます (2 回目の通過)。</p>
+    <p>さらに rj32 のジャンプは<b>絶対番地ではなく相対距離</b>を命令に埋め込みます。<code>cpudef.asm</code> の定義は <code>jump {value} =&gt; fmt_i11 jumpi, value - pc - 1</code> です。<code>value</code> は飛び先の番地、<code>pc</code> はこの <code>jump</code> 命令自身が置かれる番地で、<b>「飛び先 − 自分の番地 − 1」</b>という式が埋め込まれます。この「−1」は、rj32 の実行時に <code>pc</code> がジャンプ命令自身の番地ではなく<b>すでに次の命令の番地に進んだ後の値</b>であるために必要な補正です。アセンブラが計算に使う「組み立て時の pc」と、ハードウェアが実行時に使う「進んだ後の pc」がずれているので、この 1 だけ合わせてあげる必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="相対ジャンプの番地計算、-1の補正が必要な図">
+        <rect x="20" y="30" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="90" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">番地 100: jump L</text>
+        <rect x="200" y="30" width="140" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="270" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">番地 101 (次の命令)</text>
+        <rect x="430" y="30" width="140" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="500" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80">番地 110: L:</text>
+        <text x="310" y="110" font-size="13" text-anchor="middle" fill="#12211a">埋め込む値 = 110 − 100 − 1 = 9</text>
+        <text x="310" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">実行時: pc は先に 101 まで進んでいるので 101 + 9 = 110 に着地する</text>
+        <text x="310" y="158" font-size="12.5" text-anchor="middle" fill="#4a5d54">「−1」を忘れると、着地先が本来より 1 番地先にずれてしまう</text>
+      </svg>
+      <p class="cap">図: 相対ジャンプは「実行時に pc が既に進んでいる分」を見越して −1 している。</p>
+    </div>
+    <p>もう 1 つ、アセンブラが番地を決める上で重要なのが<code>#bankdef</code> です。<code>cpudef.asm</code> はプログラム用の <code>code</code> バンク (0x0000 から)、初期値付きデータ用の <code>data</code> バンク (0x8000 から)、初期値なしのデータ用の <code>bss</code> バンクを別々に定義しています。これは第 09 回で見たハーバード・アーキテクチャ (命令メモリとデータメモリが別) を、アセンブラの番地の付け方としてそのまま反映したものです。</p>
+  </section>
+
+  <!-- ===== 解説パート 3: 呼び出し規約 ===== -->
+  <section>
+    <h2>3. 呼び出し規約 ― 関数を呼ぶときの約束ごと</h2>
+    <p>プログラムが複数の関数に分かれていると、関数を呼ぶ側 (caller) と呼ばれる側 (callee) の間で「どのレジスタに何を入れるか」を決めておかないと、互いのデータを壊してしまいます。この約束ごとが<b>呼び出し規約 (calling convention)</b> です。rj32 の <code>docs/instructions.md</code> は、16 本あるレジスタのうち <code>r0</code> だけは特別で、残りの使い方を次のように定めています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="rj32のレジスタの役割分担の図">
+        <rect x="20" y="20" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="42" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">r0 (ra)</text>
+        <text x="85" y="60" font-size="12" text-anchor="middle" fill="#12211a">戻り先の番地</text>
+        <rect x="170" y="20" width="130" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="235" y="42" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">r1,r2 (a0,a1)</text>
+        <text x="235" y="60" font-size="12" text-anchor="middle" fill="#12211a">引数 / 戻り値</text>
+        <rect x="320" y="20" width="130" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="385" y="42" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">r3-r7 (s0-s4)</text>
+        <text x="385" y="60" font-size="12" text-anchor="middle" fill="#12211a">呼ばれた側が保存</text>
+        <rect x="470" y="20" width="130" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="535" y="42" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">r8-r13 (t0-t5)</text>
+        <text x="535" y="60" font-size="12" text-anchor="middle" fill="#12211a">呼ぶ側が保存</text>
+        <rect x="170" y="100" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="235" y="122" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">r15 (sp)</text>
+        <text x="235" y="140" font-size="12" text-anchor="middle" fill="#12211a">スタックポインタ</text>
+      </svg>
+      <p class="cap">図: レジスタごとに「誰が保存するか」の役割が決まっているので、関数をまたいでも値が壊れない。</p>
+    </div>
+    <p><code>call</code> 命令は <code>jump</code> と同じ相対番地の計算をしつつ、同時に「戻ってくるべき番地」を <code>r0</code> に保存します (<code>cpudef.asm</code> の定義では <code>jump {value} =&gt; fmt_i11 jumpi, value - pc - 1</code> に対し、<code>call</code> も同じ <code>fmt_i11</code> 形式を使って同様の番地計算をします)。関数から戻る <code>return</code> は <code>jump ra</code> という擬似命令にすぎません。この「呼び出し時に戻り先を自動で覚える」「戻る時はただ <code>r0</code> へジャンプするだけ」というシンプルな仕組みの上に、ABI (呼び出し規約) という約束ごとが乗っています。</p>
+  </section>
+
+  <!-- ===== 解説パート 4: Go から rj32 へ ===== -->
+  <section>
+    <h2>4. Go から rj32 へ ― NanoGo という道</h2>
+    <p>ここまでは人間が直接アセンブリを書く前提でした。rj32 の README には、Go 言語のサブセットを rj32 向けにコンパイルする <a href="https://github.com/rj45/nanogo" target="_blank" rel="noopener">NanoGo</a> という別プロジェクトがあることが書かれています。この回では NanoGo の内部構造までは踏み込みませんが、重要なのは<b>どこまで積み上げても、最後に出てくるのは第 1 節で見た同じ 16 bit のビット列だという点</b>です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="NanoGoも手書きアセンブリも最後は同じビット列に落ちる図">
+        <rect x="20" y="20" width="180" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="110" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">NanoGo (Go のサブセット)</text>
+        <rect x="20" y="90" width="180" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="115" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">手書きのアセンブリ</text>
+        <line x1="200" y1="40" x2="300" y2="90" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="200" y1="110" x2="300" y2="100" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="300" y="80" width="180" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="390" y="105" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">customasm + cpudef.asm</text>
+        <line x1="480" y1="100" x2="540" y2="100" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-t4)"/>
+        <rect x="540" y="80" width="60" height="40" rx="8" fill="#f3f9f6" stroke="#0f5132" stroke-width="2"/>
+        <text x="570" y="105" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">bits</text>
+        <text x="310" y="170" font-size="12.5" text-anchor="middle" fill="#4a5d54">NanoGo も、最終的には同じアセンブリ (または同じビット列の約束) に合わせる</text>
+      </svg>
+      <p class="cap">図: 高級言語を使っても、アセンブラが約束するビットの詰め込み方は変わらない。</p>
+    </div>
+    <p>この「上に何を積んでも、最後は同じ契約に合わせる」という構造は、第 1 節のアセンブラ自体が「<code>cpudef.asm</code> というルールさえ守れば customasm は rj32 を知らなくてよい」という構造と同じ考え方です。</p>
+  </section>
+
+  <!-- ===== 解説パート 5: 回路でもビットを組み立てられる、そしてエミュレータで先に確かめる ===== -->
+  <section>
+    <h2>5. エミュレータで先に確かめる</h2>
+    <p>rj32 には、テキストのアセンブラとは別に、<code>dig/assembler.dig</code> という <b>Digital の回路として作られた「Assembler」</b>もあります。これは <code>dest</code>・<code>src</code>・<code>value</code>・<code>tworeg</code> といった入力と、<code>add</code>・<code>move</code>・<code>jump</code> といった選択を GUI 上で指定すると、回路のロジックが命令のビット列を組み立てて <code>inst</code> として出力する仕組みで、テストプログラムを 1 命令ずつ手で組み立てるのに使われます。テキストのアセンブラ (customasm) が「ファイルにまとめて書いて一括変換する」道具なのに対し、この回路は「今、この 1 命令だけを対話的に組み立てる」道具で、使う場面が違うだけで、やっていること (名前を数に変換し、決まった順序でビットを並べる) は同じです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="テキストのアセンブラと回路のアセンブラの使い分けの図">
+        <rect x="30" y="30" width="250" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">customasm (テキスト)</text>
+        <text x="155" y="76" font-size="12" text-anchor="middle" fill="#12211a">ファイルにまとめて一括変換</text>
+        <text x="155" y="94" font-size="12" text-anchor="middle" fill="#12211a">大きなプログラム向け</text>
+        <rect x="340" y="30" width="250" height="90" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="465" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">dig/assembler.dig (回路)</text>
+        <text x="465" y="76" font-size="12" text-anchor="middle" fill="#12211a">GUI で 1 命令ずつ対話的に組み立て</text>
+        <text x="465" y="94" font-size="12" text-anchor="middle" fill="#12211a">短いテスト向け</text>
+        <text x="310" y="148" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらも最終的に組み立てるのは同じ 16 bit のビット列</text>
+      </svg>
+      <p class="cap">図: テキストのアセンブラと回路のアセンブラは、使う場面が違うだけで同じ仕事をする。</p>
+    </div>
+    <p>プログラムが書けたら、次に確かめる場所が重要です。rj32 の開発では、<b>FPGA に焼く前に、まずソフトウェアのエミュレータで動作を確かめる</b>という順序を踏みます。<code>Makefile</code> の <code>testemu</code> という手順は、これを 1 行で表しています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 150" role="img" aria-label="customasmの出力をパイプでemurjに直接流し込む図">
+        <rect x="20" y="40" width="190" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="115" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">customasm</text>
+        <text x="115" y="78" font-size="11.5" text-anchor="middle" fill="#12211a" font-family="monospace">-f logisim16 test.asm</text>
+        <line x1="210" y1="65" x2="270" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-t5)"/>
+        <text x="240" y="55" font-size="12" text-anchor="middle" fill="#4a5d54">パイプ |</text>
+        <rect x="270" y="40" width="200" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="370" y="60" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">emurj (Go のエミュレータ)</text>
+        <text x="370" y="78" font-size="11.5" text-anchor="middle" fill="#12211a" font-family="monospace">-run - -trace -maxcycles 100</text>
+        <line x1="470" y1="65" x2="530" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-t5)"/>
+        <text x="575" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">halt /</text>
+        <text x="575" y="78" font-size="12.5" text-anchor="middle" fill="#0f5132">error</text>
+        <text x="310" y="125" font-size="12.5" text-anchor="middle" fill="#4a5d54">ビット列のファイルを経由せず、変換結果をそのまま次のプログラムに渡す</text>
+        <defs><marker id="arr-t5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: customasm の出力をパイプでそのままソフトウェアエミュレータ emurj に渡し、実機 (FPGA) より先に動作を確かめる。</p>
+    </div>
+    <p>ソフトウェアのエミュレータは、FPGA の合成 (第 20 回) や実機への書き込みに比べて<b>圧倒的に速く繰り返せます</b>。命令の解釈を間違えていないか、ラベルの番地計算を間違えていないかといったバグは、わざわざ回路を合成してハードウェアで確かめるより先に、ソフトウェアで安く・速く・何度も試して潰しておくのが合理的です。</p>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>(1) 相対番地の「どちらの pc を使うか」を取り違えない。</b> 第 2 節で見た <code>value - pc - 1</code> の「−1」は、rj32 の実行時の <code>pc</code> がジャンプ命令自身の番地ではなく、すでに次の命令の番地に進んだ後の値であることに由来します。もし CPU 側のパイプライン段数や pc の更新タイミングを変えたら、アセンブラ側のこの補正値も合わせて見直す必要があります。ここは CPU 側の設計とアセンブラ側の計算式が暗黙に結びついている、見落としやすい箇所です。</p>
+    <p><b>(2) 即値がはみ出すと、アセンブラが命令をこっそり増やす。</b> <code>fmt_ri6</code> の即値は 6 bit (−32〜31) しか入りません。<code>cpudef.asm</code> はこの範囲をはみ出す値が来ると、自動的に <code>imm</code> 命令を 1 つ前に挿入して補います。つまり「定数を少し大きくしただけ」で生成される命令の数が増え、それより後ろにあるラベルの番地がすべて 1 つずれる可能性があります。これが、アセンブラがラベルの番地を 1 回の通過では決められず、何度か計算をやり直す必要がある理由です。</p>
+    <p><b>(3) 先に安く確かめる場所を選ぶ。</b> 命令の意味やラベルの計算を間違えた時、その発見場所が FPGA の実機であるほど、1 回の確認にかかる時間 (合成・配置配線・書き込み) が長くなります。<code>customasm | emurj</code> のようにソフトウェアだけで完結する確認を先に通し、問題が無くなってから実機に進む、という順序を守ることが、回路設計そのものと同じくらい重要な実装上の判断です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/programs/cpudef.asm" target="_blank" rel="noopener">rj32: programs/cpudef.asm</a> ― customasm 向けの rj32 命令セット定義。レジスタ名・命令名の対応表、各命令形式のビット配置、ジャンプ命令の <code>value - pc - 1</code> という相対番地の計算式、imm 自動挿入、bankdef によるコード/データ/BSS 領域の分離の根拠。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/programs/fib.asm" target="_blank" rel="noopener">rj32: programs/fib.asm</a> ― ラベル・呼び出し・条件スキップを使った実際のアセンブリの例。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/Makefile" target="_blank" rel="noopener">rj32: Makefile</a> ― <code>customasm</code> を使ったビルドの手順と、<code>customasm | emurj/emurj -run -</code> のようにパイプでエミュレータへ直接流し込んでテストする <code>testemu</code> ターゲットの根拠。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/emurj/emurj.go" target="_blank" rel="noopener">rj32: emurj/emurj.go</a> ― Go で書かれたソフトウェアエミュレータ emurj の本体。ebiten を使った画面表示と、CPU 単体の実行を両方サポートする構成の根拠。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/assembler.dig" target="_blank" rel="noopener">rj32: dig/assembler.dig</a> ― Digital 上で命令のビット列を手で組み立てる「Assembler」という名前の回路。テキストのアセンブラとは別に、回路でも同じビット詰め込みの仕事ができることの比較対象。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj32: docs/instructions.md</a> ― レジスタの呼び出し規約 (引数 ・ 戻り値 ・ callee/caller saved) の定義。</li>
+      <li><a href="https://github.com/hlorenzi/customasm" target="_blank" rel="noopener">customasm (hlorenzi/customasm)</a> ― rj32 が使っている、命令セットを外部からルールとして定義できる汎用アセンブラ本体。</li>
+      <li><a href="https://github.com/rj45/nanogo" target="_blank" rel="noopener">NanoGo (rj45/nanogo)</a> ― Go のサブセットを rj32 向けにコンパイルするプロジェクト。存在と位置づけのみを本文で紹介し、内部構造には立ち入らない。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-video.html">← 第 21 回 映像を出す</a><a href="./cpu-index.html">目次</a><a href="./cpu-performance.html">第 23 回 性能の式 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'cpudef.asm の <code>fmt_ri6</code> ルールは <code>rd`4 @ value`6 @ op`4 @ 0b11</code> という並びでビット列を組み立てる。<code>add r3, 15</code> (即値形式の加算 <code>addi</code> は番号 0) をこの並びで組み立てた 16 bit の値はどれか?',
+    opts: [
+      '0101 001111 0000 11',
+      '0011 001111 0001 11',
+      '0011 001111 0000 11',
+      '0011 001111 0000 01',
+      '0011 110000 0000 11'
+    ],
+    ans: 2,
+    exps: [
+      'rd の部分が 0101 (5) になっている。r3 を指定しているので rd は 0011 (3) でなければならない。',
+      'op の部分が 0001 になっている。これは subi (1) の値で、addi (0) である 0000 とは異なる。',
+      '<b>これが正解。</b>rd=0011 (r3) @ value=001111 (15) @ op=0000 (addi) @ fmt=11 で、全体は 0011 001111 0000 11 になる。',
+      '末尾の fmt が 01 になっている。<code>fmt_ri6</code> は末尾が <code>0b11</code> と決まっているため、01 では別の形式と誤認される。',
+      'value の部分が 110000 になっている。15 を 6 bit で表すと 001111 であり、110000 ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 1 節) と同じ 4 つの部品を、同じ順番で並べます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="add r3,15のビット列の再確認"><rect x="20" y="30" width="520" height="40" fill="#f3f9f6" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="13.5" text-anchor="middle" fill="#12211a" font-family="monospace">0011 | 001111 | 0000 | 11</text><text x="280" y="90" font-size="12" text-anchor="middle" fill="#4a5d54">rd(3) ・ value(15) ・ op(addi=0) ・ fmt(11)</text></svg>'
+          + '<p class="cap">図: 4 つの部品をこの順番で並べると 16 bit になる。</p></div>'
+    }
+  },
+  {
+    q: '<code>jump</code> や <code>call</code> の相対番地を計算する時、cpudef.asm は <code>value - pc - 1</code> のように余分な <code>-1</code> を使っている。この <code>-1</code> が必要な最も本質的な理由は?',
+    opts: [
+      'アセンブラが数える番地と実行時の番地とで、符号付きか符号なしかという表現方法そのものが異なるから',
+      'ジャンプ命令自体の読み込みに、他の命令よりちょうど 1 クロック余分にかかる仕様になっているから',
+      '飛び先のラベルがプログラムの先頭より手前にある場合にだけ必要になる、特別な補正だから',
+      'この 1 は補正ではなく、customasm の不具合を避けるための便宜的な値にすぎないから',
+      '実行時の pc がジャンプ命令自身の番地ではなく、すでに次の命令の番地まで進んだ値になっているから'
+    ],
+    ans: 4,
+    exps: [
+      '符号付き/符号なしの表現方法は飛び先の計算そのものに関係するものではなく、ここでのずれの原因ではない。',
+      'クロック数の違いはタイミングの話であり、番地の計算式に <code>-1</code> が必要な理由とは別の話題。',
+      'この補正はラベルが前方にあるか後方にあるかに関係なく、常に同じ式 <code>value - pc - 1</code> が使われる。',
+      '<code>-1</code> は本文で説明した通り、実行時の pc の進み方に合わせた意図的な補正であり、不具合を避けるための便宜的な値ではない。',
+      '<b>これが正解。</b>実行時、CPU の pc はジャンプ命令自身の番地ではなく、すでに次の命令の番地まで進んだ状態で加算に使われる。アセンブラはこの「進んだ後の pc」を見越して、あらかじめ 1 を引いておく。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 2 節) の番地の数字をもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="相対ジャンプの-1補正の再確認"><rect x="20" y="30" width="140" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="90" y="53" font-size="12.5" text-anchor="middle" fill="#0f5132">番地 100: jump L</text><rect x="190" y="30" width="140" height="36" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="260" y="53" font-size="12" text-anchor="middle" fill="#1f4a68">pc は 101 まで進む</text><rect x="400" y="30" width="140" height="36" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="470" y="53" font-size="12.5" text-anchor="middle" fill="#5b3d80">番地 110: L:</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">埋め込む値 = 110-100-1 = 9、実行時は 101+9 = 110</text></svg>'
+          + '<p class="cap">図: アセンブラは「実行時に pc が 1 進んでいること」を見越して計算する。</p></div>'
+    }
+  },
+  {
+    q: 'customasm は <code>fmt_ri6</code> 形式の即値が 6 bit (-32〜31) をはみ出すと、自動的に <code>imm</code> 命令を 1 つ前に挿入する。ある定数をわずかに大きい値に変更したところ、それより後ろにあるラベルへのジャンプの着地番地が意図しない位置になった。最も適切な原因は?',
+    opts: [
+      'ラベルの名前が customasm 内部で衝突し、別のラベルの番地を誤って参照してしまったから',
+      '<code>imm</code> 命令が新たに挿入されて命令数が増え、それより後ろにあるすべての番地が 1 つずつ後ろにずれたから',
+      '6 bit を超える即値を使った行を、customasm がその行だけ無視して出力しなくなるから',
+      'ラベルの番地は一度決まると二度と再計算されないため、古い番地のまま固定されてしまうから',
+      'ジャンプ命令の op 番号が即値の大きさによって自動的に変わり、別の命令として解釈されてしまうから'
+    ],
+    ans: 1,
+    exps: [
+      '同じ名前のラベルを 2 つ定義していない限り、定数の大きさを変えただけでラベルの参照先が衝突することは起こらない。',
+      '<b>これが正解。</b>即値がはみ出すと <code>imm</code> 命令が自動的に 1 つ挿入され、命令全体の数が増える。その結果、それより後ろにあるラベルの番地はすべて 1 つずつ後ろへずれ、相対ジャンプの計算もその新しい番地に基づいて行われる必要が出てくる。',
+      '即値が範囲を超えても customasm はその行を無視せず、<code>imm</code> 命令を補ってちゃんと組み立てる。これが「はみ出しても動く」仕組みの正体。',
+      'customasm はラベルの番地が確定するまで複数回計算し直す (第 2 節の「1 回目の通過・2 回目の通過」)。番地が固定されたまま更新されないわけではない。',
+      'op 番号は命令の種類 (jump かどうか) によって決まり、即値の大きさによって別の命令に変わることはない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>命令が 1 つ増えると、それより後ろの番地が全部ずれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="imm挿入で番地がずれる図"><rect x="20" y="30" width="150" height="36" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/><text x="95" y="53" font-size="12.5" text-anchor="middle" fill="#0f5132">add r1, 大きい値</text><rect x="190" y="30" width="80" height="36" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="230" y="53" font-size="12" text-anchor="middle" fill="#b5401f">imm (新規)</text><rect x="290" y="30" width="150" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="365" y="53" font-size="12.5" text-anchor="middle" fill="#1f4a68">以降のラベル番地 +1</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">命令が 1 つ増えるだけで、後ろの番地が全部ずれる</text></svg>'
+          + '<p class="cap">図: imm 命令の自動挿入は、後続の番地をすべてずらす。</p></div>'
+    }
+  },
+  {
+    q: '呼び出し規約で <code>t0-t5</code> (caller-saved) を関数呼び出しの前後で保持したい場合、保存の責任を持つのはどちらで、それはなぜか?',
+    opts: [
+      '呼ぶ側 (caller) が、必要なら呼ぶ前に自分で保存する。呼ばれる側はこれらのレジスタを自由に使ってよい約束だから',
+      '呼ばれる側 (callee) が、関数に入った直後に必ず保存する。呼ぶ側はこれらのレジスタの値を信用してよい約束だから',
+      'どちらも保存する必要はない。<code>t0-t5</code> は呼び出しをまたいでも常に値が保たれる約束になっているから',
+      'コンパイラではなく CPU のハードウェアが、<code>call</code> 命令の実行時に自動的にスタックへ保存してくれるから',
+      '呼ぶ側と呼ばれる側が実行時に交渉し、その都度どちらが保存するかを決める約束になっているから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b><code>t0-t5</code> は caller-saved、つまり「呼ばれる側は自由に使ってよい」という約束。値を関数呼び出しの後も残したいなら、呼ぶ側が呼ぶ前に自分でスタックなどへ保存しておく必要がある。',
+      'これは <code>s0-s4</code> (callee-saved) の約束であり、<code>t0-t5</code> (caller-saved) とは逆の役割。',
+      '呼び出しをまたいで値が保たれる保証があるのは callee-saved のレジスタで、caller-saved のレジスタにはその保証がない。',
+      'rj32 の <code>call</code> 命令がハードウェアで保存するのは戻り先の番地 (<code>r0</code>) だけで、汎用レジスタの退避は行わない。',
+      '呼び出し規約は実行時に交渉するものではなく、プログラムを書く前にあらかじめ決まっている静的な約束ごと。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 3 節) のレジスタ分担をもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="caller-savedとcallee-savedの違いの再確認"><rect x="40" y="30" width="200" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">s0-s4 (callee-saved)</text><text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">呼ばれた側が保存</text><rect x="320" y="30" width="200" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">t0-t5 (caller-saved)</text><text x="420" y="75" font-size="12" text-anchor="middle" fill="#12211a">呼ぶ側が保存</text></svg>'
+          + '<p class="cap">図: 保存の責任が逆の 2 つのグループがある。</p></div>'
+    }
+  },
+  {
+    q: 'cpudef.asm は <code>code</code> バンクを 0x0000、<code>data</code> バンクを 0x8000 から、<code>bss</code> バンクを 0x0000 から、それぞれ別に定義している。<code>bss</code> が <code>data</code> と違う番地範囲を使わず同じ 0x0000 から始まっていても問題にならない、最も適切な理由は?',
+    opts: [
+      '<code>bss</code> の内容はプログラムの実行中に一切使われないため、番地が重複しても実害がないから',
+      'customasm が <code>bss</code> バンクの内容を自動的に <code>data</code> バンクの後ろへ並べ直してくれるから',
+      '<code>bss</code> バンクは 0x0000 から始まっているように見えるが、実際には自動的に <code>data</code> バンクの直後に配置されるから',
+      '<code>code</code> バンクと <code>bss</code>/<code>data</code> バンクは、そもそも別の記憶装置 (命令メモリとデータメモリ) を指すアドレス空間なので、同じ番地の値が重複して見えても別物として扱われるから',
+      'rj32 には実際には <code>bss</code> バンクという概念は存在せず、customasm の設定ファイルの中だけの架空の区分だから'
+    ],
+    ans: 3,
+    exps: [
+      '<code>bss</code> は初期値を持たない変数の置き場所で、プログラムの実行中に読み書きされる。使われないわけではない。',
+      'customasm が複数のバンクを自動的に 1 つの番地空間へ並べ直すような処理は行わない。各バンクの番地は定義した通りに割り当てられる。',
+      '<code>bss</code> は <code>#addr 0x0000</code> と明示的に定義されており、<code>data</code> バンクの直後に自動配置されるわけではない。',
+      '<b>これが正解。</b><code>code</code> バンクは命令メモリ (プログラム用)、<code>bss</code>/<code>data</code> バンクはデータメモリという、第 09 回で見たハーバード・アーキテクチャにおける別々のアドレス空間を指す。同じ番号 0x0000 であっても、どちらの記憶装置を指すかが異なるので重複にならない。',
+      '<code>cpudef.asm</code> には <code>#bankdef bss</code> という定義が実際に存在し、架空の区分ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ番号でも、指している記憶装置そのものが違います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="命令メモリとデータメモリが別の装置である図"><rect x="40" y="30" width="200" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">命令メモリ</text><text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">code: 0x0000〜</text><rect x="320" y="30" width="200" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">データメモリ</text><text x="420" y="75" font-size="12" text-anchor="middle" fill="#12211a">bss: 0x0000〜 / data: 0x8000〜</text></svg>'
+          + '<p class="cap">図: 別の記憶装置であれば、同じ番号の番地があっても衝突しない。</p></div>'
+    }
+  },
+  {
+    q: '大きなプログラムを <code>dig/assembler.dig</code> の GUI 操作だけで最初から最後まで組み立てるのは筋が悪いとされる。最も適切な理由は?',
+    opts: [
+      'GUI では 16 bit を超える命令を扱えないという技術的な制約があるから',
+      '1 命令ずつ手で指定する操作が命令数に比例して増え、テキストファイルに比べて差分管理や自動化がしにくいから',
+      'dig/assembler.dig はシミュレーション速度が customasm よりも常に遅いという欠点があるから',
+      'GUI で作ったプログラムは FPGA には書き込めず、シミュレーションでしか動かせないから',
+      'dig/assembler.dig は add 命令しか組み立てることができず、他の命令には対応していないから'
+    ],
+    ans: 1,
+    exps: [
+      'rj32 の命令はもともと 16 bit で、GUI であること自体がビット幅の制約を生むわけではない。',
+      '<b>これが正解。</b>1 命令ごとに GUI で入力・保存する操作は、命令数が増えるほど手間が増える。テキストファイルなら差分 (git) やスクリプトでの一括変換がしやすいが、GUI 操作の繰り返しはそれが難しい。',
+      '「シミュレーション速度」はプログラムを組み立てる作業そのものとは別の話題で、ここでの筋の悪さの理由ではない。',
+      'GUI で組み立てたビット列も、他のビット列と同じように ROM へ書き込める。FPGA に書き込めないという制約があるわけではない。',
+      'dig/assembler.dig は add 以外にも move や jump などの選択を持つ回路で、add 専用というわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 5 節) の使い分けをもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="テキストと回路のアセンブラの使い分けの再確認"><rect x="30" y="30" width="230" height="70" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">テキスト (customasm)</text><text x="145" y="75" font-size="12" text-anchor="middle" fill="#12211a">大量の命令・差分管理に強い</text><rect x="300" y="30" width="230" height="70" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">回路 (dig/assembler.dig)</text><text x="415" y="75" font-size="12" text-anchor="middle" fill="#12211a">少数の命令を対話的に確認</text></svg>'
+          + '<p class="cap">図: 命令数が多いほど、テキストで一括管理する方が向いている。</p></div>'
+    }
+  },
+  {
+    q: '<svg viewBox="0 0 280 46" style="vertical-align:middle" width="280" height="46" aria-label="customasmとemurjのパイプ"><rect x="4" y="8" width="110" height="30" fill="#eaf5ef" stroke="#0f5132"/><text x="59" y="27" font-size="13" text-anchor="middle" fill="#0f5132">customasm</text><text x="128" y="27" font-size="13" fill="#4a5d54">|</text><rect x="140" y="8" width="136" height="30" fill="#efe8f7" stroke="#7a5a9e"/><text x="208" y="27" font-size="13" text-anchor="middle" fill="#5b3d80">emurj</text></svg> のようにパイプでつないで FPGA より先に確かめる、最も本質的な利点は?',
+    opts: [
+      'このパイプを使わないと、customasm が出力するビット列の形式そのものが変わってしまうから',
+      'emurj は FPGA 実機よりも多くの種類の命令を実行できる、特別な互換モードを持っているから',
+      'パイプを使うと、テスト用のビット列ファイルがディスクに残らないため、ディスク容量の節約になるから',
+      'ソフトウェアでの実行は、FPGA への合成や書き込みに比べてずっと速く繰り返せ、安く何度も試せるから',
+      'emurj で実行した結果は、実機で実行した場合と異なる挙動になることが保証されているから'
+    ],
+    ans: 3,
+    exps: [
+      'パイプを使うかどうかは出力先の違いにすぎず、customasm が出力するビット列の形式そのものには影響しない。',
+      'emurj は rj32 の命令セットをソフトウェアで模倣するもので、実機より命令の種類が増えるような特別な互換モードを持つわけではない。',
+      'ディスク容量の節約はパイプを使う理由としてはごく小さな副次的効果にすぎず、本質的な利点ではない。',
+      '<b>これが正解。</b>ソフトウェアのエミュレータはクロックごとの実行をプログラムとして模倣するだけなので、FPGA の合成・配置配線・書き込みにかかる時間を待たずに、何度も素早く試行錯誤できる。',
+      '<code>trace</code> や <code>maxcycles</code> はできるだけ実機と同じ挙動を確かめるための機能で、わざと異なる挙動にすることを保証するものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>確かめる場所が実機に近づくほど、1 回の確認にかかる時間は長くなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="ソフトウェアと実機の確認速度の違いの図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">emurj (ソフトウェア)</text><text x="140" y="73" font-size="12" text-anchor="middle" fill="#12211a">数秒で繰り返せる</text><rect x="320" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">FPGA (実機)</text><text x="420" y="73" font-size="12" text-anchor="middle" fill="#12211a">合成・配置配線・書き込みが必要</text></svg>'
+          + '<p class="cap">図: 実機に近いほど、1 回の確認コストが高くなる。</p></div>'
+    }
+  },
+  {
+    q: 'NanoGo が Go のサブセットを rj32 向けにコンパイルする時、本文の説明と一致する最終的な出力の性質は?',
+    opts: [
+      'NanoGo 専用の新しいビット列の約束ごとを別に定義し、customasm とは無関係に直接 FPGA へ書き込む',
+      'Go の構文をそのまま rj32 の命令として解釈し、アセンブリへの変換という工程自体を経由しない',
+      '手書きのアセンブリよりも常に短い命令列になることが、言語の仕様として保証されている',
+      'コンパイル結果は Digital の回路 (dig/assembler.dig) を経由しなければ、ビット列に変換できない',
+      '最終的には手書きのアセンブリと同じ、customasm と cpudef.asm が決めるビット列の約束に合わせて出力される'
+    ],
+    ans: 4,
+    exps: [
+      '本文で説明した通り、どこまで積み上げても最後は同じ契約に合わせるのが本質で、NanoGo が独自のビット列の約束を新設するという説明ではない。',
+      'Go の構文を命令のビット列へ直接対応させるのではなく、人間が書くアセンブリと同じ経路 (アセンブラによる変換) を経由すると考えるのが自然な位置づけ。',
+      '命令列の長さがコンパイラによって手書きより常に短くなるという保証は、本文のどこにも書かれていない。',
+      'dig/assembler.dig は GUI でビット列を組み立てる別の道具であり、NanoGo の出力が必ずそこを経由しなければならないという関係ではない。',
+      '<b>これが正解。</b>NanoGo のように上に高級言語を積んでも、最後に出てくるのは第 1 節で見た customasm と cpudef.asm が決める同じビット列の約束。高級言語はその約束の「上」に乗るだけで、約束自体を変えるものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 4 節) の積み重ねをもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="NanoGoも同じ契約に合わせる図"><rect x="30" y="30" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="130" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">NanoGo / 手書きアセンブリ</text><line x1="130" y1="70" x2="130" y2="95" stroke="#9aa" stroke-width="1.5"/><rect x="30" y="95" width="500" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="120" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">共通の契約: customasm + cpudef.asm が決めるビット列</text></svg>'
+          + '<p class="cap">図: 上に何を積んでも、最後は同じ契約に合わせる。</p></div>'
+    }
+  },
+  {
+    q: '<code>call</code> 命令は <code>jump</code> と同じ <code>value - pc - 1</code> という相対番地の計算を使いながら、追加で戻り先の番地を <code>r0</code> に保存する。この設計が呼び出し規約と噛み合っている理由は?',
+    opts: [
+      '呼び出し規約が <code>r0</code> を <code>ra</code> という戻り先専用の役割に割り当てており、<code>return</code> が単に <code>jump ra</code> として戻り先を使えるようにしているから',
+      '<code>r0</code> は呼び出し規約の中で最も頻繁に書き換えられるレジスタに指定されているため、<code>call</code> のたびに新しい値を入れても問題にならないから',
+      '<code>r0</code> に戻り先を保存しておくと、呼ばれた関数が引数を読み取る時に自動的にその領域が使われる仕組みになっているから',
+      '戻り先の保存は customasm が行う処理であり、CPU のハードウェアやレジスタとは直接関係しないから',
+      '<code>r0</code> への保存は呼び出し規約とは無関係で、デバッグ時に実行履歴を追うためだけに用意されている機能だから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>呼び出し規約は <code>r0</code> を <code>ra</code> (戻り先) として固定的に割り当てている。<code>call</code> がその番地を <code>r0</code> に保存し、<code>return</code> (<code>jump ra</code> の擬似命令) がそれを使って戻るという、1 対の設計になっている。',
+      '<code>r0</code> が頻繁に書き換わるのは事実だが、「頻繁に書き換わるから問題ない」という理由付けではなく、戻り先専用という役割の約束があるからこそ安全に書き換えられる。',
+      '引数は <code>a0</code>・<code>a1</code> (<code>r1</code>・<code>r2</code>) に渡される約束で、<code>r0</code> に保存した戻り先とは別の役割。',
+      '戻り先の保存は <code>call</code> 命令自体の実行がレジスタ <code>r0</code> に対して行う動作で、customasm はビット列を組み立てるだけ。',
+      '<code>r0</code> は本文で見た通り <code>ra</code> という呼び出し規約上の役割を持ち、デバッグ専用の機能ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>call と return が同じ r0 を介してつながっています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="callとreturnがr0を介してつながる図"><rect x="40" y="30" width="180" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="55" font-size="13" text-anchor="middle" fill="#0f5132">call: r0 ← 戻り先</text><line x1="220" y1="50" x2="340" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-tq9)"/><rect x="340" y="30" width="180" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="430" y="55" font-size="13" text-anchor="middle" fill="#5b3d80">return: jump r0</text><text x="280" y="105" font-size="12.5" text-anchor="middle" fill="#4a5d54">呼び出し規約が r0 の役割を固定しているから成立する</text><defs><marker id="arr-tq9" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: call が保存した r0 を、return がそのまま使う。</p></div>'
+    }
+  },
+  {
+    q: 'CPU 側の設計を変更し、pc が命令フェッチ時にさらに 1 段早く更新されるようにした (従来より 1 多く進んだ値になった) が、アセンブラ側の <code>value - pc - 1</code> という相対番地の計算式は変更しなかった。<svg viewBox="0 0 260 46" style="vertical-align:middle" width="260" height="46" aria-label="pcの進み方が変わる図"><rect x="4" y="8" width="110" height="30" fill="#eaf5ef" stroke="#0f5132"/><text x="59" y="27" font-size="12.5" text-anchor="middle" fill="#0f5132">旧: pc+1 進む</text><rect x="140" y="8" width="116" height="30" fill="#fbeeea" stroke="#c0492f"/><text x="198" y="27" font-size="12.5" text-anchor="middle" fill="#b5401f">新: pc+2 進む</text></svg> この状況で起きる最も適切な結果は?',
+    opts: [
+      'アセンブラが自動的に新しい pc の進み方を検出し、計算式を実行時に調整してくれる',
+      '影響があるのは call 命令だけで、jump 命令の着地番地は変わらずに正しく動作し続ける',
+      'すべての jump / call 命令の着地番地が、意図した番地から一定のずれ (この場合は 1 番地分) を持つようになる',
+      'imm 命令の自動挿入の判定基準が変わるだけで、ジャンプの着地番地そのものには影響しない',
+      'ビット列そのものは変わらないため、実行結果もまったく変わらずに済む'
+    ],
+    ans: 2,
+    exps: [
+      'customasm はソースコードをもとに静的にビット列を組み立てる道具で、CPU が実行時に pc をどう進めるかを検出して自動調整するような機能は持たない。',
+      '<code>jump</code> も <code>call</code> も同じ <code>fmt_i11</code> 形式と同じ補正の考え方を使っており、pc の進み方が変わればどちらも同じように影響を受ける。',
+      '<b>これが正解。</b>補正の <code>-1</code> は「実行時に pc が 1 進んでいること」を前提にしている。pc が 2 進むように変わったのに補正を変えなければ、すべての相対ジャンプの着地番地が意図した番地から 1 番地分ずれてしまう。',
+      '<code>imm</code> 命令の挿入は即値の大きさで決まる話で、pc の進み方とは別の仕組み。この変更の影響を受けるのは着地番地の計算そのもの。',
+      'ビット列 (埋め込まれる相対値) は変わらないが、CPU 側の pc の進み方が変わった以上、実際に着地する番地は変わってしまう。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>補正の前提が崩れると、着地番地がずれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="pcの前提が崩れて着地番地がずれる図"><text x="280" y="20" font-size="13" text-anchor="middle" fill="#12211a">埋め込む値は 9 のまま (110-100-1)</text><rect x="40" y="40" width="160" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="63" font-size="12.5" text-anchor="middle" fill="#0f5132">旧: 101+9=110 (正しい)</text><rect x="320" y="40" width="200" height="36" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="63" font-size="12.5" text-anchor="middle" fill="#b5401f">新: 102+9=111 (1 ずれる)</text><text x="280" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">pc の前提が変わったのに補正式を直さないとずれが生まれる</text></svg>'
+          + '<p class="cap">図: 前提が変わった分だけ、着地番地が一律にずれる。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

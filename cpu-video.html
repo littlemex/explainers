@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>映像を出す ― VGA タイミングと VDP がメモリを読む速さの限界</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 21 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>映像を出す ― VGA タイミングと VDP がメモリを読む速さの限界</h1>
+  <p>画面に絵を出すとは、決まった時刻に決まった画素を送り続けること。CPU が計算で絵を作るのではなく、メモリを決まった速さで読み切れるかどうかが勝負になる</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 05 回 <a href="./cpu-sequential.html">順序回路と時間</a>、第 09 回 <a href="./cpu-memory.html">メモリとアドレス</a>、第 18 回 <a href="./cpu-io-interrupts.html">入出力と割り込み</a></p>
+  <p class="intro">CPU は命令を 1 つずつ実行するだけで、画面に何かを「描き続ける」という仕事はしていません。画面に映像を出す仕組み (VDP, Video Display Processor) は、CPU とは独立に、モニタが要求する厳密なタイミングで信号を送り続ける専用の回路です。この回では、rj32 の VDP を例に、VGA のタイミングがどう決まるか、タイルとパレットでメモリを節約する仕組み、そして VDP がメモリを読む速さの限界がどこから来るかを図で確認します。</p>
+
+  <!-- ===== 解説パート 1: 走査という仕組み ===== -->
+  <section>
+    <h2>1. 画面に絵を出すとは何をすることか</h2>
+    <p>CPU は命令を 1 つずつ処理するだけの機械で、「画面全体を絵として保持し続ける」仕事は苦手です。そこで多くの自作 CPU は、CPU とは別に専用の回路 (VDP, Video Display Processor) を置いて、画面を描く仕事をそちらに完全に任せます。VDP の仕事の本質は、<b>モニタが要求する通りの順番とタイミングで、画素の色を送り続けること</b>だけです。</p>
+    <p>VGA が使う信号は、ブラウン管 (CRT) モニタの時代に決まった規格をそのまま引き継いでいます。CRT は電子ビームを画面の左上から右へ走らせ (走査, scan)、右端に着いたら瞬間的に次の行の左端へ戻り (帰線, retrace)、1 行ずつ下へ進んで画面全体を塗り、最後の行まで終わったら再び左上へ戻ります。液晶モニタになった今でも、VGA 信号はこの「決まった速さで左から右、上から下へ 1 画素ずつ送る」という CRT 時代の約束ごとをそのまま使っています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 280" role="img" aria-label="走査線が画面を左から右、上から下へ塗っていく図">
+        <rect x="40" y="40" width="420" height="160" rx="6" fill="#f3f9f6" stroke="#0f5132" stroke-width="2"/>
+        <path d="M60,65 H440 M60,95 H440 M60,125 H440 M60,155 H440 M60,185 H440" stroke="#8fd6b4" stroke-width="2"/>
+        <path d="M60,65 H300" stroke="#198754" stroke-width="3"/>
+        <circle cx="300" cy="65" r="5" fill="#0f5132"/>
+        <path d="M440,65 C470,75 470,85 440,95" stroke="#c0492f" stroke-width="2" fill="none" stroke-dasharray="4 4"/>
+        <text x="500" y="84" font-size="12.5" fill="#b5401f">帰線 (次の行へ)</text>
+        <text x="300" y="25" font-size="12.5" text-anchor="middle" fill="#0f5132">電子ビームが今いる位置 (左から右へ走査)</text>
+        <path d="M460,210 C 485,230 300,240 40,230" stroke="#c0492f" stroke-width="2" fill="none" stroke-dasharray="4 4" marker-end="url(#arr-v1)"/>
+        <text x="300" y="258" font-size="12.5" text-anchor="middle" fill="#4a5d54">最後の行の右端まで塗ったら、画面の左上へ戻る (垂直帰線)</text>
+        <defs><marker id="arr-v1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs>
+      </svg>
+      <p class="cap">図: 走査 (左から右へ 1 行) と帰線 (右端から次の行の左端、最終行から先頭行へ戻る移動)。</p>
+    </div>
+    <p>この「送り続ける」という性質が重要です。VDP は 1 画素でも遅れて送ると画面がずれたり乱れたりします。だからこそ VDP の設計では、<b>タイミングを狂わせないこと</b>と<b>メモリを読む速さが追いつくこと</b>の 2 つが最優先の制約になります。この回では、まずタイミングの数がどう決まるかを確認し、その後メモリを節約する工夫 (タイルとパレット) と、読む速さの限界がどこから来るかを見ていきます。</p>
+  </section>
+
+  <!-- ===== 解説パート 2: タイミングの数で全部が決まる ===== -->
+  <section>
+    <h2>2. タイミングの数で全部が決まる</h2>
+    <p>VGA の 1 本の走査線は、見える画素 (active) だけでできているわけではありません。見える部分の前後に、モニタに「もうすぐ次の行に移る」と伝えるための時間帯が挟まっています。rj32 のドキュメント (<code>docs/vga_timings.png</code>) と、公開されている 640x480 ・ 60Hz の標準タイミングは、水平方向について次の内訳で一致します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 160" role="img" aria-label="水平タイミングの内訳、640+16+96+48=800画素">
+        <rect x="20" y="40" width="372" height="50" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/>
+        <text x="206" y="70" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">active 640</text>
+        <rect x="392" y="40" width="9" height="50" fill="#8fd6b4" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="401" y="40" width="56" height="50" fill="#c0492f" opacity="0.3" stroke="#b5401f" stroke-width="2"/>
+        <text x="429" y="70" font-size="12.5" text-anchor="middle" fill="#b5401f">sync 96</text>
+        <rect x="457" y="40" width="28" height="50" fill="#8fd6b4" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="408" y="30" font-size="12.5" text-anchor="middle" fill="#4a5d54">fp 16</text>
+        <text x="471" y="30" font-size="12.5" text-anchor="middle" fill="#4a5d54">bp 48</text>
+        <text x="310" y="115" font-size="13" text-anchor="middle" fill="#12211a">640 + 16 + 96 + 48 = 800 画素/行</text>
+        <text x="310" y="137" font-size="12.5" text-anchor="middle" fill="#4a5d54">同期パルスの間、モニタは次の行の準備をしていて画素は送らない</text>
+      </svg>
+      <p class="cap">図: 水平方向は見える 640 画素の後に、前ポーチ・同期パルス・後ポーチの計 160 画素分の「見えない時間」が続き、合計 800 画素で 1 行になる。</p>
+    </div>
+    <p>垂直方向も同じ考え方です。見える 480 行の後に、前ポーチ・同期パルス・後ポーチが続き、合計 525 行で 1 画面 (フレーム) になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="垂直タイミングの内訳、480+10+2+33=525行">
+        <rect x="140" y="20" width="110" height="24" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/>
+        <text x="195" y="36" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">active 480 行</text>
+        <rect x="140" y="44" width="110" height="8" fill="#8fd6b4" stroke="#0f5132" stroke-width="1"/>
+        <line x1="250" y1="48" x2="286" y2="34" stroke="#9aa" stroke-width="1"/>
+        <text x="290" y="36" font-size="12.5" fill="#4a5d54">fp 10 行</text>
+        <rect x="140" y="52" width="110" height="6" fill="#c0492f" opacity="0.35" stroke="#b5401f" stroke-width="1"/>
+        <line x1="250" y1="55" x2="286" y2="58" stroke="#9aa" stroke-width="1"/>
+        <text x="290" y="60" font-size="12.5" fill="#b5401f">sync 2 行</text>
+        <rect x="140" y="58" width="110" height="14" fill="#8fd6b4" stroke="#0f5132" stroke-width="1"/>
+        <line x1="250" y1="65" x2="286" y2="82" stroke="#9aa" stroke-width="1"/>
+        <text x="290" y="84" font-size="12.5" fill="#4a5d54">bp 33 行</text>
+        <text x="195" y="100" font-size="13" text-anchor="middle" fill="#12211a">480 + 10 + 2 + 33 = 525 行/画面</text>
+        <text x="310" y="124" font-size="13" text-anchor="middle" fill="#12211a">800 画素 × 525 行 × 60 回/秒 ≈ 25,200,000 画素/秒</text>
+        <text x="310" y="148" font-size="12.5" text-anchor="middle" fill="#4a5d54">規格の画素クロック 25.175MHz ÷ (800×525) ≈ 59.94Hz</text>
+      </svg>
+      <p class="cap">図: 垂直方向は 525 行で 1 画面。画素クロック 25.175MHz を 800×525 で割ると約 59.94Hz(「60Hz」と呼ばれる)になる。</p>
+    </div>
+    <p>つまり VDP に必要なのは、<b>常に一定の速さで動く 1 個のクロック (画素クロック) に合わせて、水平方向のカウンタと垂直方向のカウンタを回し続けるだけ</b>という単純な仕組みです。次の節で rj32 がこれをどう回路にしているかを見ます。</p>
+  </section>
+
+  <!-- ===== 解説パート 3: rj32 のタイミング生成回路 ===== -->
+  <section>
+    <h2>3. rj32 のタイミング生成回路</h2>
+    <p>rj32 の <code>dig/vga_timing.dig</code> は、水平方向用と垂直方向用に別の回路を 2 つ作るのではなく、<b>1 つの汎用カウンタ回路を 2 回使い回す</b>という作り方をしています。この回路は <code>res</code> (見える画素数)・<code>fp</code> (前ポーチ)・<code>sync</code> (同期パルス幅)・<code>bp</code> (後ポーチ) という 4 つの数を入力として受け取り、クロックごとに 0 から数え上げて、今どの区間 (active / blank / sync) にいるかを出力します。<code>dig/vga_sync.dig</code> はこの <code>vga_timing.dig</code> を <code>Horiz</code> という名前で 1 個、<code>Vert</code> という名前で別に 1 個、それぞれ別のパラメータ (水平は 640/16/96/48、垂直は 480/10/2/33) を与えて配置し、2 本のカウンタを組み合わせるだけで画面全体のタイミングを作っています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="汎用タイミング回路を水平用・垂直用に2回使う図">
+        <rect x="30" y="20" width="220" height="70" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">vga_timing.dig「Horiz」</text>
+        <text x="140" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">res,fp,sync,bp = 640,16,96,48</text>
+        <rect x="30" y="120" width="220" height="70" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="145" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">vga_timing.dig「Vert」</text>
+        <text x="140" y="165" font-size="12.5" text-anchor="middle" fill="#12211a">res,fp,sync,bp = 480,10,2,33</text>
+        <line x1="250" y1="55" x2="420" y2="90" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="250" y1="155" x2="420" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="420" y="70" width="90" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="465" y="90" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">AND</text>
+        <text x="465" y="106" font-size="12" text-anchor="middle" fill="#12211a">両方 active か</text>
+        <line x1="510" y1="95" x2="560" y2="95" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-v3)"/>
+        <text x="585" y="80" font-size="12.5" text-anchor="middle" fill="#0f5132">pic</text>
+        <text x="585" y="98" font-size="12" text-anchor="middle" fill="#4a5d54">(画素を</text>
+        <text x="585" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">出す区間)</text>
+        <text x="310" y="210" font-size="12.5" text-anchor="middle" fill="#4a5d54">同じ回路を使い回すので、数値を差し替えるだけで済む</text>
+        <defs><marker id="arr-v3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 水平用・垂直用で同じ <code>vga_timing.dig</code> を異なるパラメータで 2 回使い、両方が active の時だけ画素を出す (pic 信号)。</p>
+    </div>
+    <p>各タイミング回路は、内部に 1 個のカウンタを持ち、クロックが来るたびに 1 ずつ増え、<code>res+fp+sync+bp-1</code> に達したら 0 に戻ります。カウンタの値と <code>res</code>・<code>res+fp</code>・<code>res+fp+sync</code> を比較器 (Comparator) で比べることで、「今は見える区間か」「今は同期パルス区間か」を判定します。水平用カウンタの値がそのまま画面上の X 座標、垂直用カウンタの値がそのまま Y 座標になるので、VDP はこの 2 つの数を見るだけで、今どの画素を描くべきかを常に知っています。</p>
+  </section>
+
+  <!-- ===== 解説パート 4: タイルマップとパレット ===== -->
+  <section>
+    <h2>4. タイルマップとパレット ― メモリを節約する仕掛け</h2>
+    <p>画面の全画素を 1 枚のビットマップとして持つ (フレームバッファ方式) と、メモリが大量に必要です。rj32 の VDP ドキュメント (<code>docs/vdp/03-palette.md</code>) は、640x360 の画面を例に、色の持ち方ごとの必要メモリ量を比較しています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="画素あたりのビット数で必要メモリが大きく変わる図">
+        <text x="300" y="20" font-size="13" text-anchor="middle" fill="#12211a">640 × 360 画素の画面を保持するのに必要なメモリ</text>
+        <rect x="60" y="40" width="430" height="24" fill="#c0492f" opacity="0.3" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="60" y="36" font-size="12.5" fill="#b5401f">24 bit/画素 (フルカラー直接保持)</text>
+        <text x="500" y="58" font-size="13" fill="#12211a">約 691 KB</text>
+        <rect x="60" y="80" width="162" height="24" fill="#3d7dca" opacity="0.3" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="60" y="76" font-size="12.5" fill="#1f4a68">9 bit/画素 (パレット番号)</text>
+        <text x="235" y="98" font-size="13" fill="#12211a">約 259 KB</text>
+        <rect x="60" y="120" width="72" height="24" fill="#198754" opacity="0.3" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="60" y="116" font-size="12.5" fill="#0f5132">4 bit/画素 (タイル内パレット番号)</text>
+        <text x="145" y="138" font-size="13" fill="#12211a">約 115 KB</text>
+        <text x="300" y="165" font-size="12.5" text-anchor="middle" fill="#4a5d54">色の「番号」だけを持ち、実際の色はパレット表で後から引く方式にするほど小さくなる</text>
+      </svg>
+      <p class="cap">図: 同じ画面サイズでも画素あたりのビット数を減らすほど必要メモリが小さくなる。rj32 は 4 bit/画素のタイルを使う。</p>
+    </div>
+    <p>rj32 の VDP はこの最後の方式を使います。画面を 8x8 画素の「タイル」の集まりとして扱い、タイルの中の 1 画素は 4 bit (16 色のうちどれか、1 つは透明用) だけを持ちます。実際の色は、パレットという「番号 → 実際の色」の対応表を別に持ち、そこから引きます (9 bit のパレット番号から 24 bit 色への変換)。この変換を <code>dig/vdp/palettebram.dig</code> が担当します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="タイルからパレットを経て画面の色になるデータの流れ">
+        <rect x="20" y="60" width="110" height="50" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="75" y="80" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">タイル</text>
+        <text x="75" y="98" font-size="12" text-anchor="middle" fill="#12211a">4 bit/画素</text>
+        <line x1="130" y1="85" x2="190" y2="85" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-v4)"/>
+        <rect x="190" y="60" width="130" height="50" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="255" y="80" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">ラインバッファ</text>
+        <text x="255" y="98" font-size="12" text-anchor="middle" fill="#12211a">9 bit パレット番号</text>
+        <line x1="320" y1="85" x2="380" y2="85" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-v4)"/>
+        <rect x="380" y="60" width="130" height="50" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="445" y="80" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">パレット表</text>
+        <text x="445" y="98" font-size="12" text-anchor="middle" fill="#12211a">9bit → 24bit 色</text>
+        <line x1="510" y1="85" x2="570" y2="85" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-v4)"/>
+        <text x="594" y="80" font-size="12.5" text-anchor="middle" fill="#0f5132">画面</text>
+        <text x="594" y="98" font-size="12" text-anchor="middle" fill="#4a5d54">へ出力</text>
+        <text x="300" y="145" font-size="12.5" text-anchor="middle" fill="#4a5d54">パレット表はブロック RAM で、CPU が書き込み ・ VDP が読み出しを同じクロックで同時に行える</text>
+        <defs><marker id="arr-v4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 4 bit のタイル画素 → 9 bit のパレット番号 → パレット表で 24 bit 色に変換してから画面へ出す。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: VDP がメモリを読む速さの制約 ===== -->
+  <section>
+    <h2>5. VDP がメモリを読む速さの制約</h2>
+    <p>VDP の限界は論理ゲートの複雑さではなく、<b>1 画素分の時間 (画素クロック 1 周期) の間にメモリを何回読めるか</b>です。rj32 が使う FPGA 内蔵のブロック RAM は同期読み出しで、アドレスを出してから実際にデータが出てくるまで 1 クロックかかります (第 09 回で見た BRAM の性質と同じです)。つまり VDP は、今描きたい画素のためのデータを、<b>1 クロック前にあらかじめ要求しておく</b>というパイプライン処理をしなければなりません。</p>
+    <p>画面 1 行は 800 画素クロックですが、実際に画素が見えるのは先頭の 640 クロックだけです。残りの 160 クロック (前ポーチ・同期・後ポーチ) は画素を出さない代わりに、<b>次の行で表示するタイルやスプライトのデータを先読みしておく時間</b>として使えます。rj32 の VDP ドキュメント (<code>docs/vdp/01-intro.md</code>) は、解像度にもよりますが 1 行あたり最低でも約 800 スプライト画素を描けることを目標にしており、この数は「640 の見える画素 + 160 の空き時間で、1 クロックに 1 回読める」という予算の中でどこまでスプライトを重ねられるかから決まっています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="1行800クロックのうち640が画素表示、160が先読みに使える図">
+        <rect x="20" y="30" width="372" height="40" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/>
+        <text x="206" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">640 クロック: 画素を出しながら次の読み出しも出す</text>
+        <rect x="392" y="30" width="93" height="40" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="438" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">160 クロック:</text>
+        <text x="438" y="90" font-size="12" text-anchor="middle" fill="#1f4a68">次の行のタイル/スプライトを先読み</text>
+        <text x="310" y="125" font-size="13" text-anchor="middle" fill="#12211a">1 クロックに読めるのは基本 1 回だけ</text>
+        <text x="310" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">読み切れない分のスプライトは、その行では描かれない</text>
+        <text x="310" y="170" font-size="12.5" text-anchor="middle" fill="#4a5d54">(並べすぎたスプライトが点滅・消える現象の正体)</text>
+      </svg>
+      <p class="cap">図: 1 行 800 クロックのうち、画素を出す 640 クロックと、次の行を先読みできる 160 クロックの使い道。</p>
+    </div>
+    <p>この制約は妥協の種類も教えてくれます。読む速さが足りない時に選べる道は、(1) 解像度や色数を落として 1 画素あたりの読み出し回数を減らす、(2) 表示できるスプライトの数に上限を設け、超えた分は描かない、のどちらかです。rj32 が「スプライト最大 512 個 (標準 256 個)」のような上限を仕様に持つのは、まさにこの読み出し速度の予算から逆算した結果です。</p>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>(1) ブロック RAM の 1 クロック遅延を数え間違えない。</b> 同期読み出しの BRAM は、アドレスを出した<b>次のクロック</b>でデータが出てきます。水平・垂直カウンタの値をそのままアドレスに使うと、データが 1 クロック遅れて出てくるため、表示される画素が右または下に 1 つずれます。正しくは、カウンタの値を 1 クロック先読みしてアドレスを作るか、カウンタ出力をそのまま使い、代わりに X ・ Y 座標側を 1 クロック分レジスタで遅らせて帳尻を合わせます。rj32 の <code>dig/vdp/pipelineregs.dig</code> はこの「段ごとにずれるタイミングを揃えるレジスタ」をまとめて管理する専用の回路です。</p>
+    <p><b>(2) 同期パルスの極性を仕様通りに合わせる。</b> VGA の同期信号には極性 (パルスの間を High にするか Low にするか) があり、640x480 ・ 60Hz の標準はどちらの同期パルスも「Low の間がパルス」(負極性) です。rj32 の <code>vga_timing.dig</code> は <code>neg</code> という入力を持ち、これを使ってパルスの極性を反転できるようにしています。この 1 ビットを取り違えると、タイミングの数が全部正しくても、モニタが同期信号を認識できず画面が真っ暗になります。</p>
+    <p><b>(3) 画素を出さない区間は「何もしない」ではなく「仕込みの時間」にする。</b> 前ポーチ・同期・後ポーチの間、画素は出しませんが、VDP の回路自体は止めません。この間にメモリへのアクセスを進めて次の行の準備をしておかないと、画素を出す 640 クロックの間に全部の読み出しを詰め込むことになり、スプライトを多く重ねられなくなります。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/vga_timings.png" target="_blank" rel="noopener">rj32: docs/vga_timings.png</a> ― 640x480 の画面に対する水平 (前ポーチ 16 ・ 同期 96 ・ 後ポーチ 48) の画素数と、垂直側の合計 525 本という数値の根拠。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/vga_timing.dig" target="_blank" rel="noopener">rj32: dig/vga_timing.dig</a> ― 水平・垂直どちらにも使う汎用タイミングカウンタ回路。res/fp/sync/bp の入力既定値が 640/16/96/48 であることを確認した。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/vga_sync.dig" target="_blank" rel="noopener">rj32: dig/vga_sync.dig</a> ― vga_timing.dig を Horiz/Vert の 2 個分インスタンス化し、hblank/vblank/pic 信号を作る回路。</li>
+      <li><a href="https://github.com/rj45/rj32/tree/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/vdp" target="_blank" rel="noopener">rj32: docs/vdp (01-intro.md, 02-screen.md, 03-palette.md, tiles.md)</a> ― VDP の目的、タイル/スプライト/パレットの仕様、ブロック RAM の 2 ポート同時読み書きの説明の根拠。</li>
+      <li><a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/dig/processor/VGA/VGA.dig" target="_blank" rel="noopener">Digital: src/main/dig/processor/VGA/VGA.dig, sync.dig</a> ― Digital 本体に付属する VGA テキストモードの例。rj32 とは別実装だが、水平/垂直カウンタ + コンパレータという同じ構造を確認する比較対象として使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-to-fpga.html">← 第 20 回 シミュレータから FPGA へ</a><a href="./cpu-index.html">目次</a><a href="./cpu-toolchain.html">第 22 回 アセンブラとコンパイラ →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '水平タイミングが「見える画素数 640、前ポーチ 16、同期パルス 96、後ポーチ 48」だとすると、1 行あたりの合計画素クロック数はいくつか。',
+    opts: [
+      '640 (見える画素数だけが本当の 1 行の長さで、残りの時間は数えなくてよい)',
+      '736 (見える 640 と同期パルス 96 だけを足した数)',
+      '784 (後ポーチを 32 として数えてしまった場合の数)',
+      '800 (640 + 16 + 96 + 48 をすべて足した数)',
+      '960 (内訳の合計よりかなり大きく余裕を持たせた数)'
+    ],
+    ans: 3,
+    exps: [
+      '見える画素数だけでは 1 行は終わらない。モニタは同期パルスやその前後のポーチの間にも時間を使っているため、640 では短すぎる。',
+      '前ポーチ 16 と後ポーチ 48 を数え忘れている。640+96=736 では、同期パルスの前後にある余白が無視されている。',
+      '後ポーチを本来の 48 ではなく 32 として数えた場合の値。640+16+96+32=784 で、後ポーチの画素数を取り違えている。',
+      '<b>これが正解。</b>640 (見える) + 16 (前ポーチ) + 96 (同期パルス) + 48 (後ポーチ) = 800 画素が 1 行の合計。',
+      '960 は実際の内訳の合計 (800) よりかなり大きく、根拠のない過大な見積もり。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じ内訳を、数を変えずにもう一度バーで確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="水平タイミングの内訳の再確認"><rect x="20" y="30" width="336" height="40" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/><text x="188" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">640</text><rect x="356" y="30" width="8" height="40" fill="#8fd6b4" stroke="#0f5132" stroke-width="1"/><rect x="364" y="30" width="50" height="40" fill="#c0492f" opacity="0.3" stroke="#b5401f" stroke-width="2"/><text x="389" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">96</text><rect x="414" y="30" width="25" height="40" fill="#8fd6b4" stroke="#0f5132" stroke-width="1"/><text x="300" y="95" font-size="13" text-anchor="middle" fill="#12211a">640 + 16 + 96 + 48 = 800</text></svg>'
+          + '<p class="cap">図: 4 つの区間をすべて足すと 1 行の合計画素クロック数になる。</p></div>'
+    }
+  },
+  {
+    q: '前ポーチ・同期パルス・後ポーチという「見えない時間」が水平タイミングに含まれている、最も本質的な理由は何か。',
+    opts: [
+      'モニタ側に「次の行に移る」ことを伝え、走査位置を切り替えるための時間を確保するため',
+      'VDP の回路のクロック周波数を落として消費電力を減らすため',
+      'CPU がメモリから画素データを読み出す時間を増やすため',
+      'ケーブル上の信号劣化を防ぐため、意図的に信号を止める時間を作っているため',
+      '画面の明るさを一定に保つため、途中で発光を止める時間を作っているため'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>CRT 時代、電子ビームは右端まで来たら瞬間的に次の行の左端へ戻る必要があった。この「戻る」動作のための時間を確保するのが前後のポーチと同期パルスの役割で、液晶モニタになった今もこの約束ごとが引き継がれている。',
+      'クロック周波数はタイミング全体の数 (800×525×60) で決まっており、ポーチの存在自体が周波数を下げる目的ではない。',
+      'VDP が画素データを読むのは CPU ではなく VDP 自身であり、CPU の読み出し時間を増やすための仕組みではない。',
+      'VGA は信号劣化を防ぐための「意図的な無信号時間」を規格として持っているわけではなく、ポーチの長さは走査位置の切り替えに必要な時間から決まっている。',
+      '明るさの調整は信号のタイミングとは別の話題で、ポーチの存在理由として本質的ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>第 1 節の走査の図を思い出してください。右端から次の行の左端へ戻る「帰線」のための時間が必要です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="帰線のための時間の図"><rect x="30" y="30" width="300" height="30" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/><text x="180" y="50" font-size="13" text-anchor="middle" fill="#0f5132">走査 (画素を出す)</text><path d="M330,45 C390,65 390,25 450,45" stroke="#c0492f" stroke-width="2" fill="none" stroke-dasharray="4 4" marker-end="url(#arr-q2)"/><text x="390" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f">帰線 (次の行の左端へ戻る時間 = ポーチ+同期)</text><defs><marker id="arr-q2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: 見えない時間は「次の行へ戻る」ための必要な移動時間。</p></div>'
+    }
+  },
+  {
+    q: '画素クロックが規格値の 25.175MHz、1 行 800 画素クロック、1 画面 525 行だとすると、実際のリフレッシュ率 (1 秒あたりの画面更新回数) に最も近い値はどれか。',
+    opts: [
+      'ちょうど 60.000Hz',
+      'ちょうど 50.000Hz',
+      'ちょうど 65.000Hz',
+      'ちょうど 59.000Hz',
+      '約 59.94Hz'
+    ],
+    ans: 4,
+    exps: [
+      '25.175MHz ÷ (800×525) = 25,175,000 ÷ 420,000 ≈ 59.94 であり、ちょうど 60.000Hz にはならない。「60Hz」という呼び方は近似の慣習。',
+      '50Hz はヨーロッパの電源周波数と同じ数字で紛らわしいが、VGA の画素クロックから計算される値とは異なる。',
+      '65Hz は内訳のどの数値からも導けない値で、計算の根拠がない。',
+      '59.000Hz は近いが、実際の計算結果 (約 59.94Hz) とは一致しない。',
+      '<b>これが正解。</b>25,175,000 ÷ (800×525) ≈ 59.94Hz。画素クロックを先に固定して内訳の画素数で割るため、きっかり 60Hz にはならず、業界では慣習的に「60Hz」と呼ばれている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>割り算の順番を図にすると、画素クロックが先に決まっていることがわかります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="画素クロックからリフレッシュ率を逆算する図"><rect x="30" y="20" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">25.175MHz (固定)</text><line x1="230" y1="40" x2="290" y2="40" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q3)"/><text x="260" y="30" font-size="12" text-anchor="middle" fill="#4a5d54">÷800÷525</text><rect x="290" y="20" width="200" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="390" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">約 59.94Hz (結果)</text><text x="260" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">60Hz を先に決めて画素クロックを逆算するのではない</text><defs><marker id="arr-q3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 画素クロックが先に決まり、そこから逆算したリフレッシュ率が約 59.94Hz になる。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 が水平用・垂直用に別々の専用回路を新しく書くのではなく、同じ <code>vga_timing.dig</code> を 2 回使い回している設計上の利点として最も適切なものは?',
+    opts: [
+      '垂直方向は水平方向よりビット数が少なくて済むため、回路の規模そのものを小さく設計できる',
+      '同じ回路の修正が両方に効き、タイミングを変える時も数値を差し替えるだけで済む',
+      'Digital 上でのシミュレーションの実行速度が、理由は不明だが自動的に 2 倍速くなる',
+      '垂直方向は水平方向と違って同期パルスが不要になるため、回路の一部をまとめて間引ける',
+      '2 つのクロックの関係を完全に非同期にすることで、消費電力を大きく下げられる'
+    ],
+    ans: 1,
+    exps: [
+      '水平・垂直のどちらのカウンタも <code>dig/vga_timing.dig</code> では 12 bit で扱われており、ビット数に違いはない。',
+      '<b>これが正解。</b>1 つの汎用カウンタ回路に res/fp/sync/bp という数値を渡すだけで、水平用・垂直用のどちらにも使える。回路自体の修正は 1 か所で済み、解像度やタイミングを変える時もパラメータを差し替えるだけでよい。',
+      'シミュレーション速度は回路の個数や構造とは別の要因 (ホストマシンの性能など) で決まり、回路を使い回すこと自体が速度を変えるわけではない。',
+      '垂直方向にも同期パルス (V-sync) が必要で、rj32 も <code>sync_V</code> という入力を持っている。間引かれているわけではない。',
+      '水平用・垂直用のカウンタは同じ画素クロックに同期して動く必要があり、非同期にすると画面がずれる。消費電力の議論でもない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 3 節) の構造を思い出してください。同じ箱を 2 回使い、入れるパラメータだけが違います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="同じ回路を2回使う利点の図"><rect x="30" y="20" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">Timing (640,16,96,48)</text><rect x="30" y="75" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="100" font-size="12.5" text-anchor="middle" fill="#0f5132">Timing (480,10,2,33)</text><text x="300" y="45" font-size="13" fill="#12211a">同じ回路 + 違う数値</text><text x="300" y="100" font-size="13" fill="#4a5d54">1 か所直せば両方に反映</text></svg>'
+          + '<p class="cap">図: 回路を複製せず、パラメータだけを変えて使い回す。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の VDP が画面全体を 1 枚のビットマップ (フレームバッファ) として持たず、タイル+パレット方式を使う最も本質的な理由は?',
+    opts: [
+      'タイル方式の方が見た目が美しいピクセルアートになるという、単なる好みの問題だから',
+      'パレット方式にすると CPU の命令セットの設計そのものが大きく簡単になるから',
+      '画素あたりのビット数を減らせるため、必要なメモリ量を大きく抑えられるから',
+      'タイル方式にすると VDP に必要なクロック周波数そのものを落とせるから',
+      'パレットを使うと同期パルスの極性を自動的に正しく合わせられる仕組みになっているから'
+    ],
+    ans: 2,
+    exps: [
+      '見た目の好みはタイル方式を選ぶ理由の 1 つではあり得るが、VDP がこの方式を採用する最も本質的な理由ではない。本質は必要なメモリ量。',
+      '命令セット (rj32 の 32 命令) はタイル/フレームバッファのどちらの画面方式を使うかとは独立に決まっている話題で、関係がない。',
+      '<b>これが正解。</b>640x360 の画面で、24 bit/画素のフレームバッファは約 691KB 必要だが、4 bit/画素のタイル方式なら約 115KB で済む (本文の図参照)。限られた FPGA 内蔵メモリでは、この差が致命的に重要。',
+      'クロック周波数は画面のタイミング規格 (640x480@60Hz など) で決まり、画素の持ち方 (タイル方式かどうか) とは別の軸。',
+      '同期パルスの極性 (<code>neg</code> 入力) はタイミング回路の設定であり、パレット方式を使うかどうかとは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文のメモリ量比較を思い出してください。画素あたりのビット数が小さいほど、画面全体で見た時の差は大きくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="メモリ量比較の再確認"><rect x="40" y="20" width="400" height="22" fill="#c0492f" opacity="0.3" stroke="#b5401f" stroke-width="1.5"/><text x="40" y="16" font-size="12.5" fill="#b5401f">24bit: 約 691KB</text><rect x="40" y="55" width="67" height="22" fill="#198754" opacity="0.3" stroke="#0f5132" stroke-width="1.5"/><text x="40" y="51" font-size="12.5" fill="#0f5132">4bit: 約 115KB</text><text x="260" y="70" font-size="13" fill="#12211a">24bit の約 1/6 のメモリで済む</text></svg>'
+          + '<p class="cap">図: 画素あたりのビット数を減らすことが、タイル+パレット方式の本質的な利点。</p></div>'
+    }
+  },
+  {
+    q: '同期読み出しのブロック RAM は、アドレスを出した次のクロックでデータが出てくる。この 1 クロックの遅延を数え間違えて座標とアドレスを揃え忘れた時、典型的に起こる現象は?',
+    opts: [
+      '表示される画素が 1 つずれ、タイルの境目がガタガタに見えてしまう',
+      '画素クロックの周波数そのものが、理由は不明だが自動的に変わってしまう',
+      '同期パルスの極性が反転し、モニタの画面が真っ暗になってしまう',
+      'パレット表の内容が、そのクロックのタイミングで完全に消去されてしまう',
+      'VDP が停止し、それに連動して CPU の命令実行まで止まってしまう'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>アドレスを出した画素と、実際にデータが出てくる画素の間に 1 クロックのずれが生まれるため、表示される画像全体が 1 画素分ずれて見える。タイルの境目でこのずれが特に目立つ。',
+      '画素クロックの周波数はタイミング回路の外側 (水晶発振子や PLL) で決まり、BRAM の読み出し遅延の数え間違いとは無関係。',
+      '同期パルスの極性の取り違えは別の失敗パターン (後述の問題) で、BRAM の読み出し遅延とは別の原因から起こる。',
+      'BRAM の読み出しタイミングを数え間違えても、パレット表のデータ自体は消えない。表示される内容がずれるだけ。',
+      'VDP と CPU は独立した回路で、VDP 側の表示タイミングの不整合が CPU の命令実行を止めることはない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>アドレスを出すタイミングとデータが出てくるタイミングの間に 1 クロックの差があります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="BRAM読み出しの1クロック遅延の図"><text x="280" y="20" font-size="13" text-anchor="middle" fill="#12211a">クロック: 1 →  2  →  3</text><rect x="20" y="45" width="160" height="40" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="69" font-size="12.5" text-anchor="middle" fill="#0f5132">アドレス X 出す</text><rect x="300" y="45" width="180" height="40" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="390" y="69" font-size="12.5" text-anchor="middle" fill="#5b3d80">データ X 出てくる</text><line x1="180" y1="65" x2="298" y2="65" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-q6)"/><text x="239" y="98" font-size="12" text-anchor="middle" fill="#b5401f">1 クロック差</text><text x="280" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">座標側もこの 1 クロック分だけ遅らせないと表示がずれる</text><defs><marker id="arr-q6" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: アドレスを出すクロックとデータが出るクロックは 1 つずれる。</p></div>'
+    }
+  },
+  {
+    q: '同期パルスの極性 (<code>neg</code> 入力で切り替えられる、パルス中を High にするか Low にするか) を規格と逆に設定してしまった時、典型的に起こる現象は?',
+    opts: [
+      '画素の色だけが反転し、画面上の位置はすべて正しく表示されたままになる',
+      'タイルの境目だけが 1 画素分ずれて、画面全体の明るさは変わらない',
+      '計算上のリフレッシュ率が約 59.94Hz から、ちょうど 60.000Hz へ変わる',
+      'タイミングの数値が全部正しくても、モニタが同期信号を認識できず画面が真っ暗になる',
+      'VDP が読み出すメモリの帯域が、それまでの 2 倍必要になってしまう'
+    ],
+    ans: 3,
+    exps: [
+      '極性の取り違えは画素の色データに影響するものではなく、モニタが「いつ次の行/次の画面が始まるか」を認識する信号の解釈に影響する。',
+      'タイルの境目の 1 画素ずれは BRAM の読み出し遅延の数え間違い (前問) が原因で、極性の問題とは別の失敗パターン。',
+      'リフレッシュ率は画素クロックと画素数の内訳だけで決まり、同期パルスの極性とは無関係。',
+      '<b>これが正解。</b>同期パルスの極性はモニタが信号を正しく認識するための約束ごとで、ここを間違えるとモニタは「同期していない」と判断し、タイミングの数値自体が正しくても画面を表示できない。',
+      '極性は 1 ビットの設定であり、メモリの読み出し帯域の必要量を変えるものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>タイミングの数値がすべて正しくても、極性という「約束ごと」が 1 つ違うだけでモニタ側は信号を認識できません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="極性の取り違えで画面が映らない図"><rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">タイミング数値は正しい</text><text x="140" y="68" font-size="12" text-anchor="middle" fill="#12211a">640/16/96/48 など</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">極性だけが逆</text><text x="420" y="68" font-size="12" text-anchor="middle" fill="#12211a">neg の設定ミス</text><text x="280" y="115" font-size="13" text-anchor="middle" fill="#12211a">結果: モニタが信号を認識できず、画面は真っ暗になる</text></svg>'
+          + '<p class="cap">図: 数値が正しくても、極性という約束ごとが違えば認識されない。</p></div>'
+    }
+  },
+  {
+    q: '1 行 800 クロックのうち、画素を表示する 640 クロックと、何も表示しない残り 160 クロックがある。<svg viewBox="0 0 300 50" style="vertical-align:middle" width="300" height="50" aria-label="640対160の配分"><rect x="5" y="10" width="200" height="24" fill="#198754" opacity="0.3" stroke="#0f5132"/><rect x="205" y="10" width="50" height="24" fill="#e3edf5" stroke="#2f5f8a"/><text x="105" y="27" font-size="14" text-anchor="middle" fill="#0f5132">640</text><text x="230" y="27" font-size="14" text-anchor="middle" fill="#1f4a68">160</text></svg> この 160 クロックの使い方として最も適切なものは?',
+    opts: [
+      '160 クロックは完全に無駄な時間なので、VDP の回路ごと止めて省電力にすべきだ',
+      '160 クロックの間に、次の行で表示するタイルやスプライトのデータをあらかじめ読み出しておける',
+      '160 クロックを使えば、画素クロックの周波数を実質的に 2 倍にできる',
+      '160 クロックの間は CPU がメモリを完全に独占してよく、VDP 側は何もする必要がない',
+      '160 クロックは同期パルスのためだけに使われ、他の用途には使えない'
+    ],
+    ans: 1,
+    exps: [
+      '回路を止めてしまうと、次の行の表示に必要なデータを読み出す時間が無くなり、むしろ表示できるスプライトの数が減ってしまう。省電力のための時間ではない。',
+      '<b>これが正解。</b>画素を出さない 160 クロックの間も VDP の回路は動き続けており、次の行のタイル・スプライトのデータを先読みする時間として使える。本文で説明した「スプライトの表示上限」はこの先読みの余裕から決まる。',
+      '画素クロックの周波数はクロック発生回路で決まる固定値であり、空いている時間の使い方で周波数自体を変えることはできない。',
+      'VDP 自身もこの時間を使って次の行の読み出しを進める必要があり、CPU に完全に譲ってしまうと先読みが間に合わなくなる。',
+      '160 クロックのうち同期パルスが使うのは一部 (96 クロック) だけで、残りの前ポーチ・後ポーチの時間は先読みに使われており、「同期パルスのためだけ」ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図 (第 5 節) の配分をもう一度確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="160クロックの使い道の図"><rect x="30" y="30" width="336" height="36" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/><text x="198" y="53" font-size="13" text-anchor="middle" fill="#0f5132">640: 画素を出す</text><rect x="366" y="30" width="84" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="408" y="53" font-size="12.5" text-anchor="middle" fill="#1f4a68">160: 先読み</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">先読みが足りないと、次の行で表示できるスプライト数が減る</text></svg>'
+          + '<p class="cap">図: 160 クロックは「次の行の準備」という仕事を持つ。</p></div>'
+    }
+  },
+  {
+    q: '1 行の中にスプライトを並べすぎて、VDP が 1 クロックに 1 回しか読めないメモリの予算を超えてしまった。この時に起きることとして最も適切なものは?',
+    opts: [
+      'VDP のクロック周波数が自動的に上がり、結局すべてのスプライトが表示される',
+      '予算を超えた分のスプライトも、パレット表の参照だけ飛ばせば必ず表示できる',
+      '予算を超えた分は次のフレームにまとめて送られ、2 倍の速さで描かれる',
+      '画面全体のタイミング (800×525×60) が崩れ、リフレッシュ率そのものが変わってしまう',
+      '1 クロックに読める回数の予算を超えた分のスプライトは、その行では読み切れずに描かれない'
+    ],
+    ans: 4,
+    exps: [
+      'クロック周波数は水晶発振子などで決まる固定値で、表示するスプライトの数によって自動的に上がることはない。',
+      'パレット表の参照を省略しても、タイルのピクセルデータ自体を読み出す必要があり、読み出し回数そのものを減らすことはできない。',
+      'VDP は走査線を追いかけてリアルタイムに描いており、ある行で描けなかった分を次のフレームに「まとめて」送るような仕組みは持たない。',
+      'スプライトの数と読み出しタイミングは画面のタイミング生成回路 (vga_timing.dig) とは別の回路の話で、タイミングそのものが崩れるわけではない。',
+      '<b>これが正解。</b>1 クロックに読めるのは基本 1 回という予算があるため、その行で必要な読み出し回数が予算を超えた分のスプライトは読み切れず、その行では描かれない。これがいわゆるスプライトオーバーフローの原理。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>予算を超えた分は「待たされる」のではなく「その行では描かれない」という点が重要です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="スプライトオーバーフローの図"><rect x="30" y="30" width="300" height="30" fill="#198754" opacity="0.28" stroke="#0f5132" stroke-width="2"/><text x="180" y="50" font-size="13" text-anchor="middle" fill="#0f5132">予算内のスプライト (描かれる)</text><rect x="330" y="30" width="110" height="30" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="385" y="50" font-size="12.5" text-anchor="middle" fill="#b5401f">予算超過分</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">予算超過分はこの行では描かれず、点滅やちらつきとして見える</text></svg>'
+          + '<p class="cap">図: 予算を超えた分は「その行限りで」描かれない。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 のフロントパネル表示 (<code>dig/vga_frontpanel.dig</code>) は、CPU 内部のレジスタや状態を VGA 画面に出すために、既存の VGA タイミング生成回路 (カウンタ・比較器) を再利用している。この設計上の利点として最も適切なものは?',
+    opts: [
+      'デバッグ表示専用の全く別の VDP をもう 1 つ新設計すべきで、既存の VGA 回路を使い回すのは筋が悪い',
+      'フロントパネル表示はタイルマップやパレットの仕組みを一切使わず、完全に独立した専用の信号線を新たに引いている',
+      '既に動作確認済みの VGA タイミング生成を再利用することで、新しく作る部分を「何を表示するか」だけに絞れる',
+      'フロントパネル表示を追加すると、画素クロックを本来の 2 倍にする必要がある',
+      'フロントパネル表示は CPU の命令実行そのものを直接書き換えるため、通常は推奨されない設計である'
+    ],
+    ans: 2,
+    exps: [
+      '画面のタイミングを合わせる回路は一度正しく作れれば何度でも使い回せるため、デバッグ用にもう 1 つ別のタイミング生成回路を新設計する必要性は薄く、むしろ手間が増えるだけ。',
+      'フロントパネル表示も画面に文字や図形を出す以上、X ・ Y 座標とタイミング信号 (H, V, pic など) を共有しており、完全に独立した信号線を新たに引く必要はない。',
+      '<b>これが正解。</b>水平・垂直のタイミング生成は、本来の映像出力でもフロントパネル表示でも共通して必要な部分。すでに動作確認済みのこの部分を再利用すれば、新しく設計するのは「どの座標にどの文字や値を出すか」という表示内容の部分だけに絞れる。',
+      '画素クロックは画面の解像度とリフレッシュ率で決まる値で、表示する内容がフロントパネル用かどうかとは無関係。',
+      'VDP は表示用の回路であり、CPU の命令実行回路そのものを書き換えるものではない。CPU の内部状態を「読んで表示する」だけである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>タイミング生成という共通部分を土台にして、その上に「何を表示するか」を載せ替えられます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="共通タイミング生成の再利用の図"><rect x="60" y="80" width="440" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="105" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">共通: タイミング生成 (カウンタ・比較器)</text><rect x="60" y="20" width="200" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="160" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">本来の映像表示</text><rect x="300" y="20" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="400" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80">フロントパネル表示</text><line x1="160" y1="60" x2="160" y2="80" stroke="#9aa" stroke-width="1.5"/><line x1="400" y1="60" x2="400" y2="80" stroke="#9aa" stroke-width="1.5"/></svg>'
+          + '<p class="cap">図: タイミング生成という土台を共有し、表示内容だけを載せ替える。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

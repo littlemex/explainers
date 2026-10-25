@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>命令デコーダと制御信号 ― ビット列から制御線を作る</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 11 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>命令デコーダと制御信号 ― ビット列から制御線を作る</h1>
+  <p>命令は 16 個のスイッチの並びに過ぎない。それを ALU ・ メモリ ・ レジスタファイルへの具体的な指示に変えるのがデコーダと制御回路の仕事</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 03 回 <a href="./cpu-combinational.html">組み合わせ回路</a>、第 10 回 <a href="./cpu-isa.html">命令セットの設計</a></p>
+  <p class="intro">第 10 回で見た 16 ビットの命令は、CPU の中では単なる 0 と 1 の並びです。この並びを「rd はどのレジスタか」「即値はいくつか」「ALU に何をさせるか」「メモリを使うか」という具体的な指示に変換するのが命令デコーダと制御回路です。rj32 では、ビットを取り出して整形する decoder.dig と、op 番号から制御線の束を作る control.dig の 2 段構成になっています。ここではこの変換の仕組みを、実際のビット操作の単位で追っていきます。</p>
+
+  <!-- ===== 解説パート 1: デコーダの入出力を先に決める ===== -->
+  <section>
+    <h2>1. デコーダの入出力を先に決める</h2>
+    <p>rj32 のデコード段は 1 つの大きな回路ではなく、<code>instdecoder.dig</code> という小さな「判定専用」の箱と、それを使う <code>decoder.dig</code> という「ビット整形」の回路に分かれています。<code>instdecoder.dig</code> は命令の <code>fmt</code> (2 ビット) と <code>op0</code> (5 ビット) だけを受け取り、<code>op</code> (完全な 5 ビットの命令番号)・<code>rd_valid</code>・<code>rs_valid</code>・<code>imm_valid</code>・<code>mem</code>・<code>cond_valid</code> という判定結果だけを返します。中身の実装 (真理値表やゲートの組み方) を一切気にせず、「この入力ならこの出力」という箱として扱えるのがポイントです。</p>
+    <p>この「入出力だけを先に決めて、中身は後から詰める」という順序は、第 03 回で見た組み合わせ回路の作り方そのものです。rj32 のデコーダ全体がこの小さな箱を土台に組み立てられています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 190" role="img" aria-label="instdecoderの入出力の図">
+        <rect x="220" y="50" width="200" height="110" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="320" y="78" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">Instr Decoder</text>
+        <text x="320" y="100" font-size="12" text-anchor="middle" fill="#12211a">中身は真理値表</text>
+        <text x="320" y="118" font-size="12" text-anchor="middle" fill="#12211a">(気にせず箱として使う)</text>
+        <text x="40" y="70" font-size="13" fill="#12211a">fmt (2bit)</text>
+        <text x="40" y="95" font-size="13" fill="#12211a">op0 (5bit)</text>
+        <line x1="100" y1="75" x2="215" y2="90" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc1)"/>
+        <text x="460" y="65" font-size="13" fill="#12211a">op (5bit)</text>
+        <text x="460" y="85" font-size="13" fill="#12211a">rd_valid / rs_valid</text>
+        <text x="460" y="105" font-size="13" fill="#12211a">imm_valid / mem</text>
+        <text x="460" y="125" font-size="13" fill="#12211a">cond_valid</text>
+        <line x1="420" y1="100" x2="455" y2="100" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc1)"/>
+        <defs><marker id="arr-dc1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: instdecoder.dig は fmt/op0 を受け取り、op と各種 valid フラグだけを返す小さな箱。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: ビットの取り出しとサインエクステンド ===== -->
+  <section>
+    <h2>2. ビットの取り出しとサインエクステンド</h2>
+    <p>命令の中の即値は、形式によって場所も幅も違います (<code>imm5</code>・<code>imm6</code>・<code>imm8</code>・<code>imm12</code>)。<code>decoder.dig</code> はまず命令ビット列からそれぞれの候補を切り出し (スプリッタで配線を分けるだけ)、続けて<b>サインエクステンド (SignEx)</b> という部品に通します。例えば 6 ビットの即値 <code>imm6</code> は、最上位ビットが 1 なら負の数として、残りの上位ビットをすべて 1 で埋めて 16 ビットに引き伸ばします。これをしないと、6 ビットの $-1$ (全部 1) が 16 ビットでは単なる小さな正の数として扱われてしまいます。</p>
+    <p>第 04 回で見た 2 の補数の性質 ― 「符号ビットを引き伸ばしても値が変わらない」― が、ここで実際の部品 (SignEx) として配線されています。理論と回路が一致する分かりやすい例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="サインエクステンドの図">
+        <text x="320" y="24" font-size="13.5" text-anchor="middle" fill="#12211a">imm6 = -1 (6 ビットでは 111111)</text>
+        <rect x="80" y="40" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5" font-family="monospace"/>
+        <text x="170" y="65" font-size="15" text-anchor="middle" font-family="monospace">111111</text>
+        <line x1="260" y1="60" x2="330" y2="60" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc2)"/>
+        <rect x="330" y="40" width="80" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="370" y="65" font-size="12.5" text-anchor="middle">SignEx</text>
+        <line x1="410" y1="60" x2="460" y2="60" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc2)"/>
+        <rect x="460" y="40" width="130" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5" font-family="monospace"/>
+        <text x="525" y="65" font-size="13" text-anchor="middle" font-family="monospace">1111111111111111</text>
+        <text x="320" y="120" font-size="13" text-anchor="middle" fill="#4a5d54">上位ビットを符号ビットで埋めるので、16 ビットでも同じ -1 のまま</text>
+        <defs><marker id="arr-dc2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: SignEx は符号ビットを上位に引き伸ばし、幅が変わっても値 (と符号) を保つ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: 有効フラグ (valid) という考え方 ===== -->
+  <section>
+    <h2>3. 有効フラグ (valid) という考え方</h2>
+    <p>命令の形式によって「rd が使われているか」「即値が使われているか」は変わります。<code>nop</code> には rd も rs も無く、<code>move rd, imm8</code> には rd と即値はあるが rs は無い、という具合です。rj32 は「このフィールドは今回意味を持つか」を <code>rd_valid</code>・<code>rs_valid</code>・<code>imm_valid</code> という独立した 1 ビットの信号で表し、デコーダ以降の回路はこのフラグだけを見れば済むようにしています。</p>
+    <p>この考え方は第 08 回のレジスタファイル (書き込み許可 <code>we</code>) や第 09 回のメモリアクセス (<code>req</code>/<code>ack</code>) で見た「やってよいかどうかを明示的な 1 本の信号で決める」という発想と同じです。値そのものと、その値が「今回意味を持つか」を分けて扱うことで、後段の回路は値の意味を気にせず valid フラグだけを見て分岐できます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="validフラグの役割の図">
+        <rect x="40" y="30" width="250" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="165" y="60" font-size="13" text-anchor="middle">nop: rd_valid=0, rs_valid=0</text>
+        <rect x="350" y="30" width="250" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="475" y="60" font-size="13" text-anchor="middle">move rd, imm8: rd_valid=1, rs_valid=0</text>
+        <rect x="195" y="100" width="250" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="320" y="130" font-size="13" text-anchor="middle">add rd, rs: rd_valid=1, rs_valid=1</text>
+        <text x="320" y="20" font-size="13" text-anchor="middle" fill="#4a5d54">同じ「rd」というビット列でも、valid が意味の有無を決める</text>
+      </svg>
+      <p class="cap">図: valid フラグは「このフィールドの値を今回使うか」を命令ごとに明示する。</p>
+    </div>
+  </section>
+  <!-- ===== 解説パート 4: L/R/immの生成 ===== -->
+  <section>
+    <h2>4. L/R/imm の生成 ― どの即値を使うかを最後にまとめて選ぶ</h2>
+    <p><code>decoder.dig</code> は <code>imm5</code>・<code>imm6</code>・<code>imm8</code>・<code>imm12</code>・<code>off5</code> をすべて並行して作っておき、最後に 1 つの大きなマルチプレクサで <code>fmt</code> の値に応じてどれを使うかを選びます。選ばれた値は <code>imm</code> という名前の出力になり、さらにもう 1 段のマルチプレクサで「即値を使うか (<code>imm_valid</code>)、レジスタの値 <code>rsval</code> を使うか」を選んで <code>R</code> (右オペランド) を作ります。同様に <code>jump</code>・<code>rdval</code>・<code>pc</code> のどれを使うかを選んで <code>L</code> (左オペランド) を作ります。</p>
+    <p>「候補を全部作ってから最後に選ぶ」というこの作り方は、組み合わせ回路では自然な設計です。条件によって計算の経路そのものを変える (if 文のように回路を分岐させる) のではなく、全ての経路を並行に計算しておき、最後にマルチプレクサで結果を選ぶ方が、配線が素直になり伝搬遅延も予測しやすくなります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 190" role="img" aria-label="L/R/immを生成するマルチプレクサの図">
+        <text x="150" y="20" font-size="13" text-anchor="middle" fill="#12211a">即値の候補 (全部並行に用意)</text>
+        <rect x="40" y="35" width="90" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2"/><text x="85" y="55" font-size="11.5" text-anchor="middle">imm6</text>
+        <rect x="140" y="35" width="90" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2"/><text x="185" y="55" font-size="11.5" text-anchor="middle">imm8</text>
+        <rect x="40" y="70" width="90" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2"/><text x="85" y="90" font-size="11.5" text-anchor="middle">imm12</text>
+        <rect x="140" y="70" width="90" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2"/><text x="185" y="90" font-size="11.5" text-anchor="middle">off5</text>
+        <line x1="230" y1="65" x2="300" y2="90" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="230" y1="90" x2="300" y2="90" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="300" y="65" width="70" height="50" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="335" y="95" font-size="11.5" text-anchor="middle">fmt で選択</text>
+        <line x1="370" y1="90" x2="420" y2="90" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc4)"/>
+        <rect x="420" y="70" width="70" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="455" y="94" font-size="12" text-anchor="middle">imm</text>
+        <line x1="490" y1="90" x2="530" y2="90" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc4)"/>
+        <rect x="530" y="55" width="80" height="70" rx="6" fill="#f6d9a8" stroke="#8a5a1a" stroke-width="1.5"/>
+        <text x="570" y="85" font-size="12" text-anchor="middle">R</text>
+        <text x="570" y="105" font-size="10.5" text-anchor="middle">imm_valid で</text>
+        <text x="570" y="118" font-size="10.5" text-anchor="middle">rsval と選択</text>
+        <text x="300" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">同様に jump/rdval/pc から L を選ぶ段がもう 1 つある</text>
+        <defs><marker id="arr-dc4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 即値の候補を全部並行に用意しておき、最後にマルチプレクサで選ぶ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 制御回路 ― opから制御線の束を作るROM ===== -->
+  <section>
+    <h2>5. 制御回路 ― op から制御線の束を作る ROM</h2>
+    <p>デコーダが作った <code>op</code> 番号を受け取り、「ALU に何をさせるか (<code>aluop</code>)」「メモリを使うか (<code>mem</code>)」「書き込むか (<code>store</code>・<code>write</code>)」「書き込み先の選び方 (<code>wrmux</code>)」「ジャンプするか (<code>jump</code>)」といった制御信号の束を作るのが <code>control.dig</code> です。この回路の中心は <code>Microcode</code> という名前の<b>ROM</b> です。<code>op</code> をアドレスとして ROM に入れると、対応する制御信号の束が <code>D</code> として一度に出力されます。</p>
+    <p>ここで使われている ROM は、第 03 回で見た真理値表そのものです。32 行 (op の数だけ) × 必要なビット数の表を用意すれば、どんな組み合わせの制御信号でも、ゲートを 1 つずつ組む代わりに「表を埋めるだけ」で作れます。これは<b>ハードワイヤード制御</b> (命令ごとに対応する制御信号が、クロックをまたいだ状態遷移なしに 1 回のルックアップで決まる方式) の典型的な実装方法で、第 14 回で扱う「何サイクルもかけて制御を進めるマイクロコードシーケンサ」とは違うものです。名前は同じ "Microcode" でも、ここでは複数サイクルに渡る手順ではなく、1 回の参照で完結する表として使われています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 180" role="img" aria-label="opからROMで制御信号を作る図">
+        <rect x="40" y="60" width="120" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="100" y="90" font-size="13" text-anchor="middle">op (アドレス)</text>
+        <line x1="160" y1="85" x2="240" y2="85" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc5)"/>
+        <rect x="240" y="40" width="160" height="90" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="320" y="70" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">Microcode (ROM)</text>
+        <text x="320" y="95" font-size="11.5" text-anchor="middle">32 行 × 制御ビット数</text>
+        <text x="320" y="113" font-size="11.5" text-anchor="middle">の真理値表</text>
+        <line x1="400" y1="85" x2="470" y2="85" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc5)"/>
+        <rect x="470" y="30" width="140" height="110" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="540" y="55" font-size="12" text-anchor="middle">halt / error</text>
+        <text x="540" y="75" font-size="12" text-anchor="middle">jump / aluop</text>
+        <text x="540" y="95" font-size="12" text-anchor="middle">mem / store</text>
+        <text x="540" y="115" font-size="12" text-anchor="middle">write / wrmux</text>
+        <defs><marker id="arr-dc5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: op をアドレスとして ROM に入れると、制御信号の束が 1 回の参照で出てくる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>ビット位置で束ねた信号は、間に 1 本を増やすと全部ずれる。</b> <code>control.dig</code> が作る <code>ctrl</code> バスは、<code>ctrldec.dig</code> 側で固定のビット範囲 (例えば 19〜21 ビット目が <code>aluop</code>) に切り分けられています。もし ROM の出力に新しい制御信号を 1 本増やそうとして、既存のフィールドの<b>間に</b>挿入してしまうと、それより後ろの全てのフィールドのビット位置がずれ、<code>ctrldec.dig</code> 側の切り出し範囲もすべて直さなければならなくなります。新しい信号は常に末尾に追加するか、あらかじめ予約の余白を残しておくのが安全です。</p>
+    <p><b>skip ・ stall ・ halt は別々の信号として作り、最後に論理で混ぜる。</b> <code>control.png</code> を見ると、<code>skip</code> はスキップ命令の結果を 1 クロック保持するレジスタ (D フリップフロップ) として実装され、<code>stall</code> (メモリアクセスの完了待ちなど) は別の信号として用意され、両者が NAND のような論理ゲートで組み合わさって最終的な <code>en_write</code> (書き込み許可) や <code>en_fetch</code> (次の命令を読んでよいか) を作っています。1 つの「止める理由」ごとに別の信号を作り、最後にまとめて合成するほうが、後から別の理由 (例えば割り込み) を 1 つ追加するときに既存の配線を壊さずに済みます。</p>
+    <p><b>ROM を使うか、ゲートを並べるかは「表を手で埋められるか」で判断する。</b> 32 行程度の制御信号なら、ROM の中身をスプレッドシートのように手で埋めても十分に見通せます。命令数がもっと増えたり、制御ビットの数が爆発的に増えると、ROM の中身を手で検証するのが難しくなり、個別のゲートで論理式を書いたほうが読みやすくなる場合もあります。rj32 の規模 (32 命令) は、ROM 方式がちょうど手に負える範囲だったという実例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 190" role="img" aria-label="ctrlバスの間に信号を挿入するとずれる図">
+        <text x="320" y="20" font-size="13" text-anchor="middle" fill="#12211a">ctrl バスのビット位置 (固定の切り出し範囲)</text>
+        <rect x="40" y="40" width="100" height="40" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="90" y="64" font-size="11.5" text-anchor="middle">aluop 19-21</text>
+        <rect x="140" y="40" width="100" height="40" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="190" y="64" font-size="11.5" text-anchor="middle">mem 22-26</text>
+        <rect x="240" y="40" width="100" height="40" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/><text x="290" y="64" font-size="11.5" text-anchor="middle">store 27-31</text>
+        <line x1="190" y1="80" x2="190" y2="92" stroke="#b5401f" stroke-width="2" marker-end="url(#arr-dc6)"/>
+        <text x="320" y="118" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">ここに新しい信号を挿入すると、右側の範囲が全部ずれる</text>
+        <text x="320" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">末尾に追加するか、あらかじめ予約の余白を残すのが安全</text>
+        <defs><marker id="arr-dc6" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b5401f"/></marker></defs>
+      </svg>
+      <p class="cap">図: 固定ビット位置で切り分けた束に信号を間に挿入すると、後続の全フィールドがずれる。</p>
+    </div>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/decoder.dig" target="_blank" rel="noopener">rj45/rj32: dig/decoder.dig</a> ― 命令ビットの取り出し、サインエクステンド、L/R/imm の生成マルチプレクサの実際の回路。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/instdecoder.dig" target="_blank" rel="noopener">rj45/rj32: dig/instdecoder.dig</a> ― fmt/op0 から op ・ rd_valid ・ rs_valid ・ imm_valid ・ mem ・ cond_valid を作る中心部分。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/control.dig" target="_blank" rel="noopener">rj45/rj32: dig/control.dig</a> ― op を鍵にした ROM (Microcode) で制御信号の束を作る回路、halt/skip/stall ロジック。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/ctrldec.dig" target="_blank" rel="noopener">rj45/rj32: dig/ctrldec.dig</a> ― control.dig が束ねた ctrl バスを aluop/mem/store/write/wrmux/jump/halt/error に分解する回路。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/img/decoder.png" target="_blank" rel="noopener">rj45/rj32: docs/img/decoder.png</a> ― decoder.dig の全体図。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/img/control.png" target="_blank" rel="noopener">rj45/rj32: docs/img/control.png</a> ― control.dig の全体図 (Microcode ROM、Halt/Skip/Stall Logic)。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-isa.html">← 第 10 回 命令セットの設計</a><a href="./cpu-index.html">目次</a><a href="./cpu-datapath.html">第 12 回 データパスを 1 命令ずつ追う →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'rj32 の instdecoder.dig が、fmt と op0 だけを受け取り op ・ rd_valid ・ rs_valid ・ imm_valid ・ mem ・ cond_valid という判定結果だけを返す「箱」として作られていることの利点は何か。',
+    opts: [
+      '中身の実装 (真理値表やゲートの組み方) を気にせず、入力と出力の対応関係だけを見て回路全体を組み立てられる',
+      'この箱を使うと、CPU のクロック周波数が自動的に 2 倍になる',
+      '箱の中身を空にできるため、実際には何も計算しなくてよくなる',
+      'fmt と op0 以外の全ての命令ビットを無視してよいことがハードウェア的に保証される',
+      '箱にすることで、rj32 のレジスタ本数を増やさずに済む'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>入出力だけを先に決めて中身をブラックボックス化することで、使う側 (decoder.dig) は内部の論理を気にせず組み立てられる。第 03 回で見た組み合わせ回路の考え方そのもの。',
+      'クロック周波数は配線の段数や伝搬遅延で決まり、「箱として扱う」こと自体が周波数を 2 倍にするような効果は無い。',
+      '箱として扱えるのは設計上の抽象化であり、実際には内部で真理値表に基づく計算が行われている。「何も計算しなくてよい」は誤り。',
+      'fmt と op0 以外のビット (rd や imm など) は decoder.dig の別の部分で使われており、「無視してよい」という保証ではない。instdecoder.dig が使わないだけ。',
+      'レジスタの本数 (16 本) は rd/rs のビット幅で決まり、instdecoder.dig の入出力設計とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図の通り、箱の中身を気にせず入出力だけで組み立てられるのが利点です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="箱として扱う利点の図"><rect x="200" y="40" width="160" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="280" y="75" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">Instr Decoder</text><text x="60" y="75" font-size="13" text-anchor="middle">入力</text><text x="480" y="75" font-size="13" text-anchor="middle">出力</text><text x="280" y="125" font-size="13" text-anchor="middle" fill="#4a5d54">中身を気にせず、対応関係だけ見て使う</text></svg>'
+          + '<p class="cap">図: 入出力だけを決めておけば、中身の実装を気にせず組み立てられる。</p></div>'
+    }
+  },
+  {
+    q: '6 ビットの即値 imm6 = -1 (ビット列は 111111) を、decoder.dig の SignEx (サインエクステンド) に通すと、16 ビットではどうなるか。',
+    opts: [
+      '上位 10 ビットがすべて 0 で埋められ、0000001111111 (10 進数で 63) になる',
+      '上位 10 ビットが元の最上位ビット (1) で埋められ、16 ビットでも -1 を表すビット列になる',
+      '下位 6 ビットが切り捨てられ、0 (ゼロ) になる',
+      '符号が反転し、+1 を表すビット列になる',
+      '元の 6 ビットがそのまま 16 ビットの下位に残り、上位 10 ビットはランダムな値になる'
+    ],
+    ans: 1,
+    exps: [
+      '0 で埋めると符号が失われ、負の数だったはずの値が大きな正の数に変わってしまう。これはサインエクステンドではなくゼロ拡張の挙動。',
+      '<b>これが正解。</b>サインエクステンドは最上位ビット (符号ビット) を上位すべてに複製するので、6 ビットの -1 (111111) は 16 ビットでも全ビット 1 の -1 のまま保たれる。',
+      '幅を広げる操作であり、元のビットを切り捨てて 0 にするという挙動ではない。',
+      '符号を反転させる操作ではなく、符号を保ったまま幅を広げる操作。',
+      'サインエクステンドは常に同じ規則 (符号ビットで埋める) に従う確定的な操作であり、上位ビットがランダムになることはない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図の通り、符号ビットを上位に複製することで値を保ったまま幅を広げます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="サインエクステンドの結果の図"><rect x="40" y="35" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5" font-family="monospace"/><text x="110" y="60" font-size="14" text-anchor="middle" font-family="monospace">111111</text><line x1="180" y1="55" x2="240" y2="55" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc-q2)"/><rect x="240" y="35" width="280" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5" font-family="monospace"/><text x="380" y="60" font-size="13" text-anchor="middle" font-family="monospace">1111111111111111</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#4a5d54">符号ビット (1) を上位 10 ビットに複製する</text><defs><marker id="arr-dc-q2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: サインエクステンドは符号ビットを上位に複製し、値と符号を保つ。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 のデコーダが rd_valid ・ rs_valid ・ imm_valid のような「valid フラグ」を使う理由として最も適切なものはどれか。',
+    opts: [
+      '各フラグの値を全部足し合わせると、命令の実行に必要なクロック数が計算できるから',
+      'valid フラグを使うと、命令のビット幅を 16 ビットから 8 ビットに削減できるから',
+      'フィールドの値そのものと、それが今回意味を持つかを分け、後段が値の意味を気にせず分岐できるようにするため',
+      'valid フラグはデバッグ専用の信号で、実際の実行には一切使われないから、シミュレータの表示を見やすくするためだけに存在する',
+      'valid フラグが 1 本でも立っていれば、CPU は必ず割り込みを発生させる仕組みになっているから'
+    ],
+    ans: 2,
+    exps: [
+      'valid フラグの本数や値を足し合わせてクロック数を計算するような仕組みはドキュメントに無い。',
+      'valid フラグはビット幅を削減する仕組みではなく、命令は常に 16 ビット固定長のまま。',
+      '<b>これが正解。</b>rd や imm のビット列自体は毎回同じ場所にあるが、意味を持つかは命令の種類で変わる。valid フラグはこの判定を 1 ビットで表す。',
+      'valid フラグはレジスタファイルの書き込み判定や ALU の入力選択に使われる実行上の信号であり、デバッグ専用ではない。',
+      'valid フラグはそのフィールドが使われるかどうかを示すだけで、割り込みの発生とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ「rd」というビット列でも、valid フラグによって意味の有無が変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="validフラグが意味を決める図"><rect x="40" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="150" y="60" font-size="13" text-anchor="middle">rd_valid=0 → rd の値は無視</text><rect x="300" y="30" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="410" y="60" font-size="13" text-anchor="middle">rd_valid=1 → rd の値を使う</text><text x="280" y="105" font-size="13" text-anchor="middle" fill="#4a5d54">同じビット位置でも valid が意味の有無を決める</text></svg>'
+          + '<p class="cap">図: valid フラグは、フィールドの値を今回使うかどうかを明示する。</p></div>'
+    }
+  },
+  {
+    q: 'decoder.dig が imm5・imm6・imm8・imm12・off5 の全てを並行して先に作っておき、最後にマルチプレクサで 1 つを選ぶという作り方をしている理由として最も適切なものはどれか。',
+    opts: [
+      '全ての候補を保存しておけば、プログラムの実行後にログとして確認できるようにするため',
+      '条件によって計算の経路そのものを変えるより、全ての経路を並行に計算して最後に選ぶ方が配線が素直になり伝搬遅延が予測しやすいから',
+      '候補を並行に作ると、消費電力が自動的にゼロになるから',
+      'rj32 のレジスタファイルの書き込みポートの数を増やさずに済むから',
+      '即値の候補を全部作ると、命令のビット幅そのものを 32 ビットに増やせるから'
+    ],
+    ans: 3,
+    exps: [
+      'ログとして確認する用途は回路のこの部分の目的ではなく、デコーダは実行のための値をリアルタイムに作るのが役割。',
+      '消費電力は並行に計算することで増える場合もあり、「自動的にゼロになる」という説明は誤り。',
+      'レジスタファイルの書き込みポート数は別の回路 (regfile.dig) の設計要素であり、即値生成の並行計算とは無関係。',
+      '<b>これが正解。</b>組み合わせ回路では、条件によって計算経路を変えるより全ての経路を並行に計算し最後にマルチプレクサで選ぶ方が配線が素直になり、伝搬遅延も予測しやすくなる。',
+      '命令のビット幅は常に 16 ビット固定であり、即値候補を並行に作ることとビット幅の変更は無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>候補を全部並行に用意し、最後に 1 段のマルチプレクサで選ぶのが本文の図の構造です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="並行計算して最後に選ぶ図"><rect x="30" y="30" width="110" height="35" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2"/><text x="85" y="52" font-size="11.5" text-anchor="middle">imm6</text><rect x="30" y="70" width="110" height="35" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2"/><text x="85" y="92" font-size="11.5" text-anchor="middle">imm8</text><rect x="30" y="110" width="110" height="20" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.2" opacity="0"/><line x1="140" y1="47" x2="260" y2="80" stroke="#0f5132" stroke-width="1.5"/><line x1="140" y1="87" x2="260" y2="80" stroke="#0f5132" stroke-width="1.5"/><rect x="260" y="55" width="90" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/><text x="305" y="85" font-size="12" text-anchor="middle">fmt で選択</text><line x1="350" y1="80" x2="420" y2="80" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc-q4)"/><rect x="420" y="60" width="100" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="470" y="84" font-size="12" text-anchor="middle">imm (確定)</text><defs><marker id="arr-dc-q4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 候補を全部並行に計算してから、最後にマルチプレクサで選ぶ。</p></div>'
+    }
+  },
+  {
+    q: '次の図のように、control.dig の Microcode ROM は op をアドレスとして受け取る。この ROM の挙動として正しいものはどれか。<div class="fig"><svg viewBox="0 0 360 110" aria-label="opをアドレスとするROMの図"><rect x="20" y="30" width="90" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="65" y="54" font-size="11.5" text-anchor="middle">op (アドレス)</text><line x1="110" y1="50" x2="160" y2="50" stroke="#0f5132" stroke-width="2"/><rect x="160" y="20" width="100" height="60" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="210" y="55" font-size="12" text-anchor="middle">Microcode</text><line x1="260" y1="50" x2="310" y2="50" stroke="#0f5132" stroke-width="2"/><text x="335" y="54" font-size="11">D</text></svg></div>',
+    opts: [
+      'op の値を 1 つ入れると、何サイクルもかけて少しずつ制御信号が変化していく',
+      'op の値を 1 つ入れると、対応する制御信号の束が 1 回の参照でまとめて出力される',
+      'op の値を入れるたびに、ROM の中身 (表の内容) が自動的に書き換わっていく',
+      'op の値とは無関係に、ROM は常に同じ固定の出力を返す',
+      'op の値を 2 回入れないと、制御信号は確定しない'
+    ],
+    ans: 1,
+    exps: [
+      '何サイクルもかけて変化していくのはマイクロコードシーケンサ (第 14 回) の挙動であり、ここでの ROM はクロックをまたいだ状態遷移を持たない 1 回の参照で完結する。',
+      '<b>これが正解。</b>ROM は真理値表そのものであり、op という 1 つのアドレスを入れると、対応する制御信号の束 (halt/error/jump/aluop/mem/store/write/wrmux) が 1 回の参照でまとめて出力される。',
+      'ROM の中身 (本文で言う「表」) は回路の設計時に固定されるもので、動作中に自動的に書き換わるものではない。',
+      'op の値によって出力は変わる。「op と無関係に固定」という説明は ROM をアドレスで引く仕組みと矛盾する。',
+      '1 回の参照で出力が確定する組み合わせ回路であり、2 回入れないと確定しないという挙動ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ROM は op というアドレス 1 つで、対応する行 (制御信号の束) を即座に返す表です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="ROMが1回の参照で返す図"><rect x="40" y="40" width="140" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="110" y="70" font-size="13" text-anchor="middle">op = 16 (add)</text><line x1="180" y1="65" x2="250" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc-q5)"/><rect x="250" y="30" width="200" height="70" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="350" y="60" font-size="12.5" text-anchor="middle">aluop=add, mem=0,</text><text x="350" y="80" font-size="12.5" text-anchor="middle">write=1 (1 回で確定)</text><defs><marker id="arr-dc-q5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: ROM は op を 1 回入れるだけで、対応する制御信号の束を即座に返す。</p></div>'
+    }
+  },
+  {
+    q: 'control.dig の "Microcode" という名前の ROM と、第 14 回で扱う「マイクロコードシーケンサ」は、名前が似ているが挙動が異なる。その違いとして正しいものはどれか。',
+    opts: [
+      'control.dig の ROM は命令ごとに複数クロックの手順を順番に実行するが、マイクロコードシーケンサは 1 クロックで終わる',
+      '両者は全く同じ挙動であり、名前が同じ以上、内部の仕組みにも違いは無く、参照先を入れ替えても結果は変わらない',
+      'control.dig の ROM は 1 回の参照で確定するが、マイクロコードシーケンサは複数ステップを順番に進める',
+      'マイクロコードシーケンサは ROM を全く使わず、ゲートだけで実装される',
+      'control.dig の ROM は op の値を無視して、常に同じ制御信号を出力する'
+    ],
+    ans: 2,
+    exps: [
+      '説明が逆になっている。control.dig の ROM はここで説明した通り 1 回の参照で完結し、複数クロックの手順を進めるのはマイクロコードシーケンサの方。',
+      '名前が同じ "Microcode" であっても、本文で説明したとおり挙動は異なる。同じ名前だからといって同じ仕組みとは限らない。',
+      '<b>これが正解。</b>control.dig の ROM は op を入れると 1 回の参照で制御信号の束が確定するハードワイヤード制御の実装手段。マイクロコードシーケンサは別の制御方式。',
+      'マイクロコードシーケンサも一般に ROM (手順を並べた表) を使って実装されることが多く、「ROM を全く使わない」という説明は誤り。',
+      'control.dig の ROM は op をアドレスとして使い、op の値に応じて異なる制御信号を出力する。op を無視するという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>名前が同じでも、1 回で終わるか複数ステップかという挙動が違います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="2種類のMicrocodeの違いの図"><rect x="30" y="30" width="220" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">control.dig の ROM</text><text x="140" y="82" font-size="12" text-anchor="middle">1 回の参照で確定</text><rect x="310" y="30" width="220" height="70" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">マイクロコードシーケンサ</text><text x="420" y="82" font-size="12" text-anchor="middle">複数ステップを順番に進める</text></svg>'
+          + '<p class="cap">図: 同じ "Microcode" でも、1 回で終わるか複数ステップかが異なる。</p></div>'
+    }
+  },
+  {
+    q: 'control.png に描かれた skip ・ stall ・ halt のロジックが、それぞれ別々の信号として作られ、最後に論理ゲートで組み合わされている設計の利点は何か。',
+    opts: [
+      '別々の信号にすることで、回路図の見た目を複雑にし、他の人に読まれにくくする',
+      'skip ・ stall ・ halt を別々にすると、CPU のクロック周波数が自動的に上がる',
+      '別々の信号にすることで、メモリの容量を節約できる',
+      'それぞれの「止める理由」を独立した信号にしておけば、後から理由を追加するときに既存の配線を壊さずに済む',
+      'skip ・ stall ・ halt を別々にすることは、Digital というシミュレータの制約で強制されている'
+    ],
+    ans: 3,
+    exps: [
+      '回路図を読みにくくすることは設計の目的ではなく、むしろ良い設計は読みやすさを保つことを重視する。',
+      'クロック周波数は配線の段数や伝搬遅延で決まるものであり、信号を分けること自体が周波数を上げる効果を持つわけではない。',
+      'skip ・ stall ・ halt はクロックやレジスタではなくメモリの容量とは無関係の制御信号であり、容量の節約にはつながらない。',
+      '<b>これが正解。</b>止める理由ごとに独立した信号を作れば、後から別の理由を追加するとき論理ゲートの入力を 1 本増やすだけで済み、既存の配線を壊さずに拡張できる。',
+      'Digital はゲートや部品を自由に組み合わせられるシミュレータであり、信号を別々にすることを強制する制約は無い。設計上の判断である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>止める理由ごとに別の信号を用意しておくと、後から追加しやすくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="別々の信号を最後に合成する図"><rect x="30" y="30" width="120" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="90" y="52" font-size="12">skip</text><rect x="30" y="75" width="120" height="35" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="90" y="97" font-size="12">stall</text><line x1="150" y1="47" x2="250" y2="65" stroke="#0f5132" stroke-width="1.5"/><line x1="150" y1="92" x2="250" y2="65" stroke="#0f5132" stroke-width="1.5"/><rect x="250" y="45" width="90" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/><text x="295" y="70" font-size="11.5" text-anchor="middle">論理ゲート</text><line x1="340" y1="65" x2="400" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc-q7)"/><text x="450" y="70" font-size="12">en_write</text><defs><marker id="arr-dc-q7" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 止める理由ごとに別の信号を用意し、最後に論理ゲートで合成する。</p></div>'
+    }
+  },
+  {
+    q: 'control.dig が作る ctrl バスは、ctrldec.dig 側で固定のビット範囲 (例: 19〜21 ビット目が aluop) に切り分けられている。この ctrl バスの<b>既存の</b>フィールドの間に、新しい制御信号を 1 本挿入した場合に起きることとして正しいものはどれか。',
+    opts: [
+      '挿入位置より後ろにあった全てのフィールドのビット位置がずれ、ctrldec.dig 側の切り出し範囲も直す必要が生じる',
+      '新しい信号は自動的に空いているビットを探して、既存のフィールドをずらさずに収まる',
+      'ctrl バスの幅は固定なので、新しい信号を挿入しようとするとコンパイルエラーになり挿入自体が行えない',
+      '新しい信号を挿入しても、ctrldec.dig 側は何も変更せずに正しく動作し続ける',
+      'ctrl バスに信号を追加すると、デコーダ側 (decoder.dig) のビット割り当ても自動的に書き換わる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>ctrldec.dig は固定のビット範囲で切り出しているため、間に新しい信号を挿入すると、それより後ろの全フィールドの位置がずれ、切り出し範囲の指定をすべて直す必要が生じる。',
+      'Digital のビットバスは自動的に空きを探して詰め込むような仕組みを持たず、配線者が明示的にビット位置を割り当てる必要がある。',
+      'Digital はシミュレータであり、ビット幅が変わること自体を検出してエラーにするような静的検査機能は前提にしていない。むしろ気づかれにくいという点が問題になる。',
+      'ctrldec.dig 側は固定のビット範囲で切り出す回路なので、ctrl バスの中身がずれれば、変更しない限り誤ったビットを切り出してしまう。',
+      'decoder.dig と control.dig は別の回路であり、ctrl バスの変更が decoder.dig 側のビット割り当てを自動的に書き換えるという連動は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図の通り、間に信号を挿入すると後ろのフィールドが全部ずれてしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="ビット位置がずれる図"><rect x="40" y="30" width="100" height="40" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="90" y="54" font-size="11.5" text-anchor="middle">aluop</text><rect x="140" y="30" width="100" height="40" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="190" y="54" font-size="11.5" text-anchor="middle">mem</text><rect x="240" y="30" width="100" height="40" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/><text x="290" y="54" font-size="11.5" text-anchor="middle">store</text><text x="190" y="100" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">間に挿入すると mem 以降が全部右にずれる</text></svg>'
+          + '<p class="cap">図: 固定ビット範囲の束の間に信号を挿入すると、後続のフィールドがすべてずれる。</p></div>'
+    }
+  },
+  {
+    q: '次の図は nop 命令 (rd も rs も使わない) をデコードした様子を示している。この図から読み取れる正しい結論はどれか。<div class="fig"><svg viewBox="0 0 380 110" aria-label="nop命令のvalidフラグの図"><rect x="20" y="20" width="340" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132"/><text x="190" y="40" font-size="12" text-anchor="middle">命令ビット列: すべて 0 (nop)</text><rect x="20" y="60" width="160" height="30" rx="5" fill="#fbeeea" stroke="#b5401f"/><text x="100" y="80" font-size="11.5" text-anchor="middle">rd_valid = 0</text><rect x="200" y="60" width="160" height="30" rx="5" fill="#fbeeea" stroke="#b5401f"/><text x="280" y="80" font-size="11.5" text-anchor="middle">rs_valid = 0</text></svg></div>',
+    opts: [
+      'nop 命令はビット列として存在しないため、デコーダは何も出力しない',
+      'rd_valid が 0 なら、rd のビット列そのものが命令から削除される',
+      'rs_valid が 0 の命令は、CPU 全体を停止させるエラーになる',
+      'rd_valid と rs_valid が両方 0 なら、次の命令は必ずスキップされる',
+      'rd_valid と rs_valid が両方 0 なので、後段の回路は rd や rs のビット列を演算に使わない'
+    ],
+    ans: 4,
+    exps: [
+      'nop もちゃんと 16 ビットのビット列を持つ命令であり、デコーダは何らかの判定結果 (この場合は両方の valid が 0) を出力する。「何も出力しない」は誤り。',
+      'valid フラグはビット列を物理的に削除するものではなく、「使うかどうか」の判断を示す別の信号。ビット列自体は命令の一部として残っている。',
+      'rs_valid が 0 であることは、単にその命令が rs を使わないことを示すだけで、error を引き起こす仕組みではない。',
+      'valid フラグはスキップ (if.cc による条件付き実行) とは別の仕組みであり、rd_valid ・ rs_valid が 0 だからといってスキップが発生するわけではない。',
+      '<b>これが正解。</b>rd や rs の位置のビット (0) は物理的に存在するが、valid が 0 のため後段はその値を使わない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ビット列自体は存在しても、valid フラグが使うかどうかを決めます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="validフラグとビット列の関係の図"><rect x="40" y="30" width="220" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="150" y="55" font-size="13" text-anchor="middle">rd のビット列は存在する (0)</text><rect x="300" y="30" width="220" height="40" rx="8" fill="#fbeeea" stroke="#b5401f" stroke-width="1.5"/><text x="410" y="55" font-size="13" text-anchor="middle">rd_valid=0 で使わない</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#4a5d54">ビット列の存在と、使うかどうかの判断は別</text></svg>'
+          + '<p class="cap">図: ビット列は存在しても、valid フラグが使うかどうかを分けて決める。</p></div>'
+    }
+  },
+  {
+    q: '次の図は L を生成するマルチプレクサの一部で、jump ・ rdval ・ pc の 3 つの候補から 1 つを選んでいる様子を示す。この構造から読み取れる正しい結論はどれか。<div class="fig"><svg viewBox="0 0 380 130" aria-label="Lを選ぶマルチプレクサの図"><rect x="20" y="10" width="100" height="30" fill="#eaf5ef" stroke="#0f5132"/><text x="70" y="30" font-size="11">jump</text><rect x="20" y="50" width="100" height="30" fill="#e3edf5" stroke="#2f5f8a"/><text x="70" y="70" font-size="11">rdval</text><rect x="20" y="90" width="100" height="30" fill="#efe8f7" stroke="#7a5a9e"/><text x="70" y="110" font-size="11">pc</text><line x1="120" y1="25" x2="180" y2="55" stroke="#0f5132" stroke-width="1.5"/><line x1="120" y1="65" x2="180" y2="65" stroke="#0f5132" stroke-width="1.5"/><line x1="120" y1="105" x2="180" y2="75" stroke="#0f5132" stroke-width="1.5"/><rect x="180" y="45" width="80" height="40" rx="6" fill="#f6d9a8" stroke="#8a5a1a"/><text x="220" y="70" font-size="11" text-anchor="middle">選択</text><line x1="260" y1="65" x2="350" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc-q10-fig)"/><text x="330" y="55" font-size="11">L</text><defs><marker id="arr-dc-q10-fig" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg></div>',
+    opts: [
+      'jump ・ rdval ・ pc の 3 つは、どれも常に同時に L として出力される',
+      'L は常に pc の値に固定されており、jump や rdval は使われない',
+      'このマルチプレクサは、候補の値を全部加算してから L として出力する',
+      'このマルチプレクサは、1 つの候補だけを選んで L として出力し、どれを選ぶかは制御信号 (jump や mem など) で決まる',
+      'jump ・ rdval ・ pc のどれを選ぶかは実行中にランダムに決まる'
+    ],
+    ans: 3,
+    exps: [
+      'マルチプレクサは複数の入力から 1 つを選ぶ部品であり、全部を同時に出力するものではない。',
+      'pc に固定されているわけではなく、jump 命令なら jump の値、load 命令ならメモリ由来の値など、命令の種類に応じて選ぶ候補が変わる。',
+      'マルチプレクサは選択した 1 つの値をそのまま通す部品であり、複数の入力を加算するような演算は行わない (それは加算器の役割)。',
+      '<b>これが正解。</b>マルチプレクサは 1 つの候補を選んで出力する部品で、どれを選ぶかは jump や mem などの制御信号で決まる。',
+      '選択はランダムではなく、命令のデコード結果という決定的な制御信号によって一意に決まる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>マルチプレクサは「選択信号に応じて 1 つを通す」部品です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="マルチプレクサの選択の図"><rect x="40" y="20" width="110" height="30" fill="#eaf5ef" stroke="#0f5132"/><text x="95" y="40" font-size="12" text-anchor="middle">jump</text><rect x="40" y="60" width="110" height="30" fill="#e3edf5" stroke="#2f5f8a"/><text x="95" y="80" font-size="12" text-anchor="middle">rdval (選択中)</text><rect x="40" y="100" width="110" height="30" fill="#efe8f7" stroke="#7a5a9e"/><text x="95" y="120" font-size="12" text-anchor="middle">pc</text><line x1="150" y1="75" x2="300" y2="75" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-dc-q10)"/><text x="330" y="80" font-size="13">L = rdval</text><defs><marker id="arr-dc-q10" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 選択信号に応じて、3 つの候補のうち 1 つだけが L として通る。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

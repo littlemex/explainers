@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2 進数と CPU の計算 ― 桁上がりとオーバーフローは別物</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 04 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>2 進数と CPU の計算 ― 桁上がりとオーバーフローは別物</h1>
+  <p>CPU の中の数はすべて 0 と 1 の並び。負の数は「2 の補数」という決め方で表され、足し算がうまくいかなくなる「桁上がり」と「オーバーフロー」はまったく別の現象として扱われる</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 03 回 <a href="./cpu-combinational.html">組み合わせ回路</a></p>
+  <p class="intro">第 03 回で見た全加算器は、1 ビットの足し算を繰り上がり付きで行う部品でした。この回ではその部品を実際の CPU の計算にどう使うかを見ます。rj32 は 16 ビットの数しか扱えない小さな機械です。負の数をどう表すか、16 ビットという枠をあふれたときに何が起きるか、そしてその「あふれ」が 2 種類ある (桁上がりとオーバーフロー) ことを、rj32 の実際の命令セットで確認します。</p>
+
+  <!-- ===== 解説パート 1: 2進数と16進数 ===== -->
+  <section>
+    <h2>1. 2 進数と 16 進数 ― 同じ数の違う書き方</h2>
+    <p>CPU の中にあるのは電圧の高い (1) か低い (0) かだけです。rj32 は 16 ビット (0 と 1 が 16 個) でひとつの数を表します。16 個の 0/1 を人間がそのまま読むのは大変なので、4 ビットずつまとめて 1 桁の<b>16 進数</b> (0〜9, A〜F) に置き換えて書くのが習慣です。$2^4=16$ なので、2 進数 4 桁と 16 進数 1 桁がぴったり対応します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="2進数16桁を16進数4桁に変換する図">
+        <text x="300" y="20" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">16 ビットの値 (レジスタ 1 個分)</text>
+        <g font-size="14" font-family="monospace">
+          <rect x="20" y="35" width="120" height="34" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+          <text x="80" y="58" text-anchor="middle">0001</text>
+          <rect x="140" y="35" width="120" height="34" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+          <text x="200" y="58" text-anchor="middle">0010</text>
+          <rect x="260" y="35" width="120" height="34" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+          <text x="320" y="58" text-anchor="middle">0011</text>
+          <rect x="380" y="35" width="120" height="34" fill="#fdeccb" stroke="#c98a1f" stroke-width="2"/>
+          <text x="440" y="58" text-anchor="middle">0100</text>
+        </g>
+        <line x1="80" y1="69" x2="80" y2="95" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="200" y1="69" x2="200" y2="95" stroke="#2f5f8a" stroke-width="1.5"/>
+        <line x1="320" y1="69" x2="320" y2="95" stroke="#7a5a9e" stroke-width="1.5"/>
+        <line x1="440" y1="69" x2="440" y2="95" stroke="#c98a1f" stroke-width="1.5"/>
+        <g font-size="18" font-family="monospace" font-weight="700">
+          <text x="80" y="118" text-anchor="middle" fill="#0f5132">1</text>
+          <text x="200" y="118" text-anchor="middle" fill="#1f4a68">2</text>
+          <text x="320" y="118" text-anchor="middle" fill="#5b3d80">3</text>
+          <text x="440" y="118" text-anchor="middle" fill="#8a5a0f">4</text>
+        </g>
+        <text x="300" y="140" font-size="13" text-anchor="middle" fill="#12211a">0001 0010 0011 0100 (2 進) = 0x1234 (16 進) ― 中身の値はまったく同じ</text>
+      </svg>
+      <p class="cap">図: 16 進数は 2 進数 4 桁をまとめて 1 文字で書く、人間向けの省略記法。CPU 内部の値そのものは変わらない。</p>
+    </div>
+    <p>rj32 の命令エンコーディング (第 10 回) やメモリアドレスは、ドキュメント中でもすべて 16 進数で書かれています。これは表記の都合であり、CPU の回路が「16 進数で考えている」わけではありません。回路にとっての実体は、あくまで 16 本の配線それぞれの 0/1 です。</p>
+  </section>
+
+  <!-- ===== 解説パート 2: 2の補数 ===== -->
+  <section>
+    <h2>2. 2 の補数 ― 引き算を足し算の回路だけでやる</h2>
+    <p>第 03 回で作った全加算器は<b>足し算</b>しかできません。引き算専用の回路をもう 1 セット作らずに済ませるため、CPU は負の数を<b>2 の補数 (two's complement)</b> という決め方で表し、「引く」ことを「2 の補数にしてから足す」ことに変換します。</p>
+    <p>決め方は単純です。16 ビットのうち、最上位ビットが 1 の並びは負の数として読みます。ある数 $N$ を負にするには、全ビットを反転させて 1 を足します ($-N = \overline{N} + 1$)。これは Digital のコンポーネント一覧にも<b>Negation (2th complement)</b> という専用部品として載っている、標準的な操作です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="4ビットの2の補数の数直線">
+        <text x="280" y="18" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">4 ビットで考える 2 の補数 (輪になった数直線)</text>
+        <circle cx="280" cy="130" r="90" fill="none" stroke="#999" stroke-dasharray="3 4"/>
+        <g font-size="12" font-family="monospace" text-anchor="middle">
+          <text x="280" y="48">0000=0</text>
+          <text x="370" y="75">0001=1</text>
+          <text x="400" y="130">0010=2</text>
+          <text x="370" y="185">0011=3</text>
+          <text x="280" y="212">0100=4</text>
+          <text x="190" y="185">1101=-3</text>
+          <text x="160" y="130">1110=-2</text>
+          <text x="190" y="75">1111=-1</text>
+        </g>
+        <path d="M280,56 L280,70" stroke="#0f5132" stroke-width="1.5" marker-end="url(#arr-tc)"/>
+        <text x="280" y="90" font-size="11" fill="#4a5d54" text-anchor="middle">+1 ずつ時計回り</text>
+        <defs><marker id="arr-tc" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 2 の補数では、数は輪になって並ぶ。0 から時計回りに +1 していくと、最上位ビットが 1 の側 (1111, 1110, …) は負の数として読む。0 の両隣が +1 と -1 になっている。</p>
+    </div>
+    <p>この輪の表現のおかげで、CPU の足し算回路は「足す数が正か負か」を気にする必要がありません。$3 + (-1)$ は、ビット列としては単純に $0011 + 1111$ を足すだけで、輪を 1 周余分に回って $0010 = 2$ が出てきます。あふれた分 (1 周分) は後で説明する桁上がりとして処理されます。</p>
+  </section>
+
+  <!-- ===== 解説パート 3: 桁上がりとオーバーフローの違い ===== -->
+  <section>
+    <h2>3. 桁上がりとオーバーフロー ― 「あふれ」は 2 種類ある</h2>
+    <p>16 ビットの計算結果が 16 ビットの枠に収まらないとき、何が起きているかは<b>符号なし (unsigned) として見るか、符号付き (signed) として見るか</b>で違う名前がつきます。Digital の Adder 部品の定義では、キャリー出力 $c_o$ は「結果に繰り上がり (overflow) があれば 1」と説明されますが、これは<b>符号なしの枠からあふれた</b>という意味での桁上がりです。符号付きの数を扱うときに意味のある「オーバーフロー (符号が壊れる)」とは別の現象だと区別して理解する必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="桁上がりとオーバーフローの違いの比較">
+        <text x="150" y="18" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">符号なしで見る: 桁上がり (Carry)</text>
+        <text x="150" y="42" font-size="13" font-family="monospace" text-anchor="middle">0xFFFF (65535) + 1</text>
+        <rect x="40" y="55" width="220" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/>
+        <text x="150" y="80" font-size="13" text-anchor="middle" fill="#0f5132">結果は 0x0000、17 桁目へ桁上がり</text>
+        <text x="150" y="110" font-size="12" text-anchor="middle" fill="#4a5d54">C フラグが立つ。符号付きとしては破綻していない</text>
+        <text x="470" y="18" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">符号付きで見る: オーバーフロー</text>
+        <text x="470" y="42" font-size="13" font-family="monospace" text-anchor="middle">0x7FFF (+32767) + 1</text>
+        <rect x="360" y="55" width="220" height="40" rx="6" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/>
+        <text x="470" y="80" font-size="13" text-anchor="middle" fill="#b5401f">結果は 0x8000 (-32768) に化ける</text>
+        <text x="470" y="110" font-size="12" text-anchor="middle" fill="#4a5d54">C フラグは立たない。符号だけが壊れる</text>
+        <text x="310" y="150" font-size="12.5" text-anchor="middle" fill="#12211a">同じ「16 ビットの枠からあふれる」でも、符号なしと符号付きでは別の壊れ方をする</text>
+        <text x="310" y="175" font-size="12.5" text-anchor="middle" fill="#12211a">桁上がり (C) と オーバーフロー は、別のフラグ・別の判定条件が必要になる</text>
+      </svg>
+      <p class="cap">図: 桁上がりは「符号なしの枠からあふれた」、オーバーフローは「符号付きの符号が壊れた」。片方が起きても、もう片方は起きないことがある。</p>
+    </div>
+    <p>rj32 の命令セットには、桁上がりを運ぶ <b>C (キャリー) フラグ</b>はありますが、符号付き専用の独立したオーバーフローフラグはありません。負の数の加減算で符号が正しいかどうかは、次節で見る <code>if.lt</code> / <code>if.ge</code> といった符号付き比較命令の結果から判断する必要があります。</p>
+  </section>
+
+  <!-- ===== 解説パート 4: 符号付き/符号なし比較とフラグ ===== -->
+  <section>
+    <h2>4. 符号付き・符号なし比較とフラグ ― 同じビット列でも答えが変わる</h2>
+    <p>CPU の回路は、16 本の配線に入っている 0/1 のパターンそのものしか見ていません。<b>そのパターンを「符号付きの数」として読むか「符号なしの数」として読むか</b>は、命令が決めることです。rj32 の <code>docs/instructions.md</code> には、まったく仕組みの似た比較命令が符号付き版と符号なし版の 2 組用意されています。</p>
+    <ul>
+      <li><code>if.lt rd, rs</code> ― <code>S &lt;- !(rd &lt; rsval)</code> (<b>符号付き</b>で比較)</li>
+      <li><code>if.ult rd, rs</code> ― <code>S &lt;- !(rd &lt; rsval)</code> (<b>符号なし</b>で比較)</li>
+    </ul>
+    <p>同じ「less than」でも、符号付きか符号なしかでビットパターンの解釈が変わるため、答えが逆になることがあります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 170" role="img" aria-label="同じビットパターンでも符号付き/符号なしで比較結果が変わる図">
+        <text x="280" y="18" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">rd = 0xFFFF, rs = 0x0001 を比較する</text>
+        <rect x="30" y="35" width="230" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="145" y="58" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">if.ult (符号なし)</text>
+        <text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">65535 &lt; 1 ? → 偽</text>
+        <rect x="300" y="35" width="230" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="415" y="58" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">if.lt (符号付き)</text>
+        <text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">-1 &lt; 1 ? → 真</text>
+        <text x="280" y="130" font-size="13" text-anchor="middle" fill="#12211a">同じビット列 0xFFFF でも、符号なしでは 65535、符号付きでは -1</text>
+        <text x="280" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらの命令を使うかで、比較の答えがまったく逆になる</text>
+      </svg>
+      <p class="cap">図: 0xFFFF というビット列は符号なしでは最大値 65535、符号付きでは -1。使う比較命令 (if.lt か if.ult か) を間違えると、意図と逆の答えが出る。</p>
+    </div>
+    <p>第 03 回で見たとおり、比較は基本的に引き算 (<code>rd - rsval</code>) の結果を見て判定します。<b>C (キャリー) フラグ</b>は「次の命令にキャリーがあるかどうか」を伝える役目で、<code>docs/instructions.md</code> の定義にあるとおり、addc/subc のような接頭命令が使い終わると役目を終え、次の命令の後にリセットされます。rj32 では比較のたびに専用の「大小関係フラグ」を保持するのではなく、その都度 if.xx 命令が内部で引き算を行い、結果に応じて<b>S (スキップ) フラグ</b>を立てるという設計です。</p>
+  </section>
+
+  <!-- ===== 解説パート 5: addc/subcによる多ワード演算 ===== -->
+  <section>
+    <h2>5. addc と subc ― 16 ビットを超える数を足す</h2>
+    <p>rj32 のレジスタは 16 ビットなので、1 回の <code>add</code> では 65535 までの数しか扱えません。もっと大きな数 (64 ビットなど) を足したいとき、<code>docs/instructions.md</code> が示す方法は、下の桁から順に足し、桁上がりを次の桁に持ち越すという、筆算と同じ考え方です。これを行うのが <code>addc</code> (キャリー付き加算) と <code>subc</code> (キャリー付き減算) です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="addcで64ビットの足し算を4つのレジスタ対に分けて行う図">
+        <text x="20" y="20" font-size="13" font-family="monospace" fill="#12211a">addc r1, r5</text>
+        <text x="20" y="60" font-size="13" font-family="monospace" fill="#12211a">addc r2, r6</text>
+        <text x="20" y="100" font-size="13" font-family="monospace" fill="#12211a">addc r3, r7</text>
+        <text x="20" y="140" font-size="13" font-family="monospace" fill="#0f5132" font-weight="700">add  r4, r8  ; このキャリーを使う</text>
+        <path d="M150,25 C220,40 220,50 150,65" stroke="#b5401f" stroke-width="2" fill="none" marker-end="url(#arr-ac1)"/>
+        <path d="M150,65 C220,80 220,90 150,105" stroke="#b5401f" stroke-width="2" fill="none" marker-end="url(#arr-ac1)"/>
+        <path d="M150,105 C220,120 220,130 150,145" stroke="#b5401f" stroke-width="2" fill="none" marker-end="url(#arr-ac1)"/>
+        <text x="400" y="85" font-size="12.5" text-anchor="middle" fill="#b5401f">C フラグが各段から次の段へ渡っていく</text>
+        <text x="20" y="180" font-size="13" font-family="monospace" fill="#4a5d54">add  r9, r10 ; この add はキャリーを使わない (独立した計算)</text>
+        <text x="280" y="210" font-size="12.5" text-anchor="middle" fill="#12211a">r1:r2:r3:r4 という 4 本のレジスタをつないで、64 ビットの 1 つの数として足す</text>
+        <defs><marker id="arr-ac1" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#b5401f"/></marker></defs>
+      </svg>
+      <p class="cap">図: instructions.md に実例がある 64 ビット加算。addc が 3 回続いたあとの add だけがキャリーを引き継ぎ、その後ろの add は独立した計算に戻る。</p>
+    </div>
+    <p>ここで注意が必要なのは、<b>C フラグが「次の 1 命令だけ」に効く</b>という寿命の短さです。<code>docs/instructions.md</code> には「キャリーフラグは、それを使った命令が終わると、次の命令のためにリセットされる」と明記されています。<code>addc</code>・<code>subc</code> が並んでいる間はキャリーが途切れずに伝わりますが、途中に全く無関係な命令を 1 つでも挟むと、キャリーの情報は失われます。</p>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント ― キャリーとオーバーフローを混同しない</h2>
+    <p>自分で ALU やテストプログラムを作るとき、最も起きやすい間違いは<b>「桁上がりが起きていないから計算は正しい」と思い込むこと</b>です。符号付きの数を扱っているときは、桁上がり (C フラグ) が立っていなくても、オーバーフロー (符号が壊れる現象) は起こりえます。第 3 節の図のとおり、0x7FFF + 1 では C フラグは立たないのに、符号は正から負に反転してしまいます。rj32 にはオーバーフロー専用のフラグが無いため、符号付きの計算結果が正しいかどうかを確認したいプログラムは、<code>if.lt</code> / <code>if.ge</code> のような符号付き比較命令を使って自分でチェックする必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 150" role="img" aria-label="キャリーの有無だけでは符号付き計算の正しさを判定できない図">
+        <rect x="20" y="30" width="230" height="80" rx="8" fill="#dcf0e4" stroke="#198754" stroke-width="2"/>
+        <text x="135" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">C フラグだけを見る</text>
+        <text x="135" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">「立っていないから安全」</text>
+        <text x="135" y="98" font-size="12" text-anchor="middle" fill="#b5401f">→ 符号付きの破綻を見逃す</text>
+        <rect x="310" y="30" width="230" height="80" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="425" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">符号付き比較で確認する</text>
+        <text x="425" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">if.lt / if.ge で符号を確認</text>
+        <text x="425" y="98" font-size="12" text-anchor="middle" fill="#0f5132">→ オーバーフローを検出できる</text>
+      </svg>
+      <p class="cap">図: C フラグの有無だけでは符号付き計算の正しさは分からない。符号付き専用のオーバーフローフラグが無い rj32 では、比較命令で自分で確かめる必要がある。</p>
+    </div>
+    <p>もう 1 つの実装上の注意は、<code>addc</code>・<code>subc</code> が「割り込みを受け付けない」命令であることです。<code>docs/instructions.md</code> によれば、これらの命令の最中に割り込みが起きるとキャリーの状態が失われてしまうため、意図的に割り込み禁止として設計されています。複数ワードの演算をまたぐ命令列を書くときは、途中に割り込みが入らないことを前提にしてよい、という設計上の約束を踏まえておく必要があります。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj45/rj32: docs/instructions.md</a> ― add/sub/addc/subc の記号的な定義と例、if.lt/if.ge/if.ult/if.uge の符号付き・符号なし比較の定義、C (キャリー) フラグと S (スキップ) フラグの定義、64 ビット加算の asm 例、addc/subc が割り込みを禁止する理由の一次情報。</li>
+      <li><a href="https://github.com/hneemann/Digital/releases/download/v0.31/Doc_English.pdf" target="_blank" rel="noopener">Digital 公式マニュアル (Doc_English.pdf, v0.31)</a> ― 12.1 Adder / 12.2 Subtract の c_i (キャリー入力) ・ c_o (キャリー出力) の定義、12.6 Comparator の Signed Operation (2 の補数での符号付き比較) 属性、12.7 Negation (2 の補数での符号反転) の定義を本文に使用した。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-combinational.html">← 第 03 回 組み合わせ回路</a><a href="./cpu-index.html">目次</a><a href="./cpu-sequential.html">第 05 回 順序回路と時間 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '16 進数が CPU の設計やドキュメントでよく使われる理由として、最も正確な説明はどれか？',
+    opts: [
+      'CPU の回路が内部で 16 進数を直接計算しているため、16 進数の方が回路の実体に近いから',
+      '2 進数 4 桁がちょうど 16 進数 1 桁に対応し、人間が 16 桁の 2 進数を読みやすく省略できるから',
+      '16 進数を使うと、2 進数より少ないビット数で同じ大きさの数を表せるから',
+      '16 進数は 10 進数よりコンピュータにとって計算が高速な数の表現方式だから',
+      '2 進数では奇数が表せないため、奇数を扱うときだけ 16 進数が必要になるから'
+    ],
+    ans: 1,
+    exps: [
+      'CPU の回路が実際に処理しているのは配線の 0/1 (2 進数) であり、16 進数で直接計算しているわけではない。16 進数はあくまで人間向けの表記。',
+      '<b>これが正解。</b>$2^4=16$ なので 2 進数 4 桁は 16 進数 1 桁にきれいに対応する。16 桁の 2 進数を 4 桁の 16 進数にまとめることで、人間が読み書きしやすくなる。',
+      '16 進数で書いても、表している数の大きさ (ビット数) は変わらない。表記が短くなるだけで、内部のビット数が減るわけではない。',
+      '計算の速さは数の表記方法 (2 進数か 16 進数か) では変わらない。CPU の回路はどちらの表記でも同じ 2 進数の配線を処理している。',
+      '2 進数でも奇数は普通に表せる (例: 0001 = 1)。奇数が表せないという前提自体が誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の変換図を思い出してください。2 進数 4 桁がそのまま 16 進数 1 桁になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 130" aria-label="2進数4桁と16進数1桁の対応"><rect x="40" y="30" width="100" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="90" y="55" font-size="13" text-anchor="middle" font-family="monospace">0100</text><text x="220" y="55" font-size="16" text-anchor="middle" fill="#4a5d54">→</text><rect x="280" y="30" width="60" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="310" y="55" font-size="15" text-anchor="middle" font-family="monospace" font-weight="700">4</text><text x="240" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">2 進数 4 桁 = 16 進数 1 桁 (情報量は同じ)</text></svg>'
+          + '<p class="cap">図: 16 進数は 2 進数をまとめて短く書くための表記。</p></div>'
+    }
+  },
+  {
+    q: 'CPU が負の数を「2 の補数」という方式で表す、最大の理由は何か？',
+    opts: [
+      '2 の補数を使うと、負の数の方が正の数より少ないビット数で表せるようになるから',
+      '2 の補数は人間が 10 進数の負の数を読みやすくするための表記上の工夫だから',
+      '足し算の回路だけで引き算も計算できるようになり、専用の引き算回路を別に作らなくて済むから',
+      '2 の補数を使うと、桁上がりという現象自体が二度と起こらなくなるから',
+      '2 の補数は分数や小数を正確に表現するために導入された方式だから'
+    ],
+    ans: 2,
+    exps: [
+      '2 の補数でも負の数のビット数は正の数と同じ (16 ビットの枠の中で表現する)。ビット数が減るわけではない。',
+      '2 の補数はビットパターンのレベルでの決め方であり、10 進数の見た目を読みやすくするための表記上の工夫ではない。',
+      '<b>これが正解。</b>2 の補数で負の数を表すと、「引く」という操作を「2 の補数にしてから足す」という操作に変換できる。これにより、足し算の回路 (全加算器) だけで引き算も実現できる。',
+      '桁上がりは 2 の補数を使っても普通に起こる現象で、2 の補数がこれを無くすわけではない。',
+      '2 の補数は整数の負の数を表すための方式であり、分数や小数の表現とは別の話題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>2 の補数を使うことで、引き算の専用回路が不要になる流れを示します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="2の補数で引き算を足し算にする"><rect x="20" y="35" width="190" height="60" rx="8" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/><text x="115" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f">A - B</text><text x="115" y="80" font-size="11.5" text-anchor="middle" fill="#b5401f">(専用の引き算回路が必要)</text><text x="235" y="65" font-size="16" text-anchor="middle" fill="#4a5d54">→</text><rect x="260" y="35" width="280" height="60" rx="8" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="400" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">A + (2 の補数にした B)</text><text x="400" y="80" font-size="11.5" text-anchor="middle" fill="#0f5132">足し算回路だけで済む</text></svg>'
+          + '<p class="cap">図: 2 の補数のおかげで、引き算を足し算回路だけで処理できる。</p></div>'
+    }
+  },
+  {
+    q: '次の図のような 4 ビットの「輪になった数直線」で、0000 (=0) から反時計回りに 1 つ進んだマスの値は何か？<br><svg viewBox="0 0 320 180" width="320" height="180" aria-label="4ビットの輪の問題"><circle cx="160" cy="95" r="70" fill="none" stroke="#999" stroke-dasharray="3 4"/><text x="160" y="35" font-size="13" text-anchor="middle" font-family="monospace">0000=0</text><text x="225" y="60" font-size="13" text-anchor="middle" font-family="monospace">0001=1</text><text x="95" y="60" font-size="13" text-anchor="middle" font-family="monospace" fill="#b5401f">????</text></svg>',
+    opts: [
+      '0010 (= 2)',
+      '1000 (= -8)',
+      '0111 (= 7)',
+      '1111 (= -1)',
+      '1110 (= -2)'
+    ],
+    ans: 3,
+    exps: [
+      '0010 は 0 から時計回りに 2 進んだ先の値であり、反時計回りに 1 進んだ値ではない。',
+      '1000 (=-8) はこの 4 ビットの輪で最も 0 から離れた値 (時計回りでも反時計回りでも半周した先) であり、1 つ進んだ値ではない。',
+      '0111 (=7) は正の数の最大値で、0 から時計回りに 7 進んだ先にある値。反時計回りの 1 つ先ではない。',
+      '<b>これが正解。</b>輪になった数直線では、0 の反時計回り隣は必ず -1 になる。2 の補数でビットパターンは全ビット 1 (1111) になる。',
+      '1110 (=-2) は 0 から反時計回りに 2 つ進んだ先の値であり、1 つ進んだ値ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>0 の両隣は、時計回りが +1、反時計回りが -1 になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 400 170" aria-label="0の両隣は+1と-1"><circle cx="200" cy="90" r="70" fill="none" stroke="#999" stroke-dasharray="3 4"/><text x="200" y="25" font-size="13" text-anchor="middle" font-family="monospace" font-weight="700">0000=0</text><text x="280" y="55" font-size="13" text-anchor="middle" font-family="monospace" fill="#0f5132">0001=1 (時計回り)</text><text x="110" y="55" font-size="13" text-anchor="middle" font-family="monospace" fill="#b5401f">1111=-1 (反時計回り)</text></svg>'
+          + '<p class="cap">図: 0 の隣は、進む方向によって +1 と -1 に分かれる。</p></div>'
+    }
+  },
+  {
+    q: '「桁上がり (Carry)」と「オーバーフロー」の違いについて、最も正確な説明はどれか？',
+    opts: [
+      '桁上がりとオーバーフローは同じ現象を指す別名であり、使い分ける必要は無い',
+      'オーバーフローは符号なしの枠からあふれた現象、桁上がりは符号付きの符号が壊れた現象を指す',
+      '桁上がりは符号なしの枠からあふれた現象、オーバーフローは符号付きの符号が壊れた現象を指す',
+      '桁上がりは足し算だけで起こり、オーバーフローは引き算だけで起こるという、演算の種類による違いである',
+      '桁上がりは 16 ビットのレジスタでは起こらず、32 ビット以上のレジスタでのみ起こる現象である'
+    ],
+    ans: 2,
+    exps: [
+      '2 つは異なる現象を指す別の言葉であり、同じ意味として使い分けなくてよいという説明は誤り。',
+      '名前の割り当てが逆になっている。符号なしの枠からあふれるのは桁上がり、符号付きの符号が壊れるのはオーバーフローという呼び方が正しい。',
+      '<b>これが正解。</b>桁上がりは「符号なしとして見たときに枠からあふれた」現象、オーバーフローは「符号付きとして見たときに符号が壊れた」現象。片方が起きても、もう片方は起きないことがある。',
+      '桁上がりも引き算で起こりうる (借り入れとして)。演算の種類による区別という説明は不正確。',
+      '桁上がりはビット数に関わらず、枠を使い切った時点で起こりうる現象であり、16 ビットのレジスタでも普通に発生する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の比較図を思い出してください。0xFFFF+1 は桁上がりだけ、0x7FFF+1 はオーバーフローだけが起きる例でした。</p>'
+          + '<div class="fig"><svg viewBox="0 0 520 150" aria-label="桁上がりとオーバーフローの対比のまとめ"><rect x="30" y="30" width="210" height="70" rx="8" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="135" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">桁上がり (Carry)</text><text x="135" y="78" font-size="12" text-anchor="middle" fill="#12211a">符号なしの枠からあふれた</text><rect x="280" y="30" width="210" height="70" rx="8" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/><text x="385" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">オーバーフロー</text><text x="385" y="78" font-size="12" text-anchor="middle" fill="#12211a">符号付きの符号が壊れた</text></svg>'
+          + '<p class="cap">図: 桁上がりとオーバーフローは別の現象であり、片方だけが起きることがある。</p></div>'
+    }
+  },
+  {
+    q: '次の図のように、rd = 0x7FFF (符号付きで +32767、16 ビットで表せる最大の正の数) に 1 を足した。結果と C フラグはどうなるか？<br><svg viewBox="0 0 360 90" width="360" height="90" aria-label="0x7FFFに1を足す図"><text x="180" y="25" font-size="14" text-anchor="middle" font-family="monospace">0x7FFF + 1 = ?</text><text x="180" y="55" font-size="13" text-anchor="middle">(符号付きで見ると +32767 + 1)</text></svg>',
+    opts: [
+      '結果は 0x8000 になり、C フラグも立つ',
+      '結果は 0x8000 (符号付きで -32768) になるが、C フラグは立たない',
+      '結果は 0x0000 になり、C フラグが立つ',
+      'エラーになり、CPU の計算が停止する',
+      '結果は 0x7FFF のまま変化しない'
+    ],
+    ans: 1,
+    exps: [
+      'C フラグは符号なしの枠からあふれたときに立つが、0x7FFF+1 は符号なしで見れば 32767+1=32768 でまだ 16 ビットの枠 (0〜65535) に収まっており、桁上がりは発生しない。',
+      '<b>これが正解。</b>ビット列としては単純に +1 されて 0x8000 になるが、これを符号付きとして読むと最上位ビットが立って -32768 になり、符号が壊れる (オーバーフロー)。符号なしでは枠を超えていないので C フラグは立たない。',
+      '0x0000 になるのは 0xFFFF (符号なしの最大値) に 1 を足した場合であり、0x7FFF に 1 を足した場合の結果ではない。',
+      'CPU の回路は配線の 0/1 を処理するだけで、この計算自体はエラーや停止を引き起こすものではない。意味の解釈 (符号付き) が壊れるだけ。',
+      '1 を足しているので、結果が元の値のまま変化しないことはない。足し算は必ず何らかの結果を返す。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の桁上がり/オーバーフローの比較図の、オーバーフロー側と同じパターンです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 140" aria-label="0x7FFF+1の結果"><text x="240" y="20" font-size="13" text-anchor="middle" fill="#12211a">0x7FFF (0111 1111 1111 1111) + 1</text><rect x="100" y="35" width="280" height="40" rx="8" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/><text x="240" y="60" font-size="13" text-anchor="middle" font-family="monospace" fill="#b5401f">= 0x8000 (1000 0000 0000 0000)</text><text x="240" y="100" font-size="13" text-anchor="middle" fill="#12211a">符号なしでは枠内 (C=0) だが、符号付きでは -32768 に化ける</text></svg>'
+          + '<p class="cap">図: ビット列は素直に +1 されるだけ。符号付きとして読んだときだけ破綻が見える。</p></div>'
+    }
+  },
+  {
+    q: 'rd = 0x8000 (16 ビットの全ビットのうち最上位だけが 1) を、rs = 0x0001 と比較する。if.lt rd, rs (符号付き) と if.ult rd, rs (符号なし) では、結果はどうなるか？',
+    opts: [
+      '符号付きでも符号なしでも、必ず同じ結果になる',
+      '符号付きでは「真 (rd が小さい)」、符号なしでも「真 (rd が小さい)」になる',
+      '符号付きでは「偽」、符号なしでも「偽」になる',
+      '符号付きでは「偽 (rd が小さくない)」、符号なしでは「真 (rd が小さい)」になる',
+      '符号付きでは「真 (rd が小さい)」、符号なしでは「偽 (rd が小さくない)」になる'
+    ],
+    ans: 4,
+    exps: [
+      'このビットパターンでは符号付きと符号なしで rd の意味が変わるため、必ず同じ結果になるとは限らない。',
+      '符号なしで見ると 0x8000 は 32768 であり、0x0001 (1) より大きい。符号なしで「rd が小さい」が真になるという説明は誤り。',
+      '符号付きで見ると 0x8000 は -32768 であり、0x0001 (1) より小さい。符号付きで「偽」になるという説明は誤り。',
+      '符号なしで見ると 0x8000 (32768) は 0x0001 (1) より大きいため「rd が小さい」は偽になる。説明が符号なしの結果と逆になっている。',
+      '<b>これが正解。</b>符号付きで見ると 0x8000 は -32768 で 1 より小さいため if.lt は真になる。符号なしで見ると 0x8000 は 32768 で 1 より大きいため if.ult は偽になる。同じビット列でも解釈次第で答えが逆になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>0x8000 というビット列は、符号付きでは最も小さい負の数、符号なしでは非常に大きな数になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 140" aria-label="0x8000の2つの読み方"><rect x="40" y="30" width="180" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="130" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">符号付きで読む</text><text x="130" y="78" font-size="13" text-anchor="middle" fill="#12211a">0x8000 = -32768 (小さい)</text><rect x="260" y="30" width="180" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="350" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">符号なしで読む</text><text x="350" y="78" font-size="13" text-anchor="middle" fill="#12211a">0x8000 = 32768 (大きい)</text></svg>'
+          + '<p class="cap">図: 同じビット列 0x8000 が、読み方によって「非常に小さい」と「非常に大きい」の両極端になる。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の instructions.md にある 64 ビット加算の例 (addc r1,r5 / addc r2,r6 / addc r3,r7 / add r4,r8) で、なぜ最初の 3 命令が add ではなく addc なのか？',
+    opts: [
+      '各桁の足し算で出た桁上がりを C フラグとして次の桁の足し算に引き継ぐ必要があるから',
+      'add 命令は 2 回以上連続で使うことができない制約があるから',
+      'addc は add よりも計算が速く実行される命令だから、できるだけ addc を使うのが基本だから',
+      'addc を使うと、レジスタの値が自動的に 2 倍になる特別な効果があるから',
+      'add 命令では 16 ビットを超える大きさの数を 1 つのレジスタに格納できないため、エラーになるから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>64 ビットの数は 16 ビットレジスタ 4 本に分けて格納されており、下の桁の足し算で出た桁上がりを、上の桁の足し算にそのまま引き継ぐ必要がある。addc はこの桁上がりを C フラグとして記録し、次の addc/add に渡す役目を持つ。',
+      'add 命令を連続して使えないという制約はなく、むしろ最後の add は単独でも問題なく使われている。',
+      'addc と add の間に実行速度の違いは述べられておらず、速いから使うという理由は本文の内容と合わない。',
+      'addc によってレジスタの値が自動的に 2 倍になるという効果は無く、addc は通常の加算に桁上がりの記録・利用を加えただけの命令。',
+      '1 つのレジスタは 16 ビットの枠を超える値を格納できないのはその通りだが、add 命令自体がエラーになるわけではなく、複数のレジスタに分けて計算するのが本文の対処法。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の addc チェーンの図を思い出してください。各段の桁上がりが次の段へ渡っていきます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 520 130" aria-label="addcチェーンの理由"><rect x="10" y="30" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="60" y="55" font-size="12" text-anchor="middle">addc r1,r5</text><rect x="140" y="30" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="190" y="55" font-size="12" text-anchor="middle">addc r2,r6</text><rect x="270" y="30" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="320" y="55" font-size="12" text-anchor="middle">addc r3,r7</text><rect x="400" y="30" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="450" y="55" font-size="12" text-anchor="middle">add r4,r8</text><path d="M110,50 L140,50" stroke="#b5401f" stroke-width="2" marker-end="url(#arr-bq7)"/><path d="M240,50 L270,50" stroke="#b5401f" stroke-width="2" marker-end="url(#arr-bq7)"/><path d="M370,50 L400,50" stroke="#b5401f" stroke-width="2" marker-end="url(#arr-bq7)"/><text x="260" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f">C フラグが桁から桁へ伝わる</text><defs><marker id="arr-bq7" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#b5401f"/></marker></defs></svg>'
+          + '<p class="cap">図: addc が桁上がりを次の段に渡すことで、16 ビットを超える数の足し算ができる。</p></div>'
+    }
+  },
+  {
+    q: 'instructions.md の定義によれば、if.lt のような if.cc 命令が「条件が成立しない」と判定したとき、実際に何が起こるか？',
+    opts: [
+      'プログラムカウンタが、あらかじめ決められた固定の番地にジャンプする',
+      'CPU がその場で停止し、以後の命令を一切実行しなくなる',
+      'C (キャリー) フラグが反転し、次の算術命令の結果に影響を与える',
+      '何も起こらず、次の 1 命令がそのまま実行される',
+      'S (スキップ) フラグが立ち、次の 1 命令 (と、それに続く prefix 命令があればそれも) がスキップされる'
+    ],
+    ans: 4,
+    exps: [
+      '固定番地へのジャンプは jump 命令の働きであり、if.cc 命令が行うのはジャンプ先を変えることではない。',
+      'CPU が停止するのは halt/error 命令の働きであり、if.cc 命令の条件不成立とは別の動作。',
+      'C フラグはキャリー (桁上がり) を運ぶためのフラグであり、if.cc の条件不成立によって反転するという仕様は定義にない。',
+      '条件不成立のときに「何も起こらず次がそのまま実行される」のは、条件が成立したとき (スキップしない場合) の動作であり、設問が問うているのは成立しなかった場合である。',
+      '<b>これが正解。</b>instructions.md の定義では、if.cc が条件不成立と判定すると S (スキップ) フラグが立ち、次の 1 命令 (imm のような prefix 命令が続く場合はそれも含めて) が実行されずスキップされる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>if.cc は分岐ではなく「次の命令を実行するかどうか」を切り替える、スキップという仕組みです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 150" aria-label="if.ccのスキップの仕組み"><rect x="10" y="30" width="110" height="50" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="65" y="59" font-size="12" text-anchor="middle">if.lt rd,rs</text><rect x="150" y="30" width="150" height="50" rx="6" fill="#f1f1f1" stroke="#999" stroke-width="1.5"/><text x="225" y="52" font-size="11" text-anchor="middle" fill="#888">次の命令</text><text x="225" y="68" font-size="11" text-anchor="middle" fill="#888">(不成立ならスキップ)</text><rect x="330" y="30" width="140" height="50" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="400" y="59" font-size="12" text-anchor="middle">その次の命令</text><text x="240" y="115" font-size="12.5" text-anchor="middle" fill="#12211a">S フラグが立つと、1 つだけ命令が無視されて先に進む</text></svg>'
+          + '<p class="cap">図: if.cc 命令の条件が不成立だと S フラグが立ち、直後の 1 命令だけがスキップされる。</p></div>'
+    }
+  },
+  {
+    q: 'instructions.md によれば、addc や subc の実行中に割り込みが禁止されているのはなぜか？',
+    opts: [
+      '割り込み処理そのものが addc/subc という命令と名前が衝突してしまうから',
+      '割り込みが起きると CPU のクロックが停止し、計算が永久に終わらなくなるから',
+      'addc/subc は実行時間が他の命令より極端に長く、割り込みを受け付ける余裕が無いから',
+      '割り込みが入ると、桁上がりを次の命令に渡すための状態 (C フラグ) が失われてしまうから',
+      '割り込みを許可すると、addc/subc の結果が必ず不正確な値になるよう CPU が設計されているから'
+    ],
+    ans: 3,
+    exps: [
+      '名前の衝突という問題は述べられておらず、割り込み禁止の理由としては的外れ。',
+      '割り込みが起きても CPU のクロック自体が停止するわけではない。割り込み処理自体も通常は数命令で完了する。',
+      'addc/subc の実行時間が他の命令より極端に長いという記述はなく、実行時間の長さが割り込み禁止の理由ではない。',
+      '<b>これが正解。</b>addc/subc は次の命令に渡すべき桁上がりの状態を C フラグに保持している。この途中に割り込みが入ってしまうと、桁上がりの情報が失われ、複数ワードの計算が壊れてしまう。これを防ぐため、割り込みが禁止されている。',
+      '割り込みを許可すると結果が必ず不正確になるよう設計されている、という説明は誤り。問題は結果の正しさそのものではなく、桁上がりの状態が失われることにある。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>桁上がりの橋が架かっている途中で割り込みが入ると、橋が途切れてしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 140" aria-label="割り込みでキャリーが失われる図"><rect x="20" y="40" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="70" y="65" font-size="12" text-anchor="middle">addc r1,r5</text><path d="M120,60 L190,60" stroke="#b5401f" stroke-width="2" stroke-dasharray="4 4"/><text x="155" y="25" font-size="11" fill="#b5401f">C を渡すはずの橋</text><rect x="190" y="40" width="40" height="40" rx="6" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/><text x="210" y="65" font-size="18" text-anchor="middle" fill="#b5401f">!</text><rect x="260" y="40" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="310" y="65" font-size="12" text-anchor="middle">addc r2,r6</text><text x="240" y="110" font-size="12.5" text-anchor="middle" fill="#12211a">割り込みが挟まると、C フラグの状態が失われる</text></svg>'
+          + '<p class="cap">図: addc/subc の間に割り込みが入ると、桁上がりの橋が途切れて計算が壊れる。</p></div>'
+    }
+  },
+  {
+    q: '次の 2 つの命令列のうち、32 ビットの数を 2 つ (それぞれ 16 ビットレジスタ 2 本に分けて格納) 正しく足し算できているのはどちらか？<br>①: addc r1,r3 に続けて add r2,r4　②: add r1,r3 に続けて add r2,r4',
+    opts: [
+      '②のみ正しい。addc は上位ワードの計算には使ってはいけない命令だから',
+      'どちらも正しい。add と addc はどのような順番で使っても同じ結果になるから',
+      'どちらも誤り。32 ビットの計算には imm 命令を使わなければならないから',
+      '②のみ正しい。先に下位ワードを addc で計算すると桁上がりが消えてしまうから',
+      '①のみ正しい。下位ワードを addc で計算し、その桁上がりを上位ワードの add に引き継ぐ必要があるから'
+    ],
+    ans: 4,
+    exps: [
+      'addc は上位ワード専用というわけではなく、むしろ下位ワードの計算で使い、桁上がりを記録する側の命令として使う。',
+      '下位ワードの計算に add (桁上がりを記録しない) を使うと、上位ワードに渡すべき桁上がりの情報が失われるため、順番や命令の選び方によって結果は変わる。',
+      'imm 命令は即値を拡張するための仕組みであり、32 ビットの 2 ワード加算に必須というわけではない。',
+      'addc で下位ワードを計算しても桁上がりは消えず、むしろ C フラグとして記録され、次の命令 (上位ワードの add) に引き継がれる。',
+      '<b>これが正解。</b>下位ワード (r1, r3) の足し算を addc で行うと、そこで出た桁上がりが C フラグに記録され、続く上位ワード (r2, r4) の add がその C フラグを使って計算する。これにより 32 ビットとして正しい答えになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>下位ワードの桁上がりを上位ワードに渡せるかどうかが、2 つの命令列の違いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 520 150" aria-label="addcとaddの組み合わせの正誤"><text x="130" y="20" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">① addc → add</text><rect x="20" y="35" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="70" y="60" font-size="11.5" text-anchor="middle">addc r1,r3</text><path d="M120,55 L150,55" stroke="#198754" stroke-width="2" marker-end="url(#arr-bq10)"/><rect x="150" y="35" width="100" height="40" rx="6" fill="#dcf0e4" stroke="#198754" stroke-width="2"/><text x="200" y="60" font-size="11.5" text-anchor="middle">add r2,r4</text><text x="130" y="95" font-size="12" text-anchor="middle" fill="#0f5132">C が引き継がれて正しい</text><text x="390" y="20" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">② add → add</text><rect x="320" y="35" width="100" height="40" rx="6" fill="#f1f1f1" stroke="#999" stroke-width="1.5"/><text x="370" y="60" font-size="11.5" text-anchor="middle" fill="#888">add r1,r3</text><rect x="450" y="35" width="60" height="40" rx="6" fill="#f1f1f1" stroke="#999" stroke-width="1.5"/><text x="480" y="60" font-size="11" text-anchor="middle" fill="#888">add r2,r4</text><text x="390" y="95" font-size="12" text-anchor="middle" fill="#b5401f">桁上がりが記録されず失われる</text><defs><marker id="arr-bq10" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#198754"/></marker></defs></svg>'
+          + '<p class="cap">図: 下位ワードを addc にすることで、桁上がりが上位ワードの add に引き継がれる。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

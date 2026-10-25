@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>レジスタファイル ― 読み 2 か所・書き 1 か所を同時に行う小さな記憶</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 08 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>レジスタファイル ― 読み 2 か所・書き 1 か所を同時に行う小さな記憶</h1>
+  <p>16 本のレジスタをただ並べるだけでは終わらない。同時に 2 か所読んで 1 か所書く、しかも同じアドレスを読み書きしたらどうなるかという約束まで含めて設計する</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 05 回 <a href="./cpu-sequential.html">順序回路と時間</a>、第 06 回 <a href="./cpu-buses-wires.html">配線とバス</a></p>
+  <p class="intro">第 05 回のレジスタは 1 個の値を覚えるだけの部品でした。CPU には <code>add rd, rs</code> のように、2 つのレジスタを同時に読んで 1 つのレジスタに書き戻す命令がたくさんあるので、レジスタを 16 本ただ並べるだけでなく、「2 か所同時に読めて、1 か所に書き込める」窓口をまとめて 1 つの部品にする必要があります。これが<b>レジスタファイル</b>です。rj32 の <code>dig/regfile.dig</code> を読むと、Digital が用意している <code>RegisterFile</code> という部品をそのまま使っていて、読み出しと書き込みの間に隠れた約束があることが分かります。結論を先に言うと、レジスタファイルの設計で一番迷うのは本数や幅ではなく、「同じアドレスを同時に読み書きしたら、新しい値と古い値のどちらが見えるか」という約束の方です。</p>
+
+  <!-- ===== 解説パート 1: レジスタファイルとは何か ===== -->
+  <section>
+    <h2>1. レジスタファイルとは何か ― 小さな共有メモリ</h2>
+    <p>rj32 には 16 本のレジスタがあり (第 10 回で詳しく扱う ISA の話にもつながります)、各本は 16 ビットです。この 16 本をひとまとめにして、アドレスで選んで読み書きできる部品にしたのが<b>レジスタファイル</b>です。rj32 の <code>dig/regfile.dig</code> を見ると、Digital の組み込み部品である <code>RegisterFile</code> がそのまま使われていて、属性は <code>Bits=16</code> (1 本の幅)・<code>AddrBits=4</code> (4 ビットのアドレスで 2^4 = 16 本を選べる) となっています。レジスタファイルは「アドレス機能を持つ、複数本のレジスタの集合」と考えると分かりやすく、第 09 回で扱う RAM とよく似た構造を持ちますが、ポートの数が違います。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 170" role="img" aria-label="16本のレジスタをまとめたレジスタファイルの図">
+        <text x="280" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">レジスタファイル (16 本 x 16 ビット)</text>
+        <rect x="40" y="35" width="480" height="110" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <g font-size="11" fill="#1f4a68" text-anchor="middle">
+          <text x="80" y="55">r0</text><text x="140" y="55">r1</text><text x="200" y="55">r2</text><text x="260" y="55">r3</text>
+          <text x="320" y="55">…</text><text x="380" y="55">r13</text><text x="440" y="55">r14</text><text x="480" y="55">r15</text>
+        </g>
+        <line x1="40" y1="65" x2="520" y2="65" stroke="#2f5f8a" stroke-width="1"/>
+        <text x="280" y="90" font-size="12" text-anchor="middle" fill="#12211a">アドレス (4bit) で 16 本のどれかを選ぶ</text>
+        <text x="280" y="115" font-size="12" text-anchor="middle" fill="#12211a">各本は 16 ビット幅</text>
+        <text x="280" y="135" font-size="11.5" text-anchor="middle" fill="#4a5d54">Digital の RegisterFile: Bits=16, AddrBits=4</text>
+      </svg>
+      <p class="cap">図: 16 本の 16 ビットレジスタを、4 ビットのアドレスで選べる 1 つの部品にまとめたのがレジスタファイル。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: ポート構成 ===== -->
+  <section>
+    <h2>2. ポート構成 ― 読み 2 か所・書き 1 か所</h2>
+    <p>Digital の <code>RegisterFile</code> 部品は、入力に <code>Din</code> (書き込むデータ)・<code>we</code> (書き込み許可)・<code>Rw</code> (書き込み先のアドレス)・<code>C</code> (クロック)・<code>Ra</code>・<code>Rb</code> (読み出す 2 つのアドレス) を持ち、出力に <code>Da</code>・<code>Db</code> (それぞれ <code>Ra</code>・<code>Rb</code> が指すレジスタの値) を持ちます。rj32 の <code>dig/regfile.dig</code> ではこれらに <code>wrval</code>・<code>wr</code>・<code>rd</code>・<code>clock</code>・<code>rs</code> という名前を付け、出力を <code>rdval</code>・<code>rsval</code> と呼んでいます。<code>add rd, rs</code> のような命令は、<code>rd</code> を左オペランドの読み出しアドレスと書き込み先の両方に使い、<code>rs</code> を右オペランドの読み出しアドレスに使うので、2 読み 1 書きという構成がちょうど合います。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 200" role="img" aria-label="レジスタファイルの読み2書き1のポート構成図">
+        <rect x="200" y="30" width="160" height="140" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="280" y="105" font-size="15" text-anchor="middle" fill="#0f5132" font-weight="700">RegisterFile</text>
+        <text x="20" y="48" font-size="12" fill="#12211a">wrval (Din)</text>
+        <line x1="20" y1="55" x2="200" y2="55" stroke="#198754" stroke-width="2"/>
+        <text x="20" y="78" font-size="12" fill="#12211a">wr (we)</text>
+        <line x1="20" y1="85" x2="200" y2="80" stroke="#198754" stroke-width="2"/>
+        <text x="20" y="108" font-size="12" fill="#b5401f" font-weight="700">rd (Rw / Ra)</text>
+        <line x1="20" y1="115" x2="200" y2="105" stroke="#b5401f" stroke-width="2"/>
+        <text x="20" y="138" font-size="12" fill="#b5401f" font-weight="700">rs (Rb)</text>
+        <line x1="20" y1="145" x2="200" y2="130" stroke="#b5401f" stroke-width="2"/>
+        <text x="20" y="178" font-size="12" fill="#12211a">clock (C)</text>
+        <line x1="20" y1="162" x2="200" y2="155" stroke="#198754" stroke-width="2"/>
+        <text x="400" y="58" font-size="12.5" fill="#0f5132" font-weight="700">rdval (Da)</text>
+        <line x1="360" y1="65" x2="520" y2="65" stroke="#0f5132" stroke-width="2"/>
+        <text x="400" y="113" font-size="12.5" fill="#0f5132" font-weight="700">rsval (Db)</text>
+        <line x1="360" y1="120" x2="520" y2="120" stroke="#0f5132" stroke-width="2"/>
+      </svg>
+      <p class="cap">図: rd は書き込み先と左オペランドの読み出しの両方に使われ、rs は右オペランドの読み出しに使われる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: 書き込みと読み出しの非対称性 ===== -->
+  <section>
+    <h2>3. 書き込みはクロックの立ち上がりだけ、読み出しはいつも今のアドレス</h2>
+    <p>Digital の <code>RegisterFile.java</code> を読むと、書き込みと読み出しの扱いが非対称になっていることが分かります。書き込みは <code>we</code> が 1 かつクロックが立ち上がった瞬間だけ行われる、第 05 回で見た「クロックの立ち上がりで確定する」という約束に従う操作です。一方、読み出しの出力 <code>Da</code>・<code>Db</code> は、<code>Ra</code>・<code>Rb</code> が指すアドレスの内容をそのクロックのタイミングで都度読み直す動作で、アドレスを変えればすぐに別のレジスタの値が出てきます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="書き込みは立ち上がりだけ読み出しは常に反映される図">
+        <rect x="20" y="25" width="270" height="55" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="155" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">書き込み</text>
+        <text x="155" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">クロックの立ち上がり ・ we=1 のときだけ</text>
+        <rect x="310" y="25" width="270" height="55" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="445" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">読み出し</text>
+        <text x="445" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">Ra ・ Rb が指す値を常に出力</text>
+        <text x="300" y="115" font-size="12.5" text-anchor="middle" fill="#12211a">書き込みは「ある瞬間だけ」、読み出しは「いつも最新のアドレスの値」</text>
+      </svg>
+      <p class="cap">図: 書き込みはクロックの立ち上がりという特別な瞬間に限られるが、読み出しはアドレスが示す値を常に反映する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 同じクロックで読み書きすると何が起きるか ===== -->
+  <section>
+    <h2>4. 同じアドレスを同時に読み書きすると、どちらの値が見えるか</h2>
+    <p><code>add rd, rs</code> のような命令は、<code>rd</code> を読み出しアドレスにも書き込みアドレスにも使います。ここで疑問になるのが「同じクロックの瞬間に、同じアドレスへの書き込みと読み出しが重なったら、新しい値と古い値のどちらが見えるか」です。この約束には主に 2 つの方式があります。<b>write-first (書き込み優先)</b> は、同じアドレスなら書き込んだ新しい値がその場で読み出しにも反映される方式、<b>read-first (読み出し優先)</b> は、読み出しは書き込み前の古い値を返す方式です。Digital の <code>RegisterFile.java</code> を読むと、クロックの立ち上がりで先に <code>memory.setData()</code> を実行してから <code>Da</code>・<code>Db</code> を計算しているため、<b>write-first</b> の挙動になっています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 170" role="img" aria-label="write-firstとread-firstの違いの図">
+        <rect x="30" y="25" width="230" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="145" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">write-first (rj32 はこちら)</text>
+        <text x="145" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">同じアドレスなら新しい値が読める</text>
+        <rect x="300" y="25" width="230" height="60" rx="8" fill="#eceef0" stroke="#8a8f98" stroke-width="2"/>
+        <text x="415" y="50" font-size="13" text-anchor="middle" fill="#4a5d54" font-weight="700">read-first</text>
+        <text x="415" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">同じアドレスでも古い値が読める</text>
+        <text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#12211a">RegisterFile.java は書き込みを先に反映してから Da/Db を計算する</text>
+      </svg>
+      <p class="cap">図: Digital の RegisterFile は write-first。同じアドレスへの読み書きが重なると、新しい値が読み出し側にも見える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: ゼロレジスタの有無 ===== -->
+  <section>
+    <h2>5. rj32 には「ゼロレジスタ」が無い</h2>
+    <p>MIPS の <code>$zero</code> や RISC-V の <code>x0</code> のように、常に 0 を返すよう固定された「ゼロレジスタ」を持つ ISA があります。これがあると、定数 0 を使う処理や「2 つのレジスタが等しいか」の比較が、特別な命令なしで素直に書けて便利です。しかし rj32 の instructions.md を見ると「16 本のレジスタのうち、特別な機能を持つのは r0 だけで、他のレジスタは自由に使える」と説明されており、その r0 の特別な機能は「読むと必ず 0 になる」ことではありません。<code>call</code> 命令が戻り先のアドレスを<b>必ず r0 に書き込む</b>という、書き込み先が固定されているという意味での特別扱いです。つまり rj32 にはゼロレジスタが無く、r0 は読み出しでは普通のレジスタと同じように振る舞います。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 160" role="img" aria-label="rj32のr0はゼロレジスタでなく書き込み先固定という図">
+        <rect x="30" y="20" width="230" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="145" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">よくある誤解</text>
+        <text x="145" y="65" font-size="11.5" text-anchor="middle" fill="#12211a">r0 を読むと必ず 0 になる (rj32 は違う)</text>
+        <rect x="300" y="20" width="230" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="415" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">rj32 の実際</text>
+        <text x="415" y="65" font-size="11.5" text-anchor="middle" fill="#12211a">call が戻り先を必ず r0 に書き込む</text>
+        <text x="280" y="120" font-size="12.5" text-anchor="middle" fill="#12211a">r0 の特別扱いは「書き込み先」の話で、「読み出し値」の話ではない</text>
+      </svg>
+      <p class="cap">図: rj32 の r0 はゼロレジスタではなく、call 命令の書き込み先として固定されているだけ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: rj32のレジスタ一覧と呼び出し規約 ===== -->
+  <section>
+    <h2>6. rj32 のレジスタ一覧と呼び出し規約</h2>
+    <p>instructions.md には 16 本のレジスタの別名と、関数呼び出しでの使い方の慣習が表になっています。<code>r0</code> (<code>ra</code>, 戻り先アドレス)、<code>r1</code>・<code>r2</code> (<code>a0</code>・<code>a1</code>, 引数と戻り値)、<code>r3</code>〜<code>r7</code> (<code>s0</code>〜<code>s4</code>, 呼び出し先で保存される callee-saved レジスタ)、<code>r8</code>〜<code>r13</code> (<code>t0</code>〜<code>t5</code>, 呼び出し元が保存する caller-saved 一時レジスタ)、<code>r14</code> (<code>bp</code>, データのベースポインタ)、<code>r15</code> (<code>sp</code>, スタックポインタ) という割り当てです。これらはハードウェアが強制する区分ではなく、アセンブラとプログラムを書く人が守る「約束 (呼び出し規約)」です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 170" role="img" aria-label="rj32のレジスタ呼び出し規約のグループ分け図">
+        <rect x="20" y="20" width="100" height="100" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="70" y="45" font-size="12" text-anchor="middle" fill="#1f4a68" font-weight="700">r0</text>
+        <text x="70" y="65" font-size="11" text-anchor="middle" fill="#12211a">ra</text>
+        <text x="70" y="85" font-size="10.5" text-anchor="middle" fill="#12211a">戻り先</text>
+        <rect x="135" y="20" width="100" height="100" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="185" y="45" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">r1-r2</text>
+        <text x="185" y="65" font-size="11" text-anchor="middle" fill="#12211a">a0-a1</text>
+        <text x="185" y="85" font-size="10.5" text-anchor="middle" fill="#12211a">引数/戻り値</text>
+        <rect x="250" y="20" width="100" height="100" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="300" y="45" font-size="12" text-anchor="middle" fill="#5b3d80" font-weight="700">r3-r7</text>
+        <text x="300" y="65" font-size="11" text-anchor="middle" fill="#12211a">s0-s4</text>
+        <text x="300" y="85" font-size="10.5" text-anchor="middle" fill="#12211a">callee-saved</text>
+        <rect x="365" y="20" width="100" height="100" rx="8" fill="#fff3e0" stroke="#b5401f" stroke-width="2"/>
+        <text x="415" y="45" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">r8-r13</text>
+        <text x="415" y="65" font-size="11" text-anchor="middle" fill="#12211a">t0-t5</text>
+        <text x="415" y="85" font-size="10.5" text-anchor="middle" fill="#12211a">caller-saved</text>
+        <rect x="480" y="20" width="65" height="100" rx="8" fill="#eceef0" stroke="#8a8f98" stroke-width="2"/>
+        <text x="512" y="45" font-size="11" text-anchor="middle" fill="#4a5d54" font-weight="700">r14-15</text>
+        <text x="512" y="65" font-size="10.5" text-anchor="middle" fill="#12211a">bp/sp</text>
+      </svg>
+      <p class="cap">図: 16 本のレジスタは、ハードウェアの制約ではなく呼び出し規約という約束で役割分担されている。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 7: 実装のポイント ===== -->
+  <section>
+    <h2>7. 実装のポイント</h2>
+    <p><b>read-first か write-first かを最初に決める。</b> 同じアドレスへの読み書きが重なる場面 (まさに <code>add rd, rs</code> のような rd が読みと書きの両方になる命令) は必ず出てくるので、どちらの値が見えるかを後回しにすると、パイプライン (第 15 回) を導入したときに想定外のバグになります。Digital の <code>RegisterFile</code> は write-first と決まっているので、それを前提にデータパスを組みます。</p>
+    <p><b>ポート数は命令形式から逆算する。</b> rj32 の多くの命令は <code>rd</code>・<code>rs</code> の 2 オペランドなので、読み出し 2 ・書き込み 1 で足ります。3 オペランドの命令セットを作るなら、読み出しポートを 3 つに増やす必要があり、レジスタファイルの配線は読み出しポートの数に比例して増えます。</p>
+    <p><b>ゼロレジスタを入れるかどうかは、ハードウェアとソフトウェアのトレードオフ。</b> ゼロレジスタがあれば定数 0 の扱いや比較が楽になりますが、1 本のレジスタの実質的な本数を 1 つ減らすことになります。rj32 は 32 命令という小さな ISA の中で、ゼロレジスタを採用せず、全 16 本を汎用レジスタとして使う設計を選んでいます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 150" role="img" aria-label="レジスタファイル実装の3つの判断ポイントまとめ図">
+        <rect x="20" y="20" width="160" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="100" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">write-first を前提に</text>
+        <text x="100" y="65" font-size="11" text-anchor="middle" fill="#12211a">同じアドレスの読み書きで</text>
+        <text x="100" y="82" font-size="11" text-anchor="middle" fill="#12211a">想定外を作らない</text>
+        <rect x="200" y="20" width="160" height="70" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="280" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">ポート数は命令形式から</text>
+        <text x="280" y="65" font-size="11" text-anchor="middle" fill="#12211a">2 オペランドなら読み 2 、</text>
+        <text x="280" y="82" font-size="11" text-anchor="middle" fill="#12211a">3 オペランドなら読み 3</text>
+        <rect x="380" y="20" width="160" height="70" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="460" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">ゼロレジスタの採否</text>
+        <text x="460" y="65" font-size="11" text-anchor="middle" fill="#12211a">楽になる代わりに</text>
+        <text x="460" y="82" font-size="11" text-anchor="middle" fill="#12211a">本数を 1 つ消費する</text>
+      </svg>
+      <p class="cap">図: レジスタファイルの設計で判断が必要な 3 つの点。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/regfile.dig" target="_blank" rel="noopener">rj32: dig/regfile.dig</a> ― Digital の RegisterFile 部品に <code>rd</code>・<code>rs</code>・<code>wrval</code>・<code>wr</code>・<code>en</code>・<code>clock</code> という名前を付けた配線と、出力 <code>rdval</code>・<code>rsval</code> の構成を確認した。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj32: docs/instructions.md</a> ― 16 本のレジスタの別名・呼び出し規約の表と、「r0 だけが特別な機能を持つ」という記述、call 命令が r0 に戻り先を書き込むという仕様を確認した。</li>
+      <li><a href="https://github.com/hneemann/Digital/blob/d118dce079b6b8867024d40f9b14dfa667e52106/src/main/java/de/neemann/digital/core/memory/RegisterFile.java" target="_blank" rel="noopener">Digital: RegisterFile.java</a> ― 書き込みがクロックの立ち上がりで we=1 のときだけ行われ、memory.setData() の実行後に Da/Db を計算する write-first の実装を確認した。</li>
+      <li>Digital 英語マニュアル (Doc_English.pdf) 9.5 節 (Register File) ― <code>Din</code>・<code>we</code>・<code>Rw</code>・<code>Ra</code>・<code>Rb</code>・<code>Da</code>・<code>Db</code> の各ピンの説明を確認した。<a href="https://github.com/hneemann/Digital/releases/download/v0.31/Doc_English.pdf" target="_blank" rel="noopener">Doc_English.pdf</a></li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-alu.html">← 第 07 回 ALU</a><a href="./cpu-index.html">目次</a><a href="./cpu-memory.html">第 09 回 メモリとアドレス →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'Digital の RegisterFile 部品が持つ入力 Ra・Rb と、出力 Da・Db の関係として正しいものは？',
+    opts: [
+      'Ra が指すレジスタの値が Da に、Rb が指すレジスタの値が Db に、それぞれ出てくる',
+      'Ra と Rb の値を足し算した結果が、Da と Db の両方に同じ値で出てくる',
+      'Ra は書き込み先のアドレスを指し、Da はそこに書き込まれた値を表示するだけの出力になる',
+      'Ra・Rb はどちらもクロックの立ち上がりとは無関係に、常にレジスタ全体を出力し続ける',
+      'Ra が指すレジスタの値が Db に、Rb が指すレジスタの値が Da に、入れ替わって出てくる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Ra が指すレジスタの値がそのまま Da に、Rb が指すレジスタの値がそのまま Db に出力される、2 つの独立した読み出しポート。',
+      'Ra・Rb はそれぞれ別のレジスタを指すアドレスであり、足し算した結果を出力する仕組みは持たない。',
+      'Ra は読み出し用のアドレスであり、書き込み先のアドレスは別の入力 Rw が受け持つ。役割が異なる。',
+      'RegisterFile 全体がクロックと無関係に動くわけではなく、書き込みはクロックの立ち上がりに従う。読み出し自体は都度反映されるが、「全体を出力」という説明は不正確。',
+      'Ra と Da、Rb と Db がそれぞれ対応しており、入れ替わって出てくるという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Ra と Da、Rb と Db がそれぞれ対になっている、独立した 2 本の読み出しポート。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 130" aria-label="RaとDa、RbとDbが対応する図"><text x="20" y="35" font-size="12.5" fill="#12211a">Ra</text><line x1="20" y1="45" x2="220" y2="45" stroke="#198754" stroke-width="2"/><text x="20" y="95" font-size="12.5" fill="#12211a">Rb</text><line x1="20" y1="105" x2="220" y2="105" stroke="#198754" stroke-width="2"/><rect x="220" y="20" width="100" height="100" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="270" y="75" font-size="12" text-anchor="middle" fill="#0f5132">RegisterFile</text><line x1="320" y1="45" x2="440" y2="45" stroke="#0f5132" stroke-width="2"/><text x="400" y="35" font-size="12" text-anchor="middle" fill="#0f5132">Da</text><line x1="320" y1="105" x2="440" y2="105" stroke="#0f5132" stroke-width="2"/><text x="400" y="95" font-size="12" text-anchor="middle" fill="#0f5132">Db</text></svg>'
+          + '<p class="cap">図: Ra → Da、Rb → Db という、対応関係のある 2 つの独立した読み出しポート。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の多くの命令が「読み出し 2 か所・書き込み 1 か所」というポート構成に収まる理由は何か？',
+    opts: [
+      'rj32 のクロック周波数が低いので、ポート数を減らさないと動作しないため',
+      '多くの命令が rd (書き込み先兼左) と rs (右) の 2 オペランド形式だから',
+      'Digital というツールがポート数を 3 以上に増やす機能そのものを持たないため',
+      'レジスタの本数が 16 本しかないので、ポートの数も 16 に制限されてしまうため',
+      'rj32 には、値を読み出す命令そのものが 1 つも存在しないため'
+    ],
+    ans: 1,
+    exps: [
+      'クロック周波数とポート数に直接の因果関係はない。ポート数は命令形式から決まる設計判断。',
+      '<b>これが正解。</b>rj32 の命令の多くは rd (左オペランド兼書き込み先) と rs (右オペランド) の 2 オペランド形式であり、読み出し 2 か所・書き込み 1 か所という構成がちょうどこの形に合う。',
+      'Digital には 3 ポート以上のレジスタファイルを自作することもできる。機能的な制限ではなく、rj32 の命令形式に合わせた設計の選択。',
+      'レジスタの本数 (16 本) とポートの数 (読み 2・書き 1) は別の軸で決まる概念で、本数がそのままポート数の上限になるわけではない。',
+      'rj32 には load・move・rcsr など、レジスタを読み出す命令が多数存在する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>2 オペランドの命令形式と、読み 2・書き 1 のポート構成はちょうど対応している。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 130" aria-label="2オペランド命令とポート構成の対応図"><rect x="30" y="20" width="180" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="120" y="42" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">add rd, rs</text><text x="120" y="60" font-size="11" text-anchor="middle" fill="#12211a">rd (読み書き) + rs (読み)</text><line x1="210" y1="45" x2="270" y2="45" stroke="#9aa" stroke-width="2"/><rect x="270" y="20" width="180" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="360" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">読み 2 ・ 書き 1</text><text x="360" y="60" font-size="11" text-anchor="middle" fill="#12211a">ちょうど対応する構成</text></svg>'
+          + '<p class="cap">図: 2 オペランド命令の形が、レジスタファイルのポート数をそのまま決めている。</p></div>'
+    }
+  },
+  {
+    q: '下の図のように、<code>add r5, r3</code> (rd=r5, rs=r3) を実行するとき、レジスタファイルの Rw・Ra・Rb にはそれぞれどの値が入るか？<div class="fig"><svg viewBox="0 0 420 130" aria-label="add r5,r3でのアドレス割り付けを問う問題用図"><text x="40" y="30" font-size="13" text-anchor="middle" fill="#12211a">add r5, r3</text><rect x="140" y="15" width="140" height="100" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="210" y="70" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">RegisterFile</text><text x="20" y="60" font-size="11.5" fill="#12211a">rd = r5</text><text x="20" y="100" font-size="11.5" fill="#12211a">rs = r3</text></svg></div>',
+    opts: [
+      'Rw=r3, Ra=r5, Rb=r5 になり、rd と rs の役割が入れ替わる',
+      'Rw=r5, Ra=r3, Rb=r3 になり、rs だけがすべてのポートに入る',
+      'Rw=r5, Ra=r5, Rb=r3 になり、rd が書き込み先と左読み出しを兼ねる',
+      'Rw・Ra・Rb のすべてに、r5 と r3 を足し合わせた値が入ってしまう',
+      'Rw=r3, Ra=r3, Rb=r5 になり、rs の方が書き込み先として使われる'
+    ],
+    ans: 2,
+    exps: [
+      'rd と rs の役割が入れ替わってしまっており、書き込み先がrsになるのは add 命令の意味 (rd <- rd + rs) に反する。',
+      'rd が書き込み先からも左オペランドからも消えてしまい、rd <- rd + rs という add の意味を表せなくなる。',
+      '<b>これが正解。</b>rd (r5) が書き込み先 Rw と左オペランドの読み出し Ra の両方に使われ、rs (r3) が右オペランドの読み出し Rb に使われる。これで rd <- rd + rs が実現できる。',
+      'アドレスどうしを足し算するという操作はレジスタファイルには存在しない。アドレスはそのまま選択に使われる。',
+      'rs が書き込み先になってしまうと、rd に結果が書き込まれないため、add rd, rs の意味と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>rd は書き込み先と左オペランドの読み出しを兼ね、rs は右オペランドの読み出しだけを担う。</p>'
+          + '<div class="fig"><svg viewBox="0 0 460 130" aria-label="rdとrsの役割分担の図"><text x="40" y="30" font-size="12.5" fill="#b5401f" font-weight="700">rd = r5</text><line x1="40" y1="40" x2="220" y2="55" stroke="#b5401f" stroke-width="2"/><line x1="40" y1="40" x2="220" y2="85" stroke="#b5401f" stroke-width="2"/><text x="40" y="100" font-size="12.5" fill="#198754" font-weight="700">rs = r3</text><line x1="40" y1="105" x2="220" y2="105" stroke="#198754" stroke-width="2"/><rect x="220" y="30" width="110" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="275" y="60" font-size="11" text-anchor="middle" fill="#0f5132">Rw=rd</text><text x="275" y="80" font-size="11" text-anchor="middle" fill="#0f5132">Ra=rd</text><text x="275" y="100" font-size="11" text-anchor="middle" fill="#0f5132">Rb=rs</text></svg>'
+          + '<p class="cap">図: rd は Rw と Ra の両方に、rs は Rb だけに使われる。</p></div>'
+    }
+  },
+  {
+    q: '「write-first (書き込み優先)」と「read-first (読み出し優先)」の違いを最も正確に表しているものは？',
+    opts: [
+      '両者は同じ動作を指すだけの別名であり、実際の挙動に違いは全く無いという説明',
+      'write-first は書き込みの方が読み出しより速いクロックで動くという説明',
+      'read-first は読み出しポートの数を増やす設計方式を指すという説明',
+      '読み書きが重なったとき、write-first は新しい値、read-first は古い値が読めるという説明',
+      'write-first は、書き込みという操作そのものを複数回繰り返して値を確定させる方式だという説明'
+    ],
+    ans: 3,
+    exps: [
+      '両者は明確に異なる挙動を指す言葉で、同じ動作の別名ではない。',
+      'クロック速度の違いを表す言葉ではない。両方とも同じクロックで動作する前提のもとでの、読み書きが重なったときの挙動の違いを指す。',
+      'read-first はポートの本数とは無関係で、同じアドレスの読み書きが重なったときにどちらの値が見えるかという挙動を指す言葉。',
+      '<b>これが正解。</b>write-first は同じアドレスへの書き込みと読み出しが重なったとき、書き込んだ新しい値がその場で読み出し側にも見える方式。read-first は古い値が見える方式。',
+      '書き込みを複数回繰り返す動作ではなく、1 回の書き込みと読み出しが重なったときの挙動を指す言葉。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じアドレスへの読み書きが重なったとき、新しい値が見えるか古い値が見えるかの違い。</p>'
+          + '<div class="fig"><svg viewBox="0 0 480 130" aria-label="write-firstとread-firstの定義の図"><rect x="30" y="25" width="200" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="130" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">write-first</text><text x="130" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">新しい値が読める</text><rect x="260" y="25" width="200" height="60" rx="8" fill="#eceef0" stroke="#8a8f98" stroke-width="2"/><text x="360" y="50" font-size="13" text-anchor="middle" fill="#4a5d54" font-weight="700">read-first</text><text x="360" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">古い値が読める</text></svg>'
+          + '<p class="cap">図: 同じアドレスへの読み書きが重なったときの挙動が、2 方式の違い。</p></div>'
+    }
+  },
+  {
+    q: '下の図のように、あるクロックの立ち上がりで r3 に新しい値 99 を書き込みつつ、同時に Ra=r3 で r3 を読み出した。Digital の RegisterFile (write-first) では、Da に出てくる値はどちらか？<div class="fig"><svg viewBox="0 0 420 130" aria-label="write-firstでの同一アドレス読み書きを問う問題用図"><text x="40" y="30" font-size="12" fill="#b5401f" font-weight="700">書き込み: r3 に 99</text><text x="40" y="55" font-size="12" fill="#12211a">r3 の古い値 = 7</text><text x="40" y="90" font-size="12" fill="#198754" font-weight="700">同時に Ra = r3 で読み出し</text><rect x="260" y="15" width="130" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="325" y="65" font-size="13" text-anchor="middle" fill="#0f5132">Da = ?</text></svg></div>',
+    opts: [
+      'Da には古い値 7 が出る',
+      'Da には 7 と 99 を足した 106 が出る',
+      'Da には常に 0 が出る',
+      'Da は不定 (ハイインピーダンス) になる',
+      'Da には新しい値 99 が出る'
+    ],
+    ans: 4,
+    exps: [
+      'write-first の RegisterFile では、同じクロックの立ち上がりでの書き込みが先に反映されるため、古い値ではなく新しい値が読み出される。',
+      '値を足し算して出力する仕組みはレジスタファイルには無い。これは起きない。',
+      '書き込みも読み出しも行われているので、0 に固定される理由は無い。',
+      'ハイインピーダンスになるのはトライステート出力 (第 06 回) の話で、通常の読み出しポートの出力がハイインピーダンスになることはない。',
+      '<b>これが正解。</b>Digital の RegisterFile は write-first なので、同じクロックの立ち上がりで書き込まれた新しい値 99 が、同じアドレスを読む Da にもそのまま出力される。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>write-first では、同じクロックの立ち上がりでの書き込みがまず反映され、その後で読み出しの値が決まる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 460 130" aria-label="write-firstの処理順の図"><rect x="30" y="25" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="120" y="50" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">① r3 に 99 を書く</text><line x1="210" y1="45" x2="270" y2="45" stroke="#9aa" stroke-width="2"/><rect x="270" y="25" width="170" height="40" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="355" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">② Da = 99 を出力</text></svg>'
+          + '<p class="cap">図: 書き込みが先に反映されてから、読み出しの値 (Da) が決まる。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の r0 についての説明として最も正確なものはどれか？',
+    opts: [
+      'r0 は常に 0 を返す、いわゆる「ゼロレジスタ」であるという説明',
+      'r0 は call 命令の戻り先が必ず書き込まれる、書き込み先が固定された特別なレジスタであるという説明',
+      'r0 はレジスタファイルに含まれず、別の専用回路で管理されているという説明',
+      'r0 は読み出し専用で、書き込むことが一切できないレジスタであるという説明',
+      'r0 は 16 本のうち唯一 32 ビット幅を持つ、特別な幅のレジスタであるという説明'
+    ],
+    ans: 1,
+    exps: [
+      'instructions.md にはそのような記述は無く、r0 を読んで常に 0 になるという仕組みも確認できない。rj32 にはゼロレジスタが無い。',
+      '<b>これが正解。</b>r0 の特別な機能は「読むと 0 になる」ことではなく、call 命令が戻り先のアドレスを必ず r0 に書き込むという、書き込み先が固定されている点にある。',
+      'r0 も他の 15 本と同じく、1 つのレジスタファイルの中の 1 本として扱われている。',
+      '読み出し専用という制約は記述されておらず、他の命令で r0 に値を書き込むこと自体は可能。',
+      'rj32 のレジスタはすべて 16 ビット幅で統一されており、r0 だけが特別な幅を持つわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>r0 の特別扱いは「読み出し値が 0 になる」ことではなく、「call の書き込み先が固定」という点にある。</p>'
+          + '<div class="fig"><svg viewBox="0 0 460 130" aria-label="r0の特別扱いの正しい理解の図"><rect x="30" y="20" width="190" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="125" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">誤解</text><text x="125" y="65" font-size="11.5" text-anchor="middle" fill="#12211a">r0 を読むと必ず 0</text><rect x="250" y="20" width="190" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="345" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">実際</text><text x="345" y="65" font-size="11.5" text-anchor="middle" fill="#12211a">call の書き込み先が r0 固定</text></svg>'
+          + '<p class="cap">図: rj32 にはゼロレジスタは無く、r0 の特別扱いは書き込み先の固定という別の意味。</p></div>'
+    }
+  },
+  {
+    q: '下の図のような呼び出し規約の表で、関数の第 2 引数を渡すのに使う慣習になっているレジスタはどれか？<div class="fig"><svg viewBox="0 0 420 110" aria-label="呼び出し規約の表から第2引数を探す問題用図"><rect x="20" y="15" width="100" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="70" y="38" font-size="12" text-anchor="middle" fill="#0f5132">r0 (ra)</text><rect x="140" y="15" width="100" height="36" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="190" y="38" font-size="12" text-anchor="middle" fill="#1f4a68">r1 (a0)</text><rect x="260" y="15" width="100" height="36" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="310" y="38" font-size="12" text-anchor="middle" fill="#1f4a68">r2 (a1)</text><text x="190" y="80" font-size="11.5" text-anchor="middle" fill="#4a5d54">a0 = 第 1 引数</text><text x="310" y="80" font-size="11.5" text-anchor="middle" fill="#4a5d54">a1 = 第 2 引数 / 戻り値</text></svg></div>',
+    opts: [
+      'r0 (ra)',
+      'r2 (a1)',
+      'r14 (bp)',
+      'r15 (sp)',
+      'r8 (t0)'
+    ],
+    ans: 1,
+    exps: [
+      'r0 (ra) は戻り先アドレスの慣習に使われるレジスタで、引数を渡す役割ではない。',
+      '<b>これが正解。</b>instructions.md の表では a1 (r2) が第 2 引数、および戻り値を渡す慣習になっている。',
+      'r14 (bp) はデータのベースポインタとして使う慣習のレジスタで、引数とは別の役割。',
+      'r15 (sp) はスタックポインタとして使う慣習のレジスタで、引数とは別の役割。',
+      'r8 (t0) は呼び出し元が保存する一時レジスタ (caller-saved) で、引数を渡す役割ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>a0・a1 がそれぞれ第 1 引数・第 2 引数 (および戻り値) を渡す慣習になっている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 420 110" aria-label="a0とa1の役割の図"><rect x="40" y="20" width="140" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="110" y="42" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">a0 (r1)</text><text x="110" y="60" font-size="11" text-anchor="middle" fill="#12211a">第 1 引数</text><rect x="220" y="20" width="160" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="300" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">a1 (r2)</text><text x="300" y="60" font-size="11" text-anchor="middle" fill="#12211a">第 2 引数 / 戻り値</text></svg>'
+          + '<p class="cap">図: a0 が第 1 引数、a1 が第 2 引数と戻り値を兼ねる慣習になっている。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 がゼロレジスタを採用せず、全 16 本を汎用レジスタとして使う設計を選んだことのトレードオフとして正しい説明はどれか？',
+    opts: [
+      '定数 0 の扱いが少し書きにくくなる代わりに、16 本すべてを自由に使えるという説明',
+      'ゼロレジスタを採用しないと、ALU の加算命令が使えなくなるという説明',
+      'ゼロレジスタを採用しないと、読み出しポートの数が自動的に増えるという説明',
+      'ゼロレジスタの有無が、命令の実行速度に直接影響するという説明',
+      'ゼロレジスタを採用しないと、call 命令が動作しなくなるという説明'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>ゼロレジスタがあれば定数 0 の扱いや比較が楽になるが、その分 1 本のレジスタが「常に 0」専用に固定されて使えなくなる。rj32 はこれを避け、全 16 本を汎用レジスタとして自由に使えるようにしている。',
+      'ゼロレジスタの有無と、add などの ALU 演算命令が使えるかどうかは無関係。add は通常のレジスタ同士でも動作する。',
+      'ゼロレジスタの有無は読み出しポートの本数を決める要因ではない。ポート数は命令のオペランド数から決まる。',
+      'ゼロレジスタの有無が実行速度に直接影響するという関係は無い。影響するのはソフトウェアの書きやすさ。',
+      'call 命令は戻り先を r0 に書き込むという rj32 独自の仕様であり、ゼロレジスタの有無とは別の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ゼロレジスタを入れるかどうかは、便利さと本数のどちらを優先するかという設計上のトレードオフ。</p>'
+          + '<div class="fig"><svg viewBox="0 0 460 130" aria-label="ゼロレジスタのトレードオフの図"><rect x="30" y="20" width="190" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="125" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">ゼロレジスタあり</text><text x="125" y="65" font-size="11" text-anchor="middle" fill="#12211a">定数0/比較が楽・本数が1減る</text><rect x="250" y="20" width="190" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="345" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">rj32 (無し)</text><text x="345" y="65" font-size="11" text-anchor="middle" fill="#12211a">多少不便・16 本を汎用に使える</text></svg>'
+          + '<p class="cap">図: ゼロレジスタの採否は、便利さと使える本数のどちらを優先するかの選択。</p></div>'
+    }
+  },
+  {
+    q: '3 オペランドの命令 (例えば add rd, rs1, rs2 のように、左右 2 つのソースと書き込み先が別々の形式) を扱う ISA のレジスタファイルを設計するとき、rj32 の 2 オペランド向けの構成 (読み 2・書き 1) をそのまま使うとどうなるか？',
+    opts: [
+      '何も変更しなくても、3 オペランド命令を 1 サイクルで処理できるという説明',
+      '書き込みポートを増やさないと、結果を保存できなくなるという説明',
+      'クロックを 2 倍の速さにすれば、読み出しポートを増やさず対応できるという説明',
+      'rs1・rs2 の両方を同時に読み出せず、ポート構成を見直す必要が出てくるという説明',
+      'レジスタの本数を 32 本に増やせば、ポート数の問題が自動的に解決するという説明'
+    ],
+    ans: 3,
+    exps: [
+      '読み出しポートが 2 つしかない構成では、3 つの異なるレジスタ (rd・rs1・rs2 のうち読み出しが必要な rs1・rs2 に加え、書き込み先の情報) を同時に扱うのに不足が生じる場面がある。',
+      '書き込み先は 1 つのままで足りる場合が多く、問題になるのは主に読み出し側の本数。',
+      'クロックを速くしても、同じサイクル内で読み出せるポートの本数という構造上の制約は解決しない。',
+      '<b>これが正解。</b>3 オペランド命令では rs1・rs2 という 2 つの読み出しアドレスを同時に扱う必要があり、読み出しポートが 2 つしかない構成でも一致する場合はあるが、さらにオペランドが増えたり読み出しの組み合わせが変わったりすると、ポート数を見直す必要が出てくる。',
+      'レジスタの本数を増やすことと、同時に読み出せるポートの本数は別の軸であり、本数を増やすだけではポートの制約は解決しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>命令のオペランドの数が増えると、必要な読み出しポートの数も見直す必要が出てくる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 460 130" aria-label="オペランド数とポート数の関係の図"><rect x="30" y="20" width="190" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="125" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">2 オペランド</text><text x="125" y="65" font-size="11" text-anchor="middle" fill="#12211a">読み 2 ・書き 1 で足りる</text><rect x="250" y="20" width="190" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="345" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">3 オペランド</text><text x="345" y="65" font-size="11" text-anchor="middle" fill="#12211a">ポート構成を見直す必要</text></svg>'
+          + '<p class="cap">図: オペランドの形式が変わると、レジスタファイルのポート構成もそれに合わせて見直す必要がある。</p></div>'
+    }
+  },
+  {
+    q: 'パイプライン化されたプロセッサ (第 15 回で扱う) で、ある命令が直前の命令の結果を同じクロックで読み出す場面を考える。この状況で、レジスタファイルが write-first ではなく read-first の挙動をしていた場合、何が起きやすいか？',
+    opts: [
+      'read-first でも write-first でも、計算の結果は完全に同じになるという説明',
+      '読み出しポートの数が自動的に増え、特に問題は発生しないという説明',
+      '書き込みという操作自体が行われなくなり、レジスタの値が消えてしまうという説明',
+      '消費電力だけが変化し、計算結果そのものには影響しないという説明',
+      '直前の命令の新しい結果ではなく古い値が読まれ、別のフォワーディングの仕組みが必要になるという説明'
+    ],
+    ans: 4,
+    exps: [
+      'read-first と write-first では、同じアドレスへの読み書きが重なったときの挙動が異なるため、結果が同じとは限らない。',
+      'read-first か write-first かという挙動の違いは、読み出しポートの本数には影響しない。',
+      '読み出しの挙動が変わるだけで、書き込み自体が行われなくなるわけではない。',
+      '消費電力だけの違いではなく、計算結果 (読み出される値) そのものが変わる可能性がある。',
+      '<b>これが正解。</b>read-first の挙動では、同じクロックで重なった書き込みの新しい値ではなく古い値が読み出されるため、直前の命令の結果をすぐに使いたい場面でデータが正しく渡らず、別途フォワーディング (第 16 回のハザード対策) の仕組みを追加する必要が出てくる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>read-first だと、直前の命令の新しい結果がすぐには見えず、別の仕組みで補う必要が出てくる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 460 130" aria-label="read-firstがもたらす問題の図"><rect x="30" y="20" width="190" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="125" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">write-first</text><text x="125" y="65" font-size="11" text-anchor="middle" fill="#12211a">そのまま新しい値が渡る</text><rect x="250" y="20" width="190" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="345" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">read-first</text><text x="345" y="65" font-size="11" text-anchor="middle" fill="#12211a">古い値が渡り、対策が必要</text></svg>'
+          + '<p class="cap">図: write-first ならそのまま値が渡るが、read-first だと別の対策 (フォワーディング) が必要になる。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

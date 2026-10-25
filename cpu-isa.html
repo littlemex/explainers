@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>命令セットの設計 ― 32 個の命令で何をして何を諦めたか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 10 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>命令セットの設計 ― 32 個の命令で何をして何を諦めたか</h1>
+  <p>命令は 16 ビットの型に押し込まれた約束事。何を持たせ何を持たせないかの判断が、その後の全ての回路の形を決める</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 04 回 <a href="./cpu-binary-arith.html">2 進数と CPU の計算</a>、第 07 回 <a href="./cpu-alu.html">ALU</a></p>
+  <p class="intro">CPU は命令を 1 つずつ読んで実行しますが、その命令は 16 ビットという限られた箱の中に、どの演算をするか・どのレジスタを使うか・どんな数値を使うかを全部詰め込まなければなりません。rj32 はこの箱を「32 個の命令」という小さな集合に絞り込むことで、デコード回路を単純に保っています。ここでは rj32 の命令一覧を読み、ビットの割り当てという設計判断と、そこで何を諦めたかを見ていきます。</p>
+
+  <!-- ===== 解説パート 1: 32命令という制約 ===== -->
+  <section>
+    <h2>1. なぜ「32 個」なのか ― 5 ビットという制約から始める</h2>
+    <p>rj32 という名前は、32 個の命令を実装していることに由来します。32 という数字は偶然ではありません。命令の種類を指定する <code>op</code> フィールドが 5 ビットで、2 進数 5 桁で表せる組み合わせがちょうど $2^5 = 32$ 通りだからです。命令セットを設計する最初の一歩は「命令の種類をどう指定するか」であり、rj32 はこれに 5 ビットという小さな枠を割り当てることを選びました。</p>
+    <p>命令一覧の冒頭には、<code>nop</code> (0 番) から <code>if.uge</code> (31 番) まで、ちょうど 32 個の命令がすべて埋まっている表があります。空いている番号はほとんどなく、11 番だけが将来の拡張用に予約されています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="5ビットのopフィールドと32通りの組み合わせの図">
+        <text x="320" y="24" font-size="14" text-anchor="middle" fill="#12211a">op フィールド (5 ビット)</text>
+        <g font-family="monospace">
+          <rect x="60" y="40" width="40" height="36" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="80" y="63" font-size="14" text-anchor="middle">0</text>
+          <rect x="100" y="40" width="40" height="36" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="120" y="63" font-size="14" text-anchor="middle">0</text>
+          <rect x="140" y="40" width="40" height="36" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="160" y="63" font-size="14" text-anchor="middle">0</text>
+          <rect x="180" y="40" width="40" height="36" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="200" y="63" font-size="14" text-anchor="middle">0</text>
+          <rect x="220" y="40" width="40" height="36" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="240" y="63" font-size="14" text-anchor="middle">0</text>
+        </g>
+        <text x="340" y="63" font-size="14" text-anchor="middle" fill="#4a5d54">～</text>
+        <g font-family="monospace">
+          <rect x="400" y="40" width="40" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="420" y="63" font-size="14" text-anchor="middle">1</text>
+          <rect x="440" y="40" width="40" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="460" y="63" font-size="14" text-anchor="middle">1</text>
+          <rect x="480" y="40" width="40" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="500" y="63" font-size="14" text-anchor="middle">1</text>
+          <rect x="520" y="40" width="40" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="540" y="63" font-size="14" text-anchor="middle">1</text>
+          <rect x="560" y="40" width="40" height="36" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="580" y="63" font-size="14" text-anchor="middle">1</text>
+        </g>
+        <text x="160" y="100" font-size="13" text-anchor="middle" fill="#0f5132">0 = nop (0 番)</text>
+        <text x="490" y="100" font-size="13" text-anchor="middle" fill="#1f4a68">31 = if.uge (31 番)</text>
+        <text x="320" y="135" font-size="14" text-anchor="middle" fill="#12211a" font-weight="700">2⁵ = 32 通り ちょうど使い切っている</text>
+      </svg>
+      <p class="cap">図: 5 ビットの op フィールドが表せる 32 通りを、rj32 はほぼすべて使い切っている。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: 命令の形式とビットの割り当て ===== -->
+  <section>
+    <h2>2. 命令の形式とビットの割り当て ― 16 ビットの中身の取り合い</h2>
+    <p>命令は 16 ビット固定長ですが、命令によって「レジスタ番号を 2 つ載せたい」「大きな即値を載せたい」など欲しいものが違います。rj32 は <code>fmt</code> (2 ビット) で大枠の形式を選び、残りのビットを <code>rd</code> (宛先レジスタ、4 ビット)・<code>rs</code> (ソースレジスタ、4 ビット)・即値・<code>op</code> (命令の種類) に割り振ります。代表的な形式は次の通りです。</p>
+    <ul>
+      <li><code>ri6</code> ― <code>rd</code> (4 bit) + <code>imm6</code> (6 bit、符号付き) + <code>func</code> (4 bit)。<code>add rd, imm6</code> のような、即値を使う算術・論理・比較命令。</li>
+      <li><code>rr</code> ― <code>rd</code> (4 bit) + <code>rs</code> (4 bit) + <code>func</code> (4 bit)。レジスタ同士の算術・論理・比較命令。</li>
+      <li><code>ls</code> ― <code>rd</code> + <code>rs</code> + <code>imm4</code> + <code>op</code>。<code>load</code>/<code>store</code>/<code>loadb</code>/<code>storeb</code> 用。</li>
+      <li><code>i12</code> ― <code>imm12</code> (12 bit) + <code>op</code>。<code>imm</code> プレフィックス専用。</li>
+      <li><code>i11</code> ― <code>imm11</code> (11 bit) + <code>op</code> (1 bit)。<code>jump</code>/<code>call</code> の相対ジャンプ用。</li>
+      <li><code>ri8</code> ― <code>rd</code> + <code>imm8</code> (8 bit) + <code>op</code>。<code>move</code>/<code>loadc</code> 用。</li>
+    </ul>
+    <p>命令の種類が増えるほどビットを食い、即値を広げるほどもビットを食います。この 2 つは常にトレードオフの関係にあり、rj32 の形式一覧はその妥協点の実例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 210" role="img" aria-label="ri6形式とrr形式のビット割り当ての図">
+        <text x="320" y="20" font-size="13.5" text-anchor="middle" fill="#12211a">16 ビットの取り合い (上位 → 下位)</text>
+        <rect x="30" y="35" width="160" height="40" fill="#f3b8a8" stroke="#8a3a2a" stroke-width="1.5"/><text x="110" y="60" font-size="13" text-anchor="middle">rd (4bit)</text>
+        <rect x="190" y="35" width="240" height="40" fill="#cfe8d8" stroke="#0f5132" stroke-width="1.5"/><text x="310" y="60" font-size="13" text-anchor="middle">imm6 (6bit, 符号付き)</text>
+        <rect x="430" y="35" width="120" height="40" fill="#d9cdeb" stroke="#5b3d80" stroke-width="1.5"/><text x="490" y="60" font-size="13" text-anchor="middle">func (4bit)</text>
+        <rect x="550" y="35" width="60" height="40" fill="#cfe1f0" stroke="#1f4a68" stroke-width="1.5"/><text x="580" y="60" font-size="12" text-anchor="middle">fmt</text>
+        <text x="320" y="95" font-size="13" text-anchor="middle" fill="#4a5d54">ri6 形式 (例: add rd, imm6)</text>
+        <rect x="30" y="115" width="160" height="40" fill="#f3b8a8" stroke="#8a3a2a" stroke-width="1.5"/><text x="110" y="140" font-size="13" text-anchor="middle">rd (4bit)</text>
+        <rect x="190" y="115" width="160" height="40" fill="#f6d9a8" stroke="#8a5a1a" stroke-width="1.5"/><text x="270" y="140" font-size="13" text-anchor="middle">rs (4bit)</text>
+        <rect x="350" y="115" width="200" height="40" fill="#d9cdeb" stroke="#5b3d80" stroke-width="1.5"/><text x="450" y="140" font-size="13" text-anchor="middle">func (4bit) + 予約</text>
+        <rect x="550" y="115" width="60" height="40" fill="#cfe1f0" stroke="#1f4a68" stroke-width="1.5"/><text x="580" y="140" font-size="12" text-anchor="middle">fmt</text>
+        <text x="320" y="175" font-size="13" text-anchor="middle" fill="#4a5d54">rr 形式 (例: add rd, rs) ― imm6 の場所が rs に変わる</text>
+      </svg>
+      <p class="cap">図: ri6 形式と rr 形式は、即値かレジスタかの違いだけビットの使い方が変わる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: デコードの仕組み ===== -->
+  <section>
+    <h2>3. デコードの仕組み ― 即値形式はどうやって同じ opcode に揃えるか</h2>
+    <p>即値形式 (<code>ri6</code> など) は、完全な 5 ビットの <code>op</code> フィールドを置く場所が無く、一部のビットを即値に明け渡しています。それでも実行段 (execute) から見れば「これは add 命令だ」という同じ判定結果が欲しいので、デコーダは即値形式の命令を受け取ると、欠けているビットをレジスタ-レジスタ形式 (<code>rr</code>) の <code>op</code> と同じ値になるように補って作り直します。</p>
+    <p><code>docs/isa_decoding.png</code> では、この補われるビットが灰色で示されています。例えば <code>ri6</code> 形式は <code>fmt</code> の下位ビットが固定の 1 で、デコーダはそこを見て「これは即値形式だ」と判断し、<code>func</code> の前に来る 1 ビットを自動的に 1 に補って、<code>rr</code> 形式と同じ 5 ビットの <code>op</code> を再構成します。この補完により、デコーダより後ろの回路 (ALU や制御信号の生成) は「即値か レジスタか」を気にせず、同じ <code>op</code> 番号だけを見れば済むようになります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 190" role="img" aria-label="デコーダが欠けたopビットを補う図">
+        <rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="140" y="58" font-size="13" text-anchor="middle" fill="#12211a">命令ビット列 (ri6 形式)</text>
+        <text x="140" y="98" font-size="12.5" text-anchor="middle" fill="#4a5d54">op の一部が欠けている</text>
+        <line x1="250" y1="55" x2="340" y2="55" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-isa1)"/>
+        <rect x="340" y="30" width="220" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="450" y="52" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">デコーダ</text>
+        <text x="450" y="70" font-size="12" text-anchor="middle" fill="#12211a">欠けたビットを 1 で補う</text>
+        <line x1="450" y1="80" x2="450" y2="120" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-isa1)"/>
+        <rect x="340" y="120" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="450" y="148" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">完全な 5 ビット op (add と同じ値)</text>
+        <defs><marker id="arr-isa1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: デコーダは即値形式の欠けたビットを補い、後段には常に完全な op 番号を渡す。</p>
+    </div>
+  </section>
+  <!-- ===== 解説パート 4: 即値の幅の限界とimm接頭命令 ===== -->
+  <section>
+    <h2>4. 即値の幅の限界と imm 接頭命令 ― 足りない分は 1 命令で補う</h2>
+    <p><code>ri6</code> 形式の即値は 6 ビットしかなく、符号付きで表せる範囲は $-32$ から $31$ までです。16 ビットのレジスタに好きな値を入れたいのに、命令 1 つでは 6 ビットしか運べません。この不足を埋めるのが <code>imm</code> という接頭命令です。<code>imm imm12</code> を実行すると、12 ビットの値が「次の命令の即値の上位 12 ビット」として一時的に保存され、続く命令が自分の下位 4 ビットと組み合わせて 16 ビットの即値を完成させます。</p>
+    <p>この設計の代償は明確です。大きな定数を 1 つ使うだけで、命令が 1 つではなく 2 つ (<code>imm</code> + 本来の命令) になり、実行にも 2 クロックかかります。rj32 のアセンブラは必要な時に <code>imm</code> を自動で挿入してくれますが、「大きな定数を使うコードは、小さな定数を使うコードより遅い」という事実は、命令セットの形がプログラムの速度に直接影響する分かりやすい例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="immプレフィックスで16ビットを組み立てる図">
+        <rect x="40" y="30" width="260" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="170" y="55" font-size="13" text-anchor="middle" fill="#12211a">imm imm12 (上位 12 ビット)</text>
+        <rect x="340" y="30" width="260" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="470" y="55" font-size="13" text-anchor="middle" fill="#12211a">add rd, imm6 (下位 4 ビット)</text>
+        <line x1="170" y1="70" x2="170" y2="110" stroke="#8fd6b4" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <line x1="470" y1="70" x2="470" y2="110" stroke="#8fd6b4" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <rect x="170" y="115" width="300" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="320" y="140" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">16 ビットの即値 (2 クロックかけて完成)</text>
+      </svg>
+      <p class="cap">図: imm プレフィックスは 2 つの命令、2 クロックをかけて 16 ビットの即値を組み立てる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 何を命令にして何を諦めたか ===== -->
+  <section>
+    <h2>5. 何を命令にして何を諦めたか</h2>
+    <p>32 個という枠の中で、rj32 は条件分岐を独立した「ジャンプ」命令にせず、<code>if.eq</code>/<code>if.lt</code> などの<b>スキップ命令</b>を 6 個も用意しています。これは「次の 1 命令を条件付きで実行する/しない」という形で、高級言語の <code>if</code> 文に近い考え方です (第 13 回で詳しく扱います)。この方式は条件分岐のための専用のアドレス計算 (飛び先までの距離) を命令にエンコードする必要が無く回路が単純になる代わりに、条件が成立しなかった時も 1 クロックを<b>必ず</b>消費するという代償を払っています。</p>
+    <p>一方で、乗算・除算は 32 個の命令に入っていません。<code>add</code>・<code>sub</code>・シフト・論理演算はあっても、掛け算を 1 命令で行う命令は無く、必要なら複数の命令を組み合わせたソフトウェアの手順 (あるいは将来の拡張命令) で実現することになります。限られた命令数の中で「足し算・引き算・比較・分岐・メモリアクセス」という最低限の道具を優先し、乗除算のような高度な演算は後回しにする、という優先順位づけの実例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="32命令の中で優先したものと諦めたものの図">
+        <rect x="30" y="30" width="270" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="165" y="55" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">32 個に入れたもの</text>
+        <text x="165" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">add/sub, and/or/xor, シフト</text>
+        <text x="165" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">load/store, if.cc × 6, jump/call</text>
+        <text x="165" y="120" font-size="12.5" text-anchor="middle" fill="#12211a">imm プレフィックス</text>
+        <rect x="340" y="30" width="270" height="110" rx="10" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/>
+        <text x="475" y="55" font-size="14" text-anchor="middle" fill="#b5401f" font-weight="700">入れなかったもの</text>
+        <text x="475" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">掛け算・割り算の専用命令</text>
+        <text x="475" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">浮動小数点演算</text>
+        <text x="475" y="120" font-size="12.5" text-anchor="middle" fill="#12211a">大きなオフセットの絶対ジャンプ</text>
+      </svg>
+      <p class="cap">図: 限られた 32 個の枠の中で、足し算・比較・メモリアクセスを優先し、乗除算や浮動小数点は諦めた。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>プレフィックスとスキップが重なる場合を忘れない。</b> <code>imm</code>・<code>addc</code>・<code>subc</code> のようなプレフィックス命令の直後に来る命令がスキップされる (if.cc で条件不成立になる) 場合、プレフィックス自体もまとめてスキップする必要があります。命令セットドキュメントにも「skip が有効な場合、imm 命令とその次の命令の両方がスキップされる」と明記されており、デコーダや制御回路を作るときにこの組み合わせを見落とすと、次の命令が本来の即値を失ったまま実行されてしまうバグになります。</p>
+    <p><b>割り込み中にプレフィックスの状態を失わないようにする。</b> プレフィックス命令が運ぶ「次の命令のための情報」はレジスタファイルやメモリに保存されない一時的な状態です。もし割り込みがプレフィックス命令とその次の命令の間に入り込むと、この一時状態を保存する場所が無いまま失われてしまいます。rj32 はこれを避けるため、プレフィックス命令の実行中は割り込みそのものを禁止するという設計判断をしています。「一時状態を作ったら、それが安全に使われるまで割り込みを閉じる」という考え方は、プレフィックス命令を持つ命令セット全般に共通する注意点です。</p>
+    <p><b>命令フォーマットの判別を 1 段で済むようにする。</b> rj32 は <code>fmt</code> フィールドをわずか 2 ビットに絞り、命令の大枠の形式をほぼ 1 段の論理回路で判別できるようにしています。形式の判別に何段もの論理ゲートが必要になると、デコード全体の伝搬遅延が伸び、第 05 回で見たクロック周期の下限に直接影響します。ビット割り当てを決める段階から「デコードが何段で終わるか」を意識しておくことが、後の回路の速さを左右します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="skipがimmとその次の命令を両方飲み込む図">
+        <text x="320" y="24" font-size="13.5" text-anchor="middle" fill="#12211a">if.eq が不成立で skip が立ったとき</text>
+        <rect x="40" y="45" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="110" y="70" font-size="13" text-anchor="middle">if.eq rd, rs</text>
+        <rect x="200" y="45" width="140" height="40" rx="6" fill="#fbeeea" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="270" y="70" font-size="13" text-anchor="middle">imm imm12</text>
+        <rect x="360" y="45" width="140" height="40" rx="6" fill="#fbeeea" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="430" y="70" font-size="13" text-anchor="middle">move rd, imm</text>
+        <rect x="520" y="45" width="100" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="570" y="70" font-size="13" text-anchor="middle">次の命令</text>
+        <text x="340" y="115" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">imm と move の両方が 1 組としてスキップされる</text>
+        <text x="320" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">片方だけスキップすると imm の値が次の命令に漏れてしまう</text>
+      </svg>
+      <p class="cap">図: skip はプレフィックス命令とその次の命令を 1 組として扱い、両方をまとめてスキップする。</p>
+    </div>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj45/rj32: docs/instructions.md</a> ― 32 命令の一覧表、レジスタ構成、imm/addc/subc プレフィックスの仕組み、skip の挙動の一次情報。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/isa_encodings.png" target="_blank" rel="noopener">rj45/rj32: docs/isa_encodings.png</a> ― 命令形式 (ri6/rr/ls/i12/i11/ri8 など) ごとのビット割り当て表。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/isa_decoding.png" target="_blank" rel="noopener">rj45/rj32: docs/isa_decoding.png</a> ― 即値形式がどのビットを opcode の代わりに使い、デコード側でどのビットを補って揃えるかの一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-memory.html">← 第 09 回 メモリとアドレス</a><a href="./cpu-index.html">目次</a><a href="./cpu-decoder-control.html">第 11 回 命令デコーダと制御信号 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'rj32 が「32 個」の命令を実装している理由として最も適切なものはどれか。',
+    opts: [
+      '命令の種類を指定する op フィールドが 5 ビットで、2 進数 5 桁で表せる組み合わせがちょうど 32 通りだから',
+      '32 個という数字は開発者の誕生日にちなんだ記念の数であり、技術的な理由は無い',
+      'rj32 のレジスタが 32 本あるので、それに合わせて命令数も 32 個にしたから',
+      '命令の一覧をアルファベット順に並べたときに、ちょうど 32 番目で良い切れ目になったから',
+      'FPGA の LUT (Look-Up Table) が必ず 32 入力であるという制約から逆算したから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>op フィールドが 5 ビットのため、2^5 = 32 通りの組み合わせが表現できる上限であり、rj32 はこの枠をほぼ使い切っている。',
+      '記念の数字という説明はドキュメントのどこにも無く、5 ビットの op フィールドという技術的な理由が明確に存在する。',
+      'rj32 のレジスタは 16 本 (r0〜r15) であり、32 本という前提自体が誤り。',
+      '命令の並び順は機能ごとの分類 (System/Moves/Jumps/...) であり、アルファベット順でもなければ、32 番目という切れ目に意味があるわけでもない。',
+      'FPGA の LUT の入力数は一般に数入力 (4〜6 入力程度) であり、32 入力という前提が誤り。命令数の決定とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>5 ビットのフィールドが表せる組み合わせの数がそのまま命令数の上限になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="5ビットで32通りの図"><rect x="40" y="30" width="480" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">op フィールド 5 ビット = 2⁵ = 32 通り</text><text x="280" y="100" font-size="13.5" text-anchor="middle" fill="#4a5d54">rj32 はこの 32 通りをほぼ使い切っている</text></svg>'
+          + '<p class="cap">図: 5 ビットの op フィールドが表現できる組み合わせはちょうど 32 通り。</p></div>'
+    }
+  },
+  {
+    q: '次の図のように、rj32 の ri6 形式と rr 形式で、同じ位置にあるフィールドの中身が違っている。この違いの理由として正しいものはどれか。<div class="fig"><svg viewBox="0 0 380 110" aria-label="ri6とrrの違いの図"><rect x="10" y="20" width="80" height="30" fill="#f3b8a8" stroke="#8a3a2a"/><text x="50" y="40" font-size="11" text-anchor="middle">rd</text><rect x="90" y="20" width="120" height="30" fill="#cfe8d8" stroke="#0f5132"/><text x="150" y="40" font-size="11" text-anchor="middle">imm6</text><text x="20" y="70" font-size="12">↓ 同じ位置</text><rect x="10" y="75" width="80" height="30" fill="#f3b8a8" stroke="#8a3a2a"/><text x="50" y="95" font-size="11" text-anchor="middle">rd</text><rect x="90" y="75" width="80" height="30" fill="#f6d9a8" stroke="#8a5a1a"/><text x="130" y="95" font-size="11" text-anchor="middle">rs</text><rect x="170" y="75" width="40" height="30" fill="#e3e3e3" stroke="#888888"/><text x="190" y="95" font-size="9" text-anchor="middle">予約</text></svg></div>',
+    opts: [
+      'ri6 形式と rr 形式は全く無関係な別の命令セットであり、意図的に比較すべきものではない',
+      '即値を使うか、レジスタを使うかの違いに応じて、同じビット位置に imm6 か rs かを入れ替えて使っているから',
+      'rr 形式の方が rd のビット数が多く、より多くのレジスタを指定できるから',
+      'ri6 形式には rd が存在せず、rr 形式にだけ rd が存在するから',
+      'rr 形式は 32 ビット長の命令で、ri6 形式は 16 ビット長の命令だから長さが違う'
+    ],
+    ans: 1,
+    exps: [
+      'rj32 の命令セットの中で、即値形式とレジスタ形式は同じ命令 (例: add) の 2 つの供給方法であり、無関係な別の命令セットという説明は誤り。',
+      '<b>これが正解。</b>rd から右側の「右側の値」をどこから取るかが違うだけで、即値なら imm6、レジスタなら rs を同じビット位置に割り当てている。',
+      'rd のビット数はどちらの形式でも 4 ビットで同じであり、rr 形式の方が多いという説明は誤り。',
+      'ri6 形式にも rd (宛先レジスタ) は存在する。両方の形式で rd は使われている。',
+      'rj32 の命令は常に 16 ビット固定長であり、rr 形式が 32 ビットになるという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じビット位置が、即値かレジスタかによって中身を切り替える、という読み方がポイントです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="同じ位置が入れ替わる図"><rect x="40" y="30" width="200" height="40" fill="#cfe8d8" stroke="#0f5132" stroke-width="1.5"/><text x="140" y="55" font-size="13" text-anchor="middle">imm6 (即値のとき)</text><rect x="320" y="30" width="200" height="40" fill="#f6d9a8" stroke="#8a5a1a" stroke-width="1.5"/><text x="420" y="55" font-size="13" text-anchor="middle">rs (レジスタのとき)</text><text x="280" y="100" font-size="13.5" text-anchor="middle" fill="#4a5d54">どちらも同じビット位置を取り合っている</text></svg>'
+          + '<p class="cap">図: 即値形式とレジスタ形式は、同じビット位置を取り合って使い分けている。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 のデコーダが、即値形式 (ri6 など) の命令を受け取ったときに行っていることとして最も適切なものはどれか。',
+    opts: [
+      '即値形式の命令はすべて無効な命令として扱い、error 信号を立てて停止する',
+      '即値の値をそのまま op 番号として使い、ALU の種類を即値の大きさで決める',
+      '欠けている op のビットをレジスタ-レジスタ形式と同じ値に補い、完全な op 番号を渡す',
+      '即値形式の命令は 2 クロックに分けて別々の op として実行し、最後に結果を合成する',
+      'rd フィールドを無視し、常に r0 に結果を書き込む'
+    ],
+    ans: 2,
+    exps: [
+      '即値形式は正規の命令であり、error として扱われるという説明は誤り。むしろ非常によく使われる形式。',
+      '即値はあくまで演算に使う値 (オペランド) であり、op 番号の決定に即値の大きさを使うという設計はドキュメントに無い。',
+      '<b>これが正解。</b>デコーダは即値形式で欠けている op のビットを、レジスタ-レジスタ形式と同じ値になるように補完し、後段の回路には常に完全な 5 ビットの op を渡す。',
+      '即値形式の命令は 1 クロックで実行される通常の命令であり、2 クロックに分けて別々の op として実行されるという説明は誤り (2 クロックかかるのは imm プレフィックスを使う場合)。',
+      'rd フィールドは宛先レジスタを指定するために使われ、常に r0 に書き込むという固定の挙動では無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>デコーダは欠けたビットを補って、後段には常に同じ形の op 番号を渡します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="opビット補完の図"><rect x="30" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="130" y="60" font-size="13" text-anchor="middle">欠けた op ビット</text><line x1="230" y1="55" x2="310" y2="55" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-isa-q3)"/><rect x="310" y="30" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="420" y="60" font-size="13" text-anchor="middle">完全な op (rr と同じ値)</text><defs><marker id="arr-isa-q3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 欠けたビットを補い、常に完全な op 番号を後段に渡す。</p></div>'
+    }
+  },
+  {
+    q: '16 ビットのレジスタに、6 ビットの imm6 では表せない大きな定数 (例えば 1000) を add で加算したい。rj32 ではどうするか。',
+    opts: [
+      '6 ビットを超える定数はそもそもレジスタに入れられないので、プログラムの設計自体を変える必要がある',
+      'move 命令を 2 回連続で実行し、2 回目の結果で 1 回目の値を自動的に上書きしてもらう',
+      'レジスタの幅を一時的に 32 ビットに拡張するモードに切り替える',
+      'imm imm12 の上位 12 ビットと、続く add 命令の imm6 下位 4 ビットを組み合わせ 16 ビットにする',
+      'ALU のキャリーフラグ C を使い、複数回の加算で大きな値を作る (キャリー連鎖) ことでしか実現できない'
+    ],
+    ans: 3,
+    exps: [
+      '16 ビットのレジスタには 0〜65535 (符号付きなら -32768〜32767) の範囲の値を保持できる。6 ビットの即値 1 つで表せないだけで、プレフィックスを使えば表現できる。',
+      'move を 2 回実行しても、2 回目の move は 1 回目の値を単純に上書きするだけで、ビットを組み合わせる仕組みにはならない。',
+      'レジスタ幅を動的に拡張するモードは rj32 には存在しない。レジスタは常に 16 ビット固定。',
+      '<b>これが正解。</b>imm imm12 で上位 12 ビットを用意し、続く add 命令などの imm6 の下位 4 ビットと組み合わせることで 16 ビットの即値を 2 クロックで完成させる。',
+      'addc/subc によるキャリー連鎖は、レジスタ同士の加算を 16 ビットより大きな精度で行うための仕組みであり、単純な定数の読み込みに必須というわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文で見た imm プレフィックスの組み立て図を思い出してください。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="immで16ビットを作る図"><rect x="30" y="30" width="220" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="140" y="55" font-size="13" text-anchor="middle">imm で上位 12 ビット</text><rect x="310" y="30" width="220" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="420" y="55" font-size="13" text-anchor="middle">add で下位 4 ビット</text><text x="280" y="100" font-size="13.5" text-anchor="middle" fill="#4a5d54">合わせて 16 ビットの定数が 2 クロックで完成する</text></svg>'
+          + '<p class="cap">図: imm と次の命令を組み合わせて 16 ビットの定数を作る。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 のスキップ命令 (if.cc) は、条件が成立しない場合に次の 1 命令をスキップする。もしスキップされる予定の「次の命令」が imm プレフィックスだった場合、正しい挙動はどれか。',
+    opts: [
+      'imm プレフィックスだけがスキップされ、その後の本来の命令はスキップされずに実行される',
+      'imm プレフィックスとその次の命令の両方が、1 組としてまとめてスキップされる',
+      'imm プレフィックスはスキップの対象にならず、常に実行されたうえで次の命令だけがスキップされる',
+      'imm プレフィックスが来た時点で CPU は error を出して停止する',
+      'スキップの判定自体が無効になり、次の命令は条件に関わらず必ず実行される'
+    ],
+    ans: 1,
+    exps: [
+      'imm だけをスキップしてその次の命令を実行してしまうと、本来 imm が渡すはずだった上位ビットが無いまま、下位ビットだけの小さな即値として実行されてしまい、プログラムの意図と異なる値になる。',
+      '<b>これが正解。</b>命令セットドキュメントに明記されている通り、スキップ中は imm プレフィックスとその次の命令が 1 組としてまとめてスキップされる。',
+      'imm が常に実行されてしまうと、スキップされるはずだった命令の一部が実行されたことになり、スキップの意味が崩れる。',
+      'imm プレフィックスの直後にスキップが重なることは異常事態ではなく、ドキュメントに想定済みの挙動として明記されている。error にはならない。',
+      'スキップの判定自体は通常通り行われ、成立しなければ次の命令 (とそのプレフィックス) がスキップされるという通常のルールが働く。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の「実装のポイント」の図の通り、imm とその次の命令は 1 組として扱われます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="imm+次の命令が1組でスキップされる図"><rect x="40" y="40" width="200" height="40" rx="6" fill="#fbeeea" stroke="#b5401f" stroke-width="1.5"/><text x="140" y="65" font-size="13" text-anchor="middle">imm imm12</text><rect x="260" y="40" width="200" height="40" rx="6" fill="#fbeeea" stroke="#b5401f" stroke-width="1.5"/><text x="360" y="65" font-size="13" text-anchor="middle">move rd, imm</text><text x="250" y="110" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">この 2 つがまとめて 1 組としてスキップされる</text></svg>'
+          + '<p class="cap">図: imm プレフィックスとその次の命令はスキップにおいて 1 組として扱われる。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の 32 個の命令一覧に、掛け算 (乗算) 専用の命令が含まれていないことから、最も適切に読み取れることはどれか。',
+    opts: [
+      'rj32 では掛け算を含むプログラムを一切作ることができない',
+      '掛け算は rj32 のハードウェアでは物理的に不可能な演算である',
+      '限られた命令数の中で足し算・比較・分岐などの基本演算を優先し、乗算は後回しにする設計がされている',
+      'rj32 は 16 ビットの値しか扱えないため、掛け算という概念自体が定義できない',
+      '乗算命令は 32 個の枠の外側にある 33 番目の命令として別枠で用意されている'
+    ],
+    ans: 2,
+    exps: [
+      '専用の乗算命令が無くても、複数の add やシフトを組み合わせたソフトウェアの手順で掛け算を実現することは可能。「一切作れない」は言い過ぎ。',
+      '掛け算が物理的に不可能という説明は誤り。ALU の構成次第では乗算器を追加することもできるが、現在の 32 命令にはそのための専用命令が割り当てられていないだけ。',
+      '<b>これが正解。</b>32 個という限られた枠の中で、足し算・比較・分岐・メモリアクセスという基本的な道具を優先し、乗算のような高度な演算は命令セットの初期段階では後回しにされている。',
+      '16 ビットの値同士の掛け算は 32 ビットの結果になりうるが、それは表現できる値の範囲の問題であり、「掛け算という概念が定義できない」ことには繋がらない。',
+      'rj32 の op フィールドは 5 ビットで 32 通りしか表現できず、「33 番目の命令」という枠は存在しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の「何を入れて何を諦めたか」の図を思い出してください。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="優先したものと諦めたものの図"><rect x="30" y="30" width="220" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">優先: 足し算・比較・分岐</text><rect x="310" y="30" width="220" height="70" rx="10" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">後回し: 乗算・浮動小数点</text></svg>'
+          + '<p class="cap">図: 限られた命令数の中で基本演算を優先し、高度な演算は後回しにした。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 が「条件付きジャンプ」ではなく「if.cc によるスキップ」を採用したことの代償 (トレードオフ) として正しいものはどれか。',
+    opts: [
+      '条件が成立しなかった場合、飛び先の計算を一切行わなくてよいため、回路が複雑になる',
+      'if.cc 命令は、条件の種類に関わらず常にプログラムを停止させてしまう',
+      'if.cc を使うと、レジスタの値が毎回自動的に 0 にリセットされてしまう',
+      '条件が成立しなかった場合でも、次の 1 命令分のクロックを必ず消費してしまう',
+      'if.cc は 32 個の命令枠の外に置かれているため、デコーダから見えない特殊な命令になっている'
+    ],
+    ans: 3,
+    exps: [
+      '飛び先の計算を行わなくてよいのはむしろ回路を単純にする利点であり、「複雑になる」という説明は逆である。',
+      'if.cc は条件によって次の命令を実行するかスキップするかを決める命令であり、プログラムを停止させる命令ではない。',
+      'if.cc はレジスタの値を比較するだけで、比較対象のレジスタを 0 にリセットするような副作用は無い。',
+      '<b>これが正解。</b>if.cc は条件が成立しなくても「次の命令をスキップする」という動作そのものに 1 クロックを使うため、条件分岐で何も起こらない場合でも必ず 1 クロック分の時間を消費する。',
+      'if.eq から if.uge までの 6 個は 32 個の命令一覧表の中にちゃんと含まれており、op フィールドの枠外に置かれているわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>スキップ方式は回路を単純にする代わりに、不成立でも 1 クロックを使う点がトレードオフです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="スキップ方式のトレードオフの図"><rect x="30" y="30" width="220" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">利点: 飛び先計算が不要</text><rect x="310" y="30" width="220" height="70" rx="10" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">代償: 不成立でも 1 クロック消費</text></svg>'
+          + '<p class="cap">図: スキップ方式は回路を単純にするが、不成立でも 1 クロックを必ず使う。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の命令一覧表で、11 番の opcode が「予約済み (reserved)」として空けられていることの意味として最も適切なものはどれか。',
+    opts: [
+      '11 番は過去に使われていたが廃止され、二度と使われない番号として封印されている',
+      '11 番は計算上どうしても作れない組み合わせであり、技術的に使用不可能な番号である',
+      '11 番は rj32 のレジスタ r11 専用に予約されており、命令としては使えない',
+      '11 番は常にエラーを返す命令として、デバッグ専用に割り当てられている',
+      '11 番は imm 命令の 2 つ目の opcode として、将来の拡張のためにあらかじめ空けられている'
+    ],
+    ans: 4,
+    exps: [
+      '「廃止され二度と使われない」という説明は命令一覧表の記述と一致しない。実際には imm のもう一つの opcode として使われている。',
+      '5 ビットの op フィールドが表す 32 通りはすべて技術的に作れる組み合わせであり、11 番だけが作れないという制約は無い。',
+      'opcode の番号とレジスタ番号 (r0〜r15) は別の名前空間であり、11 番の opcode が r11 専用という対応関係は無い。',
+      '命令一覧表に「常にエラーを返すデバッグ専用命令」という記載はなく、error 命令は別途 2 番の opcode に割り当てられている。',
+      '<b>これが正解。</b>命令一覧表には 11 番が「_reserved_ (also imm instruction)」と記載されており、imm 命令が使う 2 つの opcode の片方として、将来の拡張や現在の imm の実装のために確保されている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>32 個の枠のうち、11 番は imm 用に確保された番号として表に記載されています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="11番がimm用に予約されている図"><rect x="30" y="40" width="500" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="280" y="70" font-size="13" text-anchor="middle" fill="#12211a">opcode 9 = imm ・ opcode 11 = imm のもう一つの枠 (reserved)</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#4a5d54">32 通りのうち完全に空いている番号はほぼ無い</text></svg>'
+          + '<p class="cap">図: 11 番の opcode は imm 命令のために確保された番号。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 が fmt フィールドをわずか 2 ビットに絞っている設計上の利点として最も適切なものはどれか。',
+    opts: [
+      'fmt が 2 ビットであることと、デコードの速さや回路の段数は無関係である',
+      'fmt が 2 ビットだと、命令の総数が自動的に増えるという数学的な性質がある',
+      'fmt を 2 ビットにすると、レジスタの本数を増やさずに済むという保存則が働く',
+      '2 ビットのフィールドは、消費電力を必ず半分にするという物理的な法則がある',
+      '命令の大枠の形式をほぼ 1 段の論理回路で判別できるようになり、デコードの伝搬遅延が短く済む'
+    ],
+    ans: 4,
+    exps: [
+      '本文で説明した通り、fmt のビット数は形式判別に必要な論理の段数、つまりデコードの速さに直接関係している。',
+      'fmt のビット数と命令の総数 (32 個) は別の設計判断であり、fmt を 2 ビットにしたからといって命令数が自動的に増える数学的な関係は無い。',
+      'レジスタの本数 (16 本) は rd/rs のビット数で決まり、fmt のビット数とは別の設計要素であり、保存則のような関係は無い。',
+      '消費電力はゲート数やスイッチングの頻度など複数の要因で決まり、「2 ビットだから必ず半分」という単純な物理法則は存在しない。',
+      '<b>これが正解。</b>形式を判別するフィールドが小さいほど、少ない論理ゲートの段数で形式を判別できるようになり、デコード全体の伝搬遅延 (信号が安定するまでの時間) が短く済む。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>判別に使うビット数が小さいほど、判別そのものに必要な論理の段数が少なくて済みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="fmtが小さいほど速い図"><rect x="30" y="30" width="220" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">fmt 2 ビット</text><text x="140" y="82" font-size="12.5" text-anchor="middle" fill="#12211a">ほぼ 1 段で判別</text><rect x="310" y="30" width="220" height="70" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">fmt がもっと大きい場合</text><text x="420" y="82" font-size="12.5" text-anchor="middle" fill="#12211a">判別の段数が増えやすい</text></svg>'
+          + '<p class="cap">図: fmt フィールドが小さいほど、形式判別の論理段数を少なく保ちやすい。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の addc・subc 命令が、通常の add・sub と異なり「次の命令も含めて割り込みを禁止する」という性質を持つ理由として最も適切なものはどれか。',
+    opts: [
+      'addc・subc はキャリーフラグという一時状態を次の命令に渡すため、割り込みが入ると保存先が無く失われてしまうから',
+      'addc・subc は実行に 10 クロック以上かかる遅い命令であり、割り込みを受け付ける余裕が無いから',
+      'addc・subc はレジスタファイルを一時的に破壊する副作用があり、割り込みハンドラに見せてはいけないから',
+      'addc・subc はそもそも割り込みという概念が実装される前に設計された古い命令だから',
+      'addc・subc は rd と rs の両方を書き換えてしまうため、割り込みハンドラが混乱するから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>addc・subc が設定するキャリーフラグ (C) は、次の add/sub 命令がそれを使うまでの一時的な状態で、これを保存する専用の退避場所が無いため、割り込みで中断されると状態が失われてしまう。これを防ぐために割り込みを一時的に禁止している。',
+      '命令セットドキュメントには実行クロック数に関する記述はあるが、「10 クロック以上」というような遅さが割り込み禁止の理由だという記述は無い。',
+      'addc・subc はレジスタファイル全体を破壊するような副作用は持たず、通常の add/sub と同様に rd だけを更新する。',
+      '割り込みという概念自体はドキュメントの中で rets 命令などとともに扱われており、addc/subc が古い設計だから禁止しているという記述は無い。',
+      'addc・subc が書き換えるのは rd 1 つであり、rs は読み取り専用。rd と rs の両方を書き換えるという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>キャリーフラグという一時状態を安全に次の命令へ渡すために、その間だけ割り込みを閉じます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="キャリーの一時状態を守る図"><rect x="40" y="40" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="140" y="65" font-size="13" text-anchor="middle">addc (C を設定)</text><rect x="320" y="40" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="420" y="65" font-size="13" text-anchor="middle">add (C を使う)</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">この間は割り込みを禁止し、C を守る</text></svg>'
+          + '<p class="cap">図: キャリーフラグという一時状態を失わないよう、使われるまで割り込みを禁止する。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

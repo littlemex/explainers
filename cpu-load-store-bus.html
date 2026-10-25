@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ロード・ストアとメモリバス ― Wishbone の握手で待ち合わせる</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">BUILD A CPU ・ 第 17 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>ロード・ストアとメモリバス ― Wishbone の握手で待ち合わせる</h1>
+  <p>メモリは CPU より遅いことがある。アドレスを出してから値が届くまでの「待ち合わせ」を、バスの握手信号とバイト単位アクセスの難しさから整理する</p>
+</header>
+<main>
+  <a class="back" href="./cpu-index.html">← CPU 自作シリーズ 目次へ</a>
+  <p class="pre">この回の前提: 第 09 回 <a href="./cpu-memory.html">メモリとアドレス</a>、第 16 回 <a href="./cpu-hazards.html">ハザード</a></p>
+  <p class="intro">これまでの回では、レジスタファイルは読み書きが同じクロックで確定する前提で話を進めてきました。しかし外部のメモリやデバイスはそうとは限りません。アドレスを出してから値が返るまでに何サイクルもかかったり、相手がそもそも今は応答できなかったりします。この回では、CPU の外に出る配線を「バス」として抽象化し、相手の準備ができるまで待つための握手 (ハンドシェイク) の仕組みと、16 ビット単位のメモリから 1 バイトだけを取り出す難しさを、rj32 の実装を手がかりに整理します。</p>
+
+  <!-- ===== 解説パート 1: 待ち合わせが要る理由 ===== -->
+  <section>
+    <h2>1. なぜ待ち合わせの仕組みが要るのか</h2>
+    <p>結論を先に言うと、レジスタファイルの中は「同じクロックで確定する」世界ですが、CPU の外にある RAM やデバイスは「何サイクルかかるか分からない」世界です。両者をつなぐには、相手の準備ができるまで待つための合図、つまりバスの握手 (ハンドシェイク) が要ります。</p>
+    <p>第 08 回のレジスタファイルや第 07 回の ALU は、入力が決まればその同じクロック周期内に出力が確定しました。しかし外部の RAM は、アクセスのたびに 1 クロックで済むとは限りません。クロックが遅いメモリ、調停が必要な共有バス、今すぐ応答できないデバイスなど、相手の都合で遅れることがあります。CPU 側は「アドレスを出した」だけでは不十分で、「相手が受け取った」「相手が値を返した」ことを確認してから次に進む必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="内部確定と外部の待ち合わせの比較">
+        <text x="20" y="26" font-size="14" fill="#0f5132" font-weight="700">レジスタファイル (内部)</text>
+        <rect x="20" y="36" width="90" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="65" y="60" font-size="13" text-anchor="middle" fill="#12211a">clk 0</text>
+        <line x1="110" y1="56" x2="170" y2="56" stroke="#0f5132" stroke-width="2" marker-end="url(#a17a)"/>
+        <rect x="170" y="36" width="130" height="40" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="235" y="60" font-size="13" text-anchor="middle" fill="#0f5132">同じ clk 0 で確定</text>
+        <text x="20" y="116" font-size="14" fill="#5b3d80" font-weight="700">外部メモリ (バス越し)</text>
+        <rect x="20" y="126" width="90" height="40" rx="6" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="65" y="150" font-size="13" text-anchor="middle" fill="#12211a">clk 0: 要求</text>
+        <line x1="110" y1="146" x2="170" y2="146" stroke="#5b3d80" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a17b)"/>
+        <rect x="170" y="126" width="90" height="40" rx="6" fill="#fff6ea" stroke="#b5401f" stroke-width="2"/>
+        <text x="215" y="150" font-size="13" text-anchor="middle" fill="#12211a">clk 1,2…待機</text>
+        <line x1="260" y1="146" x2="320" y2="146" stroke="#5b3d80" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a17c)"/>
+        <rect x="320" y="126" width="90" height="40" rx="6" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="365" y="150" font-size="13" text-anchor="middle" fill="#12211a">clk N: 応答</text>
+        <text x="20" y="190" font-size="13" fill="#4a5d54">何サイクル要るかは相手次第</text>
+        <text x="20" y="208" font-size="13" fill="#4a5d54">だから確認の合図 (握手) が必要</text>
+        <defs>
+          <marker id="a17a" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker>
+          <marker id="a17b" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b3d80"/></marker>
+          <marker id="a17c" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b3d80"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: レジスタファイルは同じクロックで確定するが、外部メモリは何サイクル待つか分からない。だから握手が要る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: load/store とアドレス計算 ===== -->
+  <section>
+    <h2>2. ロード・ストア命令とアドレス計算</h2>
+    <p>rj32 には 4 つのロード・ストア系命令があります。<code>load rd, [rs, imm4]</code> はベースレジスタ <code>rs</code> に 4 ビット即値 <code>imm4</code> を 2 倍して足したアドレスから 16 ビット語を読み、<code>store [rs, imm4], rd</code> は同じアドレスに書きます。<code>loadb</code>/<code>storeb</code> はその 8 ビット版です。</p>
+    <pre><code>load  rd, [rs, imm4]    rd  &lt;- mem[rs + imm4*2]
+store [rs, imm4], rd    mem[rs + imm4*2] &lt;- rd
+loadb rd, [rs, imm4]    rd  &lt;- memb[rs + imm4] &amp; 0xff
+storeb [rs, imm4], rd   memb[rs + imm4] &lt;- rd &amp; 0xff</code></pre>
+    <p>ここでメモリは 16 ビット語単位の配列です。<code>load</code>/<code>store</code> はもともと語単位なので素直ですが、<code>loadb</code>/<code>storeb</code> は 1 バイトだけを読み書きしたいのに、メモリの最小単位は 2 バイト (1 語) しかありません。rj32 の <a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">docs/instructions.md</a> 自身も、語単位の <code>load</code>/<code>store</code> については「メモリは現在語単位でインデックスされており、本来無視すべき下位 1 ビットが無視されていない」という実装の不完全さを記し、<code>loadb</code>/<code>storeb</code> についてはそれとは別に「まだ実装されていない (Not implemented yet)」とだけ明記しています。つまりバイト単位アクセスは、仕様としては素直に書けても、回路として素直には作れない部分だということです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 260" role="img" aria-label="語単位メモリからバイトを取り出す難しさ">
+        <text x="20" y="24" font-size="14" fill="#0f5132" font-weight="700">16 ビット語メモリ (0, 1, 2 …は語番号)</text>
+        <rect x="20" y="36" width="130" height="44" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="62" font-size="13" text-anchor="middle" fill="#12211a">word[5]</text>
+        <rect x="150" y="36" width="130" height="44" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="215" y="62" font-size="13" text-anchor="middle" fill="#12211a">word[6]</text>
+        <line x1="20" y1="80" x2="280" y2="80" stroke="#0f5132" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="150" y="100" font-size="12" text-anchor="middle" fill="#4a5d54">上位バイト | 下位バイト</text>
+        <rect x="20" y="110" width="65" height="30" fill="#efe8f7" stroke="#5b3d80" stroke-width="1.5"/>
+        <text x="52" y="130" font-size="11" text-anchor="middle" fill="#12211a">byte 10</text>
+        <rect x="85" y="110" width="65" height="30" fill="#fff6ea" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="117" y="130" font-size="11" text-anchor="middle" fill="#12211a">byte 11</text>
+        <text x="20" y="160" font-size="12" fill="#b5401f" font-weight="700">storeb はこの 1 バイトだけを書き換えたい</text>
+        <text x="20" y="200" font-size="12.5" fill="#12211a" font-weight="700">同じ語の隣のバイトを壊さず書くには</text>
+        <text x="20" y="225" font-size="12" fill="#12211a">(a) 語を読んで書き換えて書き戻す</text>
+        <text x="20" y="248" font-size="12" fill="#12211a">(b) バイトごとの書き込み許可線を持つ</text>
+        <rect x="330" y="20" width="290" height="110" rx="10" fill="#fdf6ee" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="345" y="44" font-size="12.5" fill="#b5401f" font-weight="700">rj32 の現状</text>
+        <text x="345" y="68" font-size="12" fill="#12211a">(a)(b) のどちらも未実装</text>
+        <text x="345" y="90" font-size="12" fill="#12211a">load/store (語単位) のみ完成</text>
+        <text x="345" y="112" font-size="12" fill="#4a5d54">仕様書どおりに回路を作る大変さの一例</text>
+      </svg>
+      <p class="cap">図: 16 ビット語メモリから 1 バイトだけを安全に書き換えるには、読み出してから書き戻すか、専用の書き込み許可線が要る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: Wishbone B4 の握手 ===== -->
+  <section>
+    <h2>3. バスの握手 ― Wishbone B4 の STB / CYC / ACK</h2>
+    <p>「相手の準備ができるまで待つ」ための合図の付け方は、CPU の世界で決まった型があります。その代表が <b>Wishbone</b> という公開バス規格です。Wishbone B4 仕様が定める「classic standard SINGLE READ/WRITE cycle (標準の単発読み書きサイクル)」は、3 本の信号だけで握手を成立させます。</p>
+    <p><code>CYC_O</code> (cycle, サイクル有効) ― マスター (CPU 側) が「これからバスサイクルを使う」ことを示す信号で、そのサイクルの最初から最後まで立てたままにします。<code>STB_O</code> (strobe, ストローブ) ― 1 回の転送そのものが有効であることを示す信号で、アドレスやデータ線はこの信号で修飾されます。<code>ACK_I</code> (acknowledge, 確認) ― スレーブ (メモリ側) が「転送を受け取った/データを用意した」ことを返す信号です。仕様は「<code>STB_O</code> はスレーブが <code>ACK_I</code> (または <code>ERR_I</code>、<code>RTY_I</code>) のいずれかを返すまで立てたままにする」と定めており、クロックの立ち上がりごとに <code>ACK_I</code> を確認し、立っていれば <code>STB_O</code> を下げます。これにより、マスターとスレーブの両方が転送の速さを調整できます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 270" role="img" aria-label="Wishbone B4標準READサイクルのタイミング図">
+        <text x="15" y="20" font-size="13" fill="#4a5d54">CLK</text>
+        <path d="M110,34 L140,34 L140,20 L200,20 L200,34 L260,34 L260,20 L320,20 L320,34 L380,34 L380,20 L440,20 L440,34 L500,34 L500,20 L530,20 L530,34" fill="none" stroke="#12211a" stroke-width="1.5"/>
+        <text x="140" y="48" font-size="11" text-anchor="middle" fill="#4a5d54">edge0</text>
+        <text x="260" y="48" font-size="11" text-anchor="middle" fill="#4a5d54">edge1</text>
+        <text x="380" y="48" font-size="11" text-anchor="middle" fill="#4a5d54">edge2</text>
+        <text x="15" y="97" font-size="13" fill="#0f5132" font-weight="700">CYC_O</text>
+        <path d="M140,100 L140,86 L500,86 L500,100" fill="none" stroke="#0f5132" stroke-width="2.5"/>
+        <text x="15" y="147" font-size="13" fill="#1f4a68" font-weight="700">STB_O</text>
+        <path d="M140,150 L140,136 L500,136 L500,150" fill="none" stroke="#2f5f8a" stroke-width="2.5"/>
+        <text x="15" y="197" font-size="13" fill="#5b3d80" font-weight="700">ACK_I</text>
+        <path d="M140,200 L380,200 L380,186 L500,186 L500,200" fill="none" stroke="#5b3d80" stroke-width="2.5"/>
+        <text x="440" y="178" font-size="11" text-anchor="middle" fill="#5b3d80">応答</text>
+        <rect x="140" y="228" width="240" height="26" rx="5" fill="#fff6ea" stroke="#b5401f"/>
+        <text x="260" y="245" font-size="11.5" text-anchor="middle" fill="#b5401f">wait state ― ACK 待ち</text>
+        <line x1="140" y1="60" x2="140" y2="222" stroke="#c9d6cf" stroke-dasharray="2 3"/>
+        <line x1="260" y1="60" x2="260" y2="222" stroke="#c9d6cf" stroke-dasharray="2 3"/>
+        <line x1="380" y1="60" x2="380" y2="222" stroke="#c9d6cf" stroke-dasharray="2 3"/>
+      </svg>
+      <p class="cap">図: 標準 READ サイクル。edge0 で CYC_O/STB_O を立てて要求、ACK_I が来るまで待ち、ACK_I を見た次の edge で CYC_O/STB_O を下げる。</p>
+    </div>
+    <p>WRITE サイクルも流れは同じで、違いは <code>WE_O</code> (write enable) を立て、アドレスと一緒にデータも <code>DAT_O</code> に出しておく点だけです。スレーブは <code>ACK_I</code> を返す代わりに、そのクロックでデータを取り込みます (ラッチ)。どちらの場合も、マスターは <code>ACK_I</code> を見てから次のサイクルへ進むので、スレーブがどれだけ待たせても (スレーブが「待機状態 (wait state)」を挿入しても) 正しく動きます。</p>
+  </section>
+
+  <!-- ===== 解説パート 4: rj32 自身のバス制御状態機械 ===== -->
+  <section>
+    <h2>4. rj32 のバス制御状態機械</h2>
+    <p>rj32 の <a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/TODO.md" target="_blank" rel="noopener">TODO.md</a> には「標準のメモリバスインターフェース (wishbone?)」という項目が未完了のまま残っています。<a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/wishbone.fsm" target="_blank" rel="noopener">dig/wishbone.fsm</a> は、その方向への実験として作られた状態機械で、信号名は公式の <code>CYC_O</code>/<code>STB_O</code>/<code>ACK_I</code> ではなく、rj32 独自の <code>mem</code> (メモリアクセス要求)・<code>req</code>・<code>hold</code>・<code>ack</code>・<code>stall</code>・<code>done</code> を使います。つまりこれは「Wishbone そのもの」ではなく「Wishbone が解く問題 (待ち合わせの握手) を rj32 なりに解こうとした実験」だと捉えるのが正確です。</p>
+    <p>状態は <code>idle</code> (待機) → <code>wait</code> (応答待ち) → <code>done</code> (完了) の 3 つを基本に、複数アクセスを続けて出すための <code>hold</code> (保留) 状態が加わります。<code>mem</code> が立つと <code>idle</code> から動き出し、<code>ack</code> が来れば即座に <code>done</code> へ、来なければ <code>hold</code> (次のアクセスを続ける予定がある場合) か <code>wait</code> (無い場合) で待ちます。<code>ack</code> が来るまでこのループを繰り返す点は、Wishbone の「<code>ACK_I</code> が来るまで <code>STB_O</code> を保持する」という規則と同じ考え方です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 260" role="img" aria-label="rj32のバス制御状態機械の状態遷移図">
+        <circle cx="100" cy="70" r="44" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="100" y="74" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">idle</text>
+        <circle cx="100" cy="206" r="44" fill="#fff6ea" stroke="#b5401f" stroke-width="2"/>
+        <text x="100" y="210" font-size="14" text-anchor="middle" fill="#b5401f" font-weight="700">hold</text>
+        <circle cx="330" cy="206" r="44" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="330" y="210" font-size="14" text-anchor="middle" fill="#1f4a68" font-weight="700">wait</text>
+        <circle cx="540" cy="70" r="44" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="540" y="74" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">done</text>
+        <line x1="100" y1="114" x2="100" y2="162" stroke="#0f5132" stroke-width="1.5" marker-end="url(#a17d)"/>
+        <rect x="104" y="125" width="110" height="20" rx="4" fill="#fbfdfc" stroke="#0f5132" stroke-width="1"/>
+        <text x="159" y="139" font-size="10.5" text-anchor="middle" fill="#0f5132">mem&amp;hold&amp;!ack</text>
+        <path d="M60,184 C20,170 20,150 56,152" fill="none" stroke="#b5401f" stroke-width="1.5" marker-end="url(#a17f2)"/>
+        <rect x="2" y="156" width="92" height="20" rx="4" fill="#fbfdfc" stroke="#b5401f" stroke-width="1"/>
+        <text x="48" y="170" font-size="10.5" text-anchor="middle" fill="#b5401f">hold&amp;!ack</text>
+        <line x1="144" y1="206" x2="286" y2="206" stroke="#2f5f8a" stroke-width="1.5" marker-end="url(#a17f)"/>
+        <rect x="160" y="182" width="110" height="20" rx="4" fill="#fbfdfc" stroke="#2f5f8a" stroke-width="1"/>
+        <text x="215" y="196" font-size="10.5" text-anchor="middle" fill="#1f4a68">!hold&amp;!ack</text>
+        <line x1="356" y1="168" x2="508" y2="100" stroke="#2f5f8a" stroke-width="1.5" marker-end="url(#a17g)"/>
+        <rect x="400" y="118" width="60" height="20" rx="4" fill="#fbfdfc" stroke="#2f5f8a" stroke-width="1"/>
+        <text x="430" y="132" font-size="10.5" text-anchor="middle" fill="#1f4a68">ack</text>
+        <line x1="148" y1="64" x2="494" y2="68" stroke="#0f5132" stroke-width="1.5" marker-end="url(#a17e)"/>
+        <rect x="255" y="38" width="130" height="20" rx="4" fill="#fbfdfc" stroke="#0f5132" stroke-width="1"/>
+        <text x="320" y="52" font-size="10.5" text-anchor="middle" fill="#0f5132">mem&amp;ack&amp;!stall</text>
+        <path d="M518,28 C400,4 240,4 122,28" fill="none" stroke="#5b3d80" stroke-width="1.5" marker-end="url(#a17h)"/>
+        <rect x="235" y="4" width="170" height="20" rx="4" fill="#fbfdfc" stroke="#5b3d80" stroke-width="1"/>
+        <text x="320" y="18" font-size="10.5" text-anchor="middle" fill="#5b3d80">!mem&amp;!stall → idle へ</text>
+        <defs>
+          <marker id="a17d" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker>
+          <marker id="a17e" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker>
+          <marker id="a17f" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2f5f8a"/></marker>
+          <marker id="a17f2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b5401f"/></marker>
+          <marker id="a17g" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2f5f8a"/></marker>
+          <marker id="a17h" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b3d80"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: rj32 の wishbone.fsm。ack が来るまで wait/hold に留まり、ack を見た瞬間に done へ進む ― Wishbone の ACK_I 待ちと同じ考え方。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: どこで壊れるか ===== -->
+  <section>
+    <h2>5. どこで壊れるか ― パイプラインとの衝突</h2>
+    <p>第 16 回で見た rj32 の 2 段パイプライン (fetch と execute) は、各段が 1 クロックで仕事を終える前提で組まれています。ところが <code>load</code>/<code>store</code> がバスの握手で複数クロックかかると、execute 段はその間ずっと同じ命令を抱えたまま進めなくなります。これが構造ハザードで、rj32 では <code>stall</code> という信号で fetch 段にも「今は進むな」と伝え、パイプライン全体を一時停止させて対処します。</p>
+    <p>rj32 自身の <a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/TODO.md" target="_blank" rel="noopener">TODO.md</a> には「Remove stall!!!!!」(stall を取り除け) という項目があります。つまり設計者自身も、全パイプラインを止めてしまう今の方式は作りやすいが荒い最初の一手であり、本来はバスで待っているアクセスだけを止めて他は進める、もっと細かい制御に置き換えたいと考えているということです。「動くものを一番簡単な方法でまず作り、後で磨く」という設計の順序がそのまま TODO に残っている例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 210" role="img" aria-label="メモリアクセスがstallでパイプライン全体を止める図">
+        <text x="20" y="22" font-size="12.5" fill="#4a5d54">clk →</text>
+        <text x="100" y="22" font-size="12.5" fill="#4a5d54">0</text>
+        <text x="200" y="22" font-size="12.5" fill="#4a5d54">1</text>
+        <text x="300" y="22" font-size="12.5" fill="#4a5d54">2</text>
+        <text x="400" y="22" font-size="12.5" fill="#4a5d54">3</text>
+        <text x="20" y="60" font-size="13" fill="#0f5132" font-weight="700">fetch</text>
+        <rect x="70" y="42" width="90" height="34" fill="#eaf5ef" stroke="#0f5132"/><text x="115" y="63" font-size="12" text-anchor="middle">命令 B</text>
+        <rect x="170" y="42" width="90" height="34" fill="#fff6ea" stroke="#b5401f" stroke-dasharray="3 2"/><text x="215" y="63" font-size="12" text-anchor="middle" fill="#b5401f">stall 中</text>
+        <rect x="270" y="42" width="90" height="34" fill="#fff6ea" stroke="#b5401f" stroke-dasharray="3 2"/><text x="315" y="63" font-size="12" text-anchor="middle" fill="#b5401f">stall 中</text>
+        <rect x="370" y="42" width="90" height="34" fill="#eaf5ef" stroke="#0f5132"/><text x="415" y="63" font-size="12" text-anchor="middle">命令 C</text>
+        <text x="20" y="110" font-size="13" fill="#1f4a68" font-weight="700">execute</text>
+        <rect x="70" y="92" width="90" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="115" y="113" font-size="11.5" text-anchor="middle">A: load 要求</text>
+        <rect x="170" y="92" width="190" height="34" fill="#efe8f7" stroke="#5b3d80"/><text x="265" y="113" font-size="11.5" text-anchor="middle" fill="#5b3d80">A: ack 待ち (握手中)</text>
+        <rect x="370" y="92" width="90" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="415" y="113" font-size="12" text-anchor="middle">命令 B</text>
+        <text x="20" y="170" font-size="12.5" fill="#12211a">load 命令 (A) の応答待ちの間、fetch 段も execute 段も進めない ― バス全体が 1 つの stall で止まる</text>
+        <text x="20" y="192" font-size="12.5" fill="#4a5d54">TODO.md の「Remove stall!!!!!」はここをもっと細かくしたいという印</text>
+      </svg>
+      <p class="cap">図: load/store がバスで待たされると、rj32 は fetch 段まで含めてパイプライン全体を stall させる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: 実装のポイント ===== -->
+  <section>
+    <h2>6. 実装のポイント</h2>
+    <p><b>CYC と STB を混同しない。</b> Wishbone B4 の規則では、マスターが待機状態を作らないなら <code>CYC_O</code> と <code>STB_O</code> を同じ信号に兼用してよいとされています (PERMISSION 3.40)。ただしその場合でも両方の端子自体は用意する必要があり、アドレスやデータは <code>STB_O</code> が立っている間ずっと変化させてはいけません。<code>ACK_I</code> が来る前にアドレスを次の値に進めてしまうのが、握手を自分で実装するときに一番起きやすい間違いです。</p>
+    <p><b>バイト単位アクセスは後回しにしてよい設計判断。</b> rj32 の <code>loadb</code>/<code>storeb</code> が未実装のまま残っているのは手抜きではなく、優先順位の判断です。1 語を読んでから書き換えて書き戻す (read-modify-write) 方式は回路が単純ですが 1 回のバイト書き込みに読みと書きの 2 回分の時間がかかり、メモリ側にバイトごとの書き込み許可線 (Wishbone の <code>SEL_O</code> に相当する考え方) を持たせる方式は速いですがメモリの回路が複雑になります。どちらを選ぶかはメモリの構成と性能要件で決まるので、先に「とにかく動く語単位アクセス」を完成させてから決める、という rj32 の順序は妥当な判断です。</p>
+    <p><b>ACK が張り続ける場合にも壊れない状態機械にする。</b> Wishbone の規則 (RULE 3.55) は「スレーブが <code>ACK_I</code> を立て続けにしても、マスターは正常に動かなければならない」と定めています。状態機械を「ack パルスが来た瞬間だけを捉える」というエッジ検出の発想で作ると、ack が 2 クロック以上続いた場合に誤動作します。rj32 の wishbone.fsm で <code>done</code> 状態から戻る遷移に <code>ack</code> がそのまま条件として使われているのは、ack がどれだけ続いても状態が一意に決まるようにするための工夫です。</p>
+    <p>実際の SoC (チップ上にまとめた小さなコンピュータ全体) では、Wishbone のほかにも AXI-Lite や TileLink など似た役割の規格があり、どれも「CPU 側の要求信号」と「相手側の確認信号」を分けるという同じ骨格を持っています。CPU を FPGA に載せる (第 20 回) ときも、ブロック RAM や UART といった既製の部品はほぼ必ずこの形の握手で接続されます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 160" role="img" aria-label="read-modify-writeと専用書き込み許可線の比較">
+        <rect x="20" y="20" width="270" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="44" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">(a) read-modify-write</text>
+        <text x="155" y="68" font-size="12" text-anchor="middle" fill="#12211a">語を読む → 1 バイト差し替え → 書き戻す</text>
+        <text x="155" y="90" font-size="12" text-anchor="middle" fill="#12211a">回路は単純、時間は 2 倍かかる</text>
+        <text x="155" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">rj32 は現状これも未実装</text>
+        <rect x="330" y="20" width="270" height="110" rx="10" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="465" y="44" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">(b) バイトごとの書き込み許可線</text>
+        <text x="465" y="68" font-size="12" text-anchor="middle" fill="#12211a">Wishbone の SEL_O に相当</text>
+        <text x="465" y="90" font-size="12" text-anchor="middle" fill="#12211a">1 回で書けるが配線とメモリが複雑</text>
+        <text x="465" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">性能が要る場合の選択肢</text>
+      </svg>
+      <p class="cap">図: 1 バイトだけ書き換える 2 つの実装方針。rj32 はどちらも採用せず先送りにしている。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/docs/instructions.md" target="_blank" rel="noopener">rj32: docs/instructions.md</a> ― load/store/loadb/storeb のビット定義と「メモリは現在バイト単位ではなく word 単位でインデックスされており未完成」という実装注記。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/memaccess.dig" target="_blank" rel="noopener">rj32: dig/memaccess.dig</a> ― メモリ要求 (req/mem/store) と結果 (result/rdval) の信号名を確認した。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/wishbone.fsm" target="_blank" rel="noopener">rj32: dig/wishbone.fsm</a> ― バスアクセスの状態機械 (idle/wait/hold/done) と req/mem/hold/ack/stall/done の遷移条件。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/dig/wishbone_fsm.dig" target="_blank" rel="noopener">rj32: dig/wishbone_fsm.dig</a> ― 上記 FSM を実際の回路に組み込んだ図。信号名が rj32 独自であることを確認した。</li>
+      <li><a href="https://github.com/rj45/rj32/blob/cf2a2005fb55d90da5c7a425cb70dfb24c48803a/TODO.md" target="_blank" rel="noopener">rj32: TODO.md</a> ― 「Standard memory bus interface (wishbone?)」が TODO 項目であり、rj32 の既存メモリバスは標準 Wishbone 準拠の完成品ではなく、その方向への実験であることの確認。</li>
+      <li><a href="https://cdn.opencores.org/downloads/wbspec_b4.pdf" target="_blank" rel="noopener">OpenCores: WISHBONE B4 仕様書</a> ― 3.1.2〜3.1.4 章 (CYC_O / STB_O の役割分担、標準ハンドシェイクのルール) と 3.2.1/3.2.3 章 (Classic standard SINGLE READ/WRITE Cycle のクロックエッジごとの動作) を本文のタイミング図の根拠にした。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./cpu-hazards.html">← 第 16 回 ハザード</a><a href="./cpu-index.html">目次</a><a href="./cpu-io-interrupts.html">第 18 回 入出力と割り込み →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'レジスタファイルの読み書きと比べて、CPU の外にあるメモリへのアクセスに「待ち合わせ (ハンドシェイク) の仕組み」が必要になる最も根本的な理由は何か？',
+    opts: [
+      '外部メモリは消費電力が大きく、発熱を抑えるために通信を間引く必要があるから',
+      '外部メモリは何サイクルで応答できるかが相手次第で、同じクロック内で確定する保証がないから',
+      '外部メモリのアドレス線はレジスタファイルより本数が多く、配線が物理的に届かないから',
+      '外部メモリは暗号化されているため、復号にかかる時間を毎回確認する必要があるから',
+      '外部メモリは電源が別系統なので、電圧が安定するまで毎回待つ必要があるから'
+    ],
+    ans: 1,
+    exps: [
+      '発熱や消費電力はハンドシェイクが必要な理由ではない。待ち合わせが要るのはタイミングの不確実性の問題。',
+      '<b>これが正解。</b>レジスタファイルは入力が決まればそのクロック内に出力が確定するが、外部メモリは何サイクルかかるか分からないため、確認の合図 (ACK など) で進んでよいタイミングを伝える必要がある。',
+      '配線の本数や距離はこの回で扱う問題ではなく、ハンドシェイクが要る理由の説明にもならない。',
+      '一般的なメモリバスのハンドシェイクは暗号化の有無とは無関係。',
+      '電源安定待ちは起動時の話であり、通常動作中のロード・ストアごとの待ち合わせの理由ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>内部は確定済み、外部は相手の都合で遅れる、という非対称性が握手を要求します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="内部と外部の非対称性"><rect x="30" y="20" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#0f5132">内部: 同じクロックで確定</text><rect x="300" y="20" width="230" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="415" y="50" font-size="13" text-anchor="middle" fill="#5b3d80">外部: 応答まで何クロックか不定</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">不定だからこそ「終わった」という合図 (ACK) が必要</text></svg>'
+          + '<p class="cap">図: 不確実な遅延があるところにだけハンドシェイクが要る。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の <code>loadb rd, [rs, imm4]</code> は <code>rd &lt;- memb[rs + imm4] &amp; 0xff</code> と定義されている。この命令についての rj32 自身の docs/instructions.md の記述として正しいものはどれか？',
+    opts: [
+      'すでに完全に実装済みで、符号拡張まで自動で行われると明記されている',
+      '未実装 (Not implemented yet) であると記されているだけで、それ以上の理由は書かれていない',
+      'バイト単位アクセスは rj32 の設計目標に無く、将来も実装しないと明記されている',
+      'すでに実装済みだが、動作速度が load の 10 倍遅いという性能上の注意だけが記されている',
+      'loadb は store 命令のエイリアスであり、実質的には書き込み専用の命令だと記されている'
+    ],
+    ans: 1,
+    exps: [
+      '誤り。docs/instructions.md は loadb/storeb を「まだ実装されていない (Not implemented yet)」と明記している。',
+      '<b>これが正解。</b>docs/instructions.md の loadb の項には "Note: Not implemented yet." としか書かれていない。「即値が左シフトされない」「メモリが語単位でインデックスされ下位ビットが無視されない」という注記は、同じ文書の <code>load</code>/<code>store</code> (語単位版) の項に書かれているものであり、loadb/storeb の注記とは別物である。',
+      '設計目標そのものから外れているという記述はなく、将来実装しないとも書かれていない。単に未完成なだけ。',
+      '性能上の注意ではなく、未実装であるという実装状況の注記。速度の数値は書かれていない。',
+      'loadb は読み出し (load) 系の命令であり、書き込み (store) のエイリアスではない。storeb が書き込み側。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>仕様 (ビットの定義) と実装状況 (まだできていない部分) は別の話として読む必要があります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="仕様と実装状況の分離"><rect x="30" y="20" width="220" height="80" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">仕様 (symbolic)</text><text x="140" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">rd &lt;- memb[rs+imm4]&amp;0xff</text><rect x="300" y="20" width="230" height="80" rx="8" fill="#fff6ea" stroke="#b5401f" stroke-width="2"/><text x="415" y="50" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">実装状況</text><text x="415" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">Note: Not implemented yet</text></svg>'
+          + '<p class="cap">図: 命令表の定義が書かれていても、実装が追いついていない命令がある。</p></div>'
+    }
+  },
+  {
+    q: 'Wishbone B4 の「classic standard SINGLE READ cycle」で、マスターが CLOCK EDGE 0 で行うこととして正しいものはどれか？',
+    opts: [
+      'DAT_I() に読み出したい値そのものを先に書き込んでおく',
+      'ADR_O() にアドレスを出し、WE_O を立てて WRITE サイクルであることを示す',
+      'ADR_O() にアドレスを出し、WE_O を下げ、CYC_O と STB_O を立てて要求を開始する',
+      'ACK_I を強制的に立てて、スレーブに応答を促す',
+      'クロックを一時的に停止し、スレーブの準備が整うまでクロックを止めておく'
+    ],
+    ans: 2,
+    exps: [
+      'DAT_I() はスレーブが応答を返すための入力であり、マスターが先に値を書き込む信号ではない。READ では使わない。',
+      'WE_O を立てるのは WRITE サイクルの印。READ サイクルでは WE_O を下げる (negate) のが正しい。',
+      '<b>これが正解。</b>仕様書の記述どおり、CLOCK EDGE 0 でマスターはアドレスを提示し、WE_O を negate して READ を示し、CYC_O と STB_O を assert してサイクルを開始する。',
+      'ACK_I はスレーブが出す信号であり、マスターが立てるものではない。',
+      'Wishbone の標準モードはクロックを止める仕組みを持たない。待ち状態はACK_Iが来るまでSTB_Oを保持することで表現する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>CLOCK EDGE 0 はマスターが「これから読みたい」という意思表示をするタイミングです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="CLOCK EDGE 0でのマスターの動作"><rect x="30" y="30" width="500" height="80" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">EDGE 0: ADR_O 提示 / WE_O negate / CYC_O・STB_O assert</text><text x="280" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">この時点ではまだ ACK_I は来ていない</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">次のEDGEでスレーブがACK_Iを返して初めて進む</text></svg>'
+          + '<p class="cap">図: READ サイクルの開始はマスター側の提示だけで、応答はまだこれから。</p></div>'
+    }
+  },
+  {
+    q: 'Wishbone B4 のハンドシェイクで、スレーブが ACK_I を立てるタイミングを 1 クロックではなく 3 クロック遅らせた (wait state を 2 回挿入した) 場合、マスター側の STB_O の振る舞いとして正しいのはどれか？',
+    opts: [
+      'ACK_I が来るまで STB_O を立てたまま保持し続け、ACK_I を確認した次のエッジで STB_O を下げる',
+      'STB_O を 1 クロックだけ立ててすぐ下げ、ACK_I が来るまで CYC_O だけで待つ',
+      'STB_O を毎クロック点滅させて、スレーブに再送要求のタイミングを伝える',
+      'wait state の数だけ ADR_O() に異なるアドレスを順番に出し、スレーブに選ばせる',
+      'STB_O の代わりに CLK_I を遅らせて、スレーブの処理時間を確保する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>wait state が増えても規則自体は変わらず、STB_O は ACK_I が来るまで立てたまま保持し、ACK_I を確認した次のエッジで下げる。',
+      '誤り。標準プロトコルでは STB_O は ACK_I が来るまで立て続けるのが正しい振る舞いで、1 クロックだけ立てて下げてしまうと要求自体が成立しない。',
+      'STB_O を点滅させるという仕組みは仕様に存在しない。STB_O は 1 回の転送が有効である間、継続して立てる信号。',
+      'wait state 中にアドレスを変えてはいけない。アドレスは STB_O が立っている間、安定している必要がある。',
+      'CLK_I はシステム全体のクロックであり、1 つのマスターが個別に遅らせることはできない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>wait state が増えても、STB_O は ACK_I を見るまで下げない、という規則は変わりません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="wait stateが増えてもSTB_Oは保持される図"><rect x="30" y="30" width="400" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="230" y="55" font-size="13" text-anchor="middle" fill="#1f4a68">STB_O: ACK_I が来るまでずっと高いまま</text><text x="230" y="100" font-size="13" text-anchor="middle" fill="#12211a">wait state が 0 回でも 2 回でも、この規則自体は変わらない</text></svg>'
+          + '<p class="cap">図: 待ち時間の長さに関わらず、STB_O は ACK_I 確認まで保持される。</p></div>'
+    }
+  },
+  {
+    q: '次の記述のうち、Wishbone B4 仕様が明記している内容として正しいものはどれか？',
+    opts: [
+      'マスターは [CYC_O] を [STB_O] の assert と同じエッジかそれより早く assert しなければならない',
+      'CYC_O は 1 回の転送 1 つにつき 1 クロックだけ立てればよく、連続転送の間は毎回下げてよい',
+      'STB_O が立っている間、ADR_O() やWE_O を変化させても仕様上問題ない',
+      'ACK_I はスレーブが CYC_I を無視して常に返してよい信号である',
+      'CYC_O は複数転送のサイクル全体ではなく、各転送のたびに個別に生成する信号である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>RULE 3.25 は「CYC_O は STB_O の assert を qualify する rising CLK_I edge より後では assert できない (つまり同じか、それより早い)」と定めている。',
+      '誤り。CYC_O は複数転送からなるサイクルの最初の転送から最後の転送まで assert されたままにする信号で、転送ごとに下げるものではない。',
+      '誤り。RULE 3.60 により ADR_O() などは STB_O で qualify される信号であり、STB_O が立っている間は安定している必要がある。',
+      '誤り。RULE 3.30 により、スレーブは CYC_I が negate されている間は他の SLAVE 信号に応答してはならない。',
+      '誤り。CYC_O はサイクル全体 (複数転送を含みうる) に対して 1 つ立てる信号であり、転送ごとに個別には作らない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>CYC_O はサイクル全体を覆う信号、STB_O は個々の転送を覆う信号という包含関係です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="CYC_OとSTB_Oの包含関係"><rect x="30" y="30" width="500" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">CYC_O: サイクル全体 (複数転送を含みうる)</text><rect x="60" y="70" width="150" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="135" y="92" font-size="12" text-anchor="middle" fill="#1f4a68">転送1: STB_O</text><rect x="230" y="70" width="150" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="305" y="92" font-size="12" text-anchor="middle" fill="#1f4a68">転送2: STB_O</text></svg>'
+          + '<p class="cap">図: CYC_O はサイクル全体、STB_O は個々の転送。CYC_O は STB_O より先か同時に立つ。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の <code>dig/wishbone.fsm</code> において、<code>hold</code> 状態から <code>ack</code> を受け取らずに <code>hold</code> が下がった (<code>!hold &amp;&amp; !ack</code>) 場合に遷移する先はどれか？',
+    opts: [
+      'idle に戻り、要求そのものを取り消してしまう',
+      'done に遷移し、要求が完了したものとして扱ってしまう',
+      'wait (応答待ちを続ける状態) に移る',
+      'hold に留まり続け、保留要求を再送し続ける',
+      'wait に留まり続け、永久に応答を待ってしまう'
+    ],
+    ans: 2,
+    exps: [
+      'idle に戻るのは要求 (mem) 自体が無くなったとき。ack が来ていないのに要求を取り消す遷移はこの図には無い。',
+      'ack を受け取っていない以上、done (完了) には進めない。done への遷移はすべて ack が条件に含まれている。',
+      '<b>これが正解。</b>dig/wishbone.fsm では hold 状態から !hold &amp;&amp; !ack の条件で wait 状態へ遷移する定義がある。保留 (hold) していた次のアクセスの予定が無くなった (!hold) が、まだ ack も来ていない (!ack) ときに、応答待ちを続ける wait 状態へ移る遷移である。',
+      'hold に留まる遷移の条件は hold&amp;&amp;!ack (自己ループ) であり、!hold&amp;&amp;!ack ではない。!hold が条件に入っている以上、hold には留まれない。',
+      'wait はこの遷移の行き先であって、出発点ではない。出発点は hold であり、wait への遷移は 1 回だけ起きる (ループではない)。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>状態機械の各遷移には必ず条件があり、ack を含まない条件では完了 (done) には進みません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="hold状態からwait状態への遷移条件"><circle cx="120" cy="80" r="44" fill="#fff6ea" stroke="#b5401f" stroke-width="2"/><text x="120" y="84" font-size="13" text-anchor="middle" fill="#b5401f">hold</text><line x1="164" y1="70" x2="330" y2="50" stroke="#2f5f8a" stroke-width="1.5" marker-end="url(#a17q6)"/><text x="260" y="40" font-size="11" fill="#12211a">!hold &amp;&amp; !ack</text><circle cx="400" cy="80" r="44" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="400" y="84" font-size="13" text-anchor="middle" fill="#1f4a68">wait</text><line x1="164" y1="95" x2="330" y2="110" stroke="#0f5132" stroke-width="1.5" stroke-dasharray="4 3"/><text x="260" y="130" font-size="11" fill="#4a5d54">ack を伴う遷移だけが done に進む (この矢印は参考)</text><defs><marker id="a17q6" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2f5f8a"/></marker></defs></svg>'
+          + '<p class="cap">図: hold 状態から !hold &amp;&amp; !ack の条件で、応答待ちを続ける wait 状態へ進む。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の TODO.md にある「Remove stall!!!!!」という項目の意図として、本文の説明に最も近いものはどれか？',
+    opts: [
+      'stall という信号自体が回路上のバグであり、今すぐ削除しないとシミュレーションが止まるから',
+      'stall を使わずに、すべての命令を常に 1 クロックで終わらせる設計に変えたいという意図',
+      '今はパイプライン全体を止めているが、待っているアクセスだけを止める制御に置き換えたいという意図',
+      'stall は Wishbone の仕様に存在しない信号なので、仕様違反を解消するために削除したいという意図',
+      'stall 信号をハードウェアではなくソフトウェア (アセンブラ) 側の処理に移したいという意図'
+    ],
+    ans: 2,
+    exps: [
+      'TODO.md の記述はバグ報告ではなく、設計の改善項目として書かれている。stall が無いとシミュレーションが止まるという事実も無い。',
+      'メモリアクセスが複数クロックかかること自体は変えられないため、「常に 1 クロックで終わらせる」設計には置き換えられない。目指しているのは止める範囲を絞ることで、ゼロクロック化ではない。',
+      '<b>これが正解。</b>本文で説明した通り、現在の stall は構造ハザードへの最初の簡単な対処 (全体を止める) であり、TODO はそれをもっと細かく (待っているアクセスだけを止める) したいという設計の方向性を示している。',
+      'stall は Wishbone 仕様の信号ではなく rj32 独自の内部信号なので、「仕様違反」という捉え方自体が誤り。',
+      'stall はパイプラインを一時停止させるハードウェアの制御信号であり、アセンブラ (ソフトウェア側) に移せる種類の処理ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「全体を止める」から「必要な部分だけ止める」への変化が TODO の意図です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="全体stallから部分stallへの改善イメージ"><rect x="30" y="20" width="220" height="50" rx="8" fill="#fff6ea" stroke="#b5401f" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#b5401f">現状: fetch も execute も止める</text><rect x="310" y="20" width="220" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="420" y="50" font-size="13" text-anchor="middle" fill="#0f5132">目標: 待っている段だけ止める</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">TODO.md はこの方向への改善項目</text></svg>'
+          + '<p class="cap">図: stall の対象範囲を絞ることが TODO の狙い。</p></div>'
+    }
+  },
+  {
+    q: '1 バイトだけをメモリに書き込む方法として、(a) 語を読んでから書き換えて書き戻す方式と、(b) メモリにバイトごとの書き込み許可線を持たせる方式を比べたとき、本文の説明と一致する記述はどれか？',
+    opts: [
+      '(a) は回路が複雑だが 1 回の操作で済み、(b) は回路が単純だが時間が 2 倍かかる',
+      '(a) と (b) はどちらも性能・回路規模の面で完全に同等であり、選ぶ基準は存在しない',
+      '(a) は書き込み専用で読み出しには使えず、(b) は読み出し専用で書き込みには使えない',
+      '(a)(b) のどちらを選んでも、必ず既存のデータの一部を失うので採用すべきではない',
+      '(a) は回路が単純だが読み・書きの 2 回分の時間がかかり、(b) は回路は複雑になるが 1 回で書き込める'
+    ],
+    ans: 4,
+    exps: [
+      '逆である。(a) read-modify-write は回路が単純、(b) バイト許可線は回路が複雑という組み合わせが本文の説明と一致する。',
+      '本文では速度と回路規模にトレードオフがあると説明しており、「完全に同等」ではない。',
+      '(a)(b) はいずれもバイト単位の書き込みを実現するための方式であり、読み出し専用・書き込み専用という区別はない。',
+      '正しく実装すれば隣のバイトのデータは保持されるので、「必ず失う」という記述は誤り。',
+      '<b>これが正解。</b>(a) read-modify-write は回路が単純だが読みと書きの 2 回分の時間がかかり、(b) バイトごとの書き込み許可線は回路が複雑になるが 1 回の操作で書き込める、というトレードオフが本文の説明と一致する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文中の比較図をもう一度確認してください。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="read-modify-writeと書き込み許可線の再確認"><rect x="20" y="20" width="250" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="48" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">read-modify-write</text><text x="145" y="72" font-size="12" text-anchor="middle" fill="#12211a">単純・2 回分の時間</text><rect x="300" y="20" width="250" height="90" rx="10" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="425" y="48" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">バイト許可線</text><text x="425" y="72" font-size="12" text-anchor="middle" fill="#12211a">複雑・1 回で済む</text></svg>'
+          + '<p class="cap">図: トレードオフの方向は「単純だが遅い」か「複雑だが速い」。</p></div>'
+    }
+  },
+  {
+    q: '次のタイミング図は、ある READ サイクルで CYC_O と STB_O を edge0 で立て、ACK_I が edge2 で初めて立ったあとの振る舞いを示している (破線は本来あるべき位置を示す)。図中の×印のタイミングで STB_O を下げてしまった場合、何が問題になるか。<div class="fig"><svg viewBox="0 0 520 150" aria-label="STB_Oを早く下げてしまう問題の図"><text x="20" y="20" font-size="12" fill="#4a5d54">CYC_O/STB_O</text><path d="M40,40 L40,28 L160,28" stroke="#0f5132" stroke-width="2.5" fill="none"/><path d="M160,28 L160,40" stroke="#c0492f" stroke-width="2.5" fill="none"/><text x="160" y="60" font-size="16" fill="#c0492f" font-weight="700">×</text><path d="M160,40 L160,28 L300,28 L300,40" stroke="#0f5132" stroke-width="1" stroke-dasharray="3 3" fill="none"/><text x="20" y="100" font-size="12" fill="#5b3d80">ACK_I</text><path d="M40,120 L260,120 L260,108 L300,108 L300,120" stroke="#5b3d80" stroke-width="2.5" fill="none"/><text x="270" y="100" font-size="11" fill="#5b3d80">edge2 で ACK_I</text></svg></div>',
+    opts: [
+      '問題は起きない。STB_O はいつ下げても仕様上は自由だから',
+      'ACK_I が来る前に STB_O を下げ、要求が取り消されたように見えてしまう',
+      'むしろ早く下げたほうが高速化されるので、仕様が推奨する動作である',
+      'CYC_O だけが問題になり、STB_O のタイミングはこの図では無関係',
+      'ACK_I の電圧レベルが変化し、ハードウェア的に壊れる'
+    ],
+    ans: 1,
+    exps: [
+      '仕様では STB_O は ACK_I (または ERR_I/RTY_I) を確認するまで保持する規則があり、自由に下げてよいわけではない。',
+      '<b>これが正解。</b>図の×印は ACK_I がまだ来ていない時点で STB_O を下げており、スレーブからすればまだ応答していないのに要求が引き下げられたことになり、転送が成立しない。',
+      '早く下げることは高速化ではなく、プロトコル違反であり仕様が推奨する動作ではない。',
+      'STB_O は ADR_O() などの信号を qualify する重要な信号であり、無関係ではない。',
+      'タイミング図の問題は論理的な手順の誤りであり、電圧レベルの破壊とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>STB_O を早く下げると、スレーブにとって「要求が終わった」のか「まだ続いている」のかが分からなくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="STB_Oを早く下げる問題の整理"><rect x="30" y="30" width="230" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#c0492f" font-weight="700">ACK_I 前に STB_O を下げる</text><text x="145" y="75" font-size="12" text-anchor="middle" fill="#12211a">要求が消えたように見える</text><rect x="300" y="30" width="230" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">正しい手順</text><text x="415" y="75" font-size="12" text-anchor="middle" fill="#12211a">ACK_I 確認後に下げる</text></svg>'
+          + '<p class="cap">図: STB_O を下げるタイミングは、必ず ACK_I を確認した後。</p></div>'
+    }
+  },
+  {
+    q: 'rj32 の 2 段パイプラインで、ある store 命令がバスの握手で合計 4 クロック (要求 1 + wait 2 + done 1) かかったとする。この間、execute 段の後ろに続いていた 1 命令は何クロック分 fetch 段で足止めされるか。ただし store 命令自体の execute 開始クロックは数えない。',
+    opts: [
+      '0 クロック (fetch は止まらない)',
+      '1 クロック',
+      '2 クロック',
+      '3 クロック',
+      '4 クロック'
+    ],
+    ans: 3,
+    exps: [
+      '本文で説明した通り、load/store の応答待ちの間は fetch 段も execute 段と一緒に stall する。0 クロックは誤り。',
+      '要求 1 クロックの後、wait が 2 クロック、done で完了が確定するまでの間、execute 開始クロックを除いた wait 2 クロック + done 1 クロックの合計で考える必要があり、1 クロックでは足りない。',
+      '2 クロックでは wait 分しか数えておらず、done で完了を確定するクロックが抜けている。',
+      '<b>これが正解。</b>execute 開始クロックを除くと、wait 2 クロック + done 1 クロックの合計 3 クロックの間、次の命令は fetch 段に居続けることになる (ack が来るまで、そして done で確定するまで stall が続く)。',
+      '4 クロックは store 命令自体の処理サイクル全体の数であり、execute 開始クロックを除く条件からすると 1 クロック多い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>stall が続く区間を数えるときは、「どこから数え始めるか」の条件を図でそろえることが大切です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="stallの持続クロック数を数える図"><text x="20" y="20" font-size="12" fill="#4a5d54">clk: 0(開始・数えない) 1(wait) 2(wait) 3(done)</text><rect x="20" y="40" width="100" height="34" fill="#e3edf5" stroke="#2f5f8a"/><text x="70" y="62" font-size="11" text-anchor="middle">開始</text><rect x="120" y="40" width="100" height="34" fill="#fff6ea" stroke="#b5401f"/><text x="170" y="62" font-size="11" text-anchor="middle">wait 1</text><rect x="220" y="40" width="100" height="34" fill="#fff6ea" stroke="#b5401f"/><text x="270" y="62" font-size="11" text-anchor="middle">wait 2</text><rect x="320" y="40" width="100" height="34" fill="#efe8f7" stroke="#5b3d80"/><text x="370" y="62" font-size="11" text-anchor="middle">done</text><text x="220" y="110" font-size="13" text-anchor="middle" fill="#12211a">足止めは wait 1 + wait 2 + done = 3 クロック</text></svg>'
+          + '<p class="cap">図: 開始クロックを除くと、足止めは wait 2 回 + done 1 回の 3 クロック。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
