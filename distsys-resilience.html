@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回復性パターン ― 小さな故障を全面停止にしないために</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 24 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>回復性パターン ― 小さな故障を全面停止にしないために</h1>
+  <p>最大の障害はたいてい、小さな遅延がきっかけで雪だるま式に全体へ広がった結果である</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 10 回 <a href="./distsys-retries-idempotency.html">タイムアウト・リトライ・冪等性</a>、第 22 回 <a href="./distsys-rate-limiter.html">分散レートリミッタ</a></p>
+  <p class="intro">分散システムの最大級の障害は、たいてい小さなきっかけから始まります。1 台の応答が少し遅れる、1 つの依存先が少し重くなる ― それだけなら誰も困りません。問題は、その小さな遅延に対してシステム全体がどう反応するかです。何も手を打たなければ、遅延はリトライを呼び、リトライは負荷を呼び、負荷はさらなる遅延を呼んで、最後にはシステム全体が止まります。この回では、この雪だるま効果 (snowball effect) を途中で止めるための回復性パターン (resiliency patterns) ― サーキットブレーカー・バルクヘッド・ロードシェディング・グレースフルデグラデーションなどを見ます。結論を先に言うと、回復性とは「故障を無くす」ことではなく「故障を小さく留める」ことです。</p>
+
+  <!-- ===== 解説パート 1: なぜ回復性パターンが要るのか ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 小さな遅延が全面停止になる</h2>
+    <p>大規模な障害を事後に調べると、きっかけはたいてい驚くほど小さな出来事です。1 台のサーバーの応答が通常より少し遅れた、1 つの依存先サービスが一時的に重くなった ― それ自体は致命的ではありません。問題は、システムがその小さな遅延にどう反応するかです。何も対策をしていないと、遅延は雪だるま式 (snowball effect) に拡大し、最初の遅延とは無関係な部分まで巻き込んで全体が止まります。</p>
+    <p>典型的な連鎖はこうです。サービス A がサービス B を呼び出しているとき、B が落ちているわけではなく、ただ<b>少し遅い</b>だけだとします。A は B からの応答を待つあいだ、その処理に使っていたスレッドや接続を手放せません。B への呼び出しが積み重なると、A の限られたスレッドプールや接続プールが、B の応答待ちだけで埋まってしまいます。すると A は、B と無関係なリクエストすら処理する余力を失い、A を呼んでいる上流のサービス C から見れば「A も落ちた」ように見えます。これが連鎖し、最初は B 1 つの軽微な遅延だったものが、関係の無いサービス群までまとめて止める全面停止に育ちます。</p>
+    <p>この回で見る回復性パターン (resiliency patterns) ― タイムアウト・リトライ・サーキットブレーカー・レートリミット・ロードシェディング・バルクヘッド・バックプレッシャー・ let it crash ― は、どれも単体で万能ではありません。狙いは共通して「故障そのものを無くす」ことではなく、<b>故障の影響範囲を小さく留め、連鎖させない</b>ことです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="連鎖障害が雪だるま式に広がる図">
+        <rect x="20" y="20" width="110" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="75" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">サービス B</text>
+        <text x="300" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">少し遅いだけ(落ちていない)</text>
+        <rect x="260" y="80" width="130" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="325" y="102" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">サービス A</text>
+        <text x="325" y="120" font-size="12" text-anchor="middle" fill="#12211a">スレッドが待ちで埋まる</text>
+        <line x1="130" y1="60" x2="260" y2="95" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="500" y="122" width="110" height="68" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="555" y="148" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">サービス C</text>
+        <text x="555" y="166" font-size="12" text-anchor="middle" fill="#12211a">A が応答不能に</text>
+        <text x="555" y="184" font-size="12" text-anchor="middle" fill="#12211a">見える</text>
+        <line x1="390" y1="110" x2="500" y2="155" stroke="#9aa" stroke-width="1.5"/>
+        <text x="300" y="215" font-size="13.5" text-anchor="middle" fill="#12211a">B の軽微な遅延が、無関係な C まで巻き込む全面停止に育つ</text>
+      </svg>
+      <p class="cap">図: 1 つの依存先の軽微な遅延が、スレッド/接続の枯渇を通じて無関係なサービスまで連鎖する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: タイムアウトとリトライ予算 ===== -->
+  <section>
+    <h2>2. 1 回の呼び出しを守る ― タイムアウトとリトライ予算</h2>
+    <p>第 1 節の連鎖は、A が B の応答を<b>無期限に</b>待ち続けたことから始まりました。最初に手を打つべきは<b>タイムアウト (timeout)</b> です。「B への呼び出しは最大 500ms まで待ち、それを超えたら諦めてスレッドや接続を解放する」というだけで、1 つの遅い依存先が A のリソース全体を奪うことは無くなります。</p>
+    <p>ただし、タイムアウトしたリクエストをどう扱うかという次の問題が残ります。多くの実装は失敗したリクエストを<b>リトライ (retry)</b> しますが、ここに新しい罠があります。B が遅い原因が「過負荷」だった場合、A (や他の多数の呼び出し元) が一斉にリトライすると、B への負荷はむしろ増え、B はさらに遅くなり、さらに多くのリトライを呼びます。この自己増幅の構図は、タイムアウトとリトライだけでは止められません (この連鎖が止まらなくなる現象そのものは第 36 回で詳しく扱います)。</p>
+    <p>実務での対策は 2 つの組み合わせです。<b>指数バックオフ + ジッタ (exponential backoff with jitter)</b> は、リトライまでの待ち時間を失敗するたびに倍々に伸ばし、さらにランダムなばらつき (ジッタ) を加えることで、多数のクライアントのリトライが同じ瞬間に集中する「リトライの一斉射撃」を防ぎます。<b>リトライ予算 (retry budget)</b> は、ある時間窓の中でリトライに使ってよい追加トラフィックの割合に上限 (例えば通常トラフィックの 10% まで) を設け、予算を使い切ったらリトライせずに失敗を受け入れます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="リトライの増幅効果の図">
+        <text x="300" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">過負荷の B に対し、全員が即座にリトライすると負荷が増幅する</text>
+        <rect x="30" y="35" width="130" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="95" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">元のリクエスト 100</text>
+        <line x1="160" y1="52" x2="250" y2="52" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-res1)"/>
+        <rect x="250" y="35" width="130" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="315" y="57" font-size="12.5" text-anchor="middle" fill="#b5401f">失敗分を即リトライ</text>
+        <line x1="315" y1="69" x2="315" y2="105" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-res1)"/>
+        <rect x="200" y="100" width="230" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="315" y="122" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">B への実質負荷は 100 を超えて増幅</text>
+        <text x="300" y="165" font-size="13.5" text-anchor="middle" fill="#12211a">バックオフ+ジッタとリトライ予算で、この増幅に上限をかける</text>
+        <defs><marker id="arr-res1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 無制限なリトライは、過負荷の依存先への負荷をさらに増幅させる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: サーキットブレーカーとバルクヘッド ===== -->
+  <section>
+    <h2>3. 呼び出し先を守る ― サーキットブレーカーとバルクヘッド</h2>
+    <p><b>サーキットブレーカー (circuit breaker)</b> は、家庭用電気のブレーカーと同じ発想です。依存先への呼び出しの失敗率を監視し、一定の割合を超えたら「この依存先は今は壊れている」と判断して、それ以降のリクエストは<b>ネットワーク呼び出しすら行わず即座に失敗を返す</b> (fail fast) 状態 (open) に切り替わります。しばらく待った後、試験的に 1 件だけ本物のリクエストを通してみる状態 (half-open) に移り、成功すれば通常状態 (closed) に戻り、失敗すれば再び open に戻ります。これにより、第 2 節で見たリトライの増幅とは逆に、<b>壊れている依存先への呼び出しそのものを止めて</b>、依存先が回復する時間を作ります。</p>
+    <p><b>バルクヘッド (bulkhead)</b> は船の隔壁に由来する発想です。船は複数の防水隔壁で区切られており、1 つの区画が浸水しても他の区画は無事なまま船全体は沈みません。ソフトウェアでも、依存先ごとにスレッドプールや接続プールを分けておけば、1 つの遅い依存先がプールを使い切っても、他の依存先への呼び出しに使うプールは影響を受けません。第 1 節の連鎖は、まさに A が B 用とそれ以外用のリソースを分けていなかったために起きたものでした。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 200" role="img" aria-label="サーキットブレーカーの状態遷移の図">
+        <rect x="30" y="70" width="130" height="50" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="95" y="100" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">Closed(通常)</text>
+        <line x1="160" y1="85" x2="260" y2="60" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-res2)"/>
+        <text x="210" y="55" font-size="12" text-anchor="middle" fill="#12211a">失敗率が上限超え</text>
+        <rect x="260" y="30" width="130" height="50" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="325" y="60" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">Open(即座に失敗)</text>
+        <line x1="325" y1="80" x2="280" y2="115" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-res2)"/>
+        <text x="240" y="88" font-size="12" text-anchor="middle" fill="#12211a">一定時間後</text>
+        <rect x="200" y="120" width="140" height="50" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="270" y="150" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">Half-Open(試験 1 件)</text>
+        <line x1="200" y1="135" x2="160" y2="105" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-res2)"/>
+        <text x="150" y="155" font-size="12" text-anchor="middle" fill="#12211a">成功</text>
+        <line x1="340" y1="135" x2="390" y2="75" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-res2)"/>
+        <text x="400" y="155" font-size="12" text-anchor="middle" fill="#12211a">失敗</text>
+        <defs><marker id="arr-res2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: サーキットブレーカーは closed → open → half-open の間を状態遷移する。</p>
+    </div>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="バルクヘッドによるプール分離の図">
+        <text x="150" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">共有プール</text>
+        <rect x="30" y="35" width="240" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="150" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">B 宛と C 宛が同じプールを共有</text>
+        <text x="150" y="80" font-size="12" text-anchor="middle" fill="#12211a">B が詰まると C も呼べなくなる</text>
+        <text x="450" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">分離済み(バルクヘッド)</text>
+        <rect x="340" y="35" width="110" height="60" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="395" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">B 専用プール</text>
+        <text x="395" y="78" font-size="11.5" text-anchor="middle" fill="#12211a">(詰まってもここだけ)</text>
+        <rect x="460" y="35" width="110" height="60" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="515" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">C 専用プール</text>
+        <text x="515" y="78" font-size="11.5" text-anchor="middle" fill="#12211a">(無事に動き続ける)</text>
+        <text x="300" y="140" font-size="13.5" text-anchor="middle" fill="#12211a">依存先ごとにプールを分けると、1 つの詰まりが他に及ばない</text>
+      </svg>
+      <p class="cap">図: バルクヘッドは依存先ごとにリソースを分離し、1 つの詰まりが全体に広がるのを防ぐ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: レートリミット・ロードシェディング・バックプレッシャー ===== -->
+  <section>
+    <h2>4. 自分自身を守る ― ロードシェディングとバックプレッシャー</h2>
+    <p>第 22 回で見た<b>レートリミット (rate limiting)</b> は「1 クライアントあたり何件まで」という事前に決めた上限で守る仕組みでした。これに対して<b>ロードシェディング (load shedding)</b> は、サーバー自身の負荷 (CPU 使用率、キューの深さ、レイテンシなど) をリアルタイムに観測し、過負荷と判断したら送信元を問わず一部のリクエストをあえて処理せずに落とす仕組みです。全リクエストを少しずつ遅く処理するより、重要度の低いリクエストを積極的に落として、重要なリクエストだけは応答できる状態を保つ方が、全体としての価値を守れます。</p>
+    <p><b>バックプレッシャー (back pressure)</b> は、過負荷になった下流が、黙ってキューを無限に溜め込んだり単に遅くなったりする代わりに、上流へ「今は送信を抑えてほしい」という信号を積極的に送り返す仕組みです。キューの長さに上限を設け、それを超えたら新規の送信元に対して明確に「忙しい」を伝えることで、問題を下流 1 箇所に閉じ込めます。</p>
+    <p>最後に<b>let it crash</b> という発想があります。Erlang / OTP が広めた考え方で、起きうるすべての例外を 1 つずつ丁寧にハンドリングしようとするのではなく、想定外の状態に陥ったプロセスはあえてクラッシュさせ、監督役のプロセス (supervisor) がきれいな初期状態から再起動する、という割り切りです。防御的なコードを無限に書き続けるより、失敗したら素早く綺麗に再起動する方が、結果として回復が単純で速くなります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="ロードシェディングの優先度による振り分けの図">
+        <rect x="30" y="30" width="540" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">過負荷を検知(キューの深さ・ CPU 使用率などを監視)</text>
+        <line x1="200" y1="70" x2="150" y2="105" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="400" y1="70" x2="450" y2="105" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="40" y="105" width="220" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="150" y="128" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">重要なリクエスト</text>
+        <text x="150" y="146" font-size="12" text-anchor="middle" fill="#12211a">優先して処理を続ける</text>
+        <rect x="340" y="105" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="128" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">重要度の低いリクエスト</text>
+        <text x="450" y="146" font-size="12" text-anchor="middle" fill="#12211a">あえて落とす(shed)</text>
+      </svg>
+      <p class="cap">図: ロードシェディングは過負荷時に重要度の低いリクエストをあえて落とし、重要な処理を守る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: グレースフルデグラデーションと静的安定性 ===== -->
+  <section>
+    <h2>5. 全体設計 ― グレースフルデグラデーションと静的安定性</h2>
+    <p><b>グレースフルデグラデーション (graceful degradation)</b> は、重要度の低い一部の機能が故障したときに、システム全体を止めるのではなく、機能を落とした縮退状態で動き続けるという設計方針です。例えば「おすすめ商品」を計算するサービスが落ちても、商品ページ自体はおすすめ欄を空のまま表示して動き続けられれば、購入自体は妨げられません。</p>
+    <p><b>静的安定性 (static stability)</b> は、設定や状態を配る側の仕組み (コントロールプレーン) が止まっても、実際にリクエストを処理する側 (データプレーン) は、最後に受け取った設定や状態を使い続けて動作し続けられるべきだという設計原則です。例えば、負荷分散装置がどのサーバーが健康かという情報を更新する仕組みと通信できなくなっても、最後に取得した一覧を使ってトラフィックを振り分け続けられれば、コントロールプレーンの障害がそのままデータプレーンの障害に広がることを防げます。</p>
+    <p>こうした個々のパターンは、より大きな設計原則の一部として整理されています。<b>冗長化 (redundancy)</b> ・ <b>複製 (replication)</b> ・ <b>負荷分散 (load balancing)</b> ・ <b>フェイルオーバー (failover)</b> ・ グレースフルデグラデーション ・ <b>監視とアラート (monitoring and alerting)</b> の 6 つは、フォールトトレラントなシステムを設計するための代表的な原則として整理されています。可用性を高める構成としては、待機系をただ待たせる primary-backup、読み取りだけ待機系にも振る primary-secondary、両方が読み書きを受ける primary-primary のような構成があり、複製の作り方によって可用性と複雑さのトレードオフが変わります。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/resiliency-patterns.md" target="_blank" rel="noopener">ByteByteGo: Resiliency Patterns</a> ― 小さな誤りが雪だるま式に拡大するという本文第 1 節の導入、そしてタイムアウト・リトライ・サーキットブレーカー・レートリミット・ロードシェディング・バルクヘッド・バックプレッシャー・ let it crash という 8 パターンの一覧に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/a-cheat-sheet-for-designing-fault-tolerant-systems.md" target="_blank" rel="noopener">ByteByteGo: A Cheat Sheet for Designing Fault-Tolerant Systems</a> ― 複製 ・ 冗長化 ・ 負荷分散 ・ フェイルオーバー ・ グレースフルデグラデーション ・ 監視とアラートという 6 原則を第 5 節に反映した。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-do-we-design-for-high-availability.md" target="_blank" rel="noopener">ByteByteGo: How to Design for High Availability</a> ― CAP 可用性の定義 (故障していないノードは有限時間内に応答を返す)、primary-backup / primary-secondary / primary-primary という複製構成の違いを第 5 節に反映した。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-counters-topk.html">← 第 23 回 分散カウンタと Top-K</a><a href="./distsys-index.html">目次</a><a href="./distsys-raft-paxos.html">第 25 回 合意 (Paxos / Raft) →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'サービス A がサービス B を呼び出しており、B が「落ちてはいないが少し遅い」状態になった。何の対策も無いと、なぜ A 自身も応答不能になりやすいのか？',
+    opts: [
+      'B への呼び出しが A のスレッドや接続を占有したまま解放されず、B と無関係なリクエストに使うはずのリソースまで枯渇してしまうから',
+      'B が遅くなると、A のソースコードがネットワーク経由で自動的に書き換えられ、別の不具合が新たに発生してしまうから',
+      'A のデータベースのディスク容量が、B の遅延に比例して自動的に減っていくから',
+      'B が遅いという情報がネットワーク全体に伝わり、インターネット全体の速度が落ちるから',
+      'A はB以外のサービスを一切呼び出していないため、実際には影響を受けない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>タイムアウトもバルクヘッドも無いと、A はBの応答を待つ間スレッドや接続を手放せず、呼び出しが積み重なると限られたリソースがBの応答待ちだけで埋まり、Bと無関係な処理すら受け付けられなくなる。',
+      'サービスの遅延がソースコードを書き換えるという仕組みは存在せず、これは実際に起きている現象の説明にならない。',
+      'ディスク容量の減少は遅延とは別の資源の話であり、Bの遅延がAのディスク容量を直接減らす仕組みは無い。',
+      'インターネット全体の速度低下という規模の影響ではなく、問題はAとBの間のリソース(スレッドや接続)の枯渇という局所的な話である。',
+      '前提として「A が B を呼び出している」と明記されており、無関係という説明はこの前提と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、B への応答待ちがAのリソースを占有し、無関係な処理にも影響します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="連鎖障害でAのリソースが枯渇する図"><rect x="30" y="20" width="110" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="85" y="45" font-size="13" text-anchor="middle" fill="#0f5132">B(少し遅い)</text><line x1="140" y1="40" x2="250" y2="70" stroke="#9aa" stroke-width="1.5"/><rect x="165" y="60" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="275" y="82" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">Aのスレッドが待ちで埋まる</text><text x="275" y="98" font-size="11" text-anchor="middle" fill="#12211a">Bと無関係な処理も受け付けられない</text><text x="280" y="135" font-size="13.5" text-anchor="middle" fill="#12211a">タイムアウトもバルクヘッドも無いと、ここで枯渇する</text></svg>'
+          + '<p class="cap">図: Bへの応答待ちがAの共有リソースを埋め、無関係な処理まで巻き込む。</p></div>'
+    }
+  },
+  {
+    q: 'タイムアウト (timeout) を設定する最も直接的な目的は何か？',
+    opts: [
+      '依存先サービスのコードを呼び出し元から自動的に修正し、遅延の原因そのものをネットワーク越しに取り除く',
+      '依存先の応答を無期限に待ち続けることを防ぎ、一定時間を超えたらリソースを解放して諦める',
+      '依存先への通信を暗号化し、通信内容が漏洩しないようにする',
+      '依存先への呼び出し回数そのものを、一定の値に制限する',
+      '依存先が故障しているかどうかを、事前に100%の精度で予測する'
+    ],
+    ans: 1,
+    exps: [
+      '依存先のコードを呼び出し元から自動的に修正する仕組みはタイムアウトには含まれない。',
+      '<b>これが正解。</b>タイムアウトは「この呼び出しは最大どれだけ待つか」を決め、それを超えたら待ち続けるのをやめてリソース(スレッドや接続)を解放する。これにより無期限の待ちによるリソース枯渇を防ぐ。',
+      '通信の暗号化はTLSなど別の仕組みの役割であり、タイムアウトの目的ではない。',
+      '呼び出し回数そのものの制限はレートリミットの役割であり、タイムアウトとは異なる目的を持つ。',
+      'タイムアウトは待つ時間の上限を決める仕組みであり、故障の有無を事前に予測する仕組みではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>タイムアウトは「待つ時間に上限を設ける」という単純だが重要な仕組みです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="タイムアウトによる待ち時間の上限の図"><line x1="40" y1="90" x2="520" y2="90" stroke="#9aa" stroke-width="2"/><rect x="40" y="60" width="200" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="80" font-size="12.5" text-anchor="middle" fill="#0f5132">通常の応答時間</text><rect x="240" y="60" width="100" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="290" y="80" font-size="12" text-anchor="middle" fill="#b5401f">上限超え→諦める</text><text x="280" y="115" font-size="13" text-anchor="middle" fill="#12211a">上限を超えたらリソースを解放し、無期限の待ちを防ぐ</text></svg>'
+          + '<p class="cap">図: タイムアウトは待ち時間に上限を設け、無期限の待ちによるリソース枯渇を防ぐ。</p></div>'
+    }
+  },
+  {
+    q: '依存先 B が「過負荷」によって遅くなっているとき、すべての呼び出し元 A が「失敗したら即座にリトライする」という単純な戦略を採ると、何が起きやすいか？',
+    opts: [
+      'B への実質的な負荷は変わらず、A 側の処理だけが速くなる',
+      'リトライによって A 側のメモリ使用量と CPU 使用率だけが段階的に増えていき、B の負荷には一切の影響が及ばない',
+      'B への実質的な負荷がリトライによってさらに増え、Bがより遅くなり、さらに多くのリトライを招くという自己増幅が起きる',
+      'リトライは常にBの負荷を減らす方向に働くため、むしろ早期の回復を助ける',
+      'B が過負荷であっても、リトライの有無によって負荷がまったく変化することはない'
+    ],
+    ans: 2,
+    exps: [
+      'Bへの負荷が変わらないという説明は誤りで、リトライは呼び出しの総数を増やすため、通常はBへの負荷を増加させる方向に働く。',
+      'リトライはAからBへの新たな呼び出しを生むため、Bにも負荷として届く。Bに影響が及ばないという説明は誤り。',
+      '<b>これが正解。</b>過負荷が原因で遅くなっているBに対し、全呼び出し元が即座にリトライすると、Bへの呼び出し総数が増えてさらに遅くなり、それがさらに多くのタイムアウトとリトライを招くという自己増幅のループが生じる。',
+      'リトライは新たな呼び出しを追加するものであり、過負荷の原因を取り除く効果は無い。むしろ負荷を増やす方向に働く。',
+      '呼び出しの総数が増えればサーバーの負荷は変化するのが通常であり、リトライの有無が負荷にまったく影響しないという説明は不自然である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、即座のリトライは過負荷のBへの負荷をさらに増やします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="即時リトライによる自己増幅の図"><rect x="30" y="20" width="140" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="100" y="40" font-size="12.5" text-anchor="middle" fill="#b5401f">B遅延→失敗</text><line x1="100" y1="50" x2="100" y2="80" stroke="#9aa" stroke-width="1.5"/><rect x="30" y="80" width="140" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="100" y="100" font-size="12.5" text-anchor="middle" fill="#b5401f">即座にリトライ</text><line x1="170" y1="95" x2="255" y2="95" stroke="#9aa" stroke-width="1.5"/><text x="270" y="100" font-size="13" text-anchor="start" fill="#12211a">Bへの負荷が増え、さらに遅くなる</text></svg>'
+          + '<p class="cap">図: 即座のリトライは過負荷のBへの負荷を増やし、悪循環を生む。</p></div>'
+    }
+  },
+  {
+    q: 'サーキットブレーカーが「open」状態になっているとき、依存先への新しいリクエストはどう処理されるか？',
+    opts: [
+      '通常より詳細なログを残しつつ、通常どおりネットワーク呼び出しを実行する',
+      '呼び出しの優先度を自動的に下げたうえで、通常どおりネットワーク呼び出しを実行する',
+      '呼び出し先のサーバーを自動的に再起動させる信号を送る',
+      'ネットワーク呼び出しそのものを行わず、即座に失敗として扱う(fail fast)',
+      '呼び出し先に関係なく、常にリクエストを成功として扱い、ダミーの応答を返す'
+    ],
+    ans: 3,
+    exps: [
+      'open状態の目的はそもそも呼び出しを行わないことであり、詳細なログを残しながら通常どおり呼び出すという説明はopenの定義と矛盾する。',
+      '優先度を下げて呼び出すという段階的な動作ではなく、openはそもそも呼び出しを行わない状態である。',
+      'サーキットブレーカーは呼び出し元の挙動を制御する仕組みであり、呼び出し先のサーバーを再起動させる信号を送る機能は持たない。',
+      '<b>これが正解。</b>open状態では、依存先が壊れていると判断し、ネットワーク呼び出しそのものを行わずに即座に失敗を返す(fail fast)。これにより無駄な待ち時間やリソース消費を避け、依存先に余計な負荷もかけない。',
+      '常に成功として扱いダミー応答を返す動作は、呼び出し元に誤った情報を伝えることになり、サーキットブレーカーの目的(失敗を正しく伝え早く諦める)とは異なる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の状態遷移図を思い出してください。openは「即座に失敗を返す」状態です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="サーキットブレーカーopen状態の図"><rect x="30" y="40" width="160" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="110" y="70" font-size="13" text-anchor="middle" fill="#0f5132">リクエスト到着</text><line x1="190" y1="65" x2="260" y2="65" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-q4)"/><rect x="260" y="40" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="360" y="62" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">open: 呼び出さず即失敗</text><text x="360" y="80" font-size="11.5" text-anchor="middle" fill="#12211a">ネットワークに出ない</text><defs><marker id="arr-q4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: open状態では、ネットワーク呼び出しそのものを行わず即座に失敗を返す。</p></div>'
+    }
+  },
+  {
+    q: 'バルクヘッド (bulkhead) パターンの直接的な効果として最も適切なものは？',
+    opts: [
+      '依存先の数を自動的に減らし、呼び出す先の種類そのものを少なくする',
+      '依存先からの応答時間を、常にゼロに近づけるよう最適化する',
+      'すべての依存先への呼び出しを、管理の手間を減らすために1つの共有スレッドプールへあえてまとめて効率化する',
+      '依存先への呼び出しに使う認証情報を、依存先ごとに自動生成する',
+      '依存先ごとにスレッドプールや接続プールを分離し、1つの依存先のリソース枯渇が他の依存先への呼び出しに影響しないようにする'
+    ],
+    ans: 4,
+    exps: [
+      'バルクヘッドは依存先の数そのものを減らす仕組みではなく、既存の依存先群に対するリソースの分離方法である。',
+      '応答時間そのものを短縮する最適化はバルクヘッドの役割ではなく、別の性能改善の話題である。',
+      'すべてを1つの共有プールにまとめることは、本文で述べた問題(1つの依存先がプールを占有し他に影響する)をむしろ引き起こす方向であり、バルクヘッドの逆の構成である。',
+      '認証情報の生成はセキュリティ上の別の仕組みであり、バルクヘッドの直接的な効果ではない。',
+      '<b>これが正解。</b>バルクヘッドは依存先ごとにスレッドプールや接続プールを分離することで、1つの依存先のリソース枯渇が他の依存先への呼び出しに影響しないようにする、船の隔壁と同じ発想の仕組みである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、プールを分離することで1つの詰まりが他に及ばなくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="バルクヘッドによるリソース分離の図"><rect x="30" y="30" width="150" height="70" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="105" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">B専用プール</text><text x="105" y="80" font-size="11.5" text-anchor="middle" fill="#12211a">(詰まってもここだけ)</text><rect x="220" y="30" width="150" height="70" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="295" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">C専用プール</text><text x="295" y="80" font-size="11.5" text-anchor="middle" fill="#12211a">(無事に動き続ける)</text></svg>'
+          + '<p class="cap">図: 依存先ごとのプール分離により、1つの依存先の詰まりが他に及ばない。</p></div>'
+    }
+  },
+  {
+    q: 'レートリミット (rate limiting) とロードシェディング (load shedding) の違いとして最も適切なものは？',
+    opts: [
+      'レートリミットは事前に決めたクライアント単位の上限で制限するのに対し、ロードシェディングはサーバー自身の負荷状況をリアルタイムに見て送信元を問わず一部を落とす',
+      '両者はまったく同じ仕組みの別名であり、実質的な違いは無い',
+      'レートリミットはサーバー自身のCPU使用率やキューの深さをリアルタイムに見て判断するのに対し、ロードシェディングは事前に決めたクライアント単位の固定の上限だけで判断する',
+      'ロードシェディングは必ずクライアント側で実装され、サーバー側では実装できない',
+      'レートリミットは常に全リクエストを通し、ロードシェディングだけがリクエストを拒否できる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>レートリミットは「1クライアントあたり何件まで」という事前に決めた静的な上限で制限するのに対し、ロードシェディングはサーバー自身のCPU使用率やキューの深さといった実際の負荷状況を見て、送信元に関係なく一部のリクエストをあえて落とす。',
+      '前者は事前に決めた上限、後者はリアルタイムな自己観測という異なる判断基準を持つため、同じ仕組みの別名とは言えない。',
+      '説明が2つの仕組みを取り違えている。レートリミットが事前の上限、ロードシェディングがリアルタイムの負荷観測という対応が正しい。',
+      'ロードシェディングは多くの場合サーバー側(自分自身の過負荷)を基準に行われる仕組みであり、クライアント側専用という説明は誤り。',
+      'レートリミットも上限を超えたリクエストを拒否する仕組みであり、「常に全リクエストを通す」という説明は第22回で見たレートリミットの定義と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>判断基準が「事前に決めた上限」か「今の自分の負荷」かという違いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="レートリミットとロードシェディングの違いの図"><rect x="30" y="30" width="220" height="70" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">レートリミット</text><text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">クライアント単位の事前上限</text><rect x="310" y="30" width="220" height="70" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">ロードシェディング</text><text x="420" y="75" font-size="12" text-anchor="middle" fill="#12211a">自分の負荷をリアルタイム観測</text></svg>'
+          + '<p class="cap">図: 判断基準が「事前の上限」か「今の自己観測」かが2つの仕組みの違い。</p></div>'
+    }
+  },
+  {
+    q: 'バックプレッシャー (back pressure) の仕組みとして最も適切な記述はどれか？',
+    opts: [
+      '上流のクライアントのソースコードを、下流サービスがネットワーク越しに自動的に書き換えて送信量そのものを減らす',
+      '過負荷になった下流が、上流に対して「今は送信を抑えてほしい」という信号を積極的に送り返し、問題を自分の内部に閉じ込める',
+      '下流が過負荷になったら、下流自身のデータをすべて削除して空の状態から再開する',
+      '上流からの送信をすべて無条件に受理し、内部のキューを無制限に伸ばして溜め込む',
+      '下流の負荷に関係なく、常に一定の速さでリクエストを上流に送り返す'
+    ],
+    ans: 1,
+    exps: [
+      '下流が上流のコードを書き換えるという仕組みは存在せず、これはバックプレッシャーの説明にならない。',
+      '<b>これが正解。</b>バックプレッシャーは、キューの長さなどに上限を設け、それを超えたら上流に明確な信号(忙しい、送信を控えて)を送り返すことで、過負荷という問題を下流の内部に閉じ込め、上流を無秩序に巻き込まないようにする仕組みである。',
+      'データを削除して再開することは過負荷への対処として不自然であり、バックプレッシャーの一般的な仕組みではない。',
+      '無制限にキューを伸ばして溜め込む動作は、まさにバックプレッシャーが避けようとしている挙動であり、説明が逆になっている。',
+      '下流の負荷に関係なく一定速度で送り返すのでは、過負荷を上流に伝える信号にならず、バックプレッシャーの目的を果たさない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>過負荷を内部に溜め込むのではなく、上流に積極的に伝えるのがバックプレッシャーです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="バックプレッシャーの図"><rect x="30" y="40" width="140" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="65" font-size="13" text-anchor="middle" fill="#0f5132">上流(クライアント)</text><rect x="380" y="40" width="140" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="450" y="65" font-size="13" text-anchor="middle" fill="#b5401f">下流(過負荷)</text><line x1="380" y1="55" x2="170" y2="55" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-q7)"/><text x="280" y="40" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">「今は送信を控えて」</text><defs><marker id="arr-q7" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: バックプレッシャーは過負荷の下流から上流へ、送信を控えるよう信号を送り返す。</p></div>'
+    }
+  },
+  {
+    q: 'Erlang / OTP が広めた「let it crash」という発想の趣旨として最も適切なものは？',
+    opts: [
+      'どれほど些細であっても起こりうる例外のすべてを事前に想定し、1つずつ丁寧にハンドリングするコードを現場の判断で無限に書き続けるべきだという考え方',
+      'クラッシュを一切発生させないよう、事前にすべての障害を排除すべきだという考え方',
+      'クラッシュしたプロセスは二度と再起動せず、永久に停止させたままにすべきだという考え方',
+      '想定外の状態に陥ったプロセスはあえてクラッシュさせ、監督役がきれいな初期状態から再起動する方が、結果として回復が単純になるという考え方',
+      'クラッシュはユーザーにとって常に良い体験であり、積極的に増やすべきだという考え方'
+    ],
+    ans: 3,
+    exps: [
+      'let it crashはむしろその正反対で、起きうる例外を1つずつ丁寧に防御的にハンドリングし続けるアプローチの代わりとして提案された考え方である。',
+      'すべての障害を事前に排除するという考え方は現実的ではなく、let it crashはむしろ障害の発生を前提にした割り切りの考え方である。',
+      '再起動させずに永久に停止させたままにするのでは可用性が失われ、let it crashの「監督役が再起動する」という核心的な部分と矛盾する。',
+      '<b>これが正解。</b>想定外の状態に陥ったプロセスは無理に修復しようとせず、あえてクラッシュさせ、監督役(supervisor)がきれいな初期状態から再起動する。防御的なコードを無限に積み重ねるより、失敗したら素早く綺麗に再起動する方が回復が単純で速くなる。',
+      'クラッシュ自体がユーザー体験として望ましいという主張ではなく、クラッシュ後の回復を単純にする設計上の割り切りが趣旨である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>防御的なコードを積み重ねる代わりに、クラッシュと再起動をシンプルに繰り返す発想です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="let it crashの図"><rect x="10" y="40" width="170" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="95" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">想定外の状態→クラッシュ</text><line x1="180" y1="60" x2="300" y2="60" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-q8)"/><rect x="300" y="40" width="200" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="400" y="65" font-size="13" text-anchor="middle" fill="#0f5132">監督役が初期状態から再起動</text><defs><marker id="arr-q8" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: クラッシュを受け入れ、監督役による再起動で単純に回復する。</p></div>'
+    }
+  },
+  {
+    q: 'グレースフルデグラデーション (graceful degradation) の例として最も適切なものは？',
+    opts: [
+      '「おすすめ商品」を計算するサービスが落ちた際、商品ページ全体にエラー画面を表示して購入処理も止める',
+      'おすすめサービスが落ちたら、商品ページのサーバー自体を直ちに再起動する',
+      'おすすめサービスが落ちたら、注文を受け付けるサービスも連動して停止させる',
+      'おすすめサービスが落ちたら、その代わりにランダムな別の商品ページへ強制的に転送する',
+      '「おすすめ商品」を計算するサービスが落ちた際、おすすめ欄だけ空のまま表示し、商品ページ自体と購入処理は動作を続ける'
+    ],
+    ans: 4,
+    exps: [
+      '重要度の低い機能の故障でページ全体を止めてしまうのは、まさにグレースフルデグラデーションが避けようとしている全面停止そのものである。',
+      '無関係なサーバー全体の再起動は影響範囲を広げる対処であり、故障した機能だけを縮退させる考え方とは異なる。',
+      '重要度の低いおすすめサービスの故障を、重要な注文サービスの停止に連動させるのは、むしろ連鎖障害を自ら作り出す行為であり、グレースフルデグラデーションの趣旨に反する。',
+      'ランダムな別ページへの強制転送はユーザーの意図に反する動作であり、縮退した状態で元の機能を維持するという趣旨とは異なる。',
+      '<b>これが正解。</b>重要度の低い「おすすめ商品」機能が故障しても、商品ページ本体と購入処理という重要な機能は動作を続けられるように、故障した部分だけを縮退させる(欄を空にする)のがグレースフルデグラデーションの典型例である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>重要度の低い機能だけを縮退させ、重要な機能は動作を続けます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="グレースフルデグラデーションの図"><rect x="30" y="30" width="220" height="70" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">商品ページ+購入</text><text x="140" y="78" font-size="12" text-anchor="middle" fill="#12211a">動作を続ける</text><rect x="310" y="30" width="220" height="70" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">おすすめ欄</text><text x="420" y="78" font-size="12" text-anchor="middle" fill="#12211a">空のまま縮退</text></svg>'
+          + '<p class="cap">図: 重要度の低い機能だけを縮退させ、重要な機能は守る。</p></div>'
+    }
+  },
+  {
+    q: '「静的安定性 (static stability)」という設計原則が指すものとして最も適切なものは？',
+    opts: [
+      'システムの設定ファイルは一度書き込んだら最後、運用担当者であっても二度と内容を変更してはならないという厳格な制約',
+      'すべてのサーバーを物理的に固定し、スケールアウトを一切行わないという制約',
+      'コントロールプレーン(設定や状態を配る側)が落ちても、データプレーン(実際にリクエストを処理する側)は最後に受け取った情報を使い続けて動作し続けるべきだという原則',
+      'データベースの値を一度書き込んだら、二度と更新できないという制約',
+      '負荷が高まるほど、システムが自動的に遅くなるよう意図的に設計すべきだという原則'
+    ],
+    ans: 2,
+    exps: [
+      '静的安定性は設定を変更してはならないという制約ではなく、変更を配る仕組みが止まった場合の振る舞いについての原則である。',
+      'スケールアウトの可否とは別の話題であり、物理的な固定を求める原則ではない。',
+      '<b>これが正解。</b>静的安定性とは、設定や状態を配る側(コントロールプレーン)が止まっても、実際に処理する側(データプレーン)は最後に受け取った情報を使い続けて動作できるべきだという原則で、コントロールプレーンの障害がデータプレーンの障害に広がることを防ぐ。',
+      'これはデータベースの不変性(イミュータビリティ)の話題であり、静的安定性の定義とは異なる軸の概念。',
+      '負荷が高まるほど意図的に遅くする設計は回復性の原則とは言えず、静的安定性の定義にも含まれない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>コントロールプレーンが止まっても、データプレーンは最後の情報で動き続けます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="静的安定性の図"><rect x="30" y="20" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">コントロールプレーン停止</text><rect x="320" y="20" width="220" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="430" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">データプレーンは動作を続ける</text><text x="300" y="100" font-size="13" text-anchor="middle" fill="#12211a">最後に受け取った設定や状態を使い続ける</text></svg>'
+          + '<p class="cap">図: コントロールプレーンの障害を、データプレーンの障害に広げない。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

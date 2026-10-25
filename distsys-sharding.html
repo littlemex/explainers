@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>パーティショニングとシャーディング ― データを割ると何が起こるか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 06 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>パーティショニングとシャーディング ― データを割ると何が起こるか</h1>
+  <p>1 台に収まらなくなったデータを割って複数ノードに分けると、「どこに何があるか」を決める規則そのものが新しい障害点になる</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 01 回 <a href="./distsys-fundamentals.html">なぜ分散するのか</a>、第 05 回 <a href="./distsys-replication-basics.html">レプリケーション入門</a>。</p>
+  <p class="intro">結論を先に言うと、シャーディング (sharding, データ分割) とは「1 台に収まらないデータを複数のノードに分け、各ノードは全体の一部分だけを担当する」仕組みであり、その代償は「どのデータがどのノードにあるかを決める規則 (シャーディングアルゴリズム) の選び方が、負荷の偏りと、ノードを増減させるときの移動コストを決めてしまう」ことである。レプリケーション (第 05 回) は同じデータを複製して耐障害性と読み取りスケールを得る仕組みだったが、シャーディングはデータそのものを割って書き込みと容量のスケールを得る仕組みであり、両者は組み合わせて使われることが多い。</p>
+
+  <section>
+    <h2>1. なぜパーティショニングが要るのか</h2>
+    <p>ByteByteGo の a-crash-course-in-database-sharding は、シャーディングが解決する問題を 3 つに整理している。(1) <b>1 台に収まらないデータ量</b>: 1 台のサーバーが保持できるデータ量には物理的な上限がある。(2) <b>1 台では処理しきれない要求数</b>: 1 台のサーバーが処理できる秒間の要求数にも上限がある。(3) <b>データが増えるほど増すクエリの遅延</b>: テーブルの行数が増えるほど、1 回のクエリが調べる範囲が広がり遅くなる。</p>
+    <p>第 05 回のレプリケーションは「同じデータのコピーを複数ノードに持たせる」ことで読み取りと耐障害性をスケールさせたが、どのレプリカも結局<b>全データ</b>を持つ必要があり、1 台あたりの容量・書き込み負荷の上限は解決しない。そこで、データそのものを分割し、<b>各ノードが全体の一部分だけを担当する</b>という発想が必要になる。これを<b>シャード (shard, データの断片)</b> と呼び、分割する操作を<b>シャーディング</b> または<b>水平分割 (horizontal partitioning)</b> と呼ぶ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="1台のテーブルをシャーディングで分割する">
+        <rect x="40" y="20" width="200" height="90" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="140" y="45" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">1 つのテーブル</text>
+        <text x="140" y="68" font-size="12.5" text-anchor="middle" fill="#12211a">全ユーザーの行を 1 台が保持</text>
+        <text x="140" y="88" font-size="12.5" text-anchor="middle" fill="#12211a">容量・秒間要求数に上限</text>
+        <line x1="260" y1="60" x2="340" y2="60" stroke="#9aa" stroke-width="2" marker-end="url(#arrSh1)"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#4a5d54">分割</text>
+        <rect x="350" y="20" width="90" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="395" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">Shard 1</text>
+        <text x="395" y="63" font-size="12.5" text-anchor="middle" fill="#12211a">一部の行</text>
+        <rect x="450" y="20" width="90" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="495" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">Shard 2</text>
+        <text x="495" y="63" font-size="12.5" text-anchor="middle" fill="#12211a">一部の行</text>
+        <rect x="550" y="20" width="60" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="580" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Shard 3</text>
+        <text x="580" y="63" font-size="12.5" text-anchor="middle" fill="#12211a">一部</text>
+        <text x="320" y="160" font-size="13.5" text-anchor="middle" fill="#12211a">各シャードは全体の一部分だけを持つ ― レプリカ(全体のコピー)とは違う</text>
+        <text x="320" y="185" font-size="13" text-anchor="middle" fill="#4a5d54">容量も秒間の書き込み数も、シャードの数に応じて増やせる</text>
+        <defs><marker id="arrSh1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs>
+      </svg>
+      <p class="cap">図: シャーディングは「全体のコピーを増やす」のではなく「全体を分割して各ノードが一部分だけ持つ」仕組み。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 垂直分割と水平分割 ― 2 つの切り方</h2>
+    <p>ByteByteGo の vertical-partitioning-vs-horizontal-partitioning は、データの分け方には 2 つの軸があると整理している。</p>
+    <p><b>垂直分割 (vertical partitioning)</b> ― テーブルの<b>列</b>を複数のテーブルに分ける。分割後のテーブルは行数は同じだが、列数が少なくなる。例えば利用者テーブルから、めったに使わない属性だけを別テーブルに切り出す、といった使い方になる。</p>
+    <p><b>水平分割 (horizontal partitioning, シャーディング)</b> ― テーブルの<b>行</b>を複数のテーブルに分ける。分割後のテーブルは列数は同じだが、行数が少なくなる。各シャードは独立したデータストアとなり、利用者 ID の範囲などに応じて行が振り分けられる。</p>
+    <p>この回で主に扱うのは水平分割で、ByteByteGo は水平分割のメリットとして「水平スケーリングを後押しする」「1 つのクエリが調べる行数が減るため応答時間が短くなる」ことを挙げ、デメリットとして「複数シャードをまたいだ ORDER BY はアプリケーション側で結果をまとめ直す必要がある」「シャード間でデータ量が偏る<b>ホットスポット</b> が起こり得る」ことを挙げている。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="垂直分割と水平分割の違い">
+        <text x="155" y="20" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">垂直分割(列を分ける)</text>
+        <rect x="40" y="35" width="100" height="90" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="90" y="55" font-size="12.5" text-anchor="middle" fill="#12211a">id, name</text>
+        <text x="90" y="72" font-size="12.5" text-anchor="middle" fill="#12211a">(よく使う列)</text>
+        <rect x="155" y="35" width="130" height="90" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="220" y="55" font-size="12.5" text-anchor="middle" fill="#12211a">bio, prefs</text>
+        <text x="220" y="72" font-size="12.5" text-anchor="middle" fill="#12211a">(めったに使わない列)</text>
+        <text x="155" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらも全行(同じ利用者数)を持つ</text>
+        <line x1="320" y1="20" x2="320" y2="190" stroke="#d9e5df" stroke-width="2"/>
+        <text x="470" y="20" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">水平分割(行を分ける)</text>
+        <rect x="360" y="35" width="110" height="60" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="415" y="58" font-size="12.5" text-anchor="middle" fill="#12211a">ID 1-1000 の行</text>
+        <rect x="480" y="35" width="130" height="60" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="545" y="58" font-size="12.5" text-anchor="middle" fill="#12211a">ID 1001-2000 の行</text>
+        <text x="470" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらも全列を持つが、行数(利用者数)が減る</text>
+      </svg>
+      <p class="cap">図: 垂直分割は列を減らす、水平分割(シャーディング)は行を減らす。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. シャーディングアルゴリズム ― どの行をどのシャードに置くか</h2>
+    <p>水平分割では、各行をどのシャードに置くかを決める<b>シャーディングキー (shard key, 分割の基準にする列)</b> と、そのキーからシャード番号を決める<b>シャーディングアルゴリズム</b> が必要になる。ByteByteGo の a-crash-course-in-database-sharding と top-4-data-sharding-algorithms-explained が挙げる代表的な方式は次の 3 つである。</p>
+    <p><b>範囲ベース (range-based)</b> ― シャーディングキーの値の範囲でシャードを決める。例えば利用者 ID が 1〜1000 ならシャード 1、1001〜2000 ならシャード 2、という具合である。実装が単純で、範囲検索(ある期間のデータを全部取る、など)がシャード内で完結しやすい利点があるが、新しい ID ほど増え続けるようなキーだと、最新データを持つ 1 つのシャードだけが書き込みを集中して受けてしまう。</p>
+    <p><b>ハッシュベース (hash-based)</b> ― シャーディングキーにハッシュ関数を適用し、<code>shard_id = hash(key) % シャード数</code> のようにシャードを決める。範囲ベースより均等に散らばりやすいが、2 つの弱点がある。1 つはハッシュ関数の選び方が悪いと偏りが残ること、もう 1 つは<b>シャード数 (N の値) を変えると、ほぼ全てのキーの行き先が変わってしまう</b>ことである。この再配置問題は次回(第 07 回)のコンシステントハッシュで扱う。</p>
+    <p><b>ディレクトリベース (directory-based)</b> ― シャーディングキーとシャード番号の対応表(ディレクトリ、電話帳のようなもの)を別に持ち、そこを引いてシャードを決める。対応表を更新するだけでキーの再配置の自由度が上がる一方、その対応表自体が単一障害点やボトルネックになりやすい。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="範囲ベースとハッシュベースの違い">
+        <text x="150" y="20" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">範囲ベース</text>
+        <rect x="30" y="35" width="90" height="45" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="75" y="60" font-size="12.5" text-anchor="middle" fill="#12211a">ID 1-1000</text>
+        <rect x="130" y="35" width="90" height="45" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="175" y="60" font-size="12.5" text-anchor="middle" fill="#1f4a68">ID 1001-2000</text>
+        <text x="150" y="105" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">新しい ID が増え続けると</text>
+        <text x="150" y="123" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">最新シャードに書き込みが集中</text>
+        <line x1="300" y1="15" x2="300" y2="200" stroke="#d9e5df" stroke-width="2"/>
+        <text x="460" y="20" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">ハッシュベース</text>
+        <text x="460" y="42" font-size="12.5" text-anchor="middle" fill="#12211a">shard_id = hash(key) % N</text>
+        <rect x="340" y="55" width="70" height="45" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="375" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">Shard 0</text>
+        <rect x="420" y="55" width="70" height="45" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="455" y="80" font-size="12.5" text-anchor="middle" fill="#1f4a68">Shard 1</text>
+        <rect x="500" y="55" width="70" height="45" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="535" y="80" font-size="12.5" text-anchor="middle" fill="#5b3d80">Shard 2</text>
+        <text x="460" y="125" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">均等に散らばるが、N を変えると</text>
+        <text x="460" y="143" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">ほぼ全キーの行き先が変わる</text>
+      </svg>
+      <p class="cap">図: 範囲ベースは新規キーが集中しやすく、ハッシュベースはシャード数変更時に大量の再配置が起きる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. どこで壊れるか ― ホットスポット・再シャーディング・セカンダリインデックス</h2>
+    <p>SDFC の pastebin の設計議論では、「ホットパーティションを避けるには、利用者 ID でパーティショニングしてはいけない」という指摘がある。もし利用者 ID をシャーディングキーにすると、大量に投稿する利用者や人気の利用者のデータが 1 つのシャードに集中し、そのシャードだけが過負荷になる<b>ホットスポット</b> が発生する。pastebin の議論では、代わりに投稿そのものの ID である<code>paste_key</code> をパーティショニングキーにし、<code>user_id</code> は<b>セカンダリインデックス (secondary index, 主キー以外の検索用索引)</b> として扱う設計が選ばれている。</p>
+    <p>この設計には代償がある。「ある利用者の投稿を全部取得する」という問い合わせは、以前は 1 つのシャード内で済んだはずが、<code>paste_key</code> でシャーディングした結果、該当する投稿がどのシャードに散らばっているか分からないため、<b>複数のシャードに問い合わせて結果を集約する(ファンアウト)</b> 必要が生じる。これは「書き込みの均一性」と「ある種の読み取りのしやすさ」を交換する、典型的なトレードオフである。</p>
+    <p>a-crash-course-in-database-sharding はこのほかの壊れやすい点として、<b>再シャーディング (resharding)</b> ― シャード数を後から変える作業 ― が複雑で時間を要する点、複数シャードをまたぐ<b>JOIN やトランザクション</b> が難しくなる点を挙げている。これらは「シャーディングキーを最初にどう選ぶか」という設計判断が、後からのやり直しコストを大きく左右することを意味する。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="パーティショニングキーの選び方とホットスポット">
+        <rect x="30" y="20" width="250" height="70" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="155" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">user_id をキーにする</text>
+        <text x="155" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">人気利用者の投稿が 1 シャードに集中</text>
+        <text x="155" y="82" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">→ ホットスポット</text>
+        <rect x="330" y="20" width="260" height="70" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="460" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">paste_key をキーにする</text>
+        <text x="460" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">投稿は均等に散らばる</text>
+        <text x="460" y="82" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">→ 負荷は均等</text>
+        <line x1="460" y1="90" x2="460" y2="120" stroke="#0f5132" stroke-width="1.5" marker-end="url(#arrSh4)"/>
+        <text x="460" y="145" font-size="12.5" text-anchor="middle" fill="#12211a">代わりに「user_id で全件検索」は</text>
+        <text x="460" y="163" font-size="12.5" text-anchor="middle" fill="#12211a">複数シャードへのファンアウトが必要になる</text>
+        <defs><marker id="arrSh4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: ホットスポットを避けて paste_key を選ぶと、user_id 検索は複数シャードへのファンアウトになる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 実システムでの例 ― 読み取り重視と書き込み重視でシャード構成を変える</h2>
+    <p>SDFC の distributed-DB-design の議論では、要件によってシャーディングの構成方針が変わることが整理されている。<b>読み取り重視 (read-heavy)</b> なワークロードでは、第 05 回のリーダー/フォロワー型レプリケーションを中心に、読み取りを捌くフォロワーを増やす構成が合う。<b>書き込み重視 (write-heavy)</b> なワークロードでは、読み取りレプリカを増やすより先に<b>シャードの数そのものを増やす</b>ことで、1 シャードあたりの書き込み量を減らす方が効果的になる。議論の中では、Ticketmaster のようなチケット争奪戦や flash sale(短時間に注文が集中するセール)のような<b>総全順序付け(total ordering)が必要で書き込みが極端に多いワークロード</b>について「Variation 1 の構成に従いつつ、シャードを大幅に増やし、読み取りレプリカは少なめにする」という方針が述べられている。</p>
+    <p>SDFC の tinyurl-revisited (短縮 URL サービス) の議論では、短縮 URL の主キーをどう設計するかという質問に対し、「主キー = パーティショニングキー + (任意の) ソートキー」という整理が示されている。短縮コードそのもの(例: <code>defabc</code>)をパーティショニングキーにすれば、<code>短縮コードから元のURLを引く</code> という最も頻度が高い読み取りが 1 つのシャード内で完結する。一方、利用者ごとに作成した短縮 URL の一覧を見せたい場合は、<code>user_id</code> をセカンダリインデックスとして別に持つ必要があり、これは pastebin で見た「ホットスポットを避けた結果、別の軸での検索が複数シャードへのファンアウトになる」という同じトレードオフの繰り返しである。</p>
+    <p>どちらの例にも共通するのは、「シャーディングキーの選び方は、どのクエリを速くしたいかというアクセスパターンの選択そのものである」という点だ。すべてのクエリを等しく速くするキーは存在せず、最も頻度が高い・最も遅延に敏感なクエリを 1 シャード内で完結させることを優先し、それ以外のクエリ(別の軸での検索・集計)はファンアウトの代償を払う、という設計判断になる。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい/なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/a-crash-course-in-database-sharding.md" target="_blank" rel="noopener">ByteByteGo: A Crash Course on Database Sharding</a> ― シャーディングの目的・アルゴリズム・課題の整理を参照</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/top-4-data-sharding-algorithms-explained.md" target="_blank" rel="noopener">ByteByteGo: Top 4 Data Sharding Algorithms Explained</a> ― 範囲/ハッシュ/コンシステントハッシュ/仮想バケットの整理を参照</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/vertical-partitioning-vs-horizontal-partitioning.md" target="_blank" rel="noopener">ByteByteGo: Vertical vs Horizontal Partitioning</a> ― 垂直分割と水平分割の違い、水平分割の利点と欠点を参照</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/key-concepts-to-understand-database-sharding.md" target="_blank" rel="noopener">ByteByteGo: Key Concepts to Understand Database Sharding</a> ― 範囲/キー/ディレクトリベースの整理を参照</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/tinyurl-revisited" target="_blank" rel="noopener">SDFC: TinyURL Revisited</a> ― 主キー=パーティショニングキー+ソートキーの整理と、短縮コードをパーティショニングキーにする設計を参照</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/distributed-DB-design" target="_blank" rel="noopener">SDFC: Design a Distributed Database</a> ― 読み取り重視/書き込み重視でシャード構成を変える議論を参照</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/pastebin" target="_blank" rel="noopener">SDFC: Pastebin</a> ― user_id パーティショニングのホットスポット問題とセカンダリインデックス設計を参照</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-replication-basics.html">← 第 05 回 レプリケーション入門</a><a href="./distsys-index.html">目次</a><a href="./distsys-consistent-hashing.html">第 07 回 コンシステントハッシュ →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'シャーディング(水平分割)の説明として最も正確なものはどれか?',
+    opts: [
+      'テーブルの行を複数のノードに分け、各ノードが全体の一部分だけを持つようにする仕組み',
+      'テーブルの列を複数のテーブルに分け、行数は変えずに列数だけ減らす仕組み',
+      '同じデータの複製を複数ノードに持たせ、読み取りを分散させる仕組み',
+      '1台のノードにすべてのデータを保持し、キャッシュだけ複数ノードに置く仕組み',
+      'クライアント側でデータを暗号化してから1台のノードに送る仕組み'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>シャーディングは行を複数のノードに分け、各ノードが全体の一部分だけを担当する水平分割である。',
+      'これは垂直分割の説明。水平分割(シャーディング)は行を分けるのに対し、垂直分割は列を分ける。',
+      'これは第 05 回のレプリケーションの説明。シャーディングは複製ではなく分割であり、各ノードは全体の一部分しか持たない。',
+      '1台構成とキャッシュの話であり、データそのものを複数ノードに分割するシャーディングの説明ではない。',
+      '暗号化と1台構成の話であり、シャーディングの定義とは無関係。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>シャーディングは全体を分割し、各ノードが一部分だけを持つ仕組みです。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="シャーディングの基本像"><rect x="30" y="20" width="160" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="110" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">1台: 全データ</text><rect x="240" y="20" width="90" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="285" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">一部</text><rect x="340" y="20" width="90" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="385" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">一部</text><rect x="440" y="20" width="90" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="485" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80">一部</text></svg><p class="cap">図: シャーディングは全体を分割し、各ノードは一部分だけを持つ。</p></div>' }
+  },
+  {
+    q: 'あるテーブルから「めったに使わない列だけを別テーブルに切り出す」設計をした。これはどちらの分割にあたるか?',
+    opts: [
+      '水平分割であり、分割後のテーブルは行数が減る',
+      '垂直分割であり、分割後のテーブルは行数は変わらず列数が減る',
+      'シャーディングであり、複数ノードに行が均等に散らばる',
+      'レプリケーションであり、同じ列を複数ノードに複製している',
+      'ハッシュベースの分割であり、ハッシュ関数で列を選んでいる'
+    ],
+    ans: 1,
+    exps: [
+      '列を減らす操作は水平分割ではない。水平分割は行を減らす操作であり、この設計とは逆の軸。',
+      '<b>これが正解。</b>列を複数のテーブルに分け、各テーブルの行数は変わらず列数だけが減るのは垂直分割そのものである。',
+      'シャーディング(水平分割)は行を分ける操作であり、列を切り出す今回の設計とは異なる軸の話。',
+      '複製ではなく、元のテーブルを列ごとに分けているだけであり、レプリケーションの定義とは異なる。',
+      'ハッシュ関数は行の振り分けに使う手法であり、どの列を切り出すかという垂直分割の判断には使わない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>垂直分割は列を分けるだけで、行数(利用者の数)は変わりません。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="垂直分割の図"><rect x="40" y="20" width="200" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">id, name</text><text x="140" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">(よく使う列)</text><rect x="280" y="20" width="200" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="380" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">bio, prefs</text><text x="380" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">(めったに使わない列)</text><text x="280" y="130" font-size="12.5" text-anchor="middle" fill="#4a5d54">行数(利用者数)はどちらも同じ</text></svg><p class="cap">図: 垂直分割は列を分けても行数は変わらない。</p></div>' }
+  },
+  {
+    q: '新規ユーザーIDが単調に増え続けるサービスで、IDをキーに範囲ベースのシャーディングを行うと起こりやすい問題は?',
+    opts: [
+      '古いIDを持つシャードだけが過負荷になる',
+      '全シャードが常に完全に均等な負荷を受け続ける',
+      '最新のIDを持つ1つのシャードに書き込みが集中する',
+      'セカンダリインデックスが自動的に不要になる',
+      'ハッシュ関数の衝突が必ず発生するようになる'
+    ],
+    ans: 2,
+    exps: [
+      '新規IDは増え続けるため、負荷が集中するのは古いIDではなく最新のIDを持つシャードである。',
+      '範囲ベースでは新規IDが特定の範囲(最新のシャード)に集中するため、均等な負荷にはならない。',
+      '<b>これが正解。</b>IDが単調に増え続けると、新規の書き込みは常に最新の範囲を持つ1つのシャードに集中し、そこだけが過負荷になる。',
+      'セカンダリインデックスの必要性とは無関係な話題であり、範囲ベースの偏りの問題とは別の軸。',
+      'ハッシュ関数は範囲ベースのシャーディングでは使われないため、衝突という概念自体が当てはまらない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>単調に増え続けるIDは、常に同じ(最新の)シャードに書き込みが集中します。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="範囲ベースの書き込み集中"><rect x="30" y="30" width="150" height="50" rx="8" fill="#f3f9f6" stroke="#9aa" stroke-width="1.5"/><text x="105" y="60" font-size="12.5" text-anchor="middle" fill="#4a5d54">古いID(静かなシャード)</text><rect x="380" y="30" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="455" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">最新ID(書き込み集中)</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">新規行は常に右端のシャードに積み重なる</text></svg><p class="cap">図: 単調増加キーは最新シャードへの書き込み集中を生む。</p></div>' }
+  },
+  {
+    q: 'ハッシュベースのシャーディングで shard_id = hash(key) % N と決めているとき、シャード数 N を変更すると何が起こるか?',
+    opts: [
+      '変更前と全く同じキーの配置が、変更後もそのまま維持される',
+      '偶数番号のシャードだけが影響を受け、奇数番号は影響を受けない',
+      '影響はキャッシュ層だけに限定され、データベース本体は影響を受けない',
+      'ほぼ全てのキーで剰余の計算結果が変わり、大量のデータ再配置が必要になる',
+      '範囲ベースのシャーディングへ、システムが自動的に切り替わる'
+    ],
+    ans: 3,
+    exps: [
+      'Nが変わると剰余 (mod) の計算結果自体が変わるため、配置が維持されるという説明は誤り。',
+      '偶数・奇数で影響範囲が分かれるという規則はなく、Nの変更はほぼ全てのキーに無差別に影響する。',
+      'シャーディングはデータベース本体の行の配置を決める仕組みであり、キャッシュ層だけの問題ではない。',
+      '<b>これが正解。</b>shard_id = hash(key) % N の N が変わると、ほぼ全てのキーで剰余の計算結果が変わり、大量のキーが別のシャードへ移動することになる。',
+      'ハッシュベースと範囲ベースは別々の方式であり、Nの変更で自動的に方式が切り替わることはない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>Nが変わると剰余の計算結果が変わり、ほぼ全てのキーの行き先が変わります。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="シャード数変更による再配置"><text x="150" y="25" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">N=3のとき</text><rect x="40" y="40" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="150" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">key→hash%3で決まる配置</text><text x="410" y="25" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">N=4に変更後</text><rect x="300" y="40" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="410" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">hash%4でほぼ全キーが再計算</text><text x="280" y="120" font-size="13" text-anchor="middle" fill="#12211a">同じキーでも mod の相手(N)が変われば結果は変わる</text></svg><p class="cap">図: Nの変更は剰余計算の前提を変え、大量の再配置を引き起こす。</p></div>' }
+  },
+  {
+    q: 'ディレクトリベースのシャーディングの特徴として正しいものはどれか?',
+    opts: [
+      'ハッシュ関数の計算だけでシャードが決まり、対応表という概念自体を持たない',
+      '範囲ベースと全く同じ仕組みであり、対応表という概念を使わない',
+      'シャード数を変えても対応表を一切使わずに済み、常に無影響である',
+      'キーとシャードの対応を、クライアント側が勝手に推測して決める',
+      'キーとシャード位置の対応表を別に持ち、そこを引いてシャードの場所を決める'
+    ],
+    ans: 4,
+    exps: [
+      'ハッシュ関数だけで決まる方式はハッシュベースの説明であり、ディレクトリベースは対応表を参照する点が異なる。',
+      '範囲ベースは値の範囲で決める方式であり、対応表を使わない。ディレクトリベースはまさに対応表を使う点が特徴的に異なる。',
+      '対応表自体は存在し、シャード数を変える際にはその対応表を更新する必要がある。「一切使わない」は誤り。',
+      'クライアントが推測するのではなく、サーバー側で管理される対応表を参照して決める。',
+      '<b>これが正解。</b>ディレクトリベースのシャーディングは、キーとシャードの対応をまとめた対応表(ディレクトリ)を別に持ち、それを引いてシャードを決める方式である。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>ディレクトリベースは「電話帳」のような対応表を引いてシャードを決めます。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="ディレクトリベースの仕組み"><rect x="30" y="40" width="100" height="50" rx="8" fill="#fff" stroke="#9aa" stroke-width="1.5"/><text x="80" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">key</text><line x1="130" y1="65" x2="220" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arrSh-q5)"/><rect x="230" y="30" width="140" height="70" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="300" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">対応表</text><text x="300" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">(key → shard)</text><line x1="370" y1="65" x2="460" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arrSh-q5)"/><rect x="470" y="40" width="80" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="510" y="70" font-size="12.5" text-anchor="middle" fill="#1f4a68">Shard</text><defs><marker id="arrSh-q5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg><p class="cap">図: ディレクトリベースはキーをそのまま計算せず、対応表を1回引いてシャードを決める。</p></div>' }
+  },
+  {
+    q: 'pastebinのようなサービスで「投稿者のuser_idをパーティショニングキーにする」と起こりやすい問題は何か?',
+    opts: [
+      '人気の投稿者の投稿が1つのシャードに集中し、そのシャードだけが過負荷になる',
+      '投稿内容が自動的に暗号化されて読めなくなる',
+      'すべてのシャードが常に完全に空の状態になる',
+      'user_idのセカンダリインデックスが自動的に不要になる',
+      '投稿のpaste_keyが自動的に一意でなくなってしまう'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>投稿数が多い利用者(人気の投稿者)のデータが1つのシャードに集中し、そのシャードだけが過負荷になるホットスポットが生じる。',
+      '暗号化とパーティショニングキーの選び方は無関係な話題。',
+      'パーティショニングはデータを分けて配置する仕組みであり、シャードを空にする仕組みではない。',
+      'user_idをパーティショニングキーにすると、むしろ他の軸(paste_key)での検索にセカンダリインデックスが必要になる場合が多く、逆の説明になっている。',
+      'paste_keyの一意性とパーティショニングキーの選び方は別の話題であり、直接の因果関係はない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>人気の投稿者ほど投稿数が多く、そのデータが1つのシャードに積み重なります。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="user_idパーティショニングのホットスポット"><rect x="30" y="30" width="150" height="40" rx="6" fill="#f3f9f6" stroke="#9aa" stroke-width="1.5"/><text x="105" y="55" font-size="12.5" text-anchor="middle" fill="#4a5d54">普通の投稿者のシャード</text><rect x="350" y="20" width="180" height="80" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="440" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">人気投稿者のシャード</text><text x="440" y="75" font-size="12.5" text-anchor="middle" fill="#b5401f">投稿が集中し過負荷に</text></svg><p class="cap">図: user_idでの分割は、投稿数が多い利用者のシャードだけを過負荷にする。</p></div>' }
+  },
+  {
+    q: 'paste_keyをパーティショニングキーに選び、user_idをセカンダリインデックスにした設計で、「ある利用者の投稿を全部取得する」問い合わせはどうなるか?',
+    opts: [
+      '常に1つのシャードだけに問い合わせれば、確実に全件取得できる',
+      '複数のシャードに問い合わせて、結果を集約する必要が生じる',
+      'その問い合わせ自体が、設計上実行不可能になってしまう',
+      'paste_keyが自動的にuser_idの値へ置き換わってしまう',
+      '読み取りレプリカという仕組みが、このサービスでは不要になる'
+    ],
+    ans: 1,
+    exps: [
+      '投稿はpaste_keyで散らばっているため、同じ利用者の投稿が複数のシャードに分散して存在し、1つのシャードだけでは済まない。',
+      '<b>これが正解。</b>投稿はpaste_keyで複数シャードに散らばっているため、ある利用者の投稿を全部集めるには複数シャードへ問い合わせ、結果を集約(ファンアウト)する必要がある。',
+      '実行不可能になるわけではなく、コストが増える(複数シャードへの問い合わせが必要になる)というだけである。',
+      'paste_keyとuser_idは別々の列であり、一方が他方に置き換わることはない。',
+      '読み取りレプリカの必要性は複製の話であり、パーティショニングキーの選び方とは別の軸の議論。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>paste_keyで散らばった投稿を利用者単位で集めるには、複数シャードへの問い合わせが必要です。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="セカンダリインデックスのファンアウト"><rect x="30" y="20" width="100" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="80" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">Shard A</text><rect x="230" y="20" width="100" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="280" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">Shard B</text><rect x="430" y="20" width="100" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/><text x="480" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80">Shard C</text><line x1="80" y1="60" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/><line x1="280" y1="60" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/><line x1="480" y1="60" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/><rect x="200" y="110" width="160" height="30" rx="6" fill="#fff" stroke="#9aa" stroke-width="1.5"/><text x="280" y="130" font-size="12.5" text-anchor="middle" fill="#12211a">集約した結果を返す</text></svg><p class="cap">図: 各シャードに問い合わせてから集約する、ファンアウトの構図。</p></div>' }
+  },
+  {
+    q: 'シャード数を後から変える「再シャーディング」が難しいとされる理由として最も適切なものは?',
+    opts: [
+      'シャード数は一度決めると、仕様上永久に変更できない制約があるため',
+      '再シャーディング専用の、ダウンタイムが必ずゼロになるコマンドが標準で存在するため',
+      '多くのキーの配置が変わり、大量のデータ移動と整合性の管理が必要になるため',
+      '再シャーディングは読み取り専用の操作であり、書き込みには一切影響しないため',
+      'セカンダリインデックスを使っていれば、再シャーディング自体が不要になるため'
+    ],
+    ans: 2,
+    exps: [
+      '仕様上変更できないという制約があるわけではなく、現実には変更は可能だが手間とコストが大きいという話である。',
+      'そのような「必ずゼロダウンタイム」の標準コマンドは一般には存在せず、再シャーディングは慎重な計画と移行作業を要する。',
+      '<b>これが正解。</b>シャード数を変えると(ハッシュベースなら特に)多くのキーの配置が変わり、データの再配置と整合性の確認という重い作業が発生する。',
+      '再シャーディングはデータの配置そのものを変える作業であり、書き込みにも強く影響する(移行中は書き込みの扱いに注意が必要)。',
+      'セカンダリインデックスの有無は再シャーディングの必要性を無くすものではなく、無関係な話題。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>シャード数が変わると多くのキーの配置が変わり、移動と整合性の確認が必要になります。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="再シャーディングの負担"><rect x="30" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">変更前のシャード配置</text><line x1="250" y1="55" x2="320" y2="55" stroke="#9aa" stroke-width="2" marker-end="url(#arrSh-q8)"/><rect x="330" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="430" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">大量のキーが再配置される</text><text x="280" y="115" font-size="12.5" text-anchor="middle" fill="#12211a">移動中のデータ整合性の管理も同時に必要になる</text><defs><marker id="arrSh-q8" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs></svg><p class="cap">図: 再シャーディングはキー配置の大規模な入れ替えを伴う。</p></div>' }
+  },
+  {
+    q: 'total ordering(全順序付け)が必要で書き込みが極端に多いticketmaster的なワークロードで、SDFCの議論が勧める方針に最も近いものは?',
+    opts: [
+      '読み取りレプリカだけを大幅に増やし、シャード数は変えずに運用する',
+      'シャーディングという概念自体を使わず、単一ノードで運用を続ける',
+      '垂直分割だけを行い、水平分割(シャーディング)は避ける方針にする',
+      'Variation1の構成を保ちつつシャード数を大幅に増やし、読み取りレプリカは少なめにする',
+      'セカンダリインデックスを全廃し、一次キーだけで運用する方針にする'
+    ],
+    ans: 3,
+    exps: [
+      '書き込みが極端に多いワークロードでは、読み取りレプリカを増やすだけでは1シャードあたりの書き込み負荷は下がらない。',
+      '単一ノードでは書き込み量をさばけず、総全順序付けが必要な高負荷ワークロードの要件を満たせない。',
+      '垂直分割は列を分けるだけで、書き込み量そのものを複数ノードに分散する効果は小さい。',
+      '<b>これが正解。</b>SDFCの議論では、この種の書き込み重視かつ全順序が必要なワークロードについて、基本構成を保ちつつシャード数を大幅に増やし、読み取りレプリカは比較的少なめにする方針が述べられている。',
+      'セカンダリインデックスの有無は全順序付けの要件とは別の軸であり、この判断の根拠にはならない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>書き込みが極端に多いワークロードでは、読み取りレプリカよりシャード数を増やす方が効果的です。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="書き込み重視ワークロードの方針"><rect x="30" y="20" width="220" height="50" rx="8" fill="#f3f9f6" stroke="#9aa" stroke-width="1.5"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#4a5d54">読み取りレプリカを増やす</text><text x="140" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">→ 書き込み負荷は変わらない</text><rect x="310" y="20" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">シャード数を増やす</text><text x="420" y="90" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">→ 1シャードあたりの書き込みが減る</text></svg><p class="cap">図: 書き込み過多な負荷にはシャード数の増加が直接効く。</p></div>' }
+  },
+  {
+    q: '短縮 URL サービスで「短縮コードから元のURLを引く」処理を最も速くしたい場合、パーティショニングキーの選び方として適切なのは?',
+    opts: [
+      'URLが作成された日時を、パーティショニングキーにする',
+      '短縮URLを作成した利用者のユーザー名を、パーティショニングキーにする',
+      'リクエストを受け付けたサーバーのIPアドレスを、パーティショニングキーにする',
+      '毎回生成するランダムな乱数を、パーティショニングキーにする',
+      '短縮コードそのものを、パーティショニングキーにする'
+    ],
+    ans: 4,
+    exps: [
+      '作成日時でパーティショニングすると、短縮コードから引く処理は日時が分からないとシャードを特定できず、速くはならない。',
+      '利用者名でパーティショニングすると、短縮コードから引く処理のたびに利用者名を別途調べる必要が生じ、直接の高速化にはならない。',
+      'IPアドレスはリクエストの経路の情報であり、保存されているデータの検索キーとしては機能しない。',
+      '乱数は検索のたびに変わってしまい、同じ短縮コードが毎回別の場所を指すことになり、検索自体が成立しない。',
+      '<b>これが正解。</b>最も頻度が高い処理である「短縮コードから元のURLを引く」を1シャード内で完結させるには、短縮コードそのものをパーティショニングキーにするのが適切である。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>最も頻度が高い処理に合わせてパーティショニングキーを選ぶと、その処理が1シャード内で完結します。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="短縮コードをキーにする利点"><rect x="30" y="30" width="180" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">短縮コード→URL</text><line x1="220" y1="55" x2="300" y2="55" stroke="#0f5132" stroke-width="2" marker-end="url(#arrSh-q10)"/><rect x="310" y="30" width="220" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">1つのシャード内で完結</text><defs><marker id="arrSh-q10" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg><p class="cap">図: 最頻出のクエリを1シャード内で完結させるキー選びが基本方針になる。</p></div>' }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

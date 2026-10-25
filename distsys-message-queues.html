@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>メッセージキューと Pub/Sub ― 「確実に届く」の正確な意味</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 09 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>メッセージキューと Pub/Sub ― 「確実に届く」の正確な意味</h1>
+  <p>メッセージキューは送信側と受信側の時間の結合を切る道具だが、配信保証の強さには明確な代償がある</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 08 回 <a href="./distsys-cap-theorem.html">CAP 定理</a></p>
+  <p class="intro">サービス同士が直接呼び出し合うと、相手が止まっている間は自分も止まってしまいます。メッセージキューは、送信側 (プロデューサ) と受信側 (コンシューマ) の間に「いったん預かる場所」を置くことで、この時間的な結合を切る仕組みです。ただし「確実に届く」という言葉には、届かないことがある代わりに重複しない保証 (at-most-once)、重複はあるが絶対に失わない保証 (at-least-once)、そして原理的には達成できない理想である exactly-once という、はっきり違う 3 段階があります。ここでは正確な定義と、ack ・ 可視性タイムアウト ・ DLQ (dead-letter queue, 配信不能メッセージの退避先) の実際の挙動を図で確認します。</p>
+
+  <!-- ===== 解説パート 1: なぜメッセージキューが要るのか ===== -->
+  <section>
+    <h2>1. なぜメッセージキューが要るのか</h2>
+    <p>サービス A がサービス B を直接呼び出す (同期呼び出し) とき、A は B の応答が返るまで待ち続けます。B が落ちていたり遅かったりすると、A はタイムアウトするか、ずっと塞がれたままになります。これが「時間的な結合 (temporal coupling)」です。呼び出した瞬間に相手が生きていて、かつ処理が終わるまで両者がつながっていなければなりません。</p>
+    <p>メッセージキューを挟むと、A (プロデューサ) はメッセージをキューに置いた時点で処理を終え、すぐ次の仕事に進めます。B (コンシューマ) は自分の都合が良いタイミングでキューからメッセージを取り出して処理します。キューがクッションになることで、B が一時的に落ちていても A の処理は止まらず、B が復旧してから未処理分を順に処理できます。これを<b>負荷の平準化 (load leveling)</b> と呼び、急激なアクセス増加 (スパイク) を吸収する効果もあります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="直接呼び出しとキュー経由の違いを示す図">
+        <text x="150" y="24" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">直接呼び出し (同期)</text>
+        <rect x="30" y="40" width="110" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="70" font-size="13.5" text-anchor="middle" fill="#12211a">サービス A</text>
+        <rect x="190" y="40" width="110" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="245" y="65" font-size="13.5" text-anchor="middle" fill="#b5401f">サービス B</text>
+        <text x="245" y="82" font-size="12.5" text-anchor="middle" fill="#b5401f">(遅い/停止)</text>
+        <line x1="140" y1="65" x2="190" y2="65" stroke="#c0492f" stroke-width="2.5"/>
+        <text x="165" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">B が遅いと A も待たされる</text>
+        <text x="470" y="24" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">キュー経由 (非同期)</text>
+        <rect x="370" y="40" width="100" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="420" y="70" font-size="13.5" text-anchor="middle" fill="#12211a">プロデューサ</text>
+        <rect x="490" y="40" width="90" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="535" y="70" font-size="13.5" text-anchor="middle" fill="#1f4a68">キュー</text>
+        <line x1="470" y1="65" x2="490" y2="65" stroke="#198754" stroke-width="2.5"/>
+        <line x1="535" y1="90" x2="535" y2="112" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="535" y="130" font-size="13.5" text-anchor="middle" fill="#12211a">コンシューマ</text>
+        <text x="470" y="166" font-size="12.5" text-anchor="middle" fill="#4a5d54">コンシューマが遅れても</text>
+        <text x="470" y="184" font-size="12.5" text-anchor="middle" fill="#4a5d54">プロデューサは待たされない</text>
+      </svg>
+      <p class="cap">図: 直接呼び出しは相手の状態に縛られるが、キューを挟むと送信側と受信側の時間が切り離される。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: キューと Pub/Sub の構造 ===== -->
+  <section>
+    <h2>2. キューと Pub/Sub の構造</h2>
+    <p>メッセージングには大きく 2 つの配信モデルがあります。<b>点対点のキュー</b>では、1 件のメッセージは複数のコンシューマが競合して取り合い、結果としてどれか 1 つのコンシューマにだけ届きます (competing consumers パターン)。並列に並んだコンシューマで処理を分担し、スループットを増やす狙いです。</p>
+    <p>一方、<b>Pub/Sub のトピック</b>では、1 件のメッセージは全ての購読者 (サブスクライバ) それぞれに複製されて配信されます。注文確定イベントを「在庫更新」「通知送信」「分析ログ」など複数の独立したサービスに同時に伝えたいときに向いています。両者は似て見えますが、「1 件を 1 人に」か「1 件を全員に」かという配信先の数が根本的に異なります。</p>
+    <p>巨大なペイロードを送りたいときの定番パターンも押さえておきます。<b>Claim Check パターン</b>は、本体をいったんストレージに保存し、キューにはその参照 (ID や URL) だけを流す方法です。キュー自体のメッセージサイズ上限を超える大きなデータでも、参照だけなら軽く送れます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="点対点キューとPub/Subトピックの配信先の違い">
+        <text x="150" y="22" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">点対点のキュー</text>
+        <rect x="90" y="36" width="120" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="150" y="60" font-size="13" text-anchor="middle" fill="#1f4a68">メッセージ 1 件</text>
+        <line x1="150" y1="76" x2="150" y2="104" stroke="#0f5132" stroke-width="2"/>
+        <rect x="40" y="108" width="70" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="75" y="130" font-size="12.5" text-anchor="middle" fill="#0f5132">受信者 1</text>
+        <rect x="120" y="108" width="70" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="155" y="130" font-size="12.5" text-anchor="middle" fill="#0f5132">受信者 2</text>
+        <text x="150" y="172" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらか 1 つにだけ届く</text>
+        <text x="470" y="22" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">Pub/Sub のトピック</text>
+        <rect x="410" y="36" width="120" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="470" y="60" font-size="13" text-anchor="middle" fill="#5b3d80">メッセージ 1 件</text>
+        <line x1="440" y1="76" x2="410" y2="104" stroke="#7a5a9e" stroke-width="1.5"/>
+        <line x1="500" y1="76" x2="530" y2="104" stroke="#7a5a9e" stroke-width="1.5"/>
+        <rect x="370" y="108" width="80" height="36" rx="6" fill="#f3f0f8" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="410" y="130" font-size="12.5" text-anchor="middle" fill="#5b3d80">購読者 1</text>
+        <rect x="490" y="108" width="80" height="36" rx="6" fill="#f3f0f8" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="530" y="130" font-size="12.5" text-anchor="middle" fill="#5b3d80">購読者 2</text>
+        <text x="470" y="172" font-size="12.5" text-anchor="middle" fill="#4a5d54">複製されて全員に届く</text>
+      </svg>
+      <p class="cap">図: 点対点のキューは 1 件を誰か 1 人に、Pub/Sub のトピックは 1 件を全員に複製して配る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: 配信保証の正確な意味 ===== -->
+  <section>
+    <h2>3. 配信保証の正確な意味 ― at-most-once / at-least-once / exactly-once</h2>
+    <p><b>at-most-once (高々一度)</b> ― メッセージは多くて 1 回しか届きません。再送をしないので、途中で失われることはあっても、同じメッセージが重複して処理されることはありません。監視メトリクスのように、少量の欠損より低コスト・低レイテンシを優先したい場面に向きます。</p>
+    <p><b>at-least-once (少なくとも一度)</b> ― メッセージは絶対に失われませんが、確認応答が届く前に再送されると同じメッセージが複数回届くことがあります。多くのメッセージキューの既定の挙動で、受信側が同じ処理を 2 回実行しても安全になるよう、<b>冪等性 (idempotency, 何度実行しても結果が同じになる性質)</b> を自分で用意する必要があります。</p>
+    <p><b>exactly-once (ちょうど一度)</b> ― 理想的には最も扱いやすい保証ですが、実装は最も難しいとされます。実際には、ネットワーク分断や故障がある限り、送信側は「相手が受け取ったかどうか」を完全には確認できません (二将軍問題や FLP 不可能性と同じ根の問題)。そのため厳密な exactly-once は原理的に保証できず、実運用では at-least-once に重複排除や冪等キーを組み合わせて「見かけ上一度」を作る、という形に落とし込みます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 210" role="img" aria-label="3つの配信保証のタイムライン">
+        <text x="20" y="20" font-size="13" fill="#12211a">at-most-once</text>
+        <circle cx="140" cy="18" r="6" fill="#198754"/>
+        <text x="200" y="22" font-size="12.5" fill="#4a5d54">送信 1 回・再送なし (欠損の余地あり、重複は無い)</text>
+        <text x="20" y="70" font-size="13" fill="#12211a">at-least-once</text>
+        <circle cx="140" cy="68" r="6" fill="#3d7dca"/>
+        <circle cx="175" cy="68" r="6" fill="#3d7dca"/>
+        <text x="235" y="72" font-size="12.5" fill="#4a5d54">ack が無ければ再送 (欠損は無い、重複の余地あり)</text>
+        <text x="20" y="120" font-size="13" fill="#12211a">exactly-once</text>
+        <circle cx="140" cy="118" r="6" fill="#8fd6b4" stroke="#0f5132" stroke-dasharray="2 2"/>
+        <text x="200" y="122" font-size="12.5" fill="#4a5d54">理想は 1 回だけだが、分断がある限り厳密には不可能</text>
+        <text x="300" y="165" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">実運用: at-least-once ＋ 冪等化 ＝ 見かけ上の exactly-once</text>
+        <text x="300" y="188" font-size="12.5" text-anchor="middle" fill="#4a5d54">(重複は許すが、同じ結果を 2 回作らないようにする)</text>
+      </svg>
+      <p class="cap">図: 3 つの保証は「欠損を許すか」と「重複を許すか」の組み合わせで決まり、exactly-once は冪等化で代用する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: ack と可視性タイムアウト、DLQ ===== -->
+  <section>
+    <h2>4. ack と可視性タイムアウト、DLQ</h2>
+    <p>コンシューマがメッセージを受信しただけでは、キューはまだそれを「処理済み」とみなしません。処理が終わったら<b>ack (acknowledgment, 確認応答)</b> を送り、キューはそこでメッセージを削除します。ここで問題になるのが「ack が来るまでの間、他のコンシューマに同じメッセージをもう一度渡してよいか」です。</p>
+    <p>Amazon SQS を例にすると、受信されたメッセージは<b>可視性タイムアウト (visibility timeout)</b> と呼ばれる時間だけ、他のコンシューマから見えなくなります。既定値は 30 秒で、最大 12 時間まで延長できます。この時間内に ack (削除) されなければ、メッセージは再び見える状態に戻り、別のコンシューマが受け取れるようになります。処理に時間がかかる仕事では、タイムアウトを処理時間より短く設定すると、まだ処理中のメッセージが他のコンシューマに重複して渡ってしまいます。</p>
+    <p>同じメッセージが指定回数 (<code>maxReceiveCount</code>) を超えて受信されても ack されない場合、そのメッセージは<b>DLQ (dead-letter queue, 配信不能キュー)</b> に移されます。元のキューに居座って他のメッセージの処理を妨げる「有害メッセージ」を隔離し、ログを調べて原因を特定したり、修正してから再処理 (redrive) したりするための仕組みです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 280" role="img" aria-label="可視性タイムアウトとDLQへの移動のライフサイクル">
+        <rect x="20" y="20" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="50" font-size="13" text-anchor="middle" fill="#0f5132">受信 (見えなくなる)</text>
+        <line x1="150" y1="45" x2="210" y2="45" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-mq1)"/>
+        <rect x="210" y="20" width="140" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="280" y="42" font-size="13" text-anchor="middle" fill="#1f4a68">ack が時間内に来る</text>
+        <text x="280" y="58" font-size="12.5" text-anchor="middle" fill="#1f4a68">→ 削除</text>
+        <line x1="150" y1="70" x2="150" y2="110" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-mq2)"/>
+        <text x="235" y="100" font-size="12.5" fill="#b5401f">時間内に ack なし</text>
+        <rect x="20" y="114" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="120" y="139" font-size="12.5" text-anchor="middle" fill="#b5401f">再び見える状態に戻る</text>
+        <line x1="220" y1="134" x2="20" y2="46" stroke="#9aa" stroke-width="1.3" stroke-dasharray="4 4"/>
+        <line x1="120" y1="154" x2="120" y2="196" stroke="#7a5a9e" stroke-width="2" marker-end="url(#arr-mq3)"/>
+        <text x="300" y="180" font-size="12.5" text-anchor="middle" fill="#4a5d54">同じ流れを maxReceiveCount 回くり返すと</text>
+        <rect x="20" y="200" width="200" height="45" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="120" y="228" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">DLQ へ移動</text>
+        <defs>
+          <marker id="arr-mq1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker>
+          <marker id="arr-mq2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker>
+          <marker id="arr-mq3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#7a5a9e"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: ack が無いまま時間が切れるとメッセージは再び見える状態に戻り、失敗が続けば DLQ へ退避する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 順序保証の範囲 ===== -->
+  <section>
+    <h2>5. 順序保証の範囲</h2>
+    <p>「キューに入れた順に処理される」と思い込むのはよくある誤解です。1 つのキューを複数のコンシューマが競合して処理する構成 (競合コンシューマ) では、処理の速さの違いによって完了する順序が入れ替わります。順序を守りたいなら、コンシューマを 1 つに絞るか、FIFO キューのように「同じグループ (message group) の中だけ順序を守り、グループが違えば並行して処理する」という範囲を限定した保証を使います。</p>
+    <p>順序や欠損のリスクは、送信側・ブローカー・受信側のそれぞれの段階に分けて考えると見通しが良くなります。送信側では、確認応答を待たずに次々と再送すると (複数の送信が同時に飛んでいる状態で) 到着順が入れ替わることがあります。ブローカー側では、書き込みをディスクに反映する前にプロセスが落ちると、まだ反映されていない分が失われます。受信側では、処理が終わる前に「処理済み」として先に ack してしまう (自動コミット) と、その直後に落ちた場合に未処理のまま記録上だけ完了扱いになります。この 3 段階の整理は、後の回で扱う Kafka のパーティション内順序や acks 設定にもそのまま使えます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 200" role="img" aria-label="1人のコンシューマと複数の競合コンシューマでの順序の違い">
+        <text x="150" y="20" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">コンシューマが 1 つ</text>
+        <rect x="30" y="34" width="50" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="55" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">1</text>
+        <rect x="90" y="34" width="50" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="115" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">2</text>
+        <rect x="150" y="34" width="50" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="175" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">3</text>
+        <text x="150" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">1 → 2 → 3 の順で処理される</text>
+        <text x="460" y="20" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">競合コンシューマが複数</text>
+        <rect x="380" y="34" width="50" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="405" y="56" font-size="12.5" text-anchor="middle" fill="#5b3d80">1</text>
+        <rect x="440" y="34" width="50" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="465" y="56" font-size="12.5" text-anchor="middle" fill="#5b3d80">2</text>
+        <rect x="500" y="34" width="50" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="525" y="56" font-size="12.5" text-anchor="middle" fill="#5b3d80">3</text>
+        <text x="460" y="88" font-size="12.5" text-anchor="middle" fill="#4a5d54">受信者 X ・ Y が分担すると</text>
+        <text x="460" y="106" font-size="12.5" text-anchor="middle" fill="#4a5d54">2 → 1 → 3 の順もありうる</text>
+        <text x="300" y="160" font-size="13" text-anchor="middle" fill="#12211a">順序が欲しいなら処理を 1 列に絞るか、グループ単位の FIFO にする</text>
+      </svg>
+      <p class="cap">図: 並列処理で完了順が入れ替わるのは当然の挙動で、順序保証は常に何らかの範囲に限定される。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: 実システムでの例 ===== -->
+  <section>
+    <h2>6. 実システムでの例 ― 100 万件のメールと配信不能キュー</h2>
+    <p>プロモーションメールを 100 万件、10 分以内に送り切るというシステムを考えます。単純に割ると 1,000,000 ÷ 600 秒 ≒ 1,667 件/秒ですが、処理の揺らぎを見込んで 2,000 件/秒程度を目標にする、という見積もりがよく使われます。このシステムの要件は「<b>at-most-once</b> 配信」です。理由は単純で、同じ宣伝メールが何度も届く方が、ごく一部の宛先に届かないことよりもユーザー体験を損ねるからです。決済のように欠損が許されない場面とは正反対の判断基準になります。</p>
+    <p>一方、キューに入れたメッセージの処理に失敗が続く場面では、先に見た可視性タイムアウトと DLQ が実際に使われます。可視性タイムアウトの既定値 30 秒・最大 12 時間、<code>maxReceiveCount</code> を超えたら DLQ へ、という挙動を覚えておけば、「メッセージが消えた」のか「まだ可視性タイムアウトの最中で見えないだけ」なのかを運用時に正しく切り分けられます。</p>
+    <p>どの配信保証を選ぶかは、技術的な優劣ではなく「欠損と重複、どちらがより高くつくか」という業務要件の比較で決まります。これは次回 (第 10 回) で扱うリトライと冪等性の設計にも直結します。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/delivery-semantics.md" target="_blank" rel="noopener">ByteByteGo: Delivery Semantics</a> ― at-most-once / at-least-once / exactly-once の定義と、それぞれの代表的な用途 (監視メトリクス、決済など) の根拠に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/types-of-message-queue.md" target="_blank" rel="noopener">ByteByteGo: Types of Message Queues</a> ― メッセージキューの選び方の観点 (速度・拡張性・信頼性など) の紹介に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/can-kafka-lose-messages.md" target="_blank" rel="noopener">ByteByteGo: Can Kafka Lose Messages?</a> ― 送信側・ブローカー・受信側の 3 段階に分けて損失や順序の乱れを考える構成を、5 節の説明に反映した。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/top-6-cloud-messaging-patterns.md" target="_blank" rel="noopener">ByteByteGo: Top 6 Cloud Messaging Patterns</a> ― competing consumers と Claim Check パターンの説明に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/batch-emails" target="_blank" rel="noopener">SDFC: batch-emails</a> ― 100 万件のメールを 10 分で送る要件、2,000 件/秒という見積もり、at-most-once が要件になる根拠として 6 節で使った。</li>
+      <li><a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html" target="_blank" rel="noopener">Amazon SQS Developer Guide: Visibility Timeout</a> ― 可視性タイムアウトの既定値 (30 秒)・最大値 (12 時間)・再び見える状態に戻る挙動の一次情報。</li>
+      <li><a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html" target="_blank" rel="noopener">Amazon SQS Developer Guide: Dead-Letter Queues</a> ― maxReceiveCount と DLQ への移動条件の一次情報。</li>
+      <li><a href="https://bravenewgeek.com/you-cannot-have-exactly-once-delivery/" target="_blank" rel="noopener">Tyler Treat, "You Cannot Have Exactly-Once Delivery"</a> ― exactly-once が原理的に不可能で、at-least-once と冪等化で代用するという 3 節の主張の根拠。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-cap-theorem.html">← 第 08 回 CAP 定理</a><a href="./distsys-index.html">目次</a><a href="./distsys-retries-idempotency.html">第 10 回 リトライと冪等性 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'at-most-once (高々一度) の正確な定義として最も適切なものは？',
+    opts: [
+      'メッセージが必ず複数回届き、重複除去はアプリ側の責任になる方式',
+      'メッセージが必ず届くまで無限にリトライし続け、届いたことを数学的に保証する方式',
+      'メッセージの内容を暗号化して送ることで、途中経路での改ざんを防ぐ方式',
+      'メッセージが届かないことはあるが、同じメッセージが 2 回配信されることはない方式',
+      'メッセージの送信順序を厳密に保証し、受信側が並び替えなしに処理できる方式'
+    ],
+    ans: 3,
+    exps: [
+      'at-least-once の説明である。at-most-once は逆に、重複ではなく欠損の方を許容する。',
+      'そのような無限リトライでの数学的保証は存在せず、exactly-once を誤解した説明。',
+      '暗号化は配信保証とは別軸の話題。',
+      '<b>これが正解。</b>at-most-once は「届かないことはあるが重複はしない」保証。小さな欠損が許容できる監視メトリクスなどに向く。',
+      '順序保証は at-most/at-least/exactly-once とは別の軸の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>at-most-once は再送をしない分、届かないことがあっても重複はしません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="at-most-onceのタイムライン"><line x1="30" y1="60" x2="530" y2="60" stroke="#9aa" stroke-width="2"/><circle cx="150" cy="60" r="7" fill="#198754"/><text x="150" y="45" font-size="13" text-anchor="middle" fill="#0f5132">送信 1 回のみ</text><text x="150" y="85" font-size="13" text-anchor="middle" fill="#4a5d54">再送なし</text><circle cx="350" cy="60" r="7" fill="#fff" stroke="#c0492f" stroke-width="2" stroke-dasharray="2 2"/><text x="350" y="45" font-size="13" text-anchor="middle" fill="#b5401f">届かない場合もある</text><text x="350" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">重複は絶対に起きない</text></svg>'
+          + '<p class="cap">図: at-most-once は欠損の余地を残す代わりに、重複だけは起こさない。</p></div>'
+    }
+  },
+  {
+    q: 'at-least-once (少なくとも一度) を採用したとき、アプリ側が必ず用意すべき仕組みは？',
+    opts: [
+      '同じメッセージを複数回処理しても結果が変わらない、重複排除や冪等キーの仕組み',
+      'メッセージが届く前に自動的に暗号化し、改ざんを検知して破棄する仕組み',
+      '届いたメッセージの順序を受信側でタイムスタンプ基準に逆順に並べ替える仕組み',
+      'ネットワーク帯域を負荷に応じて動的に増減させ、常に同じ速度で配信する仕組み',
+      '送信側のクロックと受信側のクロックを完全に同期させ、順序を保証する仕組み'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>at-least-once は重複配信を許すので、同じ処理が 2 回走っても安全になる冪等化や重複排除キーが必須になる。',
+      '暗号化や改ざん検知は重複配信の問題とは無関係。',
+      '受信側で順序を逆にする理由はなく、順序保証の話とも別軸。',
+      '帯域の動的な調整は性能の話で、配信保証とは無関係。',
+      'クロック同期は因果関係の順序付けの話で、重複排除とは別の問題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じメッセージが 2 回届いても、冪等な処理なら結果は 1 回分と変わりません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="冪等処理の図"><circle cx="120" cy="40" r="7" fill="#3d7dca"/><text x="120" y="25" font-size="13" text-anchor="middle" fill="#0f5132">配信 1 回目</text><circle cx="220" cy="40" r="7" fill="#3d7dca"/><text x="220" y="25" font-size="13" text-anchor="middle" fill="#0f5132">配信 2 回目 (重複)</text><line x1="120" y1="47" x2="300" y2="90" stroke="#9aa" stroke-width="1.5"/><line x1="220" y1="47" x2="300" y2="90" stroke="#9aa" stroke-width="1.5"/><rect x="250" y="90" width="110" height="36" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="305" y="113" font-size="12.5" text-anchor="middle" fill="#0f5132">冪等キーで判定</text><text x="305" y="138" font-size="12.5" text-anchor="middle" fill="#4a5d54">結果は 1 回分だけ反映される</text></svg>'
+          + '<p class="cap">図: 冪等キーがあれば、重複配信が来ても処理結果は 1 回分のまま保たれる。</p></div>'
+    }
+  },
+  {
+    q: '"exactly-once delivery" についての最も正確な指摘はどれか？',
+    opts: [
+      'TCP を使えば exactly-once は常に自動的に保証される',
+      'exactly-once はどのメッセージキューでも標準で既定で有効になっている保証である',
+      '厳密な exactly-once は分断や故障がある限り保証できず、実運用は at-least-once と冪等化で代用する',
+      'exactly-once を実現するには、すべてのノードの時刻を物理的に同期させれば十分である',
+      'exactly-once は at-most-once より実装が簡単で、追加のコストは一切かからない'
+    ],
+    ans: 2,
+    exps: [
+      'TCP は 1 本の接続内でのバイト列の到達順を保証するだけで、クラッシュやタイムアウトを含む配信全体の exactly-once は保証しない。',
+      '多くのキューは既定で at-least-once であり、exactly-once が既定で有効という前提が誤り。',
+      '<b>これが正解。</b>分断や故障がある以上、送信側は受信を確認できないことがあり、厳密な exactly-once は不可能。実運用では重複を許し冪等化で見かけ上一度にする。',
+      '時刻同期は因果関係の順序付けに関わるが、配信そのものの重複や欠損を防ぐ仕組みではない。',
+      '逆である。exactly-once は最も実装が難しい保証とされ、性能や複雑さのコストが高い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>送信側は「相手が受け取ったか」を完全には確認できないため、厳密な exactly-once は作れません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="exactly-once不可能性の図"><rect x="30" y="40" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="95" y="70" font-size="13" text-anchor="middle" fill="#0f5132">送信側</text><rect x="400" y="40" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="465" y="70" font-size="13" text-anchor="middle" fill="#0f5132">受信側</text><line x1="160" y1="60" x2="400" y2="60" stroke="#c0492f" stroke-width="2" stroke-dasharray="5 5"/><text x="280" y="45" font-size="14" text-anchor="middle" fill="#b5401f" font-weight="700">?</text><text x="280" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">確認応答も失われうるので「届いたか」は原理的に確定できない</text></svg>'
+          + '<p class="cap">図: 確認応答も失われる可能性があるため、厳密な exactly-once は原理的に作れない。</p></div>'
+    }
+  },
+  {
+    q: '可視性タイムアウト (visibility timeout) の目的として最も正確なものはどれか？',
+    opts: [
+      'メッセージの内容を一定時間だけ自動で暗号化して隠しておく',
+      'キュー全体を一定時間だけ読み取り専用モードに切り替える',
+      '送信側に対して一定時間だけメッセージの再送を禁止する',
+      '受信側が使うネットワーク帯域を一定時間だけ制限する',
+      '受信済みのメッセージを一時的に見えなくし、二重処理を防ぐ'
+    ],
+    ans: 4,
+    exps: [
+      '暗号化とは無関係の仕組み。',
+      'キュー全体ではなく、受信された個々のメッセージ単位の見える/見えないの話。',
+      '再送禁止ではなく、別の受信者からの重複受信を防ぐ仕組み。',
+      '帯域制限ではない。',
+      '<b>これが正解。</b>受信したメッセージを一定時間だけ他の受信者に見えなくし、処理中に別の受信者が同じメッセージを取ってしまう事態を防ぐ。時間内に確認応答が無ければ再び見えるようになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>可視性タイムアウトの間は、処理中のメッセージが他の受信者からは見えません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="可視性タイムアウトの図"><rect x="30" y="30" width="160" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="110" y="60" font-size="13" text-anchor="middle" fill="#1f4a68">受信者 A が処理中</text><rect x="230" y="30" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 4"/><text x="310" y="60" font-size="13" text-anchor="middle" fill="#b5401f">受信者 B には見えない</text><text x="280" y="115" font-size="12.5" text-anchor="middle" fill="#4a5d54">時間内に ack すれば削除、無ければ再び全員に見える</text></svg>'
+          + '<p class="cap">図: 可視性タイムアウトの間、処理中のメッセージは他の受信者から隠される。</p></div>'
+    }
+  },
+  {
+    q: 'DLQ (dead-letter queue, 配信不能キュー) の役割として最も正確なものはどれか？',
+    opts: [
+      '処理に成功したメッセージだけを長期保管するアーカイブ用のキュー',
+      '指定回数失敗したメッセージを元のキューから移し、調査や再処理をしやすくする退避先',
+      'キュー全体の負荷が高いときに、処理されていないメッセージを一時的に捨てる仕組み',
+      'メッセージの暗号化キーを管理するための専用のキュー',
+      '受信者が誰もいないときに、メッセージを自動で削除する仕組み'
+    ],
+    ans: 1,
+    exps: [
+      '成功したメッセージの保管ではなく、失敗したメッセージの退避先という点が逆。',
+      '<b>これが正解。</b>指定回数 (maxReceiveCount など) を超えて処理に失敗したメッセージを元のキューから移し、ログ調査や再処理 (redrive) をしやすくする。',
+      '単なる負荷対策の破棄ではなく、失敗の原因調査のための退避という目的がある。',
+      '暗号化キー管理とは無関係。',
+      '自動削除ではなく、調査できる形で保持する仕組み。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じメッセージが何度も失敗を繰り返すと、元のキューを塞いでしまいます。DLQ はそれを隔離します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="DLQへの退避の図"><rect x="30" y="40" width="180" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="70" font-size="13" text-anchor="middle" fill="#0f5132">元のキュー (失敗を繰り返す)</text><line x1="210" y1="65" x2="330" y2="65" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-mq-q5)"/><text x="270" y="50" font-size="12.5" text-anchor="middle" fill="#b5401f">maxReceiveCount 超過</text><rect x="330" y="40" width="180" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="70" font-size="13" text-anchor="middle" fill="#5b3d80">DLQ (調査・再処理用)</text><defs><marker id="arr-mq-q5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: 失敗が続くメッセージは DLQ に移され、元のキューの進行を妨げなくなる。</p></div>'
+    }
+  },
+  {
+    q: 'Pub/Sub (トピック) 型のメッセージングと、通常のキュー (点対点) 型の最も大きな違いは？',
+    opts: [
+      'Pub/Sub は必ず同期的に応答を返すが、キューは必ず非同期である',
+      'Pub/Sub はメッセージを暗号化するが、キューは暗号化しない',
+      'Pub/Sub はメッセージの順序を保証するが、キューは順序を保証しない',
+      'Pub/Sub は 1 件を全員に配信するが、キューは通常いずれか 1 人にしか配信しない',
+      'Pub/Sub はディスクに保存しないが、キューは必ずディスクに保存する'
+    ],
+    ans: 3,
+    exps: [
+      '同期・非同期はキューの本質的な区別点ではない。',
+      '暗号化の有無は実装依存で、Pub/Sub とキューを分ける基準ではない。',
+      '順序保証は配信モデル (1 対 1 か 1 対多か) とは別の軸の話。',
+      '<b>これが正解。</b>キュー (点対点) は 1 件のメッセージを通常 1 つの受信者 (競合する受信者の中のどれか) に届けるが、Pub/Sub のトピックは同じメッセージの複製を全ての購読者に配信する。',
+      '永続化の有無は製品の実装次第であり、モデルの定義そのものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。配信先の数そのものが根本的に違います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="キューとPub/Subの配信先数の違い"><rect x="30" y="20" width="220" height="100" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">キュー</text><text x="140" y="70" font-size="13" text-anchor="middle" fill="#12211a">1 件 → 受信者のどれか 1 つ</text><rect x="310" y="20" width="220" height="100" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Pub/Sub</text><text x="420" y="70" font-size="13" text-anchor="middle" fill="#12211a">1 件 → 購読者の全員</text></svg>'
+          + '<p class="cap">図: キューは 1 対 1、Pub/Sub のトピックは 1 対多の配信モデル。</p></div>'
+    }
+  },
+  {
+    q: 'ある決済システムで、ネットワークの揺れにより「注文確定メッセージ」の送信が応答不明 (タイムアウト) になった。次に取るべき最も適切な対応は？',
+    opts: [
+      'at-least-once の前提で再送し、注文 ID による冪等処理で重複確定を防ぐ',
+      '応答が無い以上、その注文は確実に失敗したものとみなしてそのまま放置する',
+      'タイムアウトが起きたら即座にユーザーのアカウントを停止して調査する',
+      '同じメッセージを間隔を空けずに無限に即時再送し続けて確実性を上げる',
+      'タイムアウト対策の代わりにメッセージの暗号化だけを強化しておく'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>応答不明は「届いたが応答だけ消えた」可能性もあるため、再送 (at-least-once) を前提にしつつ、注文 ID のような冪等キーで二重確定を防ぐのが決済のような場面での定石。',
+      '「応答が無い」は失敗の証拠にならない。実際には処理済みで応答だけ消えた可能性があり、放置すると注文が宙に浮く恐れがある。',
+      'アカウント停止は過剰な対応で、タイムアウト単体はその根拠にならない。',
+      '間隔を空けない即時再送はリトライ嵐を招き、負荷を悪化させる (指数バックオフなどが必要)。',
+      '暗号化の強化はタイムアウト問題の解決策ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>応答不明には「処理済みで応答だけ消えた」場合と「本当に届いていない」場合の両方があり、送信側からは区別できません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="応答不明の2つの可能性の図"><rect x="30" y="20" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#0f5132">実は処理済み・応答だけ消えた</text><rect x="310" y="20" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="50" font-size="13" text-anchor="middle" fill="#b5401f">本当に届いていない</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">送信側はどちらか区別できない</text><text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#4a5d54">→ 再送 + 冪等キーで両方に安全に対応する</text></svg>'
+          + '<p class="cap">図: どちらが起きたか区別できないからこそ、再送と冪等化をセットで使う。</p></div>'
+    }
+  },
+  {
+    q: '「アプリの異常検知メトリクスの収集」に使うキューで許容してよい配信保証はどれで、その理由は？',
+    opts: [
+      'exactly-once のみを許容すべきで、他の保証では監視として使えない',
+      'at-least-once のみを許容すべきで、メトリクスは 1 件でも欠けると意味を持たない',
+      'at-most-once でも実用上十分で、少量のデータ欠損より低コスト・低レイテンシが優先される場面が多い',
+      '配信保証という概念自体がメトリクス収集には適用されない',
+      'ランダムに保証を切り替える方式が最も性能が良い'
+    ],
+    ans: 2,
+    exps: [
+      'exactly-once は最も実装コストが高く、メトリクスのような欠損許容度の高い用途には過剰。',
+      'メトリクスは統計的な傾向を見るのが目的で、1 件の欠損で意味を失うことは通常ない。',
+      '<b>これが正解。</b>監視メトリクスは at-most-once の代表的な使い道で、多少の欠損より軽量・低遅延が優先される。',
+      'メトリクス収集もキューを使う以上、配信保証の概念は適用される。',
+      'ランダムな切り替えに性能上の根拠はなく、保証が不安定になるだけ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>メトリクスは点の集まりの傾向を見るものなので、少数の欠損は全体の形をほとんど変えません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="メトリクス収集での欠損許容の図"><line x1="40" y1="100" x2="520" y2="100" stroke="#9aa" stroke-width="1.5"/><circle cx="90" cy="70" r="5" fill="#198754"/><circle cx="150" cy="60" r="5" fill="#198754"/><circle cx="210" cy="75" r="5" fill="#198754" opacity="0.25"/><circle cx="270" cy="55" r="5" fill="#198754"/><circle cx="330" cy="68" r="5" fill="#198754"/><circle cx="390" cy="58" r="5" fill="#198754" opacity="0.25"/><circle cx="450" cy="62" r="5" fill="#198754"/><text x="280" y="125" font-size="13" text-anchor="middle" fill="#4a5d54">薄い点 (欠損) があっても、全体の傾向はほぼ変わらない</text></svg>'
+          + '<p class="cap">図: 低コストと低レイテンシのために、少量の欠損を許容する判断は実用的。</p></div>'
+    }
+  },
+  {
+    q: 'あるチームが可視性タイムアウトを「処理にかかる最大時間より短い値」に設定してしまった。最も起こりやすい症状はどれか？',
+    opts: [
+      'キュー自体が完全に停止し、新しいメッセージが一切受信できなくなる',
+      'メッセージが暗号化されずにそのまま送信されてしまう',
+      'メッセージの到着順序が逆転して届くようになってしまう',
+      '受信者の数が勝手に自動的に増殖し続けてしまう',
+      '処理が終わる前に再び見えるようになり、他の受信者が重複処理を始める'
+    ],
+    ans: 4,
+    exps: [
+      'タイムアウトが短すぎても、キュー自体が停止するわけではない。',
+      '暗号化の有無とは無関係。',
+      '順序の逆転とは別の症状。',
+      '受信者数が自動増殖する仕組みは可視性タイムアウトとは無関係。',
+      '<b>これが正解。</b>処理が完了して ack する前にタイムアウトが切れると、メッセージが再び見える状態に戻り、別の受信者が同じメッセージを受け取って重複処理が起きる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>処理時間 > 可視性タイムアウトだと、処理の途中でメッセージが「見える」状態に戻ってしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 175" aria-label="タイムアウトが短すぎる場合の図"><text x="30" y="20" font-size="12.5" fill="#12211a">受信者 A の処理</text><rect x="30" y="30" width="260" height="22" fill="#e3edf5" stroke="#2f5f8a"/><text x="183" y="68" font-size="12.5" text-anchor="end" fill="#1f4a68">処理中 (まだ終わっていない)</text><line x1="190" y1="30" x2="190" y2="95" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 4"/><text x="190" y="110" font-size="12.5" text-anchor="middle" fill="#b5401f">タイムアウト切れ (早すぎる)</text><rect x="190" y="120" width="260" height="22" fill="#fbeeea" stroke="#c0492f"/><text x="320" y="160" font-size="12.5" text-anchor="middle" fill="#b5401f">受信者 B が重複処理を始める</text></svg>'
+          + '<p class="cap">図: 処理が終わる前にタイムアウトが切れると、別の受信者が同じ仕事を重複して始めてしまう。</p></div>'
+    }
+  },
+  {
+    q: '1,000,000 件のプロモーションメールを 10 分で送る、という要件のシステムで「at-most-once」が選ばれる最も妥当な理由はどれか？',
+    opts: [
+      'メールは 1 件あたりのデータ量が大きく、exactly-once の実装コストが技術的に不可能だから',
+      '同じ宣伝メールが重複して届く方が、1 件程度届かないことより利用者の体験を損なうため',
+      'at-most-once の方がネットワーク帯域を多く使えるから',
+      'at-most-once でしか暗号化が使えないから',
+      'メールの送信順序を保証する必要が全く無いから、at-most-once が自動的に選ばれる'
+    ],
+    ans: 1,
+    exps: [
+      '技術的に不可能というのは誤り。データ量の大きさと exactly-once の実現可否は直接結びつかない。',
+      '<b>これが正解。</b>プロモーションメールのような用途では、同じメールが何度も届く方が、ごく一部に届かないことよりユーザー体験を損ねやすく、at-most-once の「欠損を許して重複を避ける」性質が要件に合う。',
+      '帯域の使用量は at-most/at-least-once の区別とは無関係。',
+      '暗号化の可否と配信保証の種類は無関係。',
+      '順序保証が不要であることは配信保証の選択理由にはならず、無関係な論点。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>決済 (at-least-once + 冪等化) とプロモーションメール (at-most-once) では、欠損と重複のどちらが高くつくかが逆になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="決済とプロモーションメールの要件比較"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="55" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">決済</text><text x="140" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">欠損の方が致命的 → at-least-once</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="55" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">プロモーションメール</text><text x="420" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">重複の方が不快 → at-most-once</text></svg>'
+          + '<p class="cap">図: どちらの保証が正しいかは業務要件次第で、優劣の問題ではない。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

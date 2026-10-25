@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分離レベルと並行制御 ― 座席を 2 人に売らないための仕組み</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 18 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>分離レベルと並行制御 ― 座席を 2 人に売らないための仕組み</h1>
+  <p>分離レベルは「どの異常を許し、どの異常を防ぐか」の契約であり、楽観ロックと悲観ロックはその契約を守るための 2 つの実装手段である</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 13 回 <a href="./distsys-consistency-models.html">一貫性モデル</a> (線形化可能性と直列化可能性の違い)</p>
+  <p class="intro">同じ座席やアカウントを複数のトランザクションが同時に触ると、1 件ずつ順番に処理していれば起きない異常が生まれます。分離レベルは、この異常のうちどれを許し、どれを防ぐかを定めた契約です。結論を先に言うと、分離レベルを強くするほど異常は減りますが、同時に実行できる量が減るか、処理が待たされるかという代償が増えます。この回では ANSI SQL の 4 段階の分離レベルと、それぞれが実際に何を保証するのかを、座席予約やフラッシュセールの具体例で確認します。</p>
+
+  <!-- ===== 解説パート 1: この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 同時に動く取引が生む異常</h2>
+    <p>1 件のトランザクションだけが順番に動いているなら、何の問題も起きません。問題が生まれるのは、複数のトランザクションが同じデータに同時に触るときです。ACID の<b>I (Isolation, 分離性)</b> は、この「同時実行」が引き起こす異常から、アプリケーションを守るための保証です。</p>
+    <p>SDFC の ticketmaster (座席予約) を例にします。人気イベントのチケットでは、同じ座席に対して複数人が同時に購入ボタンを押します。もし「座席の空き状況を読む」と「予約を書き込む」の間に他のトランザクションが割り込むと、<b>lost update (更新の消失)</b> という異常が起きます。トランザクション A が座席の状態を読み、まだ空いていると判断して予約を書き込もうとする間に、トランザクション B が先に同じ座席を予約してしまうと、A の書き込みが B の予約を上書きしてしまい、2 人に同じ座席を売ってしまいます。</p>
+    <p>こうした異常は「分離レベルを上げれば防げる」と言われますが、分離レベルを上げるほど同時に処理できる量は減り、待たされるトランザクションが増えます。つまりこの回のテーマは、どの異常をどこまで防ぐかという契約と、その契約を守るためにどれだけの代償を払うかのトレードオフです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 220" role="img" aria-label="lost updateが起きるタイムライン図">
+        <line x1="40" y1="60" x2="560" y2="60" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="64" font-size="12.5" fill="#12211a">A</text>
+        <line x1="40" y1="140" x2="560" y2="140" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="144" font-size="12.5" fill="#12211a">B</text>
+        <rect x="80" y="40" width="130" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="145" y="65" font-size="12.5" text-anchor="middle" fill="#0f5132">read(座席=空き)</text>
+        <rect x="260" y="120" width="130" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="325" y="145" font-size="12.5" text-anchor="middle" fill="#1f4a68">write(座席 = B が確保)</text>
+        <rect x="420" y="40" width="130" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="485" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">write(座席 = A が確保)</text>
+        <line x1="325" y1="120" x2="420" y2="80" stroke="#9aa" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="300" y="195" font-size="13" text-anchor="middle" fill="#4a5d54">A は古い「空き」を見たまま書き込み、B の予約を上書きしてしまう</text>
+      </svg>
+      <p class="cap">図: A が座席を読んだ後に B が予約を確定させ、その後 A が古い情報のまま書き込むと B の予約が消える (lost update)。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: ANSI SQLの4分離レベルとMVCC ===== -->
+  <section>
+    <h2>2. 仕組み ― ANSI SQL の 4 分離レベルと MVCC</h2>
+    <p>データベースは「どの異常まで許すか」を段階的に選べるようにしています。ANSI SQL が定めた 4 つの分離レベルは、弱い方から次のように並びます。<b>Read Uncommitted</b> はまだコミットされていない他のトランザクションの変更も読めてしまう最も弱いレベル、<b>Read Committed</b> はコミットされたデータだけを読む (PostgreSQL の既定値)、<b>Repeatable Read</b> はトランザクション開始時点のスナップショットを最後まで保ち続ける、<b>Serializable</b> はすべてのトランザクションが実際には 1 本の順番で実行されたかのように振る舞うことを保証する、最も強いレベルです。</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px">
+      <thead><tr style="background:#eaf5ef">
+        <th style="text-align:left;padding:8px 10px;border:1px solid #d9e5df">分離レベル</th>
+        <th style="text-align:left;padding:8px 10px;border:1px solid #d9e5df">ダーティリード</th>
+        <th style="text-align:left;padding:8px 10px;border:1px solid #d9e5df">非再現リード</th>
+        <th style="text-align:left;padding:8px 10px;border:1px solid #d9e5df">ファントム</th>
+      </tr></thead>
+      <tbody>
+        <tr><td style="padding:8px 10px;border:1px solid #d9e5df">Read Uncommitted</td><td style="padding:8px 10px;border:1px solid #d9e5df">起こりうる</td><td style="padding:8px 10px;border:1px solid #d9e5df">起こりうる</td><td style="padding:8px 10px;border:1px solid #d9e5df">起こりうる</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #d9e5df">Read Committed</td><td style="padding:8px 10px;border:1px solid #d9e5df">防ぐ</td><td style="padding:8px 10px;border:1px solid #d9e5df">起こりうる</td><td style="padding:8px 10px;border:1px solid #d9e5df">起こりうる</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #d9e5df">Repeatable Read</td><td style="padding:8px 10px;border:1px solid #d9e5df">防ぐ</td><td style="padding:8px 10px;border:1px solid #d9e5df">防ぐ</td><td style="padding:8px 10px;border:1px solid #d9e5df">起こりうる</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #d9e5df">Serializable</td><td style="padding:8px 10px;border:1px solid #d9e5df">防ぐ</td><td style="padding:8px 10px;border:1px solid #d9e5df">防ぐ</td><td style="padding:8px 10px;border:1px solid #d9e5df">防ぐ</td></tr>
+      </tbody>
+    </table>
+    <p>この表の中身を実装するのが <b>MVCC (Multi-Version Concurrency Control, 多版型並行制御)</b> です。1 つの行に対して複数のバージョンを保持し、各トランザクションには「自分が見てよいバージョンはどこまでか」を示すスナップショットを割り当てます。これにより、読み取りが書き込みをブロックせず、書き込みが読み取りをブロックしない形で、Read Committed や Repeatable Read を実現できます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 210" role="img" aria-label="MVCCで2つのトランザクションが異なるスナップショットを見る図">
+        <line x1="40" y1="60" x2="560" y2="60" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="64" font-size="12.5" fill="#12211a">A</text>
+        <line x1="40" y1="150" x2="560" y2="150" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="154" font-size="12.5" fill="#12211a">B</text>
+        <circle cx="100" cy="60" r="5" fill="#198754"/>
+        <text x="100" y="40" font-size="12" text-anchor="middle" fill="#0f5132">A 開始 (balance=100 を見る)</text>
+        <rect x="245" y="96" width="170" height="54" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="330" y="118" font-size="11" text-anchor="middle" fill="#1f4a68">B が balance=200 に更新</text>
+        <text x="330" y="136" font-size="11" text-anchor="middle" fill="#1f4a68">・ コミット</text>
+        <rect x="430" y="40" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="500" y="65" font-size="12" text-anchor="middle" fill="#0f5132">A が読む → 100 (旧版)</text>
+        <text x="300" y="190" font-size="12.5" text-anchor="middle" fill="#4a5d54">A は自分の開始時点のバージョンを見続ける (Repeatable Read)</text>
+      </svg>
+      <p class="cap">図: MVCC では各行に複数バージョンを保持し、各トランザクションは自分のスナップショット内のバージョンを読む。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: Berenson 1995とwrite skew ===== -->
+  <section>
+    <h2>3. 仕組み ― write skew という第 5 の異常</h2>
+    <p>ANSI SQL の定義はダーティリード・非再現リード・ファントムの 3 種類しか数えていませんが、Berenson, Bernstein, Gray, Melton, O'Neil, O'Neil の 1995 年の論文 "A Critique of ANSI SQL Isolation Levels" は、この定義があいまいで異常の数も足りないことを指摘しました。その代表例が <b>write skew</b> です。</p>
+    <p>write skew は、2 つのトランザクションが<b>別々の行</b>を書き込むために、個々の行のロックやバージョン管理だけでは検出できない異常です。教科書的な例は「オンコール医師」です。病院の規則は「医師を 1 人もオフコールにしてはいけない (最低 1 人は on-call を維持する)」というものです。医師 A と医師 B がともに on-call のとき、A は「自分以外にも on-call の医師 (B) がいる」ことを確認してから自分を off-call にし、同時に B も「自分以外にも on-call の医師 (A) がいる」ことを確認してから自分を off-call にします。それぞれの確認は読み取り時点では正しいのに、2 つのトランザクションが両方コミットすると、誰も on-call ではなくなり、病院の規則を破ってしまいます。</p>
+    <p>この異常は PostgreSQL の公式ドキュメントでも明確に説明されています。<b>Repeatable Read (スナップショット分離)</b> は、個々の行の読み書きの一貫性は保証しますが、「2 つのトランザクションがまたがって初めて成り立つ制約」までは守りません。この種の制約を守るには、PostgreSQL の <b>Serializable</b> (SSI, Serializable Snapshot Isolation という述語ロックに基づく実装) を使う必要があります。</p>
+    <p>これを座席予約や宿泊予約に当てはめると、「個々の座席の二重予約」は 1 行のロックで防げますが、「販売した座席の合計が会場の定員を超えない」のような複数行にまたがる制約は、行ロックだけでは守れません。SDFC の hotel-booking の議論でも、航空業界ではオーバーブッキング (定員を超えた受け付け) は違法だが、ホテル業界では意図的に 10 % のオーバーブッキングを許容する設計もある、という対比が出てきます。つまり「write skew を防ぐべきか」自体が、業界のルールやビジネス要件によって変わる設計判断です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 220" role="img" aria-label="write skewのオンコール医師の例を示す図">
+        <line x1="40" y1="55" x2="560" y2="55" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="59" font-size="12.5" fill="#12211a">A</text>
+        <line x1="40" y1="140" x2="560" y2="140" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="144" font-size="12.5" fill="#12211a">B</text>
+        <rect x="70" y="35" width="210" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="175" y="60" font-size="11" text-anchor="middle" fill="#0f5132">read: B は on-call → 自分は off 可</text>
+        <rect x="70" y="120" width="210" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="175" y="145" font-size="11" text-anchor="middle" fill="#1f4a68">read: A は on-call → 自分は off 可</text>
+        <rect x="340" y="35" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="430" y="60" font-size="12" text-anchor="middle" fill="#b5401f">write: A を off-call に (別の行)</text>
+        <rect x="340" y="120" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="430" y="145" font-size="12" text-anchor="middle" fill="#b5401f">write: B を off-call に (別の行)</text>
+        <text x="300" y="195" font-size="13" text-anchor="middle" fill="#4a5d54">それぞれの読み取りは正しいのに、両方コミットすると誰も on-call でなくなる</text>
+      </svg>
+      <p class="cap">図: write skew ― 別々の行を書くので行ロックでは検出できないが、2 つの行をまたいだ制約が破られる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 楽観ロックと悲観ロック ===== -->
+  <section>
+    <h2>4. 仕組み ― 楽観ロックと悲観ロック</h2>
+    <p>分離レベルは「どの異常を防ぐか」という契約でしたが、実際の衝突をどう処理するかには 2 つの方式があります。</p>
+    <p><b>悲観ロック (pessimistic locking)</b> は、衝突が起きることを前提に、読む前にロックを取ってしまう方式です。SQL では <code>SELECT ... FOR UPDATE</code> が典型で、A がこの行をロックしている間、B は同じ行を読み書きしようとすると待たされます。確実に衝突を防げますが、ロックを持っている間は他のトランザクションを待たせるため、人気イベントのように競合が集中する場面ではボトルネックになります。</p>
+    <p><b>楽観ロック (optimistic locking)</b> は、衝突は稀だという前提で、読むときにはロックを取らず、更新するときに「自分が読んだ時点のバージョンのままか」を確認する方式です。行にバージョン番号を持たせ、更新文を <code>UPDATE ... WHERE id = ? AND version = ?</code> のように書き、更新できた行数が 0 件なら「他の誰かが先に更新した」と判断してやり直します。ロックを長時間持たない分スループットは上がりますが、競合が激しいとやり直しが頻発します。</p>
+    <p>SDFC の ticketmaster の議論では、座席の確保は「決済が終わるまでロックを握り続ける」のではなく、座席に<b>一時的な hold (保留)</b> を 5 分から 10 分程度だけ置き、その間に決済が完了しなければ自動的に解放する設計が検討されていました。これは悲観ロックと楽観ロックのどちらとも異なる第 3 の実務的な解決で、「ロックは短く持ち、長い待ち時間が必要な処理 (決済) はロックの外に出す」という考え方です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 200" role="img" aria-label="悲観ロックと楽観ロックの違いを示す図">
+        <rect x="20" y="20" width="260" height="70" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="150" y="45" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">悲観ロック</text>
+        <text x="150" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">読む前にロック、他は待つ</text>
+        <text x="150" y="82" font-size="11.5" text-anchor="middle" fill="#4a5d54">SELECT ... FOR UPDATE</text>
+        <rect x="320" y="20" width="260" height="70" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="450" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">楽観ロック</text>
+        <text x="450" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">更新時にバージョンを確認</text>
+        <text x="450" y="82" font-size="11.5" text-anchor="middle" fill="#4a5d54">WHERE version = ?</text>
+        <text x="150" y="130" font-size="12.5" text-anchor="middle" fill="#4a5d54">確実だが待ち時間が増える</text>
+        <text x="450" y="130" font-size="12.5" text-anchor="middle" fill="#4a5d54">速いが競合時はやり直しが増える</text>
+        <text x="300" y="175" font-size="13" text-anchor="middle" fill="#12211a">競合の多さと処理時間の長さで、どちらが合うかが変わる</text>
+      </svg>
+      <p class="cap">図: 悲観ロックは待たせて防ぐ、楽観ロックは衝突してからやり直す。どちらも衝突への対処方針が違うだけ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: どこで壊れるか ===== -->
+  <section>
+    <h2>5. どこで壊れるか ― 在庫 ・ 座席予約の設計判断</h2>
+    <p>SDFC の flash-sale (限定セール) の要件は厳しく、「オーバーセル (在庫以上に売ってしまう) もアンダーセル (在庫を余らせて売り切れと表示する) も禁止」「決済は失敗することがある」というものです。ここで悲観ロックを素直に使うと、1 つの在庫行に 10 万人が同時に SELECT FOR UPDATE をかけるような状況になり、ロックの待ち行列がそのままボトルネックになります。SDFC の inventory の議論では、これを避けるために「在庫を一時的に hold する」と「hold を実際の販売として確定 (execute) する」を 2 段階に分け、hold の時点では強い一貫性で在庫を減らすものの、execute (決済成立の確認) は可用性を優先して後から処理する、という設計が検討されていました。</p>
+    <p>逆に楽観ロックを素直に使うと、人気商品に 10 万人が群がった瞬間、ほぼ全員が「バージョンが変わっていた」としてやり直しになり、再試行の嵐 (retry storm) が起きます。SDFC の flash-sale の議論では、この集中を避けるために、1 つの在庫カウンタではなく複数台に分散させた<b>シャード化カウンタ</b>を使う案が出てきます。ただし在庫をシャードに分けると、在庫が残っているシャードと無くなったシャードが混在し、「在庫はあるのに自分が当たったシャードには無い」という新しい不公平が生まれます。この種の近似カウンタの設計は第 23 回で詳しく扱います。</p>
+    <p>どちらの方式でも、「競合の激しさ」と「処理 1 件あたりの時間の長さ」の 2 つの軸で向き不向きが決まります。悲観ロックは処理が短く競合がそこまで激しくない場合に向き、楽観ロックは読み取りが多く書き込みの競合が稀な場合に向きます。10 万人が同じ 1 行を争うような極端な競合には、どちらの方式も単体では向かず、ロックの対象をより小さい単位 (座席単位、シャード単位) に分散させる設計そのものが必要になります。</p>
+  </section>
+
+  <!-- ===== 解説パート 6: 実システムでの例 ===== -->
+  <section>
+    <h2>6. 実システムでの例</h2>
+    <p>PostgreSQL は既定で Read Committed を使います。多くのアプリケーションはこれで十分ですが、write skew のような複数行をまたぐ制約を守りたい場面では、明示的に Serializable を指定する必要があります。Serializable は述語ロックによる衝突検出のコストがかかるため、「どの制約が本当に守られるべきか」を見極めて使う範囲を絞るのが実務的な判断になります。</p>
+    <p>SDFC の airline-ticketing の議論では、航空業界ではオーバーブッキングが法律で禁止されている一方、hotel-booking の議論では意図的に 10 % のオーバーブッキングを許容する設計が紹介されていました。同じ「座席 ・ 部屋を売る」という問題でも、業界ごとに「write skew や lost update をどこまで厳密に防ぐべきか」という要件自体が異なるという点は、設計の出発点として重要です。</p>
+    <p>SDFC の ticketmaster や payment-gateway の議論に出てくる<b>auth (仮売上) → capture (確定売上)</b> という 2 段階の決済フローも、この回で見た「ロックは短く持ち、時間のかかる処理はロックの外に出す」という考え方の実例です。座席や在庫を短時間だけ hold し、決済という時間のかかる処理は hold の外側で非同期に進めることで、ロックの保持時間を最小化しています。</p>
+    <p>まとめると、分離レベルは「どの異常を許すか」という契約、楽観 / 悲観ロックは「その契約をどう実装するか」という手段です。そして実際の設計では、この 2 つの選択だけでなく、ロックの対象をどの粒度でどれだけ短く持つかという工夫が、現実の競合をさばく決め手になります。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/what-are-database-isolation-levels.md" target="_blank" rel="noopener">ByteByteGo: Database Isolation Levels</a> ― 4 分離レベルの基本的な説明と MVCC の transaction_id / roll_pointer の例の参照に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/pessimistic-vs-optimistic-locking.md" target="_blank" rel="noopener">ByteByteGo: Pessimistic vs Optimistic Locking</a> ― 悲観ロックと楽観ロックの基本的な違いとベストプラクティスの参照に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/what-does-acid-mean.md" target="_blank" rel="noopener">ByteByteGo: What does ACID mean?</a> ― Isolation (分離性) の位置づけと、ACID の C と CAP の C の違いの整理に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/transaction-iso.html" target="_blank" rel="noopener">PostgreSQL: 13.2. Transaction Isolation</a> ― Read Committed が既定であること、Repeatable Read (snapshot isolation) では write skew のような複数行の制約違反を防げず、Serializable (SSI) が必要になるという一次情報。</li>
+      <li>Berenson, Bernstein, Gray, Melton, O'Neil, O'Neil, "A Critique of ANSI SQL Isolation Levels" (1995) ― ANSI SQL の分離レベル定義の不備と write skew の定義の出典 (安定したリンクを確認できなかったため著者 ・ 年のみ記載)。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/ticketmaster" target="_blank" rel="noopener">SDFC: ticketmaster</a> ― 座席予約の lost update の具体例と、座席を一時的に hold する設計の参照に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/hotel-booking" target="_blank" rel="noopener">SDFC: hotel-booking</a> ― 航空業界のオーバーブッキング禁止とホテル業界の 10 % オーバーブッキング許容という業界差の参照に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/inventory" target="_blank" rel="noopener">SDFC: inventory</a> ― 在庫の hold → execute の 2 段階設計の参照に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/flash-sale" target="_blank" rel="noopener">SDFC: flash-sale</a> ― オーバーセル/アンダーセル禁止という厳しい要件と、シャード化カウンタの再試行の嵐の参照に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/airline-ticketing" target="_blank" rel="noopener">SDFC: airline-ticketing</a> ― auth-capture の 2 段階決済フローの参照に使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-failure-detection.html">← 第 17 回 障害検知とゴシップ</a><a href="./distsys-index.html">目次</a><a href="./distsys-2pc.html">第 19 回 分散トランザクションと 2PC →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '「lost update (更新の消失)」が起きる典型的な状況として最も適切なものは？',
+    opts: [
+      'A が読んでから書くまでの間に B が先にコミットし、A が古い値で上書きしてしまう',
+      'ネットワークが切断され、どちらのトランザクションも一切応答を返せなくなる',
+      'ディスク障害によって、コミット済みのデータが完全に消失する',
+      'クロックのずれによって、2 つのトランザクションのタイムスタンプが同じ値になる',
+      '暗号化鍵が壊れて、保存されていたデータが復号できなくなる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>A が読んでから書くまでの間に B が先にコミットすると、A は古い値のまま書き込んでしまい、B の更新が結果的に消えてしまう。これが lost update。',
+      '応答不能の話ではなく、両方が応答した上でデータの整合性が崩れる異常の話。',
+      'ディスク障害によるデータ消失は耐久性 (Durability) の問題であり、分離性 (Isolation) の異常とは別の話。',
+      'クロックのずれは別の課題 (第 15 回) であり、lost update の定義とは無関係。',
+      '暗号化の問題とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>先にコミットした側の更新が、後から古い値で上書きされて消えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="lost updateの図"><rect x="30" y="20" width="220" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="13" text-anchor="middle" fill="#1f4a68">B がコミット (座席=B)</text><rect x="310" y="90" width="220" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="115" font-size="13" text-anchor="middle" fill="#b5401f">A が古い値のまま書き込み (座席=A)</text><line x1="140" y1="60" x2="420" y2="90" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/><text x="280" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">B の更新が A に上書きされて消える</text></svg>'
+          + '<p class="cap">図: B の更新が、後から来た A の古い値ベースの書き込みで上書きされて消失する。</p></div>'
+    }
+  },
+  {
+    q: 'Read Committed と Repeatable Read の違いとして最も正確なものは？',
+    opts: [
+      'Repeatable Read はディスク書き込みを一切行わず、Read Committed は必ずディスクに書き込む',
+      'Read Committed は毎回最新を読み、Repeatable Read は開始時点のスナップショットを保つ',
+      'Read Committed は暗号化されたデータしか読めず、Repeatable Read は平文のデータを読む',
+      'Repeatable Read は常に Serializable より強い保証を持ち、ファントムも必ず防ぐ',
+      'Read Committed は複数のサーバーにまたがる読み取りしかできない'
+    ],
+    ans: 1,
+    exps: [
+      'ディスク書き込みの有無とは無関係の軸。両方とも通常どおりディスクに書き込む。',
+      '<b>これが正解。</b>Read Committed は文ごとにその時点でコミット済みの最新データを読み、Repeatable Read はトランザクション開始時点のスナップショットを保ち続ける。',
+      '暗号化とは無関係。',
+      'Repeatable Read は非再現リードは防ぐがファントムは防げない場合がある (本文の表の通り)。Serializable より強いという主張は誤り。',
+      '複数サーバーをまたぐかどうかとは無関係の、分離レベルの定義の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Read Committed は文ごとに最新を読み、Repeatable Read は開始時点の 1 枚のスナップショットを使い続けます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ReadCommittedとRepeatableReadの違いの図"><rect x="30" y="20" width="220" height="100" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">Read Committed</text><text x="140" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">文ごとに最新の</text><text x="140" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">コミット済みデータを読む</text><rect x="310" y="20" width="220" height="100" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Repeatable Read</text><text x="420" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">開始時点の 1 枚を</text><text x="420" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">最後まで使い続ける</text></svg>'
+          + '<p class="cap">図: Read Committed は毎回読み直す、Repeatable Read は最初のスナップショットを使い続ける。</p></div>'
+    }
+  },
+  {
+    q: 'MVCC (Multi-Version Concurrency Control) の基本的な考え方として最も適切なものは？',
+    opts: [
+      '1 つの行につき 1 つのバージョンだけを保持し、常に最新値だけを上書きしていく',
+      'すべての読み取りを、書き込みが終わるまで一律に待たせる',
+      '1 つの行に複数バージョンを保持し、各トランザクションが見てよい範囲を割り当てる',
+      '読み取りと書き込みを両方とも同じロックで直列化し、常に 1 件ずつ処理する',
+      'すべてのデータをメモリ上にのみ保持し、ディスクには一切書き込まない'
+    ],
+    ans: 2,
+    exps: [
+      '1 バージョンのみを上書きする方式では、読み取り中の他のトランザクションが書き込みを待つ必要が出てくる。MVCC はこれを避けるための仕組み。',
+      '読み取りを一律に待たせるのは MVCC の目的と逆であり、むしろそれを避けるための仕組みが MVCC。',
+      '<b>これが正解。</b>複数バージョンを保持し、各トランザクションが自分のスナップショット内のバージョンを読むことで、読み取りが書き込みをブロックしない設計になっている。',
+      '直列化して 1 件ずつ処理するのは MVCC とは異なるアプローチ (悲観ロックに近い考え方)。',
+      'メモリ上にのみ保持するという前提は誤り。MVCC は通常ディスク上のデータに対する仕組み。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>複数のバージョンを持つことで、読む側と書く側が互いを待たずに動けます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="MVCCの複数バージョンの図"><rect x="30" y="50" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="75" font-size="12.5" text-anchor="middle" fill="#0f5132">版 1: balance=100</text><rect x="210" y="50" width="150" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="285" y="75" font-size="12.5" text-anchor="middle" fill="#1f4a68">版 2: balance=200</text><text x="150" y="30" font-size="12.5" text-anchor="middle" fill="#4a5d54">古いトランザクションは版 1 を読む</text><text x="330" y="30" font-size="12.5" text-anchor="middle" fill="#4a5d54">新しいトランザクションは版 2 を読む</text><text x="280" y="120" font-size="12.5" text-anchor="middle" fill="#12211a">読む側と書く側が互いをブロックしない</text></svg>'
+          + '<p class="cap">図: 複数バージョンを並存させることで、読み取りと書き込みが互いを待たずに進める。</p></div>'
+    }
+  },
+  {
+    q: 'write skew が「行ロックだけでは検出できない」とされる理由として最も適切なものは？',
+    opts: [
+      'write skew はディスク障害が原因で起きる現象であり、ロックの種類とは無関係だから',
+      'それぞれ別の行を書くため、個々の行は正しくても行をまたいだ制約が破られるから',
+      'write skew はネットワーク分断が起きた時だけ発生する現象だから',
+      'write skew は読み取り専用のトランザクションだけが引き起こす現象だから',
+      'write skew は時計のずれだけが原因で発生する現象だから'
+    ],
+    ans: 1,
+    exps: [
+      'ディスク障害とは無関係。write skew は正常に動いているトランザクション同士の間で起きる論理的な異常。',
+      '<b>これが正解。</b>それぞれが別の行を書くため、行ごとのロックやバージョン確認では矛盾が見つからない。しかし 2 つの行をまたいだ制約 (例: 最低 1 人は on-call) が、両方コミットした結果として破られる。',
+      'ネットワーク分断とは無関係。単一ノードの中でも起きる異常。',
+      '書き込みが無ければ write skew は起きない。読み取り専用トランザクションだけでは発生しない。',
+      '時計のずれとは無関係。read/write の順序とコミットのタイミングの問題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>別々の行を書くので、行単位のチェックではすり抜けてしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="write skewが行ロックで検出できない理由の図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">行 A だけ見れば正常</text><rect x="330" y="30" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="430" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">行 B だけ見れば正常</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">しかし行 A と行 B をまたいだ制約は破られている</text></svg>'
+          + '<p class="cap">図: 行ごとに見れば正常でも、行をまたいだ制約は破られうる。</p></div>'
+    }
+  },
+  {
+    q: 'PostgreSQL において Repeatable Read (snapshot isolation) では防げず、Serializable (SSI) を使う必要がある異常として最も適切なものは？',
+    opts: [
+      '同じ行に対する単純な lost update',
+      'コミットされていないデータが見えてしまうダーティリード',
+      '文を実行するたびに結果が変わる非再現リード',
+      '行をまたいだ制約が、別々の行を書く write skew',
+      'ディスク容量が不足して書き込みが失敗する現象'
+    ],
+    ans: 3,
+    exps: [
+      '単純な lost update は MVCC のバージョンチェックや行ロックで Repeatable Read でも防げる場合が多い。',
+      'ダーティリードは Read Committed の時点で既に防げており、Repeatable Read では当然防がれている。',
+      '非再現リードは Repeatable Read の定義上すでに防がれている。',
+      '<b>これが正解。</b>write skew は個々の行は正しく見えるため、Repeatable Read のスナップショット分離では検出できず、述語ロックに基づく Serializable (SSI) が必要になる。',
+      'ディスク容量不足はストレージ層の問題であり、分離レベルの選択とは別の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Repeatable Read は個々の行の一貫性までしか見ません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="RepeatableReadとSerializableの守る範囲の図"><rect x="30" y="20" width="220" height="100" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">Repeatable Read</text><text x="140" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">個々の行の一貫性までを守る</text><rect x="310" y="20" width="220" height="100" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Serializable (SSI)</text><text x="420" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">行をまたぐ制約まで守る</text></svg>'
+          + '<p class="cap">図: Repeatable Read は個々の行まで、Serializable は行をまたいだ制約まで守る。</p></div>'
+    }
+  },
+  {
+    q: '悲観ロック (SELECT ... FOR UPDATE) の特徴として最も適切なものは？',
+    opts: [
+      '読む前にロックを取り、他は待たされる。確実だが競合が集中するとボトルネックになる',
+      'ロックを一切使わず、更新時にバージョンが変わっていないかだけを確認する',
+      '複数のサーバーに分散してロックを取ることで、必ず負荷が均等に分散される',
+      'ロックを取得すると、関係のない別のテーブルの行もすべて自動的にロックされる',
+      'ロックの保持時間がどれだけ長くても、他のトランザクションの速度には一切影響しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>悲観ロックは読む前にロックを取り、他のトランザクションを待たせることで衝突を確実に防ぐ。人気商品のように競合が集中する場面ではこの「待たせる」ことがボトルネックになる。',
+      'それはロックを取らない楽観ロックの特徴であり、悲観ロックの説明ではない。',
+      '負荷分散を自動で行う仕組みではなく、単に行をロックするかどうかの話。',
+      '無関係のテーブルの行まで自動でロックされるわけではない。ロックの対象は指定した行 (やその関連範囲) に限られる。',
+      'ロックを長く持つほど、他のトランザクションは待たされる時間が長くなる。影響が無いという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ロックを持つ側がいる間、他のトランザクションは待たされます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="悲観ロックで他が待たされる図"><rect x="30" y="20" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">A がロック保持中</text><rect x="260" y="70" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="350" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f">B は解放まで待機</text><line x1="210" y1="40" x2="260" y2="90" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/></svg>'
+          + '<p class="cap">図: A がロックを持っている間、B は待たされる。これが悲観ロックのボトルネックになりうる。</p></div>'
+    }
+  },
+  {
+    q: 'SDFC の ticketmaster で、座席を決済完了まで悲観ロックで保持せず、5 分から 10 分の「一時的な hold」にとどめる設計の意図として最も適切なものは？',
+    opts: [
+      '座席の在庫をわざと多めに表示して、ユーザーを呼び込むため',
+      'ホールドの仕組みを使うと、サーバーのコストが自動的に 0 になるため',
+      '決済という時間のかかる処理の間ロックを持つと長く待たせるため、短く持ちロックの外に出す',
+      '座席データを暗号化する必要があるため、ロックの代わりに hold を使う',
+      'ホールドを使うと、座席の二重予約が理論的に完全に不可能になるため'
+    ],
+    ans: 2,
+    exps: [
+      '在庫を多めに見せる意図ではなく、実際の空き座席の管理の話。',
+      'サーバーコストが自動的に 0 になるという主張は誤り。hold の管理にもコストはかかる。',
+      '<b>これが正解。</b>決済のように時間のかかる処理をロックの中に入れると他の購入者を長時間待たせる。ロックは短時間の hold にとどめ、時間のかかる決済はロックの外側 (非同期) で進める設計。',
+      '暗号化とは無関係の設計判断。',
+      'hold を使っても、hold の管理自体に競合制御が必要であり「理論的に完全に不可能」とまでは言えない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>時間のかかる処理をロックの外に出すことで、ロックの保持時間を短くします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="holdと決済を分離する設計の図"><rect x="30" y="20" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">座席を短時間 hold</text><rect x="280" y="20" width="250" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="405" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">決済はロックの外で非同期に進行</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">ロックの保持時間が短いほど、他の購入者を待たせる時間も短くなる</text></svg>'
+          + '<p class="cap">図: hold (短いロック) と決済 (時間のかかる処理) を分離する設計。</p></div>'
+    }
+  },
+  {
+    q: 'SDFC の flash-sale のような「1 個の在庫に 10 万人が同時にアクセスする」状況で、素朴な楽観ロック (バージョン確認付き UPDATE) をそのまま適用した場合に起きやすい問題は？',
+    opts: [
+      'サーバーが自動的に負荷を 0 にしてしまう',
+      'すべてのリクエストが暗号化エラーになる',
+      'データベースの時計が自動的にずれ始める',
+      'ほぼ全員が衝突しやり直しの再試行が嵐のように集中する',
+      'ディスク容量が自動的に倍増する'
+    ],
+    ans: 3,
+    exps: [
+      '負荷が自動的に 0 になるという前提は誤り。むしろ再試行で負荷は増える方向に働く。',
+      '暗号化エラーとは無関係の問題。',
+      '時計のずれとは無関係の問題。',
+      '<b>これが正解。</b>1 つの行に大量のリクエストが集中すると、ほぼ全員がバージョンの不一致でやり直しになり、再試行が嵐のように集中する。',
+      'ディスク容量とは無関係の問題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 つの行に大量のリクエストが集中すると、ほぼ全員が衝突してやり直しになります。</p>'
+          + '<div class="fig"><svg viewBox="-17 0 577 150" aria-label="楽観ロックの再試行の嵐の図"><circle cx="100" cy="40" r="8" fill="#c0492f"/><circle cx="140" cy="60" r="8" fill="#c0492f"/><circle cx="90" cy="80" r="8" fill="#c0492f"/><circle cx="150" cy="30" r="8" fill="#c0492f"/><text x="120" y="110" font-size="12.5" text-anchor="middle" fill="#b5401f">大量のリクエストが同じ行を更新しようとする</text><rect x="300" y="40" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="410" y="70" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">ほぼ全員がバージョン不一致で再試行</text></svg>'
+          + '<p class="cap">図: 1 行に集中するアクセスでは、楽観ロックは再試行の嵐を招きやすい。</p></div>'
+    }
+  },
+  {
+    q: 'SDFC の hotel-booking (10 % オーバーブッキングを許容) と airline-ticketing (オーバーブッキングは法律で禁止) の対比から学べる設計判断として最も適切なものは？',
+    opts: [
+      'ホテル業界の方がシステムの実装がすべて簡単になる',
+      '航空業界はデータベースを使わずに座席を管理している',
+      'どちらの業界でも分離レベルは常に Read Uncommitted で十分である',
+      'ホテルは常に楽観ロックしか使わず、航空会社は常に悲観ロックしか使わない',
+      'write skew の防ぎ方は業界のルールで決まり、技術だけでは決まらない'
+    ],
+    ans: 4,
+    exps: [
+      '実装の難易度が一律に簡単になるという根拠は無い。要件が違うだけで、どちらにも相応の実装の工夫が必要。',
+      'データベースを使わないという前提は不自然で、本文の論点とも無関係。',
+      'Read Uncommitted で十分かどうかは業界ルールとは無関係に、アプリケーションの要件で決まる。常に十分という主張は誤り。',
+      'ロック方式の選択と業界を一対一に固定する根拠は無い。どちらの業界でも両方の方式が使われうる。',
+      '<b>これが正解。</b>航空業界はオーバーブッキングが法律で禁止されている一方、ホテル業界は意図的に 10 % のオーバーブッキングを許容する設計がある。「どこまで厳密に防ぐか」という要件自体が業界やビジネスルールで決まり、技術はその要件を実現する手段に過ぎない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ「部屋 ・ 座席を売る」問題でも、守るべき制約の厳しさは業界で異なります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="業界ごとに要件が異なる図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ホテル業界</text><text x="140" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">10% のオーバーブッキングを許容</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">航空業界</text><text x="420" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">オーバーブッキングは法律で禁止</text></svg>'
+          + '<p class="cap">図: 同じ予約問題でも、業界のルールによって守るべき厳密さの要件が異なる。</p></div>'
+    }
+  },
+  {
+    q: '「販売した座席の合計が会場の定員を超えない」という複数行にまたがる制約を確実に守りたい場合、悲観ロック (個々の座席のロック) だけでは不十分になりうる理由と、必要な対策として最も適切なものは？',
+    opts: [
+      '個々の座席ロックは不要なので、ロックを一切使わなければ自然に制約が守られる',
+      '定員の制約は分離レベルと無関係なので、アプリケーション側では何もしなくてよい',
+      '個々の座席のロックをやめて、代わりに全座席を暗号化すれば制約が守られる',
+      '制約を守るには複数のサーバーに在庫を均等に分散しさえすればよい',
+      '座席のロックは write skew を防げず、Serializable か明示ロックが必要'
+    ],
+    ans: 4,
+    exps: [
+      'ロックを一切使わないと、個々の座席の二重予約すら防げなくなる。',
+      '定員の制約を守るにはアプリケーション側か DB 側で何らかの対策が必要であり、「何もしなくてよい」は誤り。',
+      '暗号化は一貫性の制約を守る仕組みではない。',
+      '分散させるだけでは、むしろ合計の整合性を取るのが難しくなる場合がある。分散自体が制約を保証する仕組みにはならない。',
+      '<b>これが正解。</b>個々の座席ロックは行ごとの衝突しか防げず、write skew のように行をまたいだ制約は破られうる。合計をまたいだ制約を守るには Serializable を使うか、合計を表す行 (集約カウンタ) に明示的なロックをかける必要がある。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>個々の座席のロックは、合計という別の対象の整合性までは守りません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="合計制約を守るための追加対策の図"><rect x="30" y="20" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="110" y="45" font-size="12" text-anchor="middle" fill="#0f5132">座席 1 のロック</text><rect x="210" y="20" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="290" y="45" font-size="12" text-anchor="middle" fill="#0f5132">座席 2 のロック</text><text x="200" y="90" font-size="13" text-anchor="middle" fill="#4a5d54">個々は守られるが「合計 ≤ 定員」はまだ守られていない</text><rect x="390" y="20" width="150" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="465" y="45" font-size="12" text-anchor="middle" fill="#b5401f">合計の明示ロック</text><text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#12211a">合計という対象自体に別のロックか Serializable が必要</text></svg>'
+          + '<p class="cap">図: 個々の座席ロックに加えて、合計という対象を守る仕組みが別に必要になる。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>コンシステントハッシュ ― ノード数が変わっても壊れない割り振り</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 07 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>コンシステントハッシュ ― ノード数が変わっても壊れない割り振り</h1>
+  <p>サーバーを 1 台増やすだけでほぼ全データが移動してしまう問題を、リング状の割り振りで「動く範囲」だけに閉じ込める</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 06 回 <a href="./distsys-sharding.html">パーティショニングとシャーディング</a>。</p>
+  <p class="intro">結論を先に言うと、コンシステントハッシュ (consistent hashing) とは「サーバーの数が増えたり減ったりしても、動くデータの量をごく一部に抑える」ハッシュの割り振り方である。第 06 回で見たハッシュベースのシャーディング <code>shard_id = hash(key) % N</code> には、シャード数 N を変えるとほぼ全てのキーの行き先が変わってしまうという弱点があった。コンシステントハッシュはサーバーとキーを同じ「リング」の上に配置することで、この再配置の範囲を小さく閉じ込める。</p>
+
+  <section>
+    <h2>1. 剰余ハッシュの再配置問題 ― なぜ単純な mod N は壊れるのか</h2>
+    <p>ByteByteGo の consistent-hashing は、単純なハッシュ分割の問題を次のように説明する。サーバーの台数を N 台として <code>serverIndex = hash(key) % N</code> でどのサーバーに置くかを決める方式は、N が固定されている間はうまく機能する。問題は、新しい需要に対応してサーバーを追加したり、故障したサーバーを取り除いたりして N が変わったときに起こる。</p>
+    <p>具体例で確認する。N=3 のとき、あるキーのハッシュ値が 7 だとすると、7 % 3 = 1 なのでサーバー 1 に置かれる。ここでサーバーを 1 台追加して N=4 になると、同じキーは 7 % 4 = 3 となり、サーバー 3 に移ってしまう。これはこのキーだけの問題ではない。剰余を取る相手の数 (N) そのものが変わるため、<b>ほぼ全てのキーで計算結果が変わり</b>、サーバー台数の変化のたびに大量のデータが一斉に移動する「再配置の嵐」が起きる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="N=3からN=4への変化でほぼ全キーが移動する">
+        <text x="150" y="20" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">N=3 のときの配置</text>
+        <text x="150" y="45" font-size="13" text-anchor="middle" fill="#12211a">key=7 → 7 % 3 = 1 → Server 1</text>
+        <text x="150" y="65" font-size="13" text-anchor="middle" fill="#12211a">key=8 → 8 % 3 = 2 → Server 2</text>
+        <text x="150" y="85" font-size="13" text-anchor="middle" fill="#12211a">key=9 → 9 % 3 = 0 → Server 0</text>
+        <line x1="300" y1="55" x2="360" y2="55" stroke="#9aa" stroke-width="2" marker-end="url(#arrCH1)"/>
+        <text x="330" y="40" font-size="12.5" text-anchor="middle" fill="#4a5d54">1 台追加</text>
+        <text x="480" y="20" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">N=4 のときの配置</text>
+        <text x="480" y="45" font-size="13" text-anchor="middle" fill="#b5401f">key=7 → 7 % 4 = 3 → Server 3 (移動)</text>
+        <text x="480" y="65" font-size="13" text-anchor="middle" fill="#b5401f">key=8 → 8 % 4 = 0 → Server 0 (移動)</text>
+        <text x="480" y="85" font-size="13" text-anchor="middle" fill="#0f5132">key=9 → 9 % 4 = 1 → Server 1 (移動)</text>
+        <text x="320" y="140" font-size="13.5" text-anchor="middle" fill="#12211a">3 個のキーのうち 3 個とも行き先が変わった</text>
+        <text x="320" y="160" font-size="13" text-anchor="middle" fill="#4a5d54">N (割る数) 自体が変わると、剰余の計算結果はほぼ無関係に再抽選される</text>
+        <defs><marker id="arrCH1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs>
+      </svg>
+      <p class="cap">図: サーバーを 1 台増やすだけで、剰余の計算結果はほぼ無関係な値に変わり、大量のキーが移動する。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. コンシステントハッシュのリング構造</h2>
+    <p>コンシステントハッシュは、サーバーとキーの両方を同じ<b>リング (ring, 円環状の数直線)</b> の上に配置する。やり方は次の通りである。(1) ハッシュ関数を使って各サーバーの名前や IP アドレスをハッシュ値に変換し、その値の位置にサーバーをリング上に置く。(2) 同じハッシュ関数で各キーもハッシュ値に変換し、リング上に置く。(3) あるキーがどのサーバーに属するかを決めるときは、そのキーの位置から<b>時計回りに進んで最初に見つかったサーバー</b> をその担当とする。</p>
+    <p>ByteByteGo の例では、key 0 がリング上で時計回りに進んだ先に server 0 があるため server 0 が担当し、key 1 は server 1 が担当する、という具合になる。重要なのは、この「時計回りに最初に見つかったサーバー」という規則そのものは、サーバーの台数が変わっても変える必要がないことである。</p>
+    <div class="fig">
+      <svg viewBox="0 0 520 320" role="img" aria-label="リング上のサーバーとキーの配置">
+        <circle cx="260" cy="160" r="130" fill="none" stroke="#9aa" stroke-width="2"/>
+        <circle cx="260" cy="30" r="9" fill="#0f5132"/>
+        <text x="260" y="15" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">server 0</text>
+        <circle cx="390" cy="160" r="9" fill="#2f5f8a"/>
+        <text x="430" y="165" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">server 1</text>
+        <circle cx="260" cy="290" r="9" fill="#7a5a9e"/>
+        <text x="260" y="310" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">server 2</text>
+        <circle cx="200" cy="55" r="6" fill="#c0492f"/>
+        <text x="160" y="50" font-size="12.5" text-anchor="middle" fill="#b5401f">key 0</text>
+        <circle cx="340" cy="90" r="6" fill="#c0492f"/>
+        <text x="370" y="80" font-size="12.5" text-anchor="middle" fill="#b5401f">key 1</text>
+        <circle cx="330" cy="250" r="6" fill="#c0492f"/>
+        <text x="370" y="265" font-size="12.5" text-anchor="middle" fill="#b5401f">key 2</text>
+        <text x="260" y="165" font-size="12.5" text-anchor="middle" fill="#12211a">時計回りに進み</text>
+        <text x="260" y="183" font-size="12.5" text-anchor="middle" fill="#12211a">最初のサーバーが担当</text>
+      </svg>
+      <p class="cap">図: key 0 は時計回りに進んだ先の server 0 が担当し、key 1 は server 1、key 2 は server 2 が担当する。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. サーバーを追加・削除したときに動く範囲</h2>
+    <p>コンシステントハッシュの核心は、サーバーの台数が変わっても<b>動くキーがごく一部に限られる</b>ことである。ByteByteGo の例では、リング上の server 0 の左側(時計回りで server 0 の手前)に新しいサーバー s4 を追加すると、動くのは s4 と server 0 の間に位置していたキー k0 だけである。k1、k2、k3 はそれぞれ元から時計回りに進んだ先にあったサーバーがそのまま変わらないため、影響を受けない。</p>
+    <p>これは第 06 回で見た剰余ハッシュとの決定的な違いである。剰余ハッシュでは N が変わると割る数そのものが変わるため、ほぼ全てのキーの計算結果が無関係な値に変わる。コンシステントハッシュでは、新しいサーバーが「割り込む」位置の<b>両隣のサーバーの間にあったキーだけ</b>が影響を受け、リングの他の部分は無傷のままである。サーバーを削除する場合も同様で、削除されたサーバーが担当していたキーだけが、時計回りで次に見つかるサーバーに移る。</p>
+    <div class="fig">
+      <svg viewBox="0 -3 560 242" role="img" aria-label="サーバー追加時に動くキーはごく一部">
+        <circle cx="280" cy="120" r="95" fill="none" stroke="#9aa" stroke-width="2"/>
+        <circle cx="280" cy="25" r="8" fill="#0f5132"/>
+        <text x="280" y="12" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">server 0</text>
+        <circle cx="375" cy="120" r="8" fill="#2f5f8a"/>
+        <text x="408" y="125" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">server 1</text>
+        <circle cx="280" cy="215" r="8" fill="#7a5a9e"/>
+        <text x="280" y="233" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">server 2</text>
+        <circle cx="210" cy="55" r="11" fill="#198754" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">新規 s4</text>
+        <circle cx="235" cy="40" r="6" fill="#c0492f"/>
+        <text x="190" y="25" font-size="12" text-anchor="middle" fill="#b5401f">k0 だけ移動</text>
+        <circle cx="330" cy="70" r="6" fill="#4a5d54"/>
+        <text x="355" y="60" font-size="12" text-anchor="middle" fill="#4a5d54">k1 は無傷</text>
+        <circle cx="300" cy="195" r="6" fill="#4a5d54"/>
+        <text x="330" y="210" font-size="12" text-anchor="middle" fill="#4a5d54">k2 は無傷</text>
+        <text x="280" y="123" font-size="12" text-anchor="middle" fill="#12211a">動くのは</text>
+        <text x="280" y="138" font-size="12" text-anchor="middle" fill="#12211a">隙間の中だけ</text>
+      </svg>
+      <p class="cap">図: 新サーバー s4 を挿入すると、s4 と server 0 の間にあった k0 だけが動き、他のキーは無傷のまま。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 偏りの問題と仮想ノード</h2>
+    <p>リング上にサーバーをハッシュ関数で置くだけだと、サーバーの台数が少ないうちは、サーバー同士の間隔が偶然大きく偏ることがある。間隔が広いサーバーほどリング上の広い範囲を担当することになり、キーの数が偏って一部のサーバーだけ負荷が高くなってしまう。</p>
+    <p>この偏りを緩和する一般的な工夫が<b>仮想ノード (virtual node)</b> である。1 台の物理サーバーを、リング上の 1 点ではなく<b>複数の点</b> として配置する。例えば 1 台のサーバーに 100 個の仮想的な位置を持たせれば、そのサーバーが担当する区間は 100 個の小さな区間の合計になり、1 つの区間が極端に大きくなる確率が下がる。物理サーバーを追加・削除するときも、その物理サーバーに属する仮想ノードの分だけ処理すればよく、リングの基本的な考え方は変わらない。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 170" role="img" aria-label="仮想ノードによる偏りの緩和">
+        <text x="140" y="12" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">仮想ノード無し</text>
+        <circle cx="140" cy="98" r="62" fill="none" stroke="#9aa" stroke-width="2"/>
+        <circle cx="140" cy="36" r="7" fill="#0f5132"/>
+        <circle cx="195" cy="142" r="7" fill="#2f5f8a"/>
+        <text x="140" y="150" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">広い区間に偏る</text>
+        <text x="420" y="12" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">仮想ノード有り</text>
+        <circle cx="420" cy="98" r="62" fill="none" stroke="#9aa" stroke-width="2"/>
+        <circle cx="420" cy="36" r="5" fill="#0f5132"/>
+        <circle cx="465" cy="58" r="5" fill="#0f5132"/>
+        <circle cx="474" cy="115" r="5" fill="#0f5132"/>
+        <circle cx="438" cy="156" r="5" fill="#0f5132"/>
+        <circle cx="375" cy="158" r="5" fill="#2f5f8a"/>
+        <circle cx="360" cy="105" r="5" fill="#2f5f8a"/>
+        <circle cx="370" cy="48" r="5" fill="#2f5f8a"/>
+        <text x="420" y="150" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">小さく散らばる</text>
+      </svg>
+      <p class="cap">図: 1 台のサーバーをリング上の複数点に置くと、担当区間の偏りが小さくなる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 実システムでの例と、他の手法との比較</h2>
+    <p>ByteByteGo の consistent-hashing は、コンシステントハッシュを使う実システムの例として、<b>Amazon DynamoDB と Apache Cassandra</b> (リバランス時のデータ移動を最小化する)、<b>Akamai のような CDN</b> (エッジサーバー間でコンテンツを均等に分散する)、<b>Google Network Load Balancer のようなロードバランサ</b> (持続的な接続をバックエンドに均等に分散する) を挙げている。</p>
+    <p>コンシステントハッシュ以外にも、同じ「サーバー台数が変わっても再配置を抑えたい」という目的のための手法がある。<b>Rendezvous hashing (ランデブーハッシュ、重み付け最大値ハッシュとも呼ばれる、Thaler と Ravishankar が 1996 年に提案)</b> は、キーごとに全サーバーとの組み合わせのハッシュ値をそれぞれ計算し、最大値を出したサーバーを担当とする方式である。リングを使わない分、実装の見通しは良いが、サーバー台数が多いとキーを割り振るたびに全サーバー分のハッシュ計算が必要になる。</p>
+    <p><b>Jump Consistent Hash (ジャンプコンシステントハッシュ、Lamping と Veach が 2014 年に Google から発表)</b> は、サーバーをリングに配置するのではなく、キーとサーバー台数から直接計算でシャード番号を求める方式で、リングや対応表を一切保持しない分メモリ効率に優れるが、サーバーに名前や重みを個別に付けて選ぶといった柔軟な使い方はしづらい。どちらの手法も、コンシステントハッシュと同じ「N の変化が一部のキーにしか影響しない」という性質を、別の実現方法で達成しようとするものである。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい/なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/consistent-hashing.md" target="_blank" rel="noopener">ByteByteGo: Consistent Hashing Explained</a> ― 剰余ハッシュの問題、リングの仕組み、実システムでの利用例を参照</li>
+      <li><a href="https://arxiv.org/abs/1406.2294" target="_blank" rel="noopener">Lamping, Veach, "A Fast, Minimal Memory, Consistent Hash Algorithm" (2014)</a> ― Jump Consistent Hash の比較対象として参照</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-sharding.html">← 第 06 回 パーティショニングとシャーディング</a><a href="./distsys-index.html">目次</a><a href="./distsys-cap-theorem.html">第 08 回 CAP 定理 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '単純なハッシュ分割 (shard_id = hash(key) % N) で、サーバー台数 N を変えると何が起こるか?',
+    opts: [
+      'ほぼ全てのキーで計算結果が変わり、大量のデータが一斉に再配置される',
+      '新しく追加されたサーバーだけがデータを受け取り、既存の配置は変わらない',
+      '剰余計算そのものが不要になり、全データが1台に集約される',
+      'ハッシュ関数が自動的にコンシステントハッシュの方式へ切り替わる',
+      '影響はキャッシュ層だけに限られ、データベース本体には影響しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>剰余を取る相手の数 (N) 自体が変わるため、ほぼ全てのキーで計算結果が無関係な値に変わり、大量のデータが一斉に再配置される「再配置の嵐」が起きる。',
+      '既存のキーも、計算結果が変わったものは別のサーバーへ移動する。既存配置が変わらないという説明は誤り。',
+      '剰余計算は方式として引き続き使われており、不要になるわけでも1台に集約されるわけでもない。',
+      '方式の切り替えは自動では起きない。コンシステントハッシュへの移行は設計として別途行う必要がある。',
+      'シャーディングはデータベース本体の行の配置を決める仕組みであり、キャッシュ層だけに影響が限定されるという説明は誤り。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>Nが変わると剰余の計算結果が変わり、ほぼ全てのキーの行き先が変わります。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="剰余ハッシュの再配置"><rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">N=3: key % 3 で決まる</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">N=4: key % 4 で再計算</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">割る数が変わるとほぼ全てのキーの結果が変わる</text></svg><p class="cap">図: N自体の変化が、剰余計算の前提を丸ごと変えてしまう。</p></div>' }
+  },
+  {
+    q: 'コンシステントハッシュのリングで、あるキーの担当サーバーを決める規則として正しいものは?',
+    opts: [
+      'リング上でキーに最も近い位置にあるサーバーを、方向を問わず担当にする',
+      'リング上でキーの位置から時計回りに進んで、最初に見つかったサーバーを担当にする',
+      'リング上の全サーバーのうち、ハッシュ値が最も小さいサーバーを常に担当にする',
+      'キーのハッシュ値を物理サーバーの台数で割った余りを使って担当を決める',
+      'サーバーのIPアドレスが小さい順に、先着順で担当を割り当てる'
+    ],
+    ans: 1,
+    exps: [
+      '方向を問わず最も近い位置を選ぶ方式ではなく、方向を「時計回り」に固定するのがコンシステントハッシュの規則である。',
+      '<b>これが正解。</b>コンシステントハッシュでは、キーの位置から時計回りに進んで最初に見つかったサーバーをそのキーの担当とする。',
+      'ハッシュ値が最も小さいサーバーに固定すると、そのサーバーに全キーが集中してしまい、分散の意味が無くなる。',
+      '台数で割る剰余を使う方式は、この回の前半で説明した単純なハッシュ分割であり、コンシステントハッシュとは別の方式。',
+      'IPアドレスの大小とハッシュ値の位置は無関係であり、先着順という規則はコンシステントハッシュの定義には存在しない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>時計回りに進んで最初に見つかるサーバーが担当、という規則を確認します。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="時計回りの担当決定規則"><circle cx="280" cy="80" r="65" fill="none" stroke="#9aa" stroke-width="2"/><circle cx="280" cy="15" r="7" fill="#0f5132"/><text x="280" y="140" font-size="12.5" text-anchor="middle" fill="#12211a">key→時計回りに進み、最初のサーバーが担当</text><circle cx="230" cy="30" r="5" fill="#c0492f"/><path d="M230,30 A65,65 0 0 1 280,15" stroke="#b5401f" stroke-width="2" fill="none" marker-end="url(#arrCHq2)"/><defs><marker id="arrCHq2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b5401f"/></marker></defs></svg><p class="cap">図: キーの位置から時計回りに辿った最初のサーバーがそのキーを担当する。</p></div>' }
+  },
+  {
+    q: 'リング上のserver 0の手前に新しいサーバーs4を挿入したとき、動く(担当が変わる)キーはどれか?',
+    opts: [
+      'リング上に存在する全てのキー',
+      'server 1とserver 2が担当していたキーのうち、ランダムに選ばれた半分',
+      's4とserver 0の間に位置していたキーだけ',
+      'ハッシュ値が偶数になっているキーだけ',
+      'サービス開始時に最初に作成されたキーだけ'
+    ],
+    ans: 2,
+    exps: [
+      '動くのはごく一部のキーだけであり、全てのキーが動くわけではない。これはコンシステントハッシュの核心的な利点と矛盾する。',
+      'server 1やserver 2が担当する範囲は、s4の挿入位置とは無関係であり、影響を受けない。ランダムに半分動くという説明も誤り。',
+      '<b>これが正解。</b>新サーバーs4の挿入で影響を受けるのは、s4とその手前のserver 0との間に位置していたキーだけであり、他のキーは元のまま。',
+      'ハッシュ値の偶奇とリング上の位置は直接結びつかず、挿入の影響範囲を決める基準ではない。',
+      '作成順とリング上の位置は無関係であり、最初に作成されたキーだけが動くという規則はコンシステントハッシュには存在しない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>新サーバーの挿入で動くのは、挿入位置の「隙間」にあったキーだけです。</p>'
+      + '<div class="fig"><svg viewBox="0 -12 560 162" aria-label="挿入で動くキーの範囲"><circle cx="280" cy="80" r="65" fill="none" stroke="#9aa" stroke-width="2"/><circle cx="280" cy="15" r="7" fill="#0f5132"/><text x="280" y="2" font-size="12" text-anchor="middle" fill="#0f5132">server 0</text><circle cx="230" cy="30" r="9" fill="#198754" stroke="#0f5132" stroke-width="2"/><text x="170" y="25" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">新規s4</text><circle cx="255" cy="22" r="5" fill="#c0492f"/><text x="210" y="55" font-size="12" text-anchor="middle" fill="#b5401f">このキーだけ移動</text><circle cx="340" cy="60" r="5" fill="#4a5d54"/><text x="370" y="50" font-size="12" text-anchor="middle" fill="#4a5d54">無傷</text></svg><p class="cap">図: 新サーバーと手前のサーバーの間にあったキーだけが影響を受ける。</p></div>' }
+  },
+  {
+    q: 'リング上のあるサーバーが故障して取り除かれたとき、そのサーバーが担当していたキーはどうなるか?',
+    opts: [
+      '永久に誰にも割り当てられないまま、そのキーのデータは失われる',
+      'リング上のどこかにいる、完全にランダムな別のサーバーに割り当てられる',
+      '残っている全サーバーに、負荷が均等になるよう再分配される',
+      '時計回りで次に見つかる、残っているサーバーに引き継がれる',
+      'リング自体が一度解体され、全キーがゼロから再構築されるまで保留される'
+    ],
+    ans: 3,
+    exps: [
+      'リングの規則(時計回りに次のサーバーを探す)がそのまま適用されるため、永久に失われるわけではない。',
+      '割り当て先はランダムではなく、リング上の位置関係によって一意に決まる。',
+      '均等な再分配が自動で起こるわけではなく、影響を受けるのは故障したサーバーの担当範囲だけである。',
+      '<b>これが正解。</b>サーバーが取り除かれても、リングの規則は変わらない。そのサーバーが担当していたキーは、時計回りで次に見つかる残存サーバーに引き継がれる。',
+      'リングを解体してゼロから再構築する必要はなく、コンシステントハッシュはそのような全面的な再構築を避けるために使われる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>サーバーが取り除かれても、時計回りの規則そのものは変わりません。</p>'
+      + '<div class="fig"><svg viewBox="0 -12 560 162" aria-label="サーバー削除時の引き継ぎ"><circle cx="280" cy="80" r="65" fill="none" stroke="#9aa" stroke-width="2"/><circle cx="280" cy="15" r="7" fill="#c0492f" opacity="0.35"/><text x="280" y="2" font-size="12" text-anchor="middle" fill="#b5401f">故障して除去</text><circle cx="340" cy="60" r="7" fill="#2f5f8a"/><text x="390" y="55" font-size="12" text-anchor="middle" fill="#1f4a68" font-weight="700">次のサーバー</text><circle cx="255" cy="22" r="5" fill="#198754"/><path d="M255,22 A65,65 0 0 1 340,60" stroke="#0f5132" stroke-width="2" fill="none" marker-end="url(#arrCHq4)"/><defs><marker id="arrCHq4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg><p class="cap">図: 故障したサーバーの担当キーは、時計回りで次に見つかるサーバーへ引き継がれる。</p></div>' }
+  },
+  {
+    q: '仮想ノード(virtual node)を導入する目的として正しいものはどれか?',
+    opts: [
+      '物理サーバーの台数そのものを減らし、運用コストを下げるため',
+      'リングという仕組み自体を不要にし、対応表だけで済ませるため',
+      'ハッシュ関数の計算回数を完全にゼロにし、計算コストを無くすため',
+      'サーバーの故障検知を自動化し、人の監視を不要にするため',
+      '1台の物理サーバーをリング上の複数点に置き、担当区間の偏りを小さくするため'
+    ],
+    ans: 4,
+    exps: [
+      '仮想ノードは物理サーバーの台数を変える仕組みではなく、1台あたりの表現方法を増やす工夫である。',
+      'リングという考え方自体は仮想ノードを導入しても維持される。無くす仕組みではない。',
+      'ハッシュ関数の計算は仮想ノードの位置を決める際にも必要であり、計算回数がゼロになるわけではない。',
+      '故障検知は別の仕組み(ハートビートなど、第 17 回で扱う)の役割であり、仮想ノードの目的ではない。',
+      '<b>これが正解。</b>1台の物理サーバーをリング上の複数の点として配置することで、担当区間が極端に大きくなる確率を下げ、偏りを緩和する。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>1台を複数の点として配置すると、担当区間が細かく分かれて偏りが小さくなります。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="仮想ノードの効果"><circle cx="150" cy="80" r="60" fill="none" stroke="#9aa" stroke-width="2"/><circle cx="150" cy="20" r="6" fill="#0f5132"/><circle cx="195" cy="130" r="6" fill="#2f5f8a"/><text x="150" y="150" font-size="12" text-anchor="middle" fill="#b5401f">1点だけ→区間が偏る</text><circle cx="410" cy="80" r="60" fill="none" stroke="#9aa" stroke-width="2"/><circle cx="410" cy="20" r="4" fill="#0f5132"/><circle cx="450" cy="40" r="4" fill="#0f5132"/><circle cx="460" cy="100" r="4" fill="#0f5132"/><circle cx="420" cy="135" r="4" fill="#0f5132"/><text x="410" y="150" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">複数点→区間が均される</text></svg><p class="cap">図: 仮想ノードは1台を複数の点に分散させ、区間サイズの偏りを下げる。</p></div>' }
+  },
+  {
+    q: '仮想ノードの数(1台の物理サーバーが持つリング上の点の数)を増やすと、一般にどうなるか?',
+    opts: [
+      '担当区間の偏りは小さくなるが、管理するリング上の点の数が増える',
+      '担当区間の偏りは、仮想ノードを増やすと必ず大きくなる',
+      'サーバー追加・削除時の再配置範囲が、リング全体に広がるようになる',
+      'コンシステントハッシュという方式そのものが成立しなくなる',
+      'ハッシュ関数を使わずに済むようになり、計算が不要になる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>仮想ノードを増やすほど1台あたりの区間が細かく分かれ偏りは小さくなるが、その分リング上で管理する点の数が増えるという代償がある。',
+      '仮想ノードを増やすことは偏りを均す方向の工夫であり、偏りが必ず大きくなるという説明は定義と矛盾する。',
+      '仮想ノードを増やしても、変化の影響は依然として挿入・削除された点の近傍に閉じ込められる。リング全体に広がるわけではない。',
+      '仮想ノードはコンシステントハッシュの応用的な工夫であり、方式そのものを壊すものではない。',
+      'ハッシュ関数は仮想ノードの位置を決める際にもそのまま使われており、不要になるわけではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>仮想ノードを増やすほど偏りは減りますが、管理する点の数は増えます。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="仮想ノード数のトレードオフ"><rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">得るもの: 偏りの縮小</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">代償: 管理点数の増加</text></svg><p class="cap">図: 仮想ノードの数は、偏りの縮小と管理コストのトレードオフになる。</p></div>' }
+  },
+  {
+    q: 'ByteByteGoがコンシステントハッシュの実システムでの利用例として挙げているものはどれか?',
+    opts: [
+      '単純なラウンドロビン方式だけで動作する、昔ながらのDNSサーバー',
+      'DynamoDBやCassandraが、リバランス時のデータ移動を抑えるために利用',
+      '複製を一切持たない、1台構成の小規模なブログ投稿システム',
+      'サーバーと一切通信しない、クライアント側だけで完結するローカルキャッシュ',
+      '外部と一切通信を行わない、暗号化専用の組み込みハードウェア'
+    ],
+    ans: 1,
+    exps: [
+      '単純なラウンドロビンDNSは、コンシステントハッシュとは異なる仕組みであり、挙げられている例ではない。',
+      '<b>これが正解。</b>ByteByteGoはAmazon DynamoDBやApache Cassandraが、サーバー構成の変更時のデータ移動を最小化するためにコンシステントハッシュを使っていると述べている。',
+      '1台構成のシステムには、複数ノード間でキーを割り振るコンシステントハッシュの出番がそもそも無い。',
+      'クライアント側だけで完結する仕組みは、複数サーバー間の分散を扱うコンシステントハッシュの文脈とは異なる。',
+      '暗号化専用ハードウェアはデータの分散配置とは無関係の話題であり、挙げられている例ではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>コンシステントハッシュは、複数ノード間でデータや接続を分散する実システムで使われます。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="実システムでの利用例"><rect x="30" y="25" width="160" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="110" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">DynamoDB/Cassandra</text><rect x="210" y="25" width="140" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">CDN(Akamai)</text><rect x="370" y="25" width="160" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="450" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">ロードバランサ</text></svg><p class="cap">図: データストア・CDN・ロードバランサなど、複数ノード間の割り振りに広く使われている。</p></div>' }
+  },
+  {
+    q: 'Rendezvous hashing(ランデブーハッシュ)の仕組みとして正しいものはどれか?',
+    opts: [
+      'サーバーをリング上に配置し、時計回りで最初に見つかったサーバーを担当にする方式',
+      'キーとサーバー台数から、対応表を作らずに直接シャード番号を計算する方式',
+      'キーごとに全サーバーとの組み合わせのハッシュ値を計算し、最大値のサーバーを担当にする方式',
+      'サーバーの台数が変わるたびに、全キーをランダムな順序で再分配する方式',
+      '利用者のIPアドレスだけを見て、サーバーを機械的に決めてしまう方式'
+    ],
+    ans: 2,
+    exps: [
+      'リングを使う方式はコンシステントハッシュの説明であり、Rendezvous hashingはリングを使わない別の方式。',
+      '対応表を作らず直接計算する方式はJump Consistent Hashの説明であり、Rendezvous hashingとは異なる。',
+      '<b>これが正解。</b>Rendezvous hashingは、キーごとに全サーバーとの組み合わせのハッシュ値を計算し、最大値を出したサーバーをそのキーの担当とする方式である。',
+      'ランダムな再分配ではなく、ハッシュ値の計算という決まった規則に基づいて担当が決まる。',
+      'IPアドレスだけで決める規則はRendezvous hashingの定義には含まれない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>Rendezvous hashingは、キーとサーバーの組み合わせごとにハッシュ値を計算し、最大値を比べます。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="ランデブーハッシュの仕組み"><text x="280" y="20" font-size="13" text-anchor="middle" fill="#12211a">key X と各サーバーの組み合わせのハッシュ値</text><rect x="40" y="40" width="120" height="40" rx="6" fill="#f3f9f6" stroke="#9aa" stroke-width="1.5"/><text x="100" y="65" font-size="12" text-anchor="middle" fill="#4a5d54">hash(X,s0)=12</text><rect x="220" y="40" width="120" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="65" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">hash(X,s1)=97</text><rect x="400" y="40" width="120" height="40" rx="6" fill="#f3f9f6" stroke="#9aa" stroke-width="1.5"/><text x="460" y="65" font-size="12" text-anchor="middle" fill="#4a5d54">hash(X,s2)=54</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">最大値のs1がkey Xの担当になる</text></svg><p class="cap">図: 全サーバーとの組み合わせのハッシュ値を比べ、最大値を出したサーバーを選ぶ。</p></div>' }
+  },
+  {
+    q: 'Jump Consistent Hashの特徴として正しいものはどれか?',
+    opts: [
+      'リング構造を保持し、1台あたり多数の仮想ノードを配置しておく方式である',
+      '対応表(ディレクトリ)を必ず保持し、更新のたびにその全体を書き換える方式である',
+      '各サーバーとの組み合わせのハッシュ値を、キーごとに毎回全て計算しておく方式である',
+      'リングも対応表も持たず、キーとサーバー台数から直接計算するため省メモリな方式である',
+      'サーバーごとに全く異なるハッシュ関数を、個別に使い分けておく方式である'
+    ],
+    ans: 3,
+    exps: [
+      'リングや仮想ノードを使う方式はコンシステントハッシュの説明であり、Jump Consistent Hashはリングそのものを保持しない。',
+      '対応表を保持し続ける方式はディレクトリベースのシャーディング(第 06 回)の説明であり、Jump Consistent Hashとは異なる。',
+      '全サーバーとの組み合わせを毎回計算する方式はRendezvous hashingの説明であり、Jump Consistent Hashとは異なる。',
+      '<b>これが正解。</b>Jump Consistent Hashはリングや対応表を保持せず、キーとサーバー台数から直接シャード番号を計算するため省メモリだが、個々のサーバーを名前や重みで柔軟に選ぶような使い方には向かない。',
+      'サーバーごとに異なるハッシュ関数を使うという規則は無く、同じ計算式をサーバー台数という引数だけで扱う。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>Jump Consistent Hashは、リングも対応表も持たず直接計算だけで済ませます。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="Jump Consistent Hashの省メモリ性"><rect x="40" y="25" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">key, N → 直接計算</text><rect x="320" y="25" width="200" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">リング/対応表を持たない</text></svg><p class="cap">図: 直接計算だけで済ませる代わりに、個々のサーバーの柔軟な選別はしづらい。</p></div>' }
+  },
+  {
+    q: 'CDNのエッジサーバーをコンシステントハッシュで管理する利点として最も適切なものは?',
+    opts: [
+      '全エッジサーバーへのコンテンツ配信を、自動的に暗号化できるようになる',
+      'サーバーを追加した直後から、キャッシュヒット率が必ず100%になる',
+      'サーバーの台数をどれだけ変えても、一切のキャッシュ再構築が不要になる',
+      'サーバーの位置情報が、自動的に正確な地理座標へ変換されるようになる',
+      '台数が増減してもキャッシュの再配置が一部に限られ、大半のヒットを保てる'
+    ],
+    ans: 4,
+    exps: [
+      '暗号化はコンシステントハッシュの役割ではなく、別の通信の仕組み(TLSなど)が担う話題。',
+      '100%という極端な保証はしておらず、コンシステントハッシュでも多少の再配置は発生する。',
+      '一切不要になるわけではなく、挿入・削除された位置の近傍だけに再構築が限られる、という話である。',
+      '地理座標への変換は位置情報サービスの話であり、コンシステントハッシュの機能ではない。',
+      '<b>これが正解。</b>コンシステントハッシュを使うと、サーバー台数が変わってもキャッシュの再配置が一部のコンテンツに限られ、大半のキャッシュヒットを保ったまま運用できる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>コンシステントハッシュはキャッシュ再構築の範囲を一部に限定し、大半のヒット率を保ちます。</p>'
+      + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="CDNでの利点"><rect x="30" y="25" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">大半のキャッシュは無傷</text><rect x="310" y="25" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">一部だけ再構築が必要</text></svg><p class="cap">図: サーバー増減の影響は一部のコンテンツに限られ、大半のキャッシュヒットは保たれる。</p></div>' }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

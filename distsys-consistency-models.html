@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一貫性モデル ― 強さの地図で「どこまで保証するか」を測る</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 13 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>一貫性モデル ― 強さの地図で「どこまで保証するか」を測る</h1>
+  <p>レプリケーションの遅れをどこまで見せてよいかを、厳密な言葉で決めるのが一貫性モデルである</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 05 回 <a href="./distsys-replication-basics.html">レプリケーション入門</a>、第 08 回 <a href="./distsys-cap-theorem.html">CAP 定理</a></p>
+  <p class="intro">一貫性モデルとは、複製されたデータへの読み書きが「どれだけ最新で、どれだけ順序が揃っているか」をどこまで保証するかを定義する言葉の体系である。強い方から並べると、strict serializability、線形化可能性 (linearizability)、逐次一貫性 (sequential consistency)、因果一貫性 (causal consistency)、セッション保証、結果整合性 (eventual consistency) という地図になる。強いほど扱いは楽だが遅く、弱いほど速いが異常なケースに自分で気を付けなければならない。この回ではその地図を、Jepsen の整理 (jepsen.io/consistency) と Herlihy-Wing の線形化可能性の定義に合わせて正確に描く。</p>
+
+  <!-- ===== 解説パート 1: なぜ一つの「一貫性」では足りないのか ===== -->
+  <section>
+    <h2>1. なぜ一つの「一貫性」では足りないのか</h2>
+    <p>レプリケーション (第 05 回) は複製を増やすほど読み取りを速く・丈夫にするが、複製間に必ず伝播の遅れを生む。この遅れの間、どのレプリカに読みに行くかによって見える値が変わる。CAP 定理 (第 08 回) は「分断時に C と A のどちらを諦めるか」という二択までしか教えてくれないが、現実のシステムは分断していない平常時にも「どこまで古い値を許すか」「どこまで順序の乱れを許すか」を無数の度合いで選んでいる。銀行の残高と SNS のいいね数では、許せる古さの度合いが全く違う。この無数の度合いに正確な名前を付けたのが一貫性モデルである。</p>
+    <p>一貫性モデルは強い方から弱い方へ、ちょうど地図のように並べられる。強いモデルは「弱いモデルが保証すること」をすべて含んだ上でさらに保証を積む。これを <b>包含関係 (A が B を含意する)</b> と呼ぶ。Jepsen の整理では、頂点に strict serializability があり、そこから複数オブジェクトのトランザクションを扱う系列 (serializable 系、分離レベルの話。第 18 回で扱う) と、単一オブジェクトの操作順序を扱う系列 (linearizable 系、この回の主題) に分かれる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 710 200" role="img" aria-label="一貫性モデルの強さの地図">
+        <defs><marker id="arr-s1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#4a5d54"/></marker></defs>
+        <text x="352" y="22" font-size="13.5" text-anchor="middle" fill="#4a5d54">弱い (速いが異常に注意が必要) ← → 強い (遅いが扱いやすい)</text>
+        <rect x="10"  y="70" width="118" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="69" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">結果整合性</text>
+        <text x="69" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">(いつか一致)</text>
+        <rect x="138" y="70" width="118" height="60" rx="8" fill="#fdf3e8" stroke="#b5401f" stroke-width="2"/>
+        <text x="197" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">セッション保証</text>
+        <text x="197" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">(自分の書込順)</text>
+        <rect x="266" y="70" width="118" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="325" y="95" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">因果一貫性</text>
+        <text x="325" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">(因果だけ順序)</text>
+        <rect x="394" y="70" width="142" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="465" y="95" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">逐次一貫性</text>
+        <text x="465" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">(全順序・実時間無視)</text>
+        <rect x="546" y="70" width="148" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="620" y="95" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">線形化可能性</text>
+        <text x="620" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">(全順序・実時間一致)</text>
+        <line x1="128" y1="100" x2="138" y2="100" stroke="#4a5d54" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <line x1="256" y1="100" x2="266" y2="100" stroke="#4a5d54" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <line x1="384" y1="100" x2="394" y2="100" stroke="#4a5d54" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <line x1="536" y1="100" x2="546" y2="100" stroke="#4a5d54" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <text x="352" y="165" font-size="13" text-anchor="middle" fill="#12211a">右へ進むほど「強いモデルは弱いモデルの保証を全部含んだ上で、さらに約束を積む」</text>
+        <text x="352" y="185" font-size="12.5" text-anchor="middle" fill="#4a5d54">strict serializability はこの先、複数オブジェクトのトランザクションにも同じ強さを要求する頂点</text>
+      </svg>
+      <p class="cap">図: 一貫性モデルの強さの地図。本文はこの並びの根拠を 1 つずつ確認していく。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: 線形化可能性と逐次一貫性の違い ===== -->
+  <section>
+    <h2>2. 線形化可能性と逐次一貫性 ― 実時間を見るかどうか</h2>
+    <p><b>線形化可能性 (linearizability)</b> は Herlihy と Wing が定義した、単一オブジェクトに対する最も強い一貫性モデルである。各操作を「完了した瞬間」の 1 点に写し、その点の順序 (実時間の順序) で逐次実行したときと同じ結果になることを要求する。つまり、ある書き込みが実時間上で完了した後に開始した読み取りは、その書き込み以降の値を必ず返す。CAP 定理の C はこの線形化可能性を指す。</p>
+    <p><b>逐次一貫性 (sequential consistency)</b> は Lamport が定義したより緩いモデルで、「全ての操作をどこかの全順序で並べたとき、各プロセス自身の操作順序 (プログラム順) と矛盾しない結果になる」ことだけを要求する。線形化可能性と違い、<b>実時間の前後関係は一切問わない</b>。この 1 点だけが両者の違いであり、それ以外の「全順序が存在する」という要求は共通している。</p>
+    <div class="fig">
+      <svg viewBox="-11 0 703 230" role="img" aria-label="線形化可能性と逐次一貫性の違いを示す時系列図">
+        <defs><marker id="arr-s2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+        <text x="340" y="18" font-size="12.5" text-anchor="middle" fill="#4a5d54">実時間 →</text>
+        <line x1="40" y1="30" x2="650" y2="30" stroke="#9aa" stroke-width="1"/>
+        <text x="20" y="70" font-size="13" fill="#12211a">P1</text>
+        <line x1="40" y1="65" x2="650" y2="65" stroke="#c8d6cf" stroke-width="10"/>
+        <rect x="150" y="52" width="130" height="26" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="215" y="69" font-size="12.5" text-anchor="middle" fill="#0f5132">write(x,1) 完了</text>
+        <line x1="280" y1="40" x2="280" y2="145" stroke="#0f5132" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="20" y="130" font-size="13" fill="#12211a">P2</text>
+        <line x1="40" y1="125" x2="650" y2="125" stroke="#c8d6cf" stroke-width="10"/>
+        <rect x="330" y="112" width="130" height="26" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="395" y="129" font-size="12.5" text-anchor="middle" fill="#b5401f">read(x) → 0 (旧値)</text>
+        <rect x="490" y="112" width="130" height="26" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="555" y="129" font-size="12.5" text-anchor="middle" fill="#1f4a68">read(x) → 1</text>
+        <text x="340" y="180" font-size="13" text-anchor="middle" fill="#12211a">P2 の最初の read は write 完了(実時間)より後に始まったのに 0 を返す</text>
+        <text x="340" y="200" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">線形化可能性ではこの 0 は禁止。逐次一貫性では「全順序: read→0, write→1, read→1」が P1 と P2 それぞれの</text>
+        <text x="340" y="218" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">プログラム順と矛盾しないので許される (実時間の前後は問わないため)</text>
+      </svg>
+      <p class="cap">図: 同じ実行が逐次一貫性では許容され、線形化可能性では禁止される境界線。</p>
+    </div>
+    <p>この違いが重要になるのは「他プロセスから見て、ある書き込みが確定したとわかった瞬間から、新しい値が見えてよいか」という実務の要求があるときである。分散ロック (第 26 回で詳しく扱う) や決済のように「確定後は即座に新値が見えるべき」場面では線形化可能性が必要で、逐次一貫性では不十分になる。</p>
+  </section>
+
+  <!-- ===== 解説パート 3: 因果一貫性 ===== -->
+  <section>
+    <h2>3. 因果一貫性 ― 関係のある操作だけ順序を揃える</h2>
+    <p>逐次一貫性までのモデルは「全ノードが同じ 1 つの全順序に同意する」ことを要求する。これは分断に強くない (遅いノードを待つ必要がある) ため、もっと緩めたいという要求が出る。<b>因果一貫性 (causal consistency)</b> は、Jepsen の定義によれば「因果関係のある操作は全プロセスで同じ順序に見えなければならないが、因果関係の無い (並行な) 操作については、プロセスごとに異なる順序で見えてもよい」というモデルである。</p>
+    <p>「因果関係がある」とは、ある操作が別の操作の結果を読んでから次の操作を行うような依存関係を指す。SNS で考えると、投稿への「返信」はその投稿を読んだ後に書かれるので因果関係がある。一方、同じ投稿への 2 人の「いいね」は互いを読んでいないので因果関係が無く、並行である。</p>
+    <div class="fig">
+      <svg viewBox="0 0 680 220" role="img" aria-label="因果一貫性: 因果関係のある操作とない操作の違い">
+        <defs><marker id="arr-s3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+        <text x="20" y="40" font-size="13" fill="#12211a">クライアント A</text>
+        <line x1="160" y1="35" x2="650" y2="35" stroke="#c8d6cf" stroke-width="10"/>
+        <rect x="170" y="22" width="140" height="26" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="240" y="39" font-size="12.5" text-anchor="middle" fill="#0f5132">投稿 M1 を書く</text>
+        <text x="20" y="100" font-size="13" fill="#12211a">クライアント B</text>
+        <line x1="160" y1="95" x2="650" y2="95" stroke="#c8d6cf" stroke-width="10"/>
+        <rect x="330" y="82" width="150" height="26" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="405" y="99" font-size="12.5" text-anchor="middle" fill="#5b3d80">M1 を読んで返信 M2</text>
+        <text x="20" y="160" font-size="13" fill="#12211a">クライアント C</text>
+        <line x1="160" y1="155" x2="650" y2="155" stroke="#c8d6cf" stroke-width="10"/>
+        <rect x="330" y="142" width="150" height="26" rx="6" fill="#fdf3e8" stroke="#b5401f" stroke-width="2"/>
+        <text x="405" y="159" font-size="12.5" text-anchor="middle" fill="#b5401f">M1 と無関係にいいね L1</text>
+        <line x1="240" y1="48" x2="330" y2="82" stroke="#0f5132" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arr-s3)"/>
+        <text x="340" y="195" font-size="13" text-anchor="middle" fill="#12211a">M1 → M2 は因果関係があるため全レプリカで必ず M1 が先。M1 と L1 は無関係なので</text>
+        <text x="340" y="213" font-size="13" text-anchor="middle" fill="#12211a">レプリカ X が「M1, L1, M2」、レプリカ Y が「M1, M2, L1」と見ても因果一貫性には違反しない</text>
+      </svg>
+      <p class="cap">図: 因果関係のある M1→M2 の順序だけは全レプリカで一致。無関係な L1 との前後は自由。</p>
+    </div>
+    <p>因果一貫性が実務で選ばれるのは、合意のための待ち合わせを減らしつつ「読んだものより古いものを後から見てしまう」直感に反する体験だけは防ぎたい場面である。因果一貫性は逐次一貫性より弱いが、次に説明するセッション保証や結果整合性よりは強い。</p>
+  </section>
+
+  <!-- ===== 解説パート 4: セッション保証 4 種 ===== -->
+  <section>
+    <h2>4. セッション保証 ― 自分自身との整合だけを約束する</h2>
+    <p>因果一貫性をさらに緩め、「自分の操作列との整合」だけに絞った 4 つの保証が Terry らによって定義された。これらは <b>セッション保証 (session guarantees)</b> と呼ばれ、クライアントが同じ接続・同じセッションの中で読み書きする限り成り立つ。</p>
+    <p><b>Read Your Writes (自分の書き込みは必ず読める)</b> ― 自分が書き込んだ値より古い値を、自分の後続の読み取りで受け取ることはない。<b>Monotonic Reads (単調読み取り)</b> ― 一度ある値を読んだら、その後の読み取りでそれより古い値に後退することはない。<b>Monotonic Writes (単調書き込み)</b> ― 自分の書き込みは、自分が発行した順序のまま全レプリカに適用される。<b>Writes Follow Reads (読んだ後の書き込みは追従する)</b> ― ある値を読んだ後に書き込むと、その書き込みは読んだ値より前の状態には絶対に適用されない (読んだ事実を無視した上書きが起きない)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 680 190" role="img" aria-label="Read Your Writes 違反の時系列図">
+        <text x="20" y="35" font-size="13" fill="#12211a">同じクライアント</text>
+        <line x1="150" y1="30" x2="650" y2="30" stroke="#c8d6cf" stroke-width="10"/>
+        <rect x="170" y="17" width="150" height="26" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="245" y="34" font-size="12.5" text-anchor="middle" fill="#0f5132">replica R1 に write(v2)</text>
+        <rect x="380" y="17" width="220" height="26" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="490" y="34" font-size="12.5" text-anchor="middle" fill="#b5401f">replica R2 に read() → v1 (古い)</text>
+        <text x="340" y="90" font-size="13" text-anchor="middle" fill="#12211a">write と read を別のレプリカに送り、R2 への伝播がまだ終わっていなければ v1 が返る</text>
+        <text x="340" y="112" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">これは Read Your Writes 違反。対策は「自分の書き込みを読むときは同じレプリカに固定する</text>
+        <text x="340" y="132" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">(スティッキーセッション、第 03 回)」か「書き込みのタイムスタンプ以降のレプリカにだけ読みに行く」</text>
+        <text x="340" y="165" font-size="12.5" text-anchor="middle" fill="#4a5d54">セッション保証は「他人の書き込み」には何も約束しない点が、因果一貫性との違い</text>
+      </svg>
+      <p class="cap">図: 自分の書き込みを別レプリカで読んで古い値が返る、典型的な Read Your Writes 違反。</p>
+    </div>
+    <p>セッション保証は因果一貫性より弱い。因果一貫性は「他人の因果関係」も順序を揃えるが、セッション保証は「自分の操作列」しか見ていないため、他人の書き込み同士の順序には何も言わない。PRAM (Pipelined RAM) 一貫性は Read Your Writes ・ Monotonic Reads ・ Monotonic Writes の 3 つを合わせたモデルとして位置づけられる。</p>
+  </section>
+
+  <!-- ===== 解説パート 5: 直列化可能性との違いと結果整合性 ===== -->
+  <section>
+    <h2>5. 直列化可能性との違いと、結果整合性という下限</h2>
+    <p>ここまでのモデルは軸が 1 本 (単一オブジェクトへの操作順序) だったが、データベースのトランザクション分離レベル (第 18 回で詳しく扱う) で使う <b>直列化可能性 (serializability)</b> は別の軸を持つ。直列化可能性は「複数オブジェクトをまたぐ複数のトランザクションが、ある全順序 (逐次実行) と同じ結果になる」ことを要求するが、<b>その全順序が実時間と一致する必要はない</b>。つまり直列化可能性は実時間を問わないという点で逐次一貫性に似ているが、対象が単一操作ではなくトランザクション全体である点が異なる。</p>
+    <p>直列化可能性と線形化可能性は互いに独立な軸なので、両方を同時に満たすモデルを <b>strict serializability</b> と呼ぶ。これは「複数オブジェクトのトランザクションについて、実時間と一致する全順序がある」という、Jepsen の地図で頂点に置かれる最も強いモデルである。Spanner や CockroachDB のような分散 SQL データベースはこの strict serializability を目標にする (第 35 回で TrueTime との関係を扱う)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 680 190" role="img" aria-label="直列化可能性と線形化可能性の交差がstrict serializable">
+        <circle cx="260" cy="100" r="85" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2" opacity="0.75"/>
+        <circle cx="400" cy="100" r="85" fill="#eaf5ef" stroke="#0f5132" stroke-width="2" opacity="0.75"/>
+        <text x="190" y="60" font-size="13" fill="#5b3d80" font-weight="700">serializable</text>
+        <text x="190" y="78" font-size="12.5" fill="#12211a">複数オブジェクト</text>
+        <text x="190" y="94" font-size="12.5" fill="#12211a">実時間は問わない</text>
+        <text x="470" y="60" font-size="13" fill="#0f5132" font-weight="700">linearizable</text>
+        <text x="470" y="78" font-size="12.5" fill="#12211a">単一オブジェクト</text>
+        <text x="470" y="94" font-size="12.5" fill="#12211a">実時間と一致</text>
+        <text x="330" y="105" font-size="12.5" text-anchor="middle" fill="#0b2e20" font-weight="700">strict</text>
+        <text x="330" y="122" font-size="12.5" text-anchor="middle" fill="#0b2e20" font-weight="700">serializable</text>
+      </svg>
+      <p class="cap">図: strict serializability は直列化可能性と線形化可能性、2 本の独立な軸が重なる領域。</p>
+    </div>
+    <p>一番弱い側には <b>結果整合性 (eventual consistency)</b> がある。Dynamo 型のシステム (第 14 回で詳しく扱う) に代表され、唯一の約束は「書き込みが止まれば、いつか全レプリカが同じ値に収束する」ことだけで、その間の順序や新しさには何も約束しない。ByteByteGo の整理では、この収束を実現する手段としてイベント駆動の伝播、バックグラウンドでの定期同期、Saga による補償、CQRS による読み書きの分離という 4 パターンが挙げられている。結論として、一貫性モデルを選ぶ作業とは「実時間を守るか」「因果関係だけを守るか」「自分の操作列だけを守るか」「何も守らず速度だけを取るか」を、業務要件に合わせて 1 段ずつ選んでいく作業である。</p>
+  </section>
+
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/top-eventual-consistency-patterns-you-must-know.md" target="_blank" rel="noopener">ByteByteGo: Top Eventual Consistency Patterns You Must Know</a> ― 結果整合性を実現する 4 パターン (イベント駆動、バックグラウンド同期、Saga、CQRS) を、一貫性モデルの弱い側の具体例として本文で使った。</li>
+      <li><a href="https://jepsen.io/consistency" target="_blank" rel="noopener">Jepsen: Consistency Models</a> ― モデル・現象・依存関係という整理の全体像。この回の「地図」の構成の元にした。</li>
+      <li><a href="https://jepsen.io/consistency/models" target="_blank" rel="noopener">Jepsen: Models index</a> ― strict serializable を頂点に、serializable 系と linearizable 系の 2 系統に分かれる包含関係の図。</li>
+      <li><a href="https://jepsen.io/consistency/models/sequential" target="_blank" rel="noopener">Jepsen: Sequential Consistency</a> ― 逐次一貫性の定義 (Lamport の原文引用) と、線形化可能性との違いが実時間制約の有無にあるという整理。</li>
+      <li><a href="https://jepsen.io/consistency/models/causal" target="_blank" rel="noopener">Jepsen: Causal Consistency</a> ― 「因果関係のある操作は全プロセスで同じ順序に見えるが、因果関係の無い操作の順序は一致しなくてよい」という定義。</li>
+      <li><a href="https://cs.brown.edu/~mph/HerlihyW90/p463-herlihy.pdf" target="_blank" rel="noopener">Herlihy, Wing, "Linearizability: A Correctness Condition for Concurrent Objects" (1990)</a> ― 線形化可能性の正式な定義 (各操作を完了した瞬間の 1 点に写し、その点の順序で逐次実行した結果と一致する) の一次情報。</li>
+      <li><a href="https://courses.cs.washington.edu/courses/cse550/18sp/papers/terry-session-guarantees.pdf" target="_blank" rel="noopener">Terry et al., "Session Guarantees for Weakly Consistent Replicated Data" (1994)</a> ― Read Your Writes ・ Monotonic Reads ・ Monotonic Writes ・ Writes Follow Reads の 4 つのセッション保証の定義の一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-io-multiplexing.html">← 第 12 回 ソケット発展編: I/O 多重化</a><a href="./distsys-index.html">目次</a><a href="./distsys-quorum-dynamo.html">第 14 回 クォーラムと Dynamo 型複製 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '線形化可能性 (linearizability) の正確な定義として最も適切なものはどれか。',
+    opts: [
+      'すべての書き込みが全レプリカへの伝播を完全に終えるまで、どのノードも読み取り要求そのものを一切受け付けないようにする運用上の設計のこと',
+      '各プロセス自身が発行したプログラム順序を保っていれば、全体としての操作順序が実時間での前後関係と一致しなくてもよいとする、より緩いモデルの考え方のこと',
+      'ある操作が実時間上で完了した後に始まった別の操作は、必ずその完了後の状態を観測できるという、実時間順に一致した全順序が存在すること',
+      '因果関係のある操作についてのみ順序をプロセス間で揃え、因果関係の無い操作についてはノードごとに順序が異なって見えてもよいとする考え方のこと',
+      '複数のオブジェクトをまたぐ複数のトランザクションが、ある全順序のもとで逐次実行された場合と同じ結果になることだけを要求する考え方のこと'
+    ],
+    ans: 2,
+    exps: [
+      'これは可用性を犠牲にする実装上の選択の1つであり、線形化可能性そのものの定義ではない。読み取りを拒否せずに線形化可能性を満たす実装も存在する。',
+      'これは逐次一貫性の定義であり、線形化可能性との違いはまさに「実時間の前後関係を問うかどうか」にある。よくある混同。',
+      '<b>これが正解。</b>Herlihy と Wing の定義どおり、各操作を完了した瞬間の 1 点に写し、その点の実時間順序で逐次実行した結果と一致することを要求する。',
+      'これは因果一貫性の定義。線形化可能性は因果関係の有無を問わず、全操作に実時間順の全順序を要求する点でより強い。',
+      'これは直列化可能性 (serializability) の定義で、対象が単一操作ではなく複数オブジェクトのトランザクションである点が異なる軸。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>完了した時点を基準に、その後開始した操作は必ず新しい値を見る、という実時間上の制約が線形化可能性の核心です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="線形化可能性の実時間制約"><line x1="30" y1="40" x2="530" y2="40" stroke="#9aa" stroke-width="1"/><rect x="60" y="25" width="140" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">write 完了</text><line x1="200" y1="20" x2="200" y2="110" stroke="#0f5132" stroke-width="1" stroke-dasharray="4 4"/><rect x="260" y="80" width="140" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="330" y="100" font-size="12.5" text-anchor="middle" fill="#1f4a68">read は必ず新値</text><text x="280" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">完了時点より後に始まった操作は、旧値を返すことが許されない</text></svg>'
+          + '<p class="cap">図: 完了の瞬間を境に、以後の操作はすべて新しい値を観測する。</p></div>'
+    }
+  },
+  {
+    q: '逐次一貫性 (sequential consistency) の定義として最も適切なものはどれか。',
+    opts: [
+      '各プロセス自身の操作順序を保ったまま、全体にどこかの全順序が存在すればよく、その全順序は実時間の前後関係と一致しなくてもよい',
+      '実時間上での各操作の完了順序に、必ず一致する単一の全順序がすべての操作の間に存在していなければならないこと',
+      '因果関係のある操作のみプロセス間で順序を揃え、因果関係の無い操作についてはノードごとに順序が食い違ってもよいこと',
+      '自分が書いた値より古い値は、自分自身の次の読み取りで受け取らない、という自分自身に対する保証だけを指すこと',
+      '複製間の値がいつかは一致すればよく、一致するまでの途中の順序については何の制約も課さないこと'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Lamport の定義どおり、全プロセスの操作がある1つの全順序で実行されたかのような結果になればよく、実時間と一致する必要はない。',
+      'これは線形化可能性の定義。逐次一貫性にはこの実時間制約が無い点が核心的な違い。',
+      'これは因果一貫性の定義で、逐次一貫性より弱いモデル。逐次一貫性は因果関係の有無を問わず単一の全順序を要求する点でより強い。',
+      'これはセッション保証の1つ (Read Your Writes) の定義。逐次一貫性は自分以外のプロセスの順序にも全順序を要求する点でより強い。',
+      'これは結果整合性の定義。逐次一貫性は「全順序の存在」という強い制約を持つ点で、結果整合性よりはるかに強い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>逐次一貫性が要求するのは「各プロセス自身の順序と矛盾しない、何らかの全順序」の存在だけです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="逐次一貫性の全順序"><rect x="40" y="30" width="200" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="50" font-size="12.5" text-anchor="middle" fill="#1f4a68">プロセスごとの順序を保つ</text><rect x="320" y="30" width="200" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132">矛盾しない全順序が1つ存在</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">実時間でどちらが先に完了したかは、この全順序の条件に含まれない</text></svg>'
+          + '<p class="cap">図: 逐次一貫性の要求は2つだけで、実時間は条件に入らない。</p></div>'
+    }
+  },
+  {
+    q: 'P1 が x=1 を書き込み、実時間 10:00:01 に完了した。P2 は 10:00:05 (書き込み完了より後) に x を読み、古い値 0 を受け取った。この結果が許容されるのはどのモデルか。',
+    opts: [
+      '線形化可能性でのみ許容され、逐次一貫性ではこの結果は禁止される',
+      '線形化可能性と逐次一貫性のどちらでも等しく許容される',
+      'strict serializability でのみ許容され、それより弱いモデルでは禁止される',
+      '逐次一貫性では(各プロセス自身の順序と矛盾しなければ)許容され得るが、線形化可能性では禁止される',
+      '因果一貫性でのみ許容され、それより弱い結果整合性では禁止される'
+    ],
+    ans: 3,
+    exps: [
+      '逆である。線形化可能性はまさにこの「完了後に古い値が見える」ケースを禁止するモデルであり、許容するのは逐次一貫性側。',
+      '線形化可能性はこの結果を禁止するため、両方で等しく許容されるという説明は誤り。',
+      'strict serializability は線形化可能性より強い (serializable の性質も加わる) モデルなので、線形化可能性で禁止される結果はここでも禁止される。',
+      '<b>これが正解。</b>逐次一貫性は実時間を問わないため、P2の読み取りの0をP1の書き込みより前に置く全順序が作れれば、各プロセス自身の順序と矛盾しない限り許容される。線形化可能性はこれを禁止する。',
+      '因果一貫性は逐次一貫性より弱いモデルであり、逐次一貫性が許容する範囲をさらに広く許容する。弱いモデルほど許容範囲が狭くなるという説明は矢印が逆。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文セクション 2 の時系列図と同じ構図です。実時間上の完了後に始まった読み取りが古い値を返すかどうかが分岐点になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="逐次一貫性と線形化可能性の分岐"><line x1="30" y1="40" x2="530" y2="40" stroke="#9aa" stroke-width="1"/><rect x="60" y="25" width="140" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">write(x,1) 完了</text><rect x="320" y="25" width="140" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="390" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f">read(x) → 0</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">逐次一貫性: 全順序内で read を write より前に置けば矛盾しない→許容</text><text x="280" y="112" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">線形化可能性: 実時間で write が先に完了しているので read は新値必須→禁止</text></svg>'
+          + '<p class="cap">図: 同じ観測結果が、モデルによって合法か違反かに分かれる。</p></div>'
+    }
+  },
+  {
+    q: '因果一貫性 (causal consistency) の定義として最も適切なものはどれか。',
+    opts: [
+      'すべての操作に、実時間での完了順序と必ず一致する単一の全順序を要求する、最も強いモデルのこと',
+      '因果関係のある操作は全プロセスで同じ順序に見えなければならないが、因果関係の無い (並行な) 操作は各プロセスで異なる順序に見えてもよい',
+      '自分自身が発行した書き込みの順序だけを保証し、他人が発行した操作の順序には一切関与しないという狭い保証のこと',
+      '複製間の値がいつかは収束することだけを約束し、収束するまでの間の順序については何も言わないという弱い保証のこと',
+      '複数のオブジェクトをまたぐ複数のトランザクション全体が、ある全順序のもとでの逐次実行と同じ結果になることを要求する考え方のこと'
+    ],
+    ans: 1,
+    exps: [
+      'これは線形化可能性の定義。因果一貫性は因果関係の無い操作の順序については全プロセスの一致を要求しない、より弱いモデル。',
+      '<b>これが正解。</b>Jepsen の定義どおり、因果関係のある操作の順序だけを全プロセスで揃え、並行な操作の順序は一致しなくてよい。',
+      'これはセッション保証 (Read Your Writes など) の定義。因果一貫性は他人の操作同士の因果関係も対象にする点でより広い。',
+      'これは結果整合性の定義。因果一貫性は因果関係のある操作の順序を保証する点で、結果整合性より強い。',
+      'これは直列化可能性の定義で、対象が単一操作ではなく複数オブジェクトのトランザクションである別の軸の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文セクション 3 の図の要点だけを取り出すと、因果関係の線でつながった操作だけが順序を守る対象になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="因果一貫性の対象範囲"><defs><marker id="arr-q4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs><rect x="40" y="25" width="140" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="110" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">M1 投稿</text><rect x="260" y="25" width="140" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="330" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80">M2 返信 (因果)</text><line x1="180" y1="40" x2="260" y2="40" stroke="#0f5132" stroke-width="1.5" marker-end="url(#arr-q4)"/><rect x="260" y="90" width="140" height="30" rx="6" fill="#fdf3e8" stroke="#b5401f" stroke-width="2"/><text x="330" y="110" font-size="12.5" text-anchor="middle" fill="#b5401f">L1 いいね (無関係)</text><text x="280" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">M1→M2 の順序だけ固定。L1 との前後はレプリカごとに違ってよい</text></svg>'
+          + '<p class="cap">図: 因果の矢印がある関係だけが順序保証の対象。</p></div>'
+    }
+  },
+  {
+    q: 'あるユーザーが友人の投稿に返信コメントを付けた。別のユーザーが、それとは無関係な別の投稿にいいねをした。因果一貫性を満たすシステムでの見え方として正しい記述はどれか。',
+    opts: [
+      'コメントといいねは、互いに因果関係が無い場合でも、常に同じ順序で全レプリカに表示されなければならないという厳しい要求',
+      '元の投稿の内容が、それへのコメントより後に全レプリカで見えるようになったとしても、因果一貫性には違反しないという考え方',
+      'いいねの操作は、他のすべてのレプリカへの反映が完了したことを確認してからでなければ発行できないという同期的な制約',
+      'この2つの操作には因果関係が無いため、このシステムは一切のレプリケーションを行わなくてよいという乱暴な結論',
+      '元の投稿とそれへのコメントの順序は全レプリカで一致させる必要があるが、コメントといいねの順序はレプリカによって異なってもよい'
+    ],
+    ans: 4,
+    exps: [
+      '誤り。因果関係の無い操作 (コメントといいね) にまで順序の一致を要求するのは因果一貫性より強い逐次一貫性の話であり、過剰な要求。',
+      '誤り。コメントは元の投稿を読んだ後に書かれた、因果関係のある操作。元の投稿がコメントより後に見えることは因果一貫性に違反する。',
+      '誤り。同期的な確認応答を待つのは線形化可能性に近い強い方式で、因果一貫性が要求する範囲を超えた過剰な制約。',
+      '誤り。因果関係が無い操作にも、いずれ全レプリカに反映されるというレプリケーション自体は必要。因果一貫性は順序の緩さの話であり、複製をしなくてよいという話ではない。',
+      '<b>これが正解。</b>投稿とそのコメントには因果関係があるため順序は全レプリカで一致させる必要があるが、コメントといいねは因果関係が無いため順序が食い違ってもよい。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じ構図を、具体的な人物の操作に当てはめたものです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="コメントといいねの因果関係の違い"><defs><marker id="arr-q5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs><rect x="30" y="25" width="150" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">友人の投稿</text><rect x="260" y="25" width="150" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="335" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80">返信コメント</text><line x1="180" y1="40" x2="260" y2="40" stroke="#0f5132" stroke-width="1.5" marker-end="url(#arr-q5)"/><rect x="260" y="90" width="150" height="30" rx="6" fill="#fdf3e8" stroke="#b5401f" stroke-width="2"/><text x="335" y="110" font-size="12.5" text-anchor="middle" fill="#b5401f">別の投稿へのいいね</text><text x="280" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">投稿→コメントは因果関係あり、いいねとは因果関係なし</text></svg>'
+          + '<p class="cap">図: 因果関係の有無が、順序保証が必要な範囲を決める。</p></div>'
+    }
+  },
+  {
+    q: '次の記述が指すセッション保証はどれか: 「自分が書き込んだ値より古い値を、自分の後続の読み取りで受け取ることはない」。',
+    opts: [
+      'Read Your Writes',
+      'Monotonic Reads',
+      'Monotonic Writes',
+      'Writes Follow Reads',
+      'PRAM consistency (3 つの組み合わせ)'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Read Your Writes は「自分の書き込みより古い値を自分の読み取りで受け取らない」という保証そのもの。',
+      'Monotonic Reads は「一度読んだ値より古い値に、以後の読み取りで後退しない」という保証で、自分が書いた値かどうかは問わない点が異なる。',
+      'Monotonic Writes は「自分の書き込みが、発行した順序のまま全レプリカに適用される」という書き込み同士の順序の保証で、読み取りの話ではない。',
+      'Writes Follow Reads は「ある値を読んだ後の書き込みは、読んだ値より前の状態には適用されない」という保証で、設問の記述とは向きが異なる。',
+      'PRAM consistency は Read Your Writes ・ Monotonic Reads ・ Monotonic Writes の 3 つを合わせたモデルの名称であり、設問の記述 1 つだけを指す名前ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文セクション 4 の図と同じ、Read Your Writes 違反の典型パターンです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="Read Your Writesの図"><rect x="30" y="25" width="150" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">自分が write(v2)</text><rect x="260" y="25" width="180" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="350" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f">自分が read() → v1 (違反)</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">同一クライアントの書き込みと読み取りの間だけに成り立つ、狭い保証</text></svg>'
+          + '<p class="cap">図: 自分の書き込みより古い値が、自分の読み取りに返ってはならない。</p></div>'
+    }
+  },
+  {
+    q: '直列化可能性 (serializability) について正しい記述はどれか。',
+    opts: [
+      '単一オブジェクトへの操作順序だけを対象とする概念であり、複数オブジェクトをまたぐトランザクション全体には適用できないという考え方',
+      '実時間での各トランザクションの完了順序と、必ず一致する全順序を要求するという、より強いモデルの定義',
+      '複数オブジェクトのトランザクションがある全順序での逐次実行と同じ結果になればよく、実時間とは一致しなくてよい',
+      '因果関係のあるトランザクションだけ順序を揃え、無関係なトランザクションの順序は自由であるという、因果一貫性に近い考え方',
+      'レプリカ間の値がいつかは収束すればよく、トランザクション全体の順序そのものには一切関与しないという弱い考え方'
+    ],
+    ans: 2,
+    exps: [
+      '逆である。直列化可能性はむしろ複数オブジェクトをまたぐトランザクション全体を対象とする概念であり、単一オブジェクトの操作順序は線形化可能性の領分。',
+      'それは strict serializability の定義。直列化可能性単体には実時間と一致させる要求は含まれない。',
+      '<b>これが正解。</b>直列化可能性は複数オブジェクトのトランザクションがある全順序での逐次実行と同じ結果になることだけを要求し、実時間との一致は問わない。',
+      'それは因果一貫性の考え方であり、直列化可能性の定義には因果関係という概念そのものが出てこない。',
+      'それは結果整合性の定義。直列化可能性は「全順序が存在する」という強い制約を持つ点でまったく異なる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文セクション 5 の図のとおり、直列化可能性は実時間と無関係な全順序の存在だけを要求します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="直列化可能性の軸"><rect x="40" y="30" width="220" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="150" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">複数オブジェクトのトランザクション</text><rect x="300" y="30" width="220" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="410" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">実時間とは無関係な全順序でよい</text><text x="280" y="105" font-size="12.5" text-anchor="middle" fill="#4a5d54">「実時間と一致」が付くと strict serializability になる</text></svg>'
+          + '<p class="cap">図: 直列化可能性の対象と、実時間制約が無いという特徴。</p></div>'
+    }
+  },
+  {
+    q: 'strict serializability の正確な説明として適切なものはどれか。',
+    opts: [
+      '直列化可能性よりも弱く、線形化可能性よりも弱い、両者のどちらにも満たないモデルであるという説明',
+      '複数オブジェクトのトランザクションについて、直列化可能性 (全順序の存在) と線形化可能性 (実時間との一致) を同時に満たすモデル',
+      '単一オブジェクトの操作にのみ適用される概念であり、複数オブジェクトのトランザクションには適用できないという説明',
+      '因果関係のある操作の順序だけを実時間と一致させ、それ以外の操作の順序については何も問わないという説明',
+      '結果整合性の仕組みにタイムスタンプを追加しただけの、単なる実装上の工夫にすぎないという説明'
+    ],
+    ans: 1,
+    exps: [
+      '逆である。strict serializability は直列化可能性と線形化可能性の両方を満たす、両者より強い (両者の性質をすべて含む) モデル。',
+      '<b>これが正解。</b>strict serializability は、直列化可能性が要求する全順序の存在と、線形化可能性が要求する実時間との一致を、複数オブジェクトのトランザクションに対して同時に満たすモデル。',
+      '逆である。strict serializability はまさに複数オブジェクトのトランザクションを対象とする概念であり、単一オブジェクトの話ではない。',
+      'それは因果一貫性に実時間を部分的に混ぜたような独自の説明で、strict serializability の定義には出てこない。',
+      'タイムスタンプを付けるだけの実装上の工夫ではなく、2つの独立したモデル (直列化可能性と線形化可能性) の交差という理論的な定義を持つ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文セクション 5 のベン図のとおり、2 つの円が重なる領域が strict serializability です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="strict serializableの交差"><circle cx="220" cy="75" r="65" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2" opacity="0.75"/><circle cx="340" cy="75" r="65" fill="#eaf5ef" stroke="#0f5132" stroke-width="2" opacity="0.75"/><text x="160" y="40" font-size="12.5" fill="#5b3d80" font-weight="700">serializable</text><text x="360" y="40" font-size="12.5" fill="#0f5132" font-weight="700">linearizable</text><text x="280" y="80" font-size="12.5" text-anchor="middle" fill="#0b2e20" font-weight="700">strict</text></svg>'
+          + '<p class="cap">図: strict serializability は2つの軸が両方満たされた交差点。</p></div>'
+    }
+  },
+  {
+    q: '銀行システムで、振替処理が完了した直後に、振替を行った本人とは無関係な別の利用者が別アプリから口座 A の残高を確認した。「振替完了後は、誰が読んでも古い残高を絶対に見せない」という要件を満たすには、最低限どの一貫性モデルが必要か。',
+    opts: [
+      '結果整合性があれば十分であり、これ以上の強いモデルを追加で用意する必要は無いという判断',
+      'セッション保証の一種である Read Your Writes があれば、この要件を満たすのに十分であるという判断',
+      '因果一貫性があれば十分であり、線形化可能性のような強いモデルまでは不要であるという判断',
+      '逐次一貫性があれば十分であり、実時間との一致までは要求しなくてよいという判断',
+      '線形化可能性が必要であり、それより弱いモデルでは実時間上の「完了後は誰が読んでも必ず新値」を保証できない'
+    ],
+    ans: 4,
+    exps: [
+      '結果整合性は「いつか収束する」ことしか約束しないため、完了直後に無関係な利用者が読んだときに古い値を見る可能性を排除できない。',
+      'Read Your Writes は同一クライアント (振替を行った本人の同じセッション) にしか適用されない保証であり、無関係な別の利用者の読み取りには何も約束しない。',
+      '因果一貫性は因果関係のある操作の順序しか揃えない。無関係な利用者の残高確認は振替処理と因果関係が無いため、因果一貫性の対象外になる。',
+      '逐次一貫性は実時間の前後関係を問わないため、完了後に始まった読み取りを全順序内で完了前に置くことが論理的に許容されてしまい、古い値を見る可能性を排除できない。',
+      '<b>これが正解。</b>線形化可能性は「実時間上で完了した後に始まった操作は必ず新値を見る」ことを、因果関係や発行者を問わずすべての操作に要求する最も強いモデルであり、この要件を満たす最低限の選択になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>無関係な第三者の読み取りにまで保証を及ぼせるのは、因果関係やセッションを問わない線形化可能性だけです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="無関係な読み取りへの保証範囲の比較"><rect x="30" y="20" width="160" height="110" rx="8" fill="#fdf3e8" stroke="#b5401f" stroke-width="2"/><text x="110" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">セッション保証</text><text x="110" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">同一クライアントのみ</text><rect x="210" y="20" width="160" height="110" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="290" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">因果一貫性</text><text x="290" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">因果関係のある相手まで</text><rect x="390" y="20" width="160" height="110" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="470" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">線形化可能性</text><text x="470" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">無関係な全員に適用</text></svg>'
+          + '<p class="cap">図: 保証が及ぶ範囲は右に行くほど広く、無関係な第三者まで届くのは線形化可能性だけ。</p></div>'
+    }
+  },
+  {
+    q: '「結果整合性 (eventual consistency) を採用しているシステムは、因果一貫性も自動的に満たす」という主張について、最も正確な指摘はどれか。',
+    opts: [
+      '正しい。結果整合性は因果一貫性を含意する、因果一貫性より強いモデルである',
+      '正しい。因果一貫性と結果整合性は同じ強さを持つ同義語である',
+      '誤り。結果整合性は因果一貫性より強いモデルであり、常に因果一貫性の保証を自動的に含む',
+      '誤り。因果一貫性は結果整合性より強いモデルであり、結果整合性だけでは因果関係のある操作の順序まで保証されない',
+      'この2つのモデルは強弱を比較できない独立な概念であり、どちらが強いかという問い自体が成立しない'
+    ],
+    ans: 3,
+    exps: [
+      '逆である。因果一貫性のほうが結果整合性より強いモデルであり、結果整合性が因果一貫性を含意するという向きは成立しない。',
+      '誤り。因果一貫性は因果関係のある操作の順序を保証するが、結果整合性は順序について何も約束しない点で、明確に強さが異なる。',
+      '向きが逆。因果一貫性のほうが結果整合性より強いモデルであり、結果整合性は因果一貫性の保証を自動的には含まない。',
+      '<b>これが正解。</b>因果一貫性は結果整合性より強いモデルで、結果整合性単体では因果関係のある操作 (投稿とその返信など) の順序が食い違って見える余地が残る。',
+      'Jepsen の地図では因果一貫性は結果整合性より強い側に明確に位置づけられ、比較可能な関係にある。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文セクション 1 の地図のとおり、因果一貫性は結果整合性より右 (強い) 側に位置します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="因果一貫性と結果整合性の強弱"><rect x="30" y="35" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="65" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">結果整合性 (弱い)</text><rect x="320" y="35" width="200" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="65" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">因果一貫性 (強い)</text><text x="275" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54">→ 強さが増す方向</text></svg>'
+          + '<p class="cap">図: 因果一貫性は結果整合性より強い側に位置する、独立ではない関係。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

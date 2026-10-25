@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>タイムアウト・リトライ・冪等性 ― 「送った」と「届いた」は同じではない</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 10 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>タイムアウト・リトライ・冪等性 ― 「送った」と「届いた」は同じではない</h1>
+  <p>応答が来ないとき、処理が成功したのか失敗したのかはクライアントには分からない。この不確実性を前提に、同じ処理を安全に繰り返せる形にしておく必要がある</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 02 回 <a href="./distsys-sockets.html">ソケットプログラミング入門</a>、第 09 回 <a href="./distsys-message-queues.html">メッセージキューと Pub/Sub</a></p>
+  <p class="intro">ネットワーク越しに処理を依頼したとき、応答が返ってこなければ、成功したのか失敗したのかはクライアント側には分かりません。もう一度送れば直るかもしれませんが、もし 1 回目が実は成功していたら、同じ処理が 2 回実行されてしまいます。決済なら二重課金、注文なら二重発送です。この回では、いつ ・ どれだけ待って再送するか (リトライとバックオフ) と、同じ処理を何度実行しても結果が 1 回分と同じになるように作る性質 (冪等性) を、決済ゲートウェイの例で確認します。</p>
+
+  <!-- ===== 解説パート 1: C・A・P の正確な定義 ===== -->
+
+  <!-- ===== クイズパート ===== -->
+  <section>
+    <h2>1. なぜリトライが必要か ― 応答が無いときの不確実性</h2>
+    <p>クライアントがサーバに処理を依頼し、タイムアウト (一定時間待っても応答が来ないと諦める仕組み) に達したとき、実際に起きていた可能性は 3 つあります。1 つ目は<b>依頼そのものがサーバに届いていない</b>場合で、この場合サーバは何もしていません。2 つ目は<b>依頼は届いたが処理中にサーバが落ちた</b>場合で、処理は途中で止まっているかもしれません。3 つ目は<b>処理は正常に完了したが、その応答がクライアントに届く前に失われた</b>場合で、この場合サーバ側では処理が完全に終わっています。</p>
+    <p>クライアントから見ると、この 3 つはすべて「応答が来ない」という同じ見え方になり、区別する手段がありません。ここで安全策として「応答が無いなら失敗したとみなして再送する」という判断をすると、3 つ目のケース (処理は実際には成功していた) では、同じ処理がもう一度実行されることになります。決済処理であれば二重課金、注文処理であれば二重発送です。つまりリトライは「失敗したかもしれない処理をやり直す」仕組みであると同時に、「実は成功していた処理を重複させる」危険も併せ持っています。この危険に対処する仕組みが、次の節で説明する<b>冪等性 (idempotency)</b> です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="応答が無い3つの可能性を示す図">
+        <rect x="20" y="20" width="110" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="75" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">クライアント</text>
+        <line x1="130" y1="45" x2="260" y2="45" stroke="#9aa" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="195" y="35" font-size="12.5" text-anchor="middle" fill="#4a5d54">依頼</text>
+        <rect x="260" y="20" width="110" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="315" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">サーバ</text>
+        <rect x="20" y="100" width="560" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="125" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">ケース 1: 依頼が届いていない (サーバは何もしていない)</text>
+        <rect x="20" y="150" width="560" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="300" y="175" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">ケース 2: 処理中にサーバが落ちた (結果は不定)</text>
+        <rect x="20" y="200" width="560" height="25" rx="8" fill="#fff8e1" stroke="#b58900" stroke-width="2"/>
+        <text x="300" y="217" font-size="12.5" text-anchor="middle" fill="#7a5a00" font-weight="700">ケース 3: 処理は完了済み、応答だけが失われた</text>
+      </svg>
+      <p class="cap">図: 応答が無いという同じ見え方の裏に、処理が実際には完了している場合も含まれる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. リトライ戦略 ― いつ ・ どれだけ待って再送するか</h2>
+    <p>再送のタイミングには何通りかの方式があります。<b>線形バックオフ (linear backoff)</b> は、再送までの待ち時間を一定間隔で増やしていく方式で、実装が単純です。しかし、同時に失敗した多数のクライアントが同じ間隔で再送すると、再送のタイミングが揃ってしまい、サーバに負荷が再び集中する<b>リトライ嵐 (retry storm)</b> を引き起こしやすくなります。<b>線形ジッタバックオフ (linear jitter backoff)</b> は、線形に増える待ち時間にランダムな揺らぎ (ジッタ) を加えることで、再送のタイミングを散らし、この集中を緩和します。</p>
+    <p><b>指数バックオフ (exponential backoff)</b> は、待ち時間を 1 秒、2 秒、4 秒、8 秒のように倍々に増やしていく方式で、失敗が続くほど間隔を大きく空けるため、高負荷の状況での再送の衝突を大きく減らせます。ただし、一時的な障害であれば短い待ちで解決したはずの場面でも、不必要に長く待たせてしまう欠点があります。<b>指数ジッタバックオフ (exponential jitter backoff)</b> は指数バックオフにさらにランダムな揺らぎを加えた方式で、間隔を大きく空けつつ衝突も避けられるため、実務では最もよく使われます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="線形バックオフと指数バックオフの間隔の伸び方を示す図">
+        <line x1="40" y1="180" x2="580" y2="180" stroke="#9aa" stroke-width="2"/>
+        <line x1="40" y1="180" x2="40" y2="20" stroke="#9aa" stroke-width="2"/>
+        <text x="20" y="20" font-size="12.5" fill="#12211a">待ち時間</text>
+        <text x="560" y="200" font-size="12.5" fill="#12211a">再送回数</text>
+        <polyline points="40,170 140,150 240,130 340,110 440,90" fill="none" stroke="#2f5f8a" stroke-width="2.5"/>
+        <text x="460" y="85" font-size="12.5" fill="#1f4a68" font-weight="700">線形バックオフ</text>
+        <polyline points="40,175 140,160 240,120 340,50 420,25" fill="none" stroke="#7a5a9e" stroke-width="2.5"/>
+        <text x="425" y="32" font-size="12.5" fill="#5b3d80" font-weight="700">指数バックオフ</text>
+      </svg>
+      <p class="cap">図: 指数バックオフは再送回数が増えるほど待ち時間が急激に伸び、高負荷時の衝突を線形バックオフより強く避ける。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 冪等性 ― 何度実行しても結果が 1 回分と同じになる性質</h2>
+    <p><b>冪等性 (idempotency)</b> とは、同じ処理を 1 回実行しても複数回実行しても、最終的な結果が変わらない性質を指します。HTTP の世界では、<code>PUT</code> (指定した内容でまるごと置き換える) や <code>DELETE</code> (指定したものを削除する) はもともと冪等です。10 回 <code>DELETE</code> を送っても、1 回目で削除され、残りの 9 回は「すでに無い」という同じ結果になるだけです。これに対し <code>POST</code> (新しい何かを作成する) は、何も工夫しなければ冪等ではありません。同じ内容の <code>POST</code> を 2 回送れば、2 つの別々のリソース (2 件の注文、2 回の決済) が作られてしまいます。</p>
+    <p>決済処理のように本来冪等でない操作を安全に再送できるようにする標準的な方法が<b>冪等キー (idempotency key)</b> です。クライアントが処理を依頼する際、その処理を一意に識別するキーを自分で生成して添えます (サーバ側で生成するキーでは、キーの発行自体がもう 1 回のネットワーク往復になり、その往復が失敗したときに同じ問題が再発するため、クライアント側で生成するのが基本です)。サーバは受け取ったキーを「処理済みキーの記録」と照合し、すでに同じキーで処理済みであれば、新たに処理を実行せず前回と同じ結果をそのまま返します。決済ゲートウェイでは、これを<b>認可 (authorization)</b> と<b>確定 (capture)</b> の 2 段階に分け、認可の時点で冪等キーを発行し、同じキーでの確定リクエストが何度来ても実際の課金は 1 回だけになるように設計します。</p>
+    <p>次のコードは、冪等キーを使った決済処理の最小の形を示したものです。</p>
+    <pre><code>import threading
+
+class PaymentProcessor:
+    def __init__(self):
+        self.processed = {}
+        self.lock = threading.Lock()
+
+    def charge(self, idempotency_key, amount):
+        with self.lock:
+            if idempotency_key in self.processed:
+                return self.processed[idempotency_key]
+            result = {'status': 'charged', 'amount': amount}
+            self.processed[idempotency_key] = result
+            return result
+
+processor = PaymentProcessor()
+print(processor.charge('key-1', 1000))
+print(processor.charge('key-1', 1000))</code></pre>
+    <p>1 回目の呼び出しでは <code>key-1</code> が未処理なので課金を実行し、結果を記録します。2 回目の呼び出しでは同じキーが見つかるため、新たに課金せず記録済みの結果をそのまま返します。<code>threading.Lock</code> を使っているのは、同時に 2 つのリクエストが同じキーで到着した場合に、両方が「未処理」と判定して 2 回課金してしまう競合を防ぐためです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="冪等キーによって2回目の課金が防がれる図">
+        <rect x="30" y="20" width="160" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">1 回目: key-1</text>
+        <rect x="230" y="20" width="160" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="310" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">未処理 → 課金実行</text>
+        <rect x="30" y="100" width="160" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="130" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">2 回目: key-1</text>
+        <rect x="230" y="100" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="310" y="130" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">既に処理済み → 課金せず</text>
+      </svg>
+      <p class="cap">図: 同じ冪等キーの 2 回目は、記録済みの結果を返すだけで新たな課金を行わない。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. どこで壊れるか ― リトライと冪等性の限界</h2>
+    <p>リトライ戦略にも冪等性にも、それぞれ壊れ方があります。1 つ目は<b>リトライ嵐</b>です。多数のクライアントが同時に障害を検知し、同じようなタイミングで再送を始めると、まだ回復していないサーバやその先の DB にさらに負荷を重ねてしまい、障害を長引かせることがあります。バックオフとジッタはこれを緩和しますが、再送の総数そのものに上限 (最大リトライ回数) を設けないと、障害が長引くほど再送の量が積み重なり続けます。</p>
+    <p>2 つ目は<b>タイムアウトの不整合</b>です。呼び出し元のタイムアウトがサーバ側の処理時間より短いと、サーバがまだ処理を続けているうちにクライアントが「失敗した」と判断して再送してしまい、同じ処理がサーバ側で並行して 2 つ走ることになります。呼び出しの連鎖が深い (A が B を呼び、B が C を呼ぶ) 場合は、途中の層のタイムアウトが外側の層のタイムアウトより長いと、外側がすでに諦めた後も内側の処理だけが無駄に動き続けるという無駄も生まれます。</p>
+    <p>3 つ目は<b>冪等キーの記録自体の寿命と競合</b>です。「処理済みキーの記録」を永久に保持できないことが多く、何らかの期限で削除されます。削除された後に遅れて届いた再送は「未処理」と判定されてしまい、冪等性が意図せず破れます。また、先のコード例で示したロックが無い実装では、同じキーを持つ 2 つのリクエストがほぼ同時に到着すると、両方が「まだ処理済みではない」と判定してしまい、ロックの意図 (同じキーの処理を 1 つに絞る) が果たされません。4 つ目は<b>メッセージキューでの再処理</b>です。多くのメッセージキューは「少なくとも 1 回届ける (at-least-once)」保証をするため、同じメッセージが複数回届くことを前提に、受信側のハンドラ自体を冪等に作る必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="リトライ嵐と冪等キーの競合の図">
+        <rect x="20" y="20" width="280" height="160" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="160" y="45" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">リトライ嵐</text>
+        <text x="160" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">多数のクライアントが</text>
+        <text x="160" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">同時に再送を始める</text>
+        <text x="160" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">対策: ジッタ + 最大リトライ回数</text>
+        <rect x="320" y="20" width="280" height="160" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="460" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">冪等キーの競合</text>
+        <text x="460" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">同じキーが同時に到着</text>
+        <text x="460" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">両方が「未処理」と判定</text>
+        <text x="460" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">対策: ロックや一意制約で直列化</text>
+      </svg>
+      <p class="cap">図: リトライ嵐は再送のタイミングが揃うことで起き、冪等キーの競合は同時到着によって起きる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 実システムでの例 ― 決済ゲートウェイの認可 ・ 確定フロー</h2>
+    <p>オンライン決済を仲介する決済ゲートウェイ (Stripe や PayPal のようなサービス) は、認可 (authorization) と確定 (capture) の 2 段階構成を使ってこの問題を解決しています。注文が確定する前の段階で、まずクライアントが一意な冪等キーを生成して<b>認可</b>リクエストに添えます。認可は「この金額を後で確定してよいか」をカード発行会社に確認する処理で、まだ実際の引き落としは起きません。続いて<b>確定</b>リクエストで、先ほどの認可に対応する冪等キーを使って実際の引き落としを指示します。注文処理の途中でネットワークが不安定になり、確定リクエストへの応答が届かずクライアントが再送しても、ゲートウェイは同じ冪等キーを見て「既に確定済み」と判断し、二重に引き落とすことはありません。</p>
+    <p>再送の間隔については、AWS のようなクラウド事業者の SDK が指数ジッタバックオフを既定の挙動として採用しています。クライアント側のライブラリは、一時的なエラー (ネットワークの瞬断やサーバの過負荷を示す応答コードなど) を検知すると、1 回目は短い間隔、2 回目はその倍、3 回目はさらに倍という形で間隔を広げながら、各間隔にランダムな揺らぎを加えて再送します。これにより、同時に失敗した多数のクライアントの再送タイミングが自然に分散され、復旧しかけているサーバに再送が集中して再び倒れる事態を避けられます。</p>
+    <p>この 2 つの仕組みは役割が異なります。バックオフとジッタは「いつ再送するか」というタイミングの制御であり、再送そのものを安全にするものではありません。冪等キーは「同じ処理が何回来ても結果は 1 回分」という安全性の保証であり、タイミングとは無関係です。実務では両方を組み合わせ、タイミングを散らしたリトライを、冪等性を持つ操作に対してだけ行う、という形に落ち着きます。冪等でない操作 (例えば一意制約の無い単純な <code>POST</code> による注文作成) に無条件でリトライを仕掛けると、この回で見てきた二重課金や二重発送がそのまま現実になります。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-do-we-retry-on-failures.md" target="_blank" rel="noopener">ByteByteGo: Retry Strategies for System Failures</a> ― 線形バックオフ ・ 線形ジッタバックオフ ・ 指数バックオフ ・ 指数ジッタバックオフの 4 方式の利点と欠点を第 2 節に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/top-6-cases-to-apply-idempotency.md" target="_blank" rel="noopener">ByteByteGo: Top 6 Cases to Apply Idempotency</a> ― REST API ・ 決済処理 ・ 注文管理 ・ DB 操作 ・ ユーザアカウント管理 ・ メッセージキューという冪等性が必要な 6 つの場面を第 3 節と第 4 節に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/payment-gateway" target="_blank" rel="noopener">SDFC: Payment Gateway</a> ― 認可 (authorization) と確定 (capture) を分け、認可時に発行した冪等キーを確定時に使い回す設計を第 3 節と第 5 節の具体例に使った。</li>
+      <li><a href="https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/" target="_blank" rel="noopener">Amazon Builders' Library: Timeouts, retries and backoff with jitter</a> ― クラウド SDK が指数ジッタバックオフを既定で採用している実例を第 5 節に使った。</li>
+      <li><a href="https://stripe.com/docs/idempotency" target="_blank" rel="noopener">Stripe: Idempotent requests</a> ― クライアントが冪等キーを生成してリクエストに添える運用の実例の参照に使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-message-queues.html">← 第 09 回 メッセージキューと配信保証</a><a href="./distsys-index.html">目次</a><a href="./distsys-unique-id.html">第 11 回 分散 ID 生成 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'クライアントがサーバへ処理を依頼し、タイムアウトまで応答が来なかった。このとき実際に起きていた可能性について、最も正確な記述はどれか？',
+    opts: [
+      '応答が来ないことは常に「サーバが処理に失敗した」ことを意味し、処理が成功している可能性は無い',
+      '応答が来ないことは常に「依頼そのものがネットワークのどこかで消えて届いていない」ことを意味し、サーバ側で処理が進んでいる可能性は無い',
+      '依頼が届いていない、処理中にサーバが落ちた、処理は完了したが応答だけが失われた、という複数の可能性が考えられ、クライアント側からはどれが起きたか区別できない',
+      '応答が来ないことは常に「処理は完了しているが応答の送信だけが意図的に遅延されている」という特殊な状況だけを意味する',
+      'タイムアウトは常にクライアント側のバグが原因で発生し、サーバ側の状態とは無関係である'
+    ],
+    ans: 2,
+    exps: [
+      '処理が完了していても、その応答だけが途中で失われるケースがあり得るため、「常に失敗した」と決め付けるのは不正確。',
+      '依頼が届いた上で処理中にサーバが落ちる、または処理が完了して応答だけが失われるケースもあり得るため、「常に届いていない」と決め付けるのは不正確。',
+      '<b>これが正解。</b>依頼が届いていない、処理中に落ちた、処理完了後に応答だけ失われた、という複数の可能性があり、クライアント側には応答が無いという同じ見え方しかせず、どれが起きたかを区別する手段が無い。',
+      '意図的な遅延という特定のシナリオに限定する説明は、他の可能性 (依頼未到達や処理中の障害) を排除してしまい不正確。',
+      'タイムアウトはネットワークの問題やサーバ側の過負荷など様々な原因で発生し、クライアント側のバグに限定されるという説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>応答が無いという同じ結果の裏には、複数の異なる状況が隠れています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="応答無しの裏に複数の可能性がある図"><rect x="200" y="20" width="160" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">応答が無い (同じ見え方)</text><line x1="260" y1="60" x2="120" y2="100" stroke="#9aa" stroke-width="1.5"/><line x1="280" y1="60" x2="280" y2="100" stroke="#9aa" stroke-width="1.5"/><line x1="300" y1="60" x2="440" y2="100" stroke="#9aa" stroke-width="1.5"/><rect x="30" y="100" width="180" height="45" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="120" y="126" font-size="12.5" text-anchor="middle" fill="#b5401f">依頼が未到達</text><rect x="190" y="100" width="180" height="45" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="280" y="126" font-size="12.5" text-anchor="middle" fill="#5b3d80">処理中に落ちた</text><rect x="350" y="100" width="180" height="45" rx="8" fill="#fff8e1" stroke="#b58900" stroke-width="2"/><text x="440" y="126" font-size="12.5" text-anchor="middle" fill="#7a5a00">完了済み、応答だけ消失</text></svg>'
+          + '<p class="cap">図: 応答が無いという 1 つの観測結果の裏に、複数の異なる状況が隠れている。</p></div>'
+    }
+  },
+  {
+    q: '指数バックオフ (exponential backoff) と線形バックオフ (linear backoff) の違いについて、最も正確な記述はどれか？',
+    opts: [
+      '指数バックオフは待ち時間を一定間隔で増やす方式であり、線形バックオフは待ち時間を倍々に増やす方式である',
+      '線形バックオフは一切待たずに即座に再送する方式であり、指数バックオフは一定時間待ってから再送する方式である',
+      '指数バックオフと線形バックオフは同じ増え方をする方式であり、呼び方だけが異なる',
+      '線形バックオフにはジッタが常に組み込まれており、指数バックオフにはジッタを組み込むことができない',
+      '線形バックオフは待ち時間を一定間隔で増やす方式であり、指数バックオフは待ち時間を倍々に増やしていく方式である'
+    ],
+    ans: 4,
+    exps: [
+      '2 つの方式の説明が入れ替わっている。一定間隔で増えるのは線形バックオフであり、倍々に増えるのは指数バックオフである。',
+      '線形バックオフも待ち時間を置いてから再送する方式であり、即座に再送するという説明は定義と異なる。',
+      '増え方が明確に異なり (一定間隔 対 倍々)、単なる呼び方の違いではない。',
+      'ジッタは線形バックオフにも指数バックオフにも追加で組み込むことができる仕組みであり、一方にしか使えないという制約は無い。',
+      '<b>これが正解。</b>線形バックオフは待ち時間を一定間隔で増やす方式、指数バックオフは待ち時間を倍々に増やしていく方式であり、指数バックオフの方が失敗が続くほど急激に間隔が広がる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。指数バックオフは再送回数が増えるほど待ち時間が急激に伸びます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="線形と指数の伸び方の違い"><line x1="40" y1="120" x2="520" y2="120" stroke="#9aa" stroke-width="2"/><line x1="40" y1="120" x2="40" y2="20" stroke="#9aa" stroke-width="2"/><polyline points="40,110 140,95 240,80 340,65" fill="none" stroke="#2f5f8a" stroke-width="2.5"/><text x="380" y="60" font-size="12.5" fill="#1f4a68" font-weight="700">線形</text><polyline points="40,115 140,100 240,60 300,25" fill="none" stroke="#7a5a9e" stroke-width="2.5"/><text x="250" y="40" font-size="12.5" fill="#5b3d80" font-weight="700">指数</text></svg>'
+          + '<p class="cap">図: 指数バックオフは線形バックオフよりも待ち時間が急激に伸びる。</p></div>'
+    }
+  },
+  {
+    q: 'HTTP の冪等性について、最も正確な記述はどれか？',
+    opts: [
+      'PUT も POST も DELETE も、仕様上すべて冪等なメソッドとして定義されている',
+      'PUT と DELETE は仕様上もともと冪等なメソッドであり、POST は何も工夫しなければ冪等ではない',
+      'POST は仕様上もともと冪等なメソッドであり、PUT と DELETE は何も工夫しなければ冪等ではない',
+      'GET だけが冪等であり、PUT と DELETE は毎回異なる結果を返すため冪等ではない',
+      'HTTP のメソッドに冪等性という概念は定義されておらず、冪等性はアプリケーション層だけの概念である'
+    ],
+    ans: 1,
+    exps: [
+      'POST は同じ内容を複数回送ると複数のリソースが作られてしまう場合があり、仕様上もともと冪等であるという説明は不正確。',
+      '<b>これが正解。</b>PUT (指定内容で置き換える) と DELETE (指定したものを削除する) は仕様上もともと冪等であり、繰り返しても最終結果は変わらない。POST は新しい何かを作成する操作であり、何も工夫しなければ繰り返すたびに新しいリソースが作られ冪等ではない。',
+      'PUT と DELETE はもともと冪等なメソッドとして定義されており、「冪等ではない」という説明は逆になっている。',
+      'PUT や DELETE は冪等な操作として定義されており、「冪等ではない」という説明は不正確。',
+      'HTTP の仕様 (RFC) では各メソッドの冪等性が明確に定義されており、「概念が定義されていない」という説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>PUT と DELETE はもともと冪等、POST は工夫が無いと冪等になりません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="PUT・DELETE・POSTの冪等性の図"><rect x="30" y="20" width="160" height="90" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="110" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">PUT / DELETE</text><text x="110" y="80" font-size="13" text-anchor="middle" fill="#12211a">もともと冪等</text><rect x="360" y="20" width="160" height="90" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="440" y="50" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">POST</text><text x="440" y="80" font-size="13" text-anchor="middle" fill="#12211a">工夫が無いと冪等でない</text></svg>'
+          + '<p class="cap">図: PUT と DELETE はもともと冪等、POST は冪等キーなどの工夫が必要。</p></div>'
+    }
+  },
+  {
+    q: '冪等キー (idempotency key) の生成を誰が行うべきかについて、最も妥当な設計はどれか？',
+    opts: [
+      'サーバがリクエストを受け取った直後に、リクエストの内容から自動的にキーを生成し直し、クライアントには一切キーを意識させないようにする',
+      'キーは毎回ランダムに生成し、再送のたびに新しいキーを使うことで常に新規処理として扱う',
+      'キーの生成はネットワークの状態に依存させず、常に DB の自動採番 ID を流用する',
+      'クライアントが処理を依頼する前に自分でキーを生成し、再送のときも同じキーを使い続けることで、サーバ側がそのキーを使って処理済みかどうかを判定できるようにする',
+      'キーは決済額そのものを文字列化したものを使い、同じ金額のリクエストはすべて同一視する'
+    ],
+    ans: 3,
+    exps: [
+      'サーバ側がキーを生成する設計では、キーの発行自体がもう 1 回のネットワーク往復を必要とし、その往復が失敗すると同じ問題が再発してしまう。',
+      '再送のたびに新しいキーを使うと、サーバ側は毎回「未処理」と判定してしまい、冪等性の仕組みそのものが機能しなくなる。',
+      'DB の自動採番 ID は処理が成功した後に発行されることが多く、処理前にクライアントが持っておく必要のある冪等キーの役割を果たせない。',
+      '<b>これが正解。</b>クライアントが依頼前に自分でキーを生成し、再送時も同じキーを使うことで、サーバはそのキーをもとに「これは既に処理済みか」を一貫して判定できる。',
+      '金額だけをキーにすると、同じ金額の別々の正当な注文まで同一視されてしまい、本来実行されるべき処理まで取り消されてしまう。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>クライアントが依頼前に生成したキーを再送時も使い続けることで、サーバは一貫した判定ができます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="クライアント生成の冪等キーの図"><rect x="30" y="20" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">クライアントがキーを生成</text><line x1="140" y1="70" x2="140" y2="100" stroke="#0f5132" stroke-width="2"/><rect x="30" y="100" width="220" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="125" font-size="12.5" text-anchor="middle" fill="#1f4a68">1 回目も再送も同じキー</text><rect x="310" y="60" width="220" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="420" y="85" font-size="12.5" text-anchor="middle" fill="#0f5132">サーバが一貫して判定可能</text></svg>'
+          + '<p class="cap">図: キーをクライアントが事前生成し再送でも使い続けることで、サーバ側の判定が成立する。</p></div>'
+    }
+  },
+  {
+    q: 'ある注文フォームで、冪等キーを使わない単純な POST による注文作成リクエストを実装した。ユーザがボタンを押した直後にネットワークが不安定になり応答が来なかったため、ユーザがもう一度ボタンを押して再送した。最も起こりやすい事態はどれか？',
+    opts: [
+      '1 回目のリクエストが実際にはサーバに届いて処理が完了していた場合、2 回目の送信によって注文が重複して作成される可能性がある',
+      'POST はもともと冪等なメソッドなので、何度送信しても注文は 1 件しか作られない',
+      'サーバは常に 1 回目のリクエストだけを認識し、2 回目のリクエストは自動的に無視される',
+      'ネットワークが不安定だったことが原因で、サーバ側では一切処理が実行されずエラーだけが必ず記録される仕組みになっている',
+      'ユーザが手動で再送した場合に限り、サーバ側で自動的に重複が検出されて片方が削除される'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>1 回目のリクエストが実際には届いて処理が完了していたのに応答だけが失われていた場合、ユーザが再送した 2 回目のリクエストによって、冪等キーなどの保護が無いため注文が重複して作成されてしまう可能性がある。',
+      'POST は仕様上もともと冪等ではなく、工夫が無ければ複数回の送信で複数のリソースが作られる。',
+      '冪等キーなどの仕組みが無い実装では、サーバは 2 つのリクエストを別々の新規リクエストとして認識してしまう。',
+      'ネットワークが不安定だったのはクライアントと サーバの間の応答の経路であり、サーバ側での処理自体が実行されていた可能性は排除できない。',
+      '冪等キーなどの重複検出の仕組みが実装されていなければ、サーバ側で自動的に重複を検出して削除する機能は働かない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>冪等キーが無いと、応答が失われた後の再送がそのまま新しい注文として処理されます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="冪等キー無しで注文が重複する図"><rect x="30" y="20" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">1 回目: 注文作成済み (応答消失)</text><rect x="330" y="20" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="430" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f">2 回目: 別の新規注文として処理</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">キーで照合しないため、同じ注文として扱われない</text></svg>'
+          + '<p class="cap">図: 冪等キーが無いと、同じ意図の 2 つのリクエストが別々の注文として処理されてしまう。</p></div>'
+    }
+  },
+  {
+    q: 'バックオフにランダムな揺らぎ (ジッタ) を加える目的として、最も正確な記述はどれか？',
+    opts: [
+      '待ち時間の合計を必ず短縮し、再送が完了するまでの時間を常に縮めるため',
+      '冪等キーの衝突を防ぎ、同じキーが複数のリクエストに割り当てられないようにするため',
+      '同時に失敗した多数のクライアントの再送タイミングを散らし、サーバへの負荷の再集中 (リトライ嵐) を避けるため',
+      'タイムアウトの値そのものを動的に変更し、常に最適な待機時間を自動的に計算するため',
+      '応答が来ない原因 (依頼未到達 ・ 処理中断 ・ 応答消失) を区別できるようにするため'
+    ],
+    ans: 2,
+    exps: [
+      'ジッタは個々の待ち時間にランダムな変動を加えるものであり、合計の待ち時間を必ず短縮するという保証は無い。むしろ一部のクライアントは揺らぎにより長く待つこともある。',
+      '冪等キーの衝突の防止はキーの生成方法の話であり、バックオフのタイミング制御とは別の話題である。',
+      '<b>これが正解。</b>ジッタは同時に失敗した多数のクライアントの再送タイミングをランダムに散らし、再送が一点に集中してサーバに負荷が再び集中するリトライ嵐を避けるための工夫である。',
+      'ジッタはタイムアウトの値自体を変更する仕組みではなく、再送までの待ち時間に加える揺らぎである。',
+      '応答が無い原因の区別は別の問題であり、ジッタを加えることでこの区別ができるようになるわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ジッタが無いと再送のタイミングが揃い、あると散らばります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ジッタが再送タイミングを散らす図"><line x1="40" y1="50" x2="520" y2="50" stroke="#9aa" stroke-width="2"/><circle cx="280" cy="50" r="7" fill="#c0492f"/><text x="280" y="35" font-size="12.5" text-anchor="middle" fill="#c0492f">ジッタ無し: 再送が同時に集中</text><line x1="40" y1="110" x2="520" y2="110" stroke="#9aa" stroke-width="2"/><circle cx="240" cy="110" r="6" fill="#198754"/><circle cx="270" cy="110" r="6" fill="#198754"/><circle cx="300" cy="110" r="6" fill="#198754"/><circle cx="330" cy="110" r="6" fill="#198754"/><text x="280" y="135" font-size="12.5" text-anchor="middle" fill="#0f5132">ジッタ有り: 再送が散らばる</text></svg>'
+          + '<p class="cap">図: ジッタによって同時失敗した複数クライアントの再送タイミングが分散する。</p></div>'
+    }
+  },
+  {
+    q: 'あるメッセージキューが「少なくとも 1 回届ける (at-least-once)」保証をしている。このキューを使うシステムの受信側 (コンシューマ) を実装する際、最も妥当な設計方針はどれか？',
+    opts: [
+      'キューが保証しているのだから、受信側は各メッセージが厳密に 1 回だけ届くことを前提にハンドラを実装してよい',
+      'メッセージの重複は理論上発生し得ないため、受信側では特に対策をする必要はない',
+      '重複が起きたら受信側のプロセスを毎回再起動することで対処する',
+      'キューの設定を変更して配信回数を強制的に 1 回に制限すれば、受信側は何も考えなくてよい',
+      '同じメッセージが複数回届く可能性を前提に、メッセージ ID などをもとにハンドラ自体を冪等に実装する'
+    ],
+    ans: 4,
+    exps: [
+      '「少なくとも 1 回」という保証は、1 回以上届く可能性を認めているという意味であり、厳密に 1 回だけ届くことを前提にするのは保証の内容と矛盾する。',
+      '「少なくとも 1 回」という名称自体が重複の可能性を含んでいることを示しており、「発生し得ない」という説明は保証の定義と矛盾する。',
+      'プロセスの再起動は重複そのものを防ぐ仕組みではなく、的外れな対処である。',
+      '多くの at-least-once 型のキューは配信回数を厳密に 1 回に制限する機能そのものを提供しておらず、設定変更だけで解決する保証は無い。',
+      '<b>これが正解。</b>at-least-once の保証は重複配信を許容しているため、受信側はメッセージ ID などを使って同じメッセージの重複処理を無害化できるよう、ハンドラ自体を冪等に実装する必要がある。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>at-least-once は「1 回以上届く」ことを保証するため、受信側が冪等性を持つ必要があります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="at-least-onceと冪等なハンドラの図"><rect x="30" y="20" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">キュー: 少なくとも 1 回届ける</text><line x1="130" y1="60" x2="130" y2="90" stroke="#0f5132" stroke-width="2"/><rect x="30" y="90" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="115" font-size="12.5" text-anchor="middle" fill="#b5401f">同じメッセージが複数回届く</text><rect x="320" y="55" width="210" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="425" y="80" font-size="12.5" text-anchor="middle" fill="#0f5132">受信側を冪等に実装</text></svg>'
+          + '<p class="cap">図: at-least-once の重複配信を無害化するのは受信側の冪等なハンドラの役割。</p></div>'
+    }
+  },
+  {
+    q: 'サービス A がサービス B を呼び出し、B がさらにサービス C を呼び出す構成で、C の処理に 5 秒、B のタイムアウトが 8 秒、A の B へのタイムアウトが 3 秒に設定されていた。この設定について最も妥当な指摘はどれか？',
+    opts: [
+      'タイムアウトの値は見た目の性能指標にしか影響せず、この組み合わせ自体には構造的な問題は存在しない',
+      'A の B へのタイムアウトが B の処理完了 (C を含む 5 秒) より短く、A は処理が終わる前に諦めて再送し、B 側で処理が無駄に続く可能性がある',
+      'C の処理時間が 5 秒であることは、A や B のタイムアウト設定の妥当性とは完全に無関係であり、考慮する必要は無い',
+      'B のタイムアウトが A のタイムアウトより長いことは常に問題であり、必ず B のタイムアウトを A より短く設定し直さなければならない',
+      'タイムアウトは呼び出しの連鎖の中で最も内側の処理 (C) だけに設定すればよく、A や B の段には設定が不要である'
+    ],
+    ans: 1,
+    exps: [
+      'タイムアウトの組み合わせは、呼び出し元が早く諦めて再送し内側の処理が無駄に続くという構造的な問題を引き起こし得るため、「問題は無い」という説明は不正確。',
+      '<b>これが正解。</b>A の B へのタイムアウト (3 秒) が、B が C の処理 (5 秒) を含めて完了するまでの時間より短いため、A は B の処理がまだ終わっていない時点で諦めて再送してしまう。この間 B 側では C の処理が無駄に続いている可能性がある。',
+      'C の処理時間は B の応答時間の内訳そのものであり、A や B のタイムアウト設計に直接関係する要素である。「無関係」という説明は不正確。',
+      '内側のタイムアウトが外側より長いことは問題を引き起こしやすいが、「外側は必ず内側より短くしなければならない」という逆の決め付けも一般化しすぎで、実際には連鎖全体でタイムアウトの時間配分を設計する必要がある。',
+      'タイムアウトは呼び出しの各段 (A → B、B → C) それぞれに設定するのが基本であり、最も内側だけに設定すればよいという説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>外側のタイムアウトが内側の処理完了より短いと、外側が諦めた後も内側の処理だけが無駄に続きます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="タイムアウトの不整合の図"><line x1="40" y1="40" x2="520" y2="40" stroke="#9aa" stroke-width="2"/><text x="40" y="25" font-size="12.5" fill="#12211a">時間軸</text><rect x="40" y="55" width="130" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="105" y="75" font-size="12.5" text-anchor="middle" fill="#b5401f">A: 3 秒で諦めて再送</text><rect x="40" y="95" width="300" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="190" y="115" font-size="12.5" text-anchor="middle" fill="#1f4a68">B: C (5 秒) を含めて処理継続中</text><text x="280" y="150" font-size="12.5" text-anchor="middle" fill="#12211a">A が諦めた後も B と C の処理が無駄に続く</text></svg>'
+          + '<p class="cap">図: 外側の呼び出し元が先に諦めても、内側の処理はそのまま続いてしまう。</p></div>'
+    }
+  },
+  {
+    q: '冪等キーを使った決済処理の実装で、同じキーを持つ 2 つのリクエストがほぼ同時にサーバへ到着した。もし「処理済みキーの記録」を確認してから記録を書き込むまでの間にロックなどの保護が無い場合、最も起こりやすい事態はどれか？',
+    opts: [
+      'サーバは必ず 1 つ目のリクエストだけを受け付け、2 つ目は自動的にネットワーク層で拒否される',
+      '同じキーであっても到着時刻が違う限り、必ず異なる処理として扱われることが保証されている',
+      '両方のリクエストがほぼ同時に「まだ処理済みではない」と判定してしまい、保護が無ければ処理が 2 回実行されてしまう可能性がある',
+      'キーが同じであることを検知した時点で、サーバは自動的に古い方のリクエストを破棄する仕組みが標準で備わっている',
+      'このような同時到着は理論上発生し得ないため、対策を考える必要は無い'
+    ],
+    ans: 2,
+    exps: [
+      'ネットワーク層は冪等キーの意味を理解しておらず、同じキーを持つリクエストを自動的に拒否する仕組みは備えていない。',
+      '冪等キーの目的はまさに「同じキーなら同じ処理として扱う」ことであり、到着時刻が違うだけで異なる処理として扱われるという説明は冪等性の目的と矛盾する。',
+      '<b>これが正解。</b>ロックなどの保護が無いと、ほぼ同時に到着した 2 つのリクエストが両方とも「記録を確認した時点ではまだ処理済みではない」と判定してしまい、意図せず処理が 2 回実行される競合が起こり得る。',
+      'キーが同じであることを検知して自動的に古い方を破棄する仕組みは標準では備わっておらず、ロックや一意制約などを明示的に実装する必要がある。',
+      '同時到着は実際のネットワーク環境で起こり得る現象であり、「理論上発生し得ない」という説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ロックが無いと、2 つのリクエストが同時に「未処理」と判定してしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ロック無しで競合が起きる図"><rect x="30" y="20" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">リクエスト 1: key-1 を確認</text><rect x="330" y="20" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="430" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">リクエスト 2: key-1 を確認</text><rect x="165" y="90" width="230" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="115" font-size="12.5" text-anchor="middle" fill="#b5401f">両方が「未処理」と判定 → 2 回実行</text></svg>'
+          + '<p class="cap">図: ロックが無いと、同時到着した 2 つのリクエストが両方とも未処理と判定してしまう。</p></div>'
+    }
+  },
+  {
+    q: 'ある API 呼び出しで、1 回目の再送を 1 秒後、2 回目を 2 秒後、3 回目を 4 秒後、4 回目を 8 秒後に行う指数バックオフ (ジッタ無し) を実装した。5 回目の再送まで行う設定にした場合、1 回目の呼び出し失敗から 5 回目の再送が開始されるまでの待ち時間の合計に最も近いものはどれか？',
+    opts: [
+      '31 秒 (1 + 2 + 4 + 8 + 16 秒の合計)',
+      '5 秒 (各回を均等に 1 秒とみなした合計)',
+      '20 秒 (1 秒刻みで単純に増えると仮定した合計)',
+      '8 秒 (最後の間隔だけを合計とみなした値)',
+      '無限大 (指数的に増える間隔は発散し合計できない)'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>1 回目 1 秒、2 回目 2 秒、3 回目 4 秒、4 回目 8 秒ときたので、5 回目の間隔は前の 2 倍の 16 秒。合計は 1 + 2 + 4 + 8 + 16 = 31 秒になる。',
+      '指数バックオフは各回の間隔が倍々に増えていく方式であり、すべての回を均等な 1 秒とみなす計算は定義と合わない。',
+      '指数バックオフは 1 秒刻みで単純に増えるのではなく倍々に増える方式であり、この前提は線形バックオフの説明に近く指数バックオフには当てはまらない。',
+      '合計の待ち時間は各回の間隔すべてを足したものであり、最後の間隔だけを答えとするのは問いに対する答えとして不十分。',
+      '5 回という有限回数に区切っているため、合計自体は有限の値 (31 秒) として計算できる。「発散して合計できない」という説明は、有限回数で打ち切っているこの設定には当てはまらない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>各回の待ち時間が倍々に増え、それらを足し合わせると合計の待ち時間になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="指数バックオフの合計待ち時間の図"><rect x="30" y="30" width="60" height="30" rx="4" fill="#8fd6b4" opacity="0.5" stroke="#0f5132"/><text x="60" y="50" font-size="12.5" text-anchor="middle" fill="#12211a">1s</text><rect x="100" y="30" width="60" height="30" rx="4" fill="#8fd6b4" opacity="0.6" stroke="#0f5132"/><text x="130" y="50" font-size="12.5" text-anchor="middle" fill="#12211a">2s</text><rect x="170" y="30" width="60" height="30" rx="4" fill="#8fd6b4" opacity="0.7" stroke="#0f5132"/><text x="200" y="50" font-size="12.5" text-anchor="middle" fill="#12211a">4s</text><rect x="240" y="30" width="60" height="30" rx="4" fill="#8fd6b4" opacity="0.8" stroke="#0f5132"/><text x="270" y="50" font-size="12.5" text-anchor="middle" fill="#12211a">8s</text><rect x="310" y="30" width="60" height="30" rx="4" fill="#8fd6b4" opacity="0.9" stroke="#0f5132"/><text x="340" y="50" font-size="12.5" text-anchor="middle" fill="#12211a">16s</text><text x="200" y="100" font-size="13.5" text-anchor="middle" fill="#12211a">1 + 2 + 4 + 8 + 16 = 31 秒</text></svg>'
+          + '<p class="cap">図: 各回の待ち時間を足し合わせると合計 31 秒になる。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

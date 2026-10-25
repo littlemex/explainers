@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>決定論的ステートマシン複製と取引所 ― 複製ではなく再生で冗長性を持たせる</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 33 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>決定論的ステートマシン複製と取引所 ― 複製ではなく再生で冗長性を持たせる</h1>
+  <p>シーケンサが決めた順序を、決定論的な単一スレッド処理が再生することで、低遅延と障害復旧を同時に満たす</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 25 回 <a href="./distsys-raft-paxos.html">合意 Paxos / Raft</a>、第 26 回 <a href="./distsys-locks-leases-fencing.html">分散ロック・リース・フェンシングトークン</a>、第 13 回 <a href="./distsys-consistency-models.html">一貫性モデル</a></p>
+
+  <p class="intro">株式取引所のマッチングエンジンは「複製してフェイルオーバーする」という普通のレプリケーション(第 5 回)では作れない。複製元と複製先が<b>1 命令も違わず同じ順序で同じ処理を実行する</b>ことを要求されるため、代わりに「決定論的なステートマシンを、全く同じ入力列で再生する」という設計(決定論的ステートマシン複製, deterministic state machine replication)が使われる。</p>
+
+  <section>
+    <h2>1. なぜ「複製」ではなく「再生」なのか</h2>
+    <p>通常のレプリケーションは、リーダーが処理した結果(新しい行の値など)をフォロワーに送る。しかし株式のマッチングエンジンのように、1 マイクロ秒単位の順序が結果を左右する処理では、結果だけを送るのでは不十分なことがある。代わりに採られる設計は、<b>すべての注文に単一の順序を割り当てるシーケンサ</b>を 1 つだけ置き、その順序通りの入力列を<b>単一スレッドのマッチングエンジン</b>に与え、エンジンは完全に決定論的な処理だけを行う、という形にする。</p>
+    <p>この設計の鍵は、同じ入力列を与えれば、いつどこで実行しても必ず同じ状態・同じ出力が得られるという性質にある。これにより、障害からの復旧やホットスタンバイへの引き継ぎは「状態をコピーする」のではなく、<b>同じ入力列(イベントログ)を最初から、または直前のスナップショットから再生する</b>ことで実現できる。これは第 25 回で見た Raft のログ複製と発想は同じだが、合意アルゴリズムによる多数派調整を経ずに、シーケンサが決めた順序をそのまま信頼する点が異なる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 205" role="img" aria-label="決定論的ステートマシン複製の図">
+        <rect x="30" y="30" width="140" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="100" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">注文(非順序)</text>
+        <line x1="170" y1="50" x2="220" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-sm1)"/>
+        <rect x="220" y="30" width="140" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="290" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">シーケンサ</text>
+        <line x1="360" y1="50" x2="410" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-sm1)"/>
+        <rect x="410" y="30" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="510" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">単一スレッドで決定論的処理</text>
+        <line x1="510" y1="70" x2="510" y2="110" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-sm1)"/>
+        <rect x="410" y="110" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="510" y="135" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">イベントログに記録</text>
+        <text x="510" y="170" font-size="12.5" text-anchor="middle" fill="#4a5d54">同じログを再生すれば誰が実行しても</text>
+        <text x="510" y="186" font-size="12.5" text-anchor="middle" fill="#4a5d54">同じ状態になる</text>
+        <defs><marker id="arr-sm1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: シーケンサが全順序を決め、単一スレッドの決定論的処理とログ記録で「再生による複製」を可能にする。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 低遅延を実現する設計 ― クリティカルパスを削る</h2>
+    <p>低遅延な取引所の設計原則は一言で言える。<b>クリティカルパス(注文がシステムに入ってから結果が出るまでの経路)に乗る作業を減らす</b>ことである。これには 4 つの削り方がある。(1) クリティカルパス上のタスク数を減らす、(2) 各タスクにかかる時間を減らす、(3) ネットワークのホップ数を減らす、(4) ディスクアクセスを減らす。</p>
+    <p>具体的には、全コンポーネントを 1 台の巨大なサーバに集約し(コンテナを使わない)、コンポーネント間の通信は<b>共有メモリ上のイベントバス</b>で行い、ディスクを介さない。Order Manager(注文受付とリスク確認)と Matching Engine(マッチング処理)のようなクリティカルパス上の主要コンポーネントは<b>単一スレッドで動作し、それぞれ 1 つの CPU コアに固定 (pin)</b> される。これにより、OS による<b>コンテキストスイッチが発生せず、ロックも不要</b>になる。単一スレッドのアプリケーションループが、タスクを 1 つずつ順番に処理する。クリティカルパスに乗らない他のコンポーネントは、同じイベントバスを監視して非同期に反応する。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 180" role="img" aria-label="低遅延取引所のクリティカルパス設計の図">
+        <rect x="30" y="30" width="170" height="130" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="115" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Order Manager</text>
+        <text x="115" y="75" font-size="12" text-anchor="middle" fill="#12211a">単一スレッド、CPU 固定</text>
+        <text x="115" y="95" font-size="12" text-anchor="middle" fill="#12211a">リスク確認</text>
+        <line x1="200" y1="95" x2="260" y2="95" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-sm2)"/>
+        <rect x="260" y="30" width="170" height="130" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="345" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">Matching Engine</text>
+        <text x="345" y="75" font-size="12" text-anchor="middle" fill="#12211a">単一スレッド、CPU 固定</text>
+        <text x="345" y="95" font-size="12" text-anchor="middle" fill="#12211a">マッチング処理</text>
+        <line x1="115" y1="160" x2="115" y2="180" stroke="none"/>
+        <text x="500" y="70" font-size="12" text-anchor="middle" fill="#4a5d54">共有メモリの</text>
+        <text x="500" y="88" font-size="12" text-anchor="middle" fill="#4a5d54">イベントバス</text>
+        <text x="500" y="106" font-size="12" text-anchor="middle" fill="#4a5d54">(ディスク不使用)</text>
+        <text x="230" y="178" font-size="12.5" text-anchor="middle" fill="#12211a">同一の巨大サーバ内・コンテナ無し・コンテキストスイッチ無し</text>
+      </svg>
+      <p class="cap">図: クリティカルパス上の主要コンポーネントは単一スレッド、CPU 固定で、ロックもコンテキストスイッチも排除する。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 冗長性の取り方 ― active-shadow とシャーディングの代償</h2>
+    <p>単一スレッドのマッチングエンジンは、そのサーバが落ちると全体が止まる。冗長性を持たせる定石は<b>active-shadow 複製</b>で、active (稼働系) と shadow (待機系) の両方が同じイベントログを受け取り、同じ決定論的な計算を行う。active が落ちたときは、shadow がすでに同じ状態を再生し終えているため、瞬時に引き継げる。これは通常のレプリケーションのような「後から状態を転送する」のではなく、<b>常に同じ入力で並走させておく</b>という考え方である。</p>
+    <p>銘柄 (ティッカー) ごとにシャーディングして複数サーバに分散する設計も考えられるが、これには代償がある。シャーディングはサーバ間のネットワークホップを増やし、低遅延の原則(前節)に反する。この代償を払ってでもシャーディングするかは、1 台のサーバで処理しきれるスループットの限界と、ネットワークホップで増えるレイテンシのどちらが優先されるかという判断になる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="active-shadow 複製の図">
+        <rect x="40" y="30" width="200" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">active: 稼働系</text>
+        <text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">同じログを処理中</text>
+        <rect x="40" y="105" width="200" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="140" y="130" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">shadow: 待機系</text>
+        <text x="140" y="150" font-size="12" text-anchor="middle" fill="#12211a">同じログを並走処理中</text>
+        <line x1="240" y1="60" x2="375" y2="60" stroke="#9aa" stroke-width="1" stroke-dasharray="4 4"/>
+        <line x1="240" y1="135" x2="400" y2="135" stroke="#9aa" stroke-width="1" stroke-dasharray="4 4"/>
+        <text x="420" y="45" font-size="12" text-anchor="middle" fill="#4a5d54">同一の</text>
+        <text x="420" y="63" font-size="12" text-anchor="middle" fill="#4a5d54">イベントログ</text>
+        <text x="420" y="81" font-size="12" text-anchor="middle" fill="#4a5d54">を両方に配信</text>
+        <text x="300" y="20" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">active が落ちたら shadow が即座に引き継ぐ</text>
+      </svg>
+      <p class="cap">図: 常に同じ入力で並走させることで、障害時の引き継ぎを「状態転送」なしに瞬時に行う。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 他の応用: オンライン競売のシーケンシング</h2>
+    <p>オンライン競売(オークション)も、全参加者の入札に 1 つの順序を割り当てる必要がある点で、同じ発想を応用できる題材になる。競売には締切の定め方に 2 種類あり、<b>固定された締切時刻</b>のものと、<b>最後の入札から一定時間 (例: 60 分) 経過したら終了</b>という延長型のものがある。延長型は「残り時間が少ないほど入札が増える」という性質を持ち、締切直前に入札が集中するバーストに対応できるスケーラビリティ(高い書き込みスループット)が必要になる。この入札の受付順序こそが、誰が競売の勝者になるかを左右するため、取引所のシーケンサと同じく、入札イベントへの一貫した順序付けが設計の核になる。</p>
+    <p>ただし、オンライン競売は株式取引所ほど極端な低遅延(マイクロ秒単位)を要求されないことが多く、入札の処理自体を単一スレッド・単一サーバに限定する必要性は低い。何を最優先するか(低遅延か、スケーラビリティか)によって、同じ「全順序を割り当てる」という要件でも、採用する実装の重さが変わってくる。</p>
+  </section>
+
+  <section>
+    <h2>5. どこで壊れるか・何を諦めるか</h2>
+    <ul>
+      <li><b>非決定的な処理が紛れ込む</b>: マッチングエンジンの処理の中に、壁時計の現在時刻を読む、浮動小数点演算の順序に依存する、ハッシュテーブルの反復順序に依存するなど、実行環境によって結果が変わりうる処理が入ると、active と shadow の状態がずれる。決定論を破る処理を一切含めないことが設計上の絶対条件になる。</li>
+      <li><b>シーケンサ自体が単一障害点になる</b>: 全順序を決める役割を 1 つのコンポーネントに集約しているため、シーケンサが落ちると全体が止まる。シーケンサの冗長化も、結局は「誰が今の順序決定役か」を決める合意の問題(第 25 回)に帰着する。</li>
+      <li><b>UDP マルチキャストで配信される価格フィードは信頼性より速度を優先する</b>: 価格の更新は、古い値を届けるより新しい値を速く届ける方が有益なため、再送を伴う TCP ではなく UDP マルチキャストが使われることがある。一方、注文そのものは確実に届く必要があるため TCP が使われる、というように、同じシステム内でも要求によって転送方式を分けるのが定石になる。</li>
+      <li><b>シャーディングは低遅延の原則と正面から衝突する</b>: スループットを上げる一般的な手段(第 6 回のシャーディング)が、この文脈ではネットワークホップの増加という形でレイテンシを悪化させる。両者は常にトレードオフの関係にある。</li>
+    </ul>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい/なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/stock-exchange" target="_blank" rel="noopener">SDFC: stock-exchange</a> ― シーケンサ、active-shadow 複製・ティッカー単位のシャーディングとレイテンシの代償</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/online-auction-and-bidding" target="_blank" rel="noopener">SDFC: online-auction-and-bidding</a> ― 固定締切/延長型締切と入札の順序付けの題材</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/low-latency-stock-exchange.md" target="_blank" rel="noopener">ByteByteGo: Low Latency Stock Exchange</a> ― クリティカルパスの削り方(タスク数・時間・ホップ数・ディスク)と単一スレッド設計</li>
+
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-multi-region.html">← 第 32 回 マルチリージョンと災害対策</a><a href="./distsys-index.html">目次</a><a href="./distsys-flp-byzantine.html">第 34 回 不可能性とビザンチン障害 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+
+  {
+    q: '決定論的ステートマシン複製を採用したマッチングエンジンの処理ロジックの中に、「注文処理の途中で壁時計(システムの現在時刻)を読み、その値を結果の一部の計算に使う」というコードが紛れ込んでいた。これが引き起こす最も深刻な問題は何か。',
+    opts: [
+      'active と shadow が全く同じログを処理しても壁時計の値がずれ、内部状態が食い違ってしまい決定論が崩れる',
+      '壁時計の読み取りはディスク I/O を伴うため、クリティカルパスの遅延が数ミリ秒増えるだけで、状態の整合性には影響しないと考えられる',
+      '壁時計を読む処理はネットワーク分断(CAP 定理の P)を引き起こし、active と shadow の通信が切断されると考えられる',
+      '壁時計の値は全てのサーバで完全に同期しているため、この処理を入れても実務上はほとんど問題にならないと考えられる',
+      '壁時計を読む処理は、シーケンサが割り当てる全順序そのものを書き換えてしまい、注文の受付順序が逆転すると考えられる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>決定論的複製は「同じ入力列を与えれば必ず同じ状態になる」ことに依存する。壁時計の読み取り値はサーバごとに微妙に異なりうるため、同じイベントログを処理しても active と shadow の状態がずれ、複製の前提が崩れる。',
+      '壁時計の読み取り自体は通常メモリ上の操作でディスク I/O を伴わず、問題の本質は遅延ではなく非決定性による状態のずれにある。',
+      '壁時計を読む処理とネットワーク分断は無関係の別の層の現象であり、この記述は因果関係を取り違えている。',
+      '複数サーバの時計は完全には同期しておらず(第 15 回参照)、わずかなずれが決定論を破る原因になる。「完全に同期」という前提自体が誤り。',
+      'シーケンサによる全順序の割り当てと、各サーバ内での壁時計の読み取りは別の処理であり、後者が前者の割り当て結果そのものを書き換えるという因果関係は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じログを処理しても、非決定的な処理が混ざると状態がずれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="非決定性による状態のずれの図"><rect x="40" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">active: 時計 A を読む</text><rect x="320" y="30" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">shadow: 時計 B を読む</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">同じログでも結果が食い違う → 複製が崩れる</text></svg>'
+          + '<p class="cap">図: 非決定的な入力(壁時計)が決定論的複製の前提を破る。</p></div>'
+    }
+  },
+  {
+    q: '全ての注文に単一の順序を割り当てる「シーケンサ」を 1 つだけ置く設計において、このシーケンサが単一障害点(SPOF)になるという指摘に対し、最も妥当な対応はどれか。',
+    opts: [
+      'シーケンサは理論上落ちることがないコンポーネントなので、冗長化の検討自体が不要であると判断してよい',
+      'シーケンサを冗長化すれば、単一障害点の問題は自動的に完全に消滅し、追加の調整は何も要らないと判断してよい',
+      'シーケンサを複数台用意すれば十分であり、どの台が今の順序決定役かを決める仕組みは特に要らないと判断してよい',
+      'シーケンサの冗長化は、結局「今どの候補が正当な決定役か」を決める合意の問題に帰着し、Raft/Paxos と同種の課題が残る',
+      'シーケンサという概念自体が不要であり、各参加者が自分の時刻だけを基準に注文を処理すれば問題は解消すると判断してよい'
+    ],
+    ans: 3,
+    exps: [
+      'シーケンサもサーバである以上、ハードウェア障害やソフトウェア障害で落ちる可能性があり、「理論上落ちない」という前提は現実と矛盾する。',
+      '冗長化は負荷分散や待機系の用意には有効だが、「どの冗長化インスタンスが現在正当な決定役か」を決める新たな調整問題を生む。「自動的に完全に消滅」は楽観的すぎる。',
+      '複数台のシーケンサ候補が同時に異なる順序を割り当てると矛盾が生じるため、「どの台が今の決定役か」を一意に定める仕組みが欠かせない。',
+      '<b>これが正解。</b>シーケンサを冗長化しても、複数の候補のうち「今、正当に順序を決めてよいのは誰か」を一意に定める必要があり、これは第 25 回で見た合意アルゴリズム(Raft/Paxos)が解いているのと同種の課題に帰着する。',
+      '各参加者が自分の時刻だけで処理すると、参加者間で順序の認識が食い違う可能性があり、これは全順序を保証するという要件そのものを放棄する選択であり、SPOF の解消とは別の問題を生む。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>シーケンサを冗長化しても「誰が今の決定役か」という新たな調整問題が残ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="シーケンサ冗長化の課題の図"><rect x="40" y="40" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="115" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">候補シーケンサ 1</text><rect x="220" y="40" width="150" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="295" y="65" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">候補シーケンサ 2</text><text x="200" y="110" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">どちらが正当な決定役か → 合意の問題(第 25 回)</text></svg>'
+          + '<p class="cap">図: 冗長化は新たな合意の問題を生むだけで、SPOF の本質的な解消ではない。</p></div>'
+    }
+  },
+  {
+    q: 'ある取引所が「注文の送信には TCP を使うが、価格フィードの配信には UDP マルチキャストを使う」という設計を採っている。この使い分けの理由として最も妥当なものはどれか。',
+    opts: [
+      'TCP と UDP はどちらも同じ信頼性を持つため、この使い分けには技術的な根拠が無く、単なる慣習であると考えられる',
+      '注文は UDP の方が速いが規制上 TCP が義務付けられているだけで、技術的合理性とは無関係であると考えられる',
+      '注文は確実な到達が重要で再送を伴う TCP が適し、価格は新しい値を速く届ける方が有益なため再送の無い UDP が合理的である',
+      '価格フィードに UDP を使うと必ずデータが欠損するため、本来は推奨されない設計だが実装の簡便さだけで選ばれていると考えられる',
+      'TCP は複数の受信者に同時配信できないため技術的に使えず、UDP マルチキャストが唯一の選択肢として残っただけであると考えられる'
+    ],
+    ans: 2,
+    exps: [
+      'TCP は再送によって到達を保証する信頼性の高い通信、UDP は再送を行わない軽量な通信であり、両者の信頼性の性質は明確に異なる。「同じ信頼性」という前提は誤り。',
+      '通信方式の選択は規制だけで決まるものではなく、本文で述べた「注文は確実性、価格は速度」という技術的な合理性に基づく判断がある。',
+      '<b>これが正解。</b>注文は欠落すると取引が成立しないため確実な到達が必要で TCP が適する。価格フィードは古い値を再送で届けるより、新しい値をできるだけ速く届ける方が有益なため、再送を伴わない UDP マルチキャストの方が合理的になる。',
+      'UDP は必ず欠損するわけではなく、ネットワークの状態によって欠損の可能性があるというだけである。「必ず欠損する」という無条件の記述は誤り。',
+      'TCP も複数の受信者への配信自体は(個別の接続を複数張ることで)技術的に可能であり、「複数配信できないため技術的に使えない」という記述は不正確。マルチキャストという一対多の効率的な配信の仕組みが UDP に適している、という方が正確な理由。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>確実性が要る注文と、速度が要る価格フィードで、通信方式の優先順位が逆になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="TCP と UDP の使い分けの図"><rect x="30" y="30" width="230" height="80" rx="8" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">注文: TCP</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">再送で確実な到達を優先</text><rect x="300" y="30" width="230" height="80" rx="8" fill="#efe8f7" stroke="#7a5a9e"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">価格: UDP マルチキャスト</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">再送なしで最新値の速さを優先</text></svg>'
+          + '<p class="cap">図: 確実性と速さ、どちらを優先するかで通信方式が分かれる。</p></div>'
+    }
+  },
+  {
+    q: '単一サーバで動くマッチングエンジンのスループットが限界に近づいてきたため、銘柄(ティッカー)ごとにシャーディングして複数サーバに分散する案が出た。この案を評価する際に最も重要な論点は何か。',
+    opts: [
+      'シャーディングは常に無条件で正しい解であり、低遅延という要件とは無関係にスループットだけを見て決定すればよいと考えてよい',
+      'スループット向上とネットワークホップ増加によるレイテンシ悪化を比較し、低遅延の原則との優先順位を判断する必要がある',
+      'シャーディングを行うと注文の受付順序の決定論が自動的に保証されるため、シーケンサの設計は一切考慮不要になると考えてよい',
+      'シャーディングは必ずデータの一貫性を破壊するため、取引所のような金融システムでは理論上絶対に採用できないと考えてよい',
+      'シャーディングの単位は必ず時間帯でなければならず、銘柄単位での分割は技術的に不可能であると考えてよい'
+    ],
+    ans: 1,
+    exps: [
+      'シャーディングはスループットを上げる一般的な手段(第 6 回)だが、低遅延を最優先する取引所の文脈ではネットワークホップの増加という代償が伴うため、「無条件で正しい」とは言えない。',
+      '<b>これが正解。</b>シャーディングで複数サーバに分散すればスループットは上がりうるが、サーバ間のホップが増えレイテンシが悪化しうる。1 台のサーバの処理限界とレイテンシ悪化のどちらを優先するかという判断が、シャーディングを採用するかどうかの核心的な論点になる。',
+      '銘柄ごとにシャーディングしても、各銘柄内の注文順序を決めるシーケンサの設計は依然として必要であり、「一切考慮不要」という記述は誤り。',
+      'シャーディング自体がデータの一貫性を必ず破壊するという主張は過大であり、設計次第で銘柄単位の独立性を保ったまま一貫性を維持することは可能。',
+      '銘柄単位でのシャーディングは本文で示された現実の設計例であり、「技術的に不可能」という記述は事実と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>シャーディングはスループットとレイテンシのどちらを優先するかのトレードオフです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="シャーディングのトレードオフの図"><rect x="40" y="40" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="140" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">シャーディング: スループット↑</text><rect x="320" y="40" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="420" y="65" font-size="11" text-anchor="middle" fill="#b5401f" font-weight="700">ネットワークホップ: レイテンシ↑</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">低遅延を優先するなら代償が大きい</text></svg>'
+          + '<p class="cap">図: スループット向上とレイテンシ悪化は表裏一体のトレードオフ。</p></div>'
+    }
+  },
+  {
+    q: 'ある設計者が「取引所のマッチングエンジンは、Raft(第 25 回で見た多数派の合意で書き込みを確定する合意アルゴリズム)を使って各ノードに注文を複製すればよい」と提案した。この提案に対する最も妥当な批判はどれか。',
+    opts: [
+      'Raft は分散システムの合意アルゴリズムとして欠陥があり、どんな用途でも採用するべきではないと考えるべきである',
+      'Raft は多数派の確認応答を待つ往復の待ち時間がマイクロ秒単位の低遅延を求める取引所には重すぎるコストになりうる',
+      'Raft はリーダーを持たない設計であるため、取引所のような単一の順序付けが必要なシステムには原理的に適用できないと考えるべきである',
+      'Raft を使うと注文の内容が暗号化されず、セキュリティ上の理由で取引所には使えないと考えるべきである',
+      'Raft は単一ノードでしか動作しないアルゴリズムであるため、複数ノードへの複製という目的自体に使えないと考えるべきである'
+    ],
+    ans: 1,
+    exps: [
+      'Raft は多くの分散システムで実用されている合意アルゴリズムであり、「どんな用途でも採用するべきではない」という全否定は過大な評価である。',
+      '<b>これが正解。</b>Raft はログの複製を確定させるために多数派からの確認応答を待つ必要があり、この往復の待ち時間がマイクロ秒単位の低遅延を求める取引所には無視できないコストになる。決定論的な単一スレッド処理と active-shadow の並走は、合意の往復を経ずに低遅延を達成できる点で異なる設計思想を採る。',
+      'Raft はむしろリーダーを置いて書き込みを単純化する設計(第 25 回)であり、「リーダーを持たない」という記述は誤り。',
+      '暗号化の有無は合意アルゴリズムの選択とは別の、通信層の実装上の話であり、Raft 自体がセキュリティを損なうという主張は不正確。',
+      'Raft は複数ノード間でログを複製する目的で設計されたアルゴリズムであり、「単一ノードでしか動作しない」という記述は根本的に誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Raft の多数派確認の往復時間が、低遅延取引所には重すぎるコストになります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Raft の往復コストの図"><rect x="30" y="40" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="140" y="65" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">Raft: 多数派の確認応答を待つ</text><rect x="300" y="40" width="220" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="410" y="65" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">決定論+active-shadow: 往復なし</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">往復コストの有無がマイクロ秒単位で差になる</text></svg>'
+          + '<p class="cap">図: 合意の往復を経ない設計が、低遅延のために選ばれる理由。</p></div>'
+    }
+  },
+  {
+    q: 'オンライン競売サービスが「最後の入札から 60 分経過したら終了」という延長型の締切を採用した。締切直前に大量の入札が集中し、入札イベントを単一の順序に割り当てる処理が追いつかなくなった。この設計から読み取れる教訓として最も妥当なものはどれか。',
+    opts: [
+      '延長型の締切は「残り時間が少ないほど入札が増える」性質を持ち、順序付け経路には高い書き込みスループットへの耐性が要求される',
+      '延長型の締切を採用した時点で、入札の順序付けという処理自体が完全に不要になるという関係が成り立つ',
+      '入札が集中するのは実装のバグが原因であり、延長型の締切という仕組み自体には起因しないという関係が成り立つ',
+      '固定締切型の競売は原理的に入札の集中が発生しないため、順序付けの設計を考える必要が無いという関係が成り立つ',
+      '入札の順序付けに失敗しても、競売の勝者が誰になるかには一切影響しないという関係が成り立つ'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>延長型の締切は「入札があるたびに終了時刻が延びる」ため、残り時間が少なくなるほど入札が集中しやすい性質を持つ。この性質を踏まえ、入札イベントの受付・順序付け経路には固定締切型よりも高い書き込みスループットへの耐性が求められる、というのが設計上の教訓になる。',
+      '延長型であっても「誰の入札が先に受理されたか」によって最終的な最高額が変わるため、順序付けという処理自体の必要性は無くならない。',
+      '延長型の締切という仕組みの性質上、構造的に締切直前の入札が増えやすいという事実があり、「実装のバグが原因」という説明は本質を見誤っている。',
+      '固定締切型でも、締切の直前に入札が集中する可能性は十分にある。「原理的に発生しない」という記述は過大な一般化。',
+      '入札の受付順序は、誰が最終的な最高額の入札者になるかを左右するため、順序付けの失敗は競売結果そのものに影響しうる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>延長型の締切は、残り時間が減るほど入札が増えるという自己強化的な性質を持ちます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="延長型締切のバースト性の図"><line x1="40" y1="110" x2="520" y2="110" stroke="#9aa" stroke-width="2"/><text x="40" y="130" font-size="12.5" fill="#12211a">時間経過</text><path d="M60,100 C200,95 350,60 500,20" stroke="#c0492f" stroke-width="3" fill="none"/><text x="400" y="45" font-size="13" fill="#b5401f" font-weight="700">入札頻度が締切間際に急増</text></svg>'
+          + '<p class="cap">図: 延長型の締切は締切間際のバーストに対応できる設計が必要。</p></div>'
+    }
+  },
+  {
+    q: '取引所のサーバが多数の CPU コアを持つ大規模マシンであるにもかかわらず、Matching Engine をあえて単一スレッドで動作させる設計を採る理由として最も妥当なものはどれか。',
+    opts: [
+      'マルチスレッド化は実装が簡単すぎて技術的なやりがいが無いため、単一スレッドの方が開発者に好まれるからという理由',
+      '単一スレッドにすると消費電力が増えるため、環境負荷を優先してあえて選んでいるからという理由',
+      '複数スレッドの並行処理は実行順序が変わりうり決定論が崩れるが、CPU 固定の単一スレッドならロックも不要で両方得やすいから',
+      '単一スレッドでなければシーケンサという概念自体が成立しないという、技術的な依存関係があるからという理由',
+      'マルチコアのマシンでは単一スレッドの処理が技術的に不可能であり、選択の余地が無いからという理由'
+    ],
+    ans: 2,
+    exps: [
+      '開発者の好みという主観的な理由は、低遅延・決定論という取引所の設計要件を説明する根拠にはならない。',
+      '消費電力の観点は本文で述べられた設計理由ではなく、単一スレッド化の主目的(決定論と低遅延)とは異なる軸の話。',
+      '<b>これが正解。</b>複数スレッドでの並行処理はスレッドのスケジューリング次第で実行順序が変わりうり、決定論が崩れる原因になる。CPU コアに固定した単一スレッドで順番に処理すれば、ロックの取得やコンテキストスイッチの発生する余地が無くなり、決定論と低遅延の両方を得やすい。',
+      'シーケンサは「全順序を割り当てる」役割であり、マッチングエンジンのスレッド数とは独立した別のコンポーネントの設計判断。依存関係があるという記述は不正確。',
+      '多数の CPU コアを持つマシンでも、1 つのスレッドだけをコアに固定して動かすこと自体は技術的に可能であり、「不可能」という記述は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>単一スレッド・ CPU 固定は、ロックもスケジューリングの揺れも排除します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="単一スレッド設計の利点の図"><rect x="40" y="40" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="150" y="65" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">マルチスレッド: 実行順序が揺れる</text><rect x="300" y="40" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="410" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">単一スレッド固定: 決定論を保つ</text></svg>'
+          + '<p class="cap">図: 単一スレッド化は決定論を守るための直接的な手段。</p></div>'
+    }
+  },
+  {
+    q: '障害で落ちたマッチングエンジンのサーバを、イベントログから再生して復旧させる設計を採っている。再生中に、ログの途中に記録されていたイベントの一部がディスク破損で欠落していたことが判明した。最も妥当な対応はどれか。',
+    opts: [
+      '欠落したイベントは無視して、ログの残りの部分だけを再生し、あとは状態が自動的に正しく補完されると考えてよい',
+      '1 件でも欠落すると決定論的な再生の前提が崩れるため、直前のスナップショットへ遡るか、欠落を検知する仕組みで未然に防ぐ必要がある',
+      'イベントログの欠落は再生結果に一切影響しないため、特別な対応は不要であると考えてよい',
+      'イベントログが欠落した場合は、shadow サーバも同じログを使っているため、同じ箇所で同じように欠落しているはずなので問題にならないと考えてよい',
+      'イベントログの欠落は、シーケンサが自動的に検知して該当イベントを再送してくれる標準機能に含まれていると考えてよい'
+    ],
+    ans: 1,
+    exps: [
+      '欠落したイベントは状態の一部(ある注文の情報)を失っていることを意味し、「自動的に正しく補完される」という保証は無い。',
+      '<b>これが正解。</b>決定論的な再生は「入力列を完全に再現できること」が前提であり、1 件でも欠落するとその前提が崩れる。直前の完全なスナップショットまで遡るか、チェックサムなどで欠落を未然に検知する仕組みが必要になる。',
+      'イベントログの欠落は再生結果の状態そのものに影響するため、「一切影響しない」という記述はこの設計の前提と矛盾する。',
+      'ディスク破損はサーバごとに独立して発生する物理的な故障であり、active と shadow が同じ箇所で同じように欠落するとは限らない。むしろ別々のストレージを使うことで、片方が欠落しても他方から復旧できるようにするのが冗長化の目的の一つ。',
+      'シーケンサの役割は注文に全順序を割り当てることであり、ディスク破損によるログの物理的な欠落を自動検知・再送する機能を持つという前提は本文に無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 件の欠落でも、再生結果の状態が正しい状態と食い違う可能性があります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ログ欠落の影響の図"><rect x="40" y="50" width="100" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132"/><rect x="150" y="50" width="100" height="30" rx="5" fill="#fbeeea" stroke="#c0492f" stroke-dasharray="4 4"/><text x="200" y="40" font-size="12" text-anchor="middle" fill="#b5401f">欠落</text><rect x="260" y="50" width="100" height="30" rx="5" fill="#eaf5ef" stroke="#0f5132"/><text x="200" y="110" font-size="13" text-anchor="middle" fill="#12211a">1 件の欠落で以降の再生結果が本来の状態と食い違う</text></svg>'
+          + '<p class="cap">図: 完全な入力列の再現が、決定論的複製の前提条件。</p></div>'
+    }
+  },
+  {
+    q: '運用チームが、ディスク容量を節約するために「1 年以上前のイベントログは安全に削除してよい」と判断し、古いログを全て削除した。この判断が安全であるために、最低限満たされているべき条件は何か。',
+    opts: [
+      'シーケンサが稼働中であれば、古いログを削除しても過去の状態をいつでも再現できるため、特別な条件は不要であると考えられる',
+      '1 年という期間はどのシステムでも業界標準として定められており、条件を個別に検討する必要は無いと考えられる',
+      'active サーバが稼働していれば、shadow サーバは古いログを参照する必要が無いため、削除は常に無条件に安全であると考えられる',
+      'ログを圧縮(compaction)してディスク使用量を減らせば、削除そのものは不要になるため、この判断自体が誤りであると考えられる',
+      '削除範囲より新しい完全なスナップショットが存在していること。無いと削除範囲のログが要る場合に状態の再現手段が失われる'
+    ],
+    ans: 4,
+    exps: [
+      'シーケンサが稼働していることと、過去のログを削除した場合に過去の状態を再現できることは別の話。シーケンサは順序を割り当てる役割であり、削除済みログの内容を保持する機能ではない。',
+      '保持期間の決め方はシステムの要件(規制、障害対応の想定期間など)に依存し、全システムに共通の業界標準があるという前提は本文に無い。',
+      'shadow サーバが参照する必要が無いとしても、新たにサーバを追加して最初から状態を再現したい場合など、古いログが必要になる場面は残りうる。「常に無条件に安全」は過大な一般化。',
+      '圧縮(第 28 回のコンパクションと同種の発想)は使用量を減らす別の手段であり、「削除そのものが不要になる」という結論は、削除とスナップショットの役割分担を混同している。',
+      '<b>これが正解。</b>イベントログを削除しても安全であるためには、削除する範囲より新しい時点の完全なスナップショットが存在していることが必須の条件になる。スナップショットがあれば、そこから先のログだけを再生すれば状態を再現できるが、無ければ削除した範囲のログが必要になった時点で状態を再現する手段が失われる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>スナップショットが無いと、ログの削除が再生可能性そのものを失わせます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="スナップショットとログ削除の関係の図"><rect x="40" y="50" width="140" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-dasharray="4 4"/><text x="110" y="75" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">削除された古いログ</text><rect x="200" y="50" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="270" y="75" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">スナップショット</text><rect x="360" y="50" width="140" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="430" y="75" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">以降のログ(保持)</text><text x="280" y="120" font-size="13" text-anchor="middle" fill="#12211a">スナップショットがあれば削除後も再現できる</text></svg>'
+          + '<p class="cap">図: スナップショットの有無が、ログ削除の安全性を左右する。</p></div>'
+    }
+  },
+  {
+    q: 'ある新しい暗号資産の取引所を立ち上げるチームが、本文で見た「決定論的ステートマシン複製・単一スレッドのクリティカルパス・ active-shadow 複製・ UDP と TCP の使い分け」をすべて学んだ上で、「取扱銘柄が少なく、マイクロ秒単位の競争は無いが、サーバがクラウド上の仮想マシンで、物理 CPU への固定ピン付けができない」という制約の中で設計方針を考えている。最も妥当な判断はどれか。',
+    opts: [
+      '物理 CPU へのピン付けができないなら、取引所という時点でこのシステムは原理的に構築不可能だと結論づける判断',
+      'マイクロ秒単位の競争が無い以上、低遅延の原則は一切考慮せず、通常の Web サービスと全く同じ設計でよいと判断する',
+      'ピン付けができない制約を無視して、本文の設計をそのまま一字一句コピーし、動かないまま運用を開始するという判断',
+      'マイクロ秒単位の競争が無いなら決定論自体も不要と判断し、active-shadow の並走をやめて非同期レプリケーションに切り替える',
+      '極端な低遅延設計までは不要だが、決定論的な単一スレッドと active-shadow は維持し、要求に応じ厳しさを調整する判断'
+    ],
+    ans: 4,
+    exps: [
+      '物理 CPU へのピン付けができないことは、低遅延の極限を追求する上での制約だが、決定論的な複製という設計自体を不可能にするものではない。「原理的に構築不可能」は過大な結論。',
+      '低遅延の原則を全く考慮しないという判断は、取引所としての応答性の要件を無視することになり、「一切考慮しない」という極端な判断は妥当とは言えない。',
+      '制約を無視して動かない設計をそのまま運用開始するのは、現実の制約を反映しない無責任な判断であり、妥当な方針とは言えない。',
+      '決定論と active-shadow はマイクロ秒単位の競争の有無とは独立した、障害復旧や状態一致の正しさを支える設計であり、低遅延の要求が緩いことが決定論の必要性を無くす理由にはならない。',
+      '<b>これが正解。</b>マイクロ秒単位の競争が無いなら、物理ピン付けのような極端な低遅延設計までは必須ではないが、決定論的な単一スレッド処理と active-shadow による複製は、障害復旧や状態一致の正しさを支える設計として引き続き有効であり、要求レイテンシに応じて設計の厳しさを調整するのが妥当な判断になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>決定論と active-shadow は低遅延の極限とは別の価値(正しさ)を持ち、制約に応じて厳しさを調整できます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="設計の厳しさの調整の図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">決定論+active-shadow(維持)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">物理ピン付け等(要求次第で緩和)</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">正しさを支える部分と、極限の速さを支える部分を分けて考える</text></svg>'
+          + '<p class="cap">図: 制約に応じて、守るべき設計と緩めてよい設計を分けて判断する。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

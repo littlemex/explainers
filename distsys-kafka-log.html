@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kafka とログ中心設計 ― 「書けた」の正確な意味</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 21 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>Kafka とログ中心設計 ― 「書けた」の正確な意味</h1>
+  <p>Kafka は届いたら消える「キュー」ではなく、追記され続ける「ログ」であり、acks と ISR の設定次第で「書けた」の意味そのものが変わる</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 09 回 <a href="./distsys-message-queues.html">メッセージキューと Pub/Sub</a></p>
+  <p class="intro">第 09 回で見たキューは「受信者が ack したら消える」仕組みでした。Kafka はそれとは違い、書き込まれたメッセージをしばらく (設定した保持期間だけ) 消さずに追記し続ける<b>ログ</b>として扱います。1 件のメッセージを 1 人が受け取ったら終わり、ではなく、複数のコンシューマグループがそれぞれ自分の読み取り位置 (オフセット) を持って同じログを独立に読み進められます。ここでは Kafka 特有の設計 ― パーティション・オフセット・ ISR ・ acks ・冪等プロデューサ・トランザクション ― を、Apache Kafka 公式ドキュメントの定義に沿って正確に確認します。</p>
+
+  <!-- ===== 解説パート 1: ログ中心設計とは何か ===== -->
+  <section>
+    <h2>1. ログ中心設計とは何か</h2>
+    <p>通常のメッセージキューは「取り出されたら無くなる」郵便受けのようなものでした。Kafka の<b>トピック (topic)</b> は、郵便受けではなく<b>追記専用の記録帳 (append-only log)</b> です。新しいメッセージは常に末尾に追加され、既存の記録は (保持期間が切れるまで) 書き換えられたり消されたりしません。</p>
+    <p>コンシューマは記録帳を「読んだら破る」のではなく、「どこまで読んだか」という<b>オフセット (offset, 記録帳の何行目まで読んだかを示す位置)</b> だけを自分で管理します。この違いが重要な結果を生みます。コンシューマ A がオフセット 100 まで読んでいても、コンシューマ B は同じ記録帳をオフセット 40 から独立に読める、ということです。<b>コンシューマグループ (consumer group)</b> という単位でこのオフセットを管理するため、「分析用のグループ」と「通知用のグループ」が同じトピックを、互いに干渉せず、それぞれ自分の速さで読み進められます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="キューとログの違いを示す図">
+        <text x="150" y="20" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">キュー (第 09 回)</text>
+        <rect x="30" y="34" width="60" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5" opacity="0.3"/>
+        <rect x="95" y="34" width="60" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5" opacity="0.3"/>
+        <rect x="160" y="34" width="60" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="190" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">C</text>
+        <text x="150" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">受信して ack したら消える</text>
+        <text x="480" y="20" font-size="14" text-anchor="middle" fill="#1f4a68" font-weight="700">ログ (Kafka)</text>
+        <rect x="380" y="34" width="50" height="34" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <rect x="432" y="34" width="50" height="34" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <rect x="484" y="34" width="50" height="34" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <rect x="536" y="34" width="50" height="34" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="405" y="56" font-size="12.5" text-anchor="middle" fill="#1f4a68">0</text>
+        <text x="457" y="56" font-size="12.5" text-anchor="middle" fill="#1f4a68">1</text>
+        <text x="509" y="56" font-size="12.5" text-anchor="middle" fill="#1f4a68">2</text>
+        <text x="561" y="56" font-size="12.5" text-anchor="middle" fill="#1f4a68">3</text>
+        <line x1="457" y1="72" x2="457" y2="90" stroke="#198754" stroke-width="2"/>
+        <text x="457" y="104" font-size="12.5" text-anchor="middle" fill="#198754">グループ A</text>
+        <text x="457" y="118" font-size="12.5" text-anchor="middle" fill="#198754">offset=1</text>
+        <line x1="561" y1="72" x2="561" y2="130" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="561" y="144" font-size="12.5" text-anchor="middle" fill="#5b3d80">グループ B</text>
+        <text x="561" y="158" font-size="12.5" text-anchor="middle" fill="#5b3d80">offset=3</text>
+        <text x="480" y="188" font-size="12.5" text-anchor="middle" fill="#12211a">消えずに残り、グループごとに</text>
+        <text x="480" y="204" font-size="12.5" text-anchor="middle" fill="#12211a">読み取り位置を独立に進められる</text>
+      </svg>
+      <p class="cap">図: キューは消費したら消えるが、Kafka のログは残り続け、グループごとに読み取り位置が独立する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: パーティションとキー、ホットパーティション ===== -->
+  <section>
+    <h2>2. パーティションとキー、ホットパーティション</h2>
+    <p>1 つのトピックは複数の<b>パーティション (partition, ログを分割した並列レーン)</b> に分かれています。パーティションを増やすほど、複数のブローカーと複数のコンシューマに処理を分散でき、スループットが上がります。問題は「どのメッセージをどのパーティションに置くか」です。</p>
+    <p>プロデューサはメッセージに<b>キー (key)</b> を付けられます。同じキーのメッセージは必ず同じパーティションに入り、同じパーティション内では書き込んだ順に読み出せます (詳しくは 5 節)。広告クリックの集計システムを例にすると、「どの広告がクリックされたか」を素直に集計したいからといって <code>ad_id</code> をキーに選ぶと、人気の広告 1 つに大量のクリックが集中し、そのパーティションだけが異常に混雑する<b>ホットパーティション (hot partition)</b> が起きます。クリックが 1 日 10 億件、平均 10,000 TPS (ピークはその 5 倍) という規模では、1 つのキーにアクセスが集中した瞬間にそのパーティションを担当するブローカーだけが過負荷になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 210" role="img" aria-label="ホットパーティションの図">
+        <text x="300" y="20" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">キーを ad_id にすると、人気の広告に集中する</text>
+        <rect x="40" y="40" width="130" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="105" y="63" font-size="12.5" text-anchor="middle" fill="#0f5132">partition 0 (通常)</text>
+        <rect x="220" y="40" width="130" height="36" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="285" y="63" font-size="12.5" text-anchor="middle" fill="#b5401f">partition 1 (人気広告)</text>
+        <rect x="400" y="40" width="130" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="465" y="63" font-size="12.5" text-anchor="middle" fill="#0f5132">partition 2 (通常)</text>
+        <text x="285" y="105" font-size="12.5" text-anchor="middle" fill="#b5401f">クリックの大半がここに集中</text>
+        <text x="285" y="123" font-size="12.5" text-anchor="middle" fill="#b5401f">このブローカーだけ過負荷になる</text>
+        <text x="300" y="165" font-size="13" text-anchor="middle" fill="#12211a">対策: 集計したい単位とは別の、散らばりの良いキー (例: user_id) を使う</text>
+        <text x="300" y="185" font-size="12.5" text-anchor="middle" fill="#4a5d54">集計自体はコンシューマ側やストリーム処理で後から行う</text>
+      </svg>
+      <p class="cap">図: 集計の単位をそのままキーにすると、人気の広告 1 つがパーティションを独占してしまう。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: ISR と acks ===== -->
+  <section>
+    <h2>3. ISR と acks ― 「書けた」の正確な意味</h2>
+    <p>各パーティションには 1 台の<b>リーダー (leader)</b> と、複製を持つ<b>フォロワー (follower)</b> がいます。Kafka 公式ドキュメントは、リーダーに追いついているレプリカの集合を<b>ISR (in-sync replicas)</b> と呼び、「リーダーに選べるのは ISR のメンバーだけ」「書き込みは ISR の全員が受け取るまでコミット済みとはみなされない」と定義しています。つまり ISR が小さいほど書き込みは速いが、そのレプリカが壊れたときにデータを失う範囲が広がります。</p>
+    <p>プロデューサ側の <code>acks</code> 設定は、この ISR とセットで「書けた」の意味を決めます。公式ドキュメントの定義は次の通りです。</p>
+    <ul>
+      <li><code>acks=0</code> ― プロデューサはブローカーからの応答を一切待ちません。最速ですが、ブローカーが受け取れていなくても送信側は気づけません。</li>
+      <li><code>acks=1</code> ― リーダーが自分のログに書き込んだ時点で応答します。フォロワーへの複製が完了する前にリーダーが壊れると、その書き込みは失われることがあります。</li>
+      <li><code>acks=all</code> (<code>-1</code>) ― リーダーは ISR の全員が書き込みを受け取るまで応答を返しません。最も durable (壊れにくい) ですが、レイテンシは最大になります。</li>
+    </ul>
+    <p>ここに<b>min.insync.replicas</b> というブローカー側の設定が絡みます。公式ドキュメントは「<code>acks=all</code> が指定されたとき、書き込みが成功するために必要な ISR の最小数を指定する」と定義しており、ISR がこの数を下回ると、プロデューサは <code>NotEnoughReplicas</code> という例外で書き込みを拒否されます。つまり「<code>acks=all</code> にすれば絶対安全」ではなく、<code>min.insync.replicas</code> を適切な値 (複製数 3 なら 2 など) にしてはじめて、1 台の故障でデータを失わないことが保証されます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 220" role="img" aria-label="acksとISRの関係を示す図">
+        <rect x="30" y="20" width="140" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="100" y="45" font-size="13" text-anchor="middle" fill="#0f5132">リーダー</text>
+        <rect x="210" y="20" width="140" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="280" y="45" font-size="13" text-anchor="middle" fill="#1f4a68">フォロワー (ISR)</text>
+        <rect x="390" y="20" width="140" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="460" y="45" font-size="13" text-anchor="middle" fill="#1f4a68">フォロワー (ISR)</text>
+        <text x="80" y="90" font-size="12.5" fill="#4a5d54">acks=0: 待たない</text>
+        <text x="80" y="115" font-size="12.5" fill="#4a5d54">acks=1: リーダー書き込みのみ待つ</text>
+        <text x="80" y="140" font-size="12.5" fill="#4a5d54">acks=all: ISR 全員の受領を待つ</text>
+        <text x="300" y="175" font-size="13" text-anchor="middle" fill="#12211a">min.insync.replicas が ISR の下限を決める</text>
+        <text x="300" y="195" font-size="12.5" text-anchor="middle" fill="#4a5d54">下回ると acks=all の書き込みは NotEnoughReplicas で失敗する</text>
+      </svg>
+      <p class="cap">図: acks は「どこまで待つか」、min.insync.replicas は「ISR がどこまで減ってよいか」を決める、別々のノブ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 冪等プロデューサとトランザクション ===== -->
+  <section>
+    <h2>4. 冪等プロデューサとトランザクション</h2>
+    <p>第 09 回で、厳密な exactly-once は分断がある限り原理的に不可能だと説明しました。Kafka はこの限界を受け入れつつ、「ネットワークの再送によって Kafka 内で重複が生まれる」という限定された問題だけを解決する<b>冪等プロデューサ (idempotent producer)</b> を用意しています。公式ドキュメントの定義では、ブローカーがプロデューサごとに PID (producer ID) を割り当て、プロデューサが各メッセージに付けるシーケンス番号を使って重複を検出します。これにより「再送によってログに同じメッセージが 2 回入ること」が無くなります。<code>enable.idempotence=true</code> にすると、Kafka は自動的に <code>acks=all</code>・<code>retries>0</code>・<code>max.in.flight.requests.per.connection<=5</code> を要求し、これは新しいクライアントでは既定で有効です。</p>
+    <p>冪等プロデューサが守る範囲は「1 つのプロデューサが 1 つのパーティションに送る時」だけです。複数のパーティションにまたがる書き込みをまとめて<b>アトミック (all-or-nothing, 全部成功するか全部失敗するかのどちらかにする)</b> にしたいなら、<b>トランザクション</b> を使います。公式ドキュメントは「プロデューサが複数のパーティションにメッセージをアトミックに送る機能を 0.11.0.0 以降サポートする」と説明しています。プロデューサ側では <code>transactional.id</code> を設定し、再起動後に前のインスタンスの未完了トランザクションを中断させます。読み取り側では、コンシューマの <code>isolation.level</code> を <code>read_committed</code> にすると、コミットされていないトランザクションのメッセージは見えなくなります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="冪等プロデューサとトランザクションの範囲の違い">
+        <rect x="20" y="20" width="270" height="76" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">冪等プロデューサ</text>
+        <text x="155" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">1 プロデューサ → 1 パーティションの</text>
+        <text x="155" y="81" font-size="12.5" text-anchor="middle" fill="#12211a">重複を防ぐ</text>
+        <rect x="330" y="20" width="270" height="76" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="465" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">トランザクション</text>
+        <text x="465" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">複数パーティションへの書き込みを</text>
+        <text x="465" y="81" font-size="12.5" text-anchor="middle" fill="#12211a">全部成功/全部失敗にする</text>
+        <text x="310" y="130" font-size="13" text-anchor="middle" fill="#12211a">読み取り側は isolation.level=read_committed で</text>
+        <text x="310" y="148" font-size="13" text-anchor="middle" fill="#12211a">コミットされていない書き込みを見ないようにする</text>
+      </svg>
+      <p class="cap">図: 冪等プロデューサは単一パーティションの重複防止、トランザクションは複数パーティションの一括成功/失敗。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 順序とキー ===== -->
+  <section>
+    <h2>5. 順序とキー</h2>
+    <p>Kafka が保証する順序は、<b>同じパーティション内に限られます</b>。トピック全体では順序は保証されません。2 節で見たように、同じキーのメッセージは常に同じパーティションに入るため、「このキーの中では書いた順に読める」という範囲限定の保証が得られます。これは第 09 回で見た FIFO キューの「同じグループの中だけ順序を守る」という考え方と同じ形をしています。</p>
+    <p>送信側にも順序を乱す要因があります。<code>max.in.flight.requests.per.connection</code> が 1 より大きいと、複数のリクエストが同時に飛んでいる状態になり、1 回目が失敗して再送される間に 2 回目が先に書き込まれ、順序が入れ替わることがあります。冪等プロデューサを有効にすると、Kafka はブローカー側でシーケンス番号を使ってこの入れ替わりを防ぎます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="パーティション内順序とパーティション間の順序の違い">
+        <text x="150" y="20" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">partition 0 (同じキー)</text>
+        <rect x="40" y="34" width="50" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="65" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">1</text>
+        <rect x="100" y="34" width="50" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="125" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">2</text>
+        <rect x="160" y="34" width="50" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="185" y="56" font-size="12.5" text-anchor="middle" fill="#0f5132">3</text>
+        <text x="150" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">パーティション内は書いた順で読める</text>
+        <text x="450" y="20" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">partition 1 (別のキー)</text>
+        <rect x="360" y="34" width="50" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="385" y="56" font-size="12.5" text-anchor="middle" fill="#5b3d80">4</text>
+        <rect x="420" y="34" width="50" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="445" y="56" font-size="12.5" text-anchor="middle" fill="#5b3d80">5</text>
+        <text x="450" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">別パーティションとの前後関係は決まらない</text>
+        <text x="300" y="140" font-size="13" text-anchor="middle" fill="#12211a">トピック全体での「1 → 2 → 3 → 4 → 5」という順序は保証されない</text>
+      </svg>
+      <p class="cap">図: Kafka が保証する順序はパーティション内だけで、パーティションをまたぐ順序は決まらない。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: ストリーム処理のウィンドウと実システムの例 ===== -->
+  <section>
+    <h2>6. ストリーム処理のウィンドウと、広告クリック集計の実例</h2>
+    <p>ログから流れてくるメッセージを「直近 1 分間の合計」のように集計したいとき、その 1 分間の切り方を<b>ウィンドウ (window)</b> と呼びます。ここで迷いやすいのが、メッセージに記録された<b>イベント時刻 (event time, 実際にクリックが起きた時刻)</b> と、Kafka がそれを処理した<b>処理時刻 (processing time)</b> の違いです。ネットワークの遅延でメッセージが遅れて届くと、処理時刻でウィンドウを切ると集計がずれます。イベント時刻を使う場合は、「もうこれより古いイベントは来ない」とみなす境界線である<b>ウォーターマーク (watermark)</b> を設け、それより遅れて届いたデータは諦めるか別扱いにする、という判断が必要になります。</p>
+    <p>広告クリック集計システムを例に、ここまでの内容を一つに結びます。要件は 1 日 10 億クリック (平均 10,000 TPS、ピーク 50,000 TPS)、そして「1 クリック 1,000 ドルの広告もあるので、二重課金は絶対に避けたい」というものです。これは 4 節の冪等プロデューサ (同じクリックが再送で 2 回記録されるのを防ぐ) と、2 節のパーティションキー選び (<code>ad_id</code> ではなく散らばりの良いキーを使う) の両方が関わる、現実の設計判断です。要件には「結果整合性で十分 (eventual consistency is good enough)」とも書かれており、集計ダッシュボードへの反映が多少遅れることは許容し、課金の正確さを優先する、という優先順位になっています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 200" role="img" aria-label="イベント時刻とウォーターマークの図">
+        <line x1="30" y1="40" x2="570" y2="40" stroke="#9aa" stroke-width="2"/>
+        <text x="30" y="25" font-size="12.5" fill="#12211a">イベント時刻</text>
+        <circle cx="120" cy="40" r="6" fill="#198754"/>
+        <circle cx="220" cy="40" r="6" fill="#198754"/>
+        <circle cx="300" cy="40" r="6" fill="#c0492f"/>
+        <text x="300" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">遅れて到着</text>
+        <line x1="260" y1="20" x2="260" y2="90" stroke="#7a5a9e" stroke-width="2" stroke-dasharray="4 4"/>
+        <text x="260" y="105" font-size="12.5" text-anchor="middle" fill="#5b3d80">ウォーターマーク</text>
+        <text x="300" y="140" font-size="13" text-anchor="middle" fill="#12211a">ウォーターマークより前のウィンドウは確定して集計を締める</text>
+        <text x="300" y="160" font-size="13" text-anchor="middle" fill="#12211a">それより遅れた分は別扱い (遅延データ) として扱う</text>
+      </svg>
+      <p class="cap">図: ウォーターマークを過ぎたウィンドウは集計を締め、それより遅れて届くデータは別途扱う。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/the-ultimate-kafka-101-you-cannot-miss.md" target="_blank" rel="noopener">ByteByteGo: The Ultimate Kafka 101 You Cannot Miss</a> ― トピック・パーティション・プロデューサ・コンシューマ・クラスタという基本語彙を 1 節で使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/why-is-kafka-fast.md" target="_blank" rel="noopener">ByteByteGo: Why is Kafka Fast?</a> ― シーケンシャル I/O とゼロコピーという設計思想の紹介に使った (本文では深入りせず参考に留めた)。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/can-kafka-lose-messages.md" target="_blank" rel="noopener">ByteByteGo: Can Kafka Lose Messages?</a> ― プロデューサ・ブローカー・コンシューマの 3 段階で損失が起きる場所を切り分ける構成を 3 ・ 4 節に反映した。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/ad-click-counter" target="_blank" rel="noopener">SDFC: ad-click-counter</a> ― 1 日 10 億クリック・平均 10,000 TPS (ピーク 50,000 TPS) ・ 1 クリック 1,000 ドルの広告の二重課金回避という要件を 2 ・ 6 節の実例に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/ad-click-ecosystem" target="_blank" rel="noopener">SDFC: ad-click-ecosystem</a> ― 「ad_id をパーティションキーにするとホットパーティションになる」という議論を 2 節のホットパーティション例に使った。</li>
+      <li><a href="https://kafka.apache.org/43/design/design/" target="_blank" rel="noopener">Apache Kafka Documentation: Design ― Replication / Message Delivery Semantics / Using Transactions</a> ― ISR の定義、コミットの条件、冪等プロデューサと transactional.id ・ isolation.level の一次情報として 3 ・ 4 節に使った。</li>
+      <li><a href="https://kafka.apache.org/43/configuration/producer-configs/" target="_blank" rel="noopener">Apache Kafka Documentation: Producer Configs</a> ― acks (0 / 1 / all) と enable.idempotence の正確な定義の一次情報。</li>
+      <li><a href="https://kafka.apache.org/43/configuration/broker-configs/" target="_blank" rel="noopener">Apache Kafka Documentation: Broker Configs</a> ― min.insync.replicas の定義と NotEnoughReplicas の挙動の一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-saga-outbox-cdc.html">← 第 20 回 Saga・Outbox・CDC</a><a href="./distsys-index.html">目次</a><a href="./distsys-rate-limiter.html">第 22 回 分散レートリミッタ →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'Kafka の ISR (in-sync replicas) の正確な定義として最も適切なものは？',
+    opts: [
+      'クラスタ内の全ブローカーのうち、CPU 使用率が低い順に並べたリスト',
+      '過去に一度でもリーダーだった経験を持つレプリカの集合',
+      'ユーザーが手動で指定した、絶対に削除してはいけないレプリカの集合',
+      'リーダーに追いついていて、次のリーダーに選ばれる資格を持つレプリカの集合',
+      'ディスク容量に余裕があるブローカーだけを集めたレプリカの集合'
+    ],
+    ans: 3,
+    exps: [
+      'CPU 使用率は ISR の定義に関係しない。',
+      '過去の経験ではなく、現在リーダーに追いついているかどうかで決まる、動的な集合。',
+      '手動指定ではなく、Kafka がレプリケーションの追従状況から自動的に管理する集合。',
+      '<b>これが正解。</b>ISR はリーダーに追いついているレプリカの集合で、次のリーダーに選ばれる資格を持つのはこの集合のメンバーだけ。',
+      'ディスク容量ではなく、レプリケーションの追従状況で決まる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ISR は「リーダーに追いついているか」だけで決まる、常に変動する集合です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ISRの図"><rect x="30" y="30" width="120" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="90" y="55" font-size="13" text-anchor="middle" fill="#0f5132">リーダー</text><rect x="200" y="30" width="120" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="260" y="55" font-size="13" text-anchor="middle" fill="#1f4a68">追いついている</text><rect x="370" y="30" width="150" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 4"/><text x="445" y="55" font-size="13" text-anchor="middle" fill="#b5401f">遅れている (ISR 外)</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">次のリーダーに選ばれる資格があるのは ISR のメンバーだけ</text></svg>'
+          + '<p class="cap">図: ISR は追いついているレプリカだけの、常に変動する集合。</p></div>'
+    }
+  },
+  {
+    q: 'プロデューサの acks 設定について、公式ドキュメントの定義に最も忠実なものは？',
+    opts: [
+      'acks=0 は応答を待たず、acks=1 はリーダーの書き込みのみを待ち、acks=all は ISR 全員の受領を待つ',
+      'acks=0 の方が常に安全で、acks=all の方が常に危険だと一般に言われている設定である',
+      'acks の値はコンシューマ側がオフセットをいつコミットするかを表す設定である',
+      'acks=1 は ISR 全員の受領を必ず待ち、acks=all はリーダーの書き込みだけを待つ設定である',
+      'acks の値はトピックのパーティション数を自動的に決定するための設定である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>acks=0 は応答を待たず最速だが最も壊れやすく、acks=1 はリーダーの書き込みのみ、acks=all は ISR 全員の受領まで待つ、最も durable な設定。',
+      '逆である。acks=0 が最も壊れやすく、acks=all が最も durable。',
+      'acks はプロデューサ側の設定で、コンシューマのオフセットコミットとは別の話。',
+      'acks=1 と acks=all の説明が入れ替わっている。',
+      'パーティション数は別の設定 (num.partitions など) で決まり、acks とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>acks の値ごとに「どこまで待つか」が変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="acksの3段階の図"><text x="30" y="25" font-size="13" fill="#12211a">acks=0</text><circle cx="140" cy="25" r="6" fill="#c0492f"/><text x="220" y="30" font-size="12.5" fill="#4a5d54">応答を待たない (最速・最も壊れやすい)</text><text x="30" y="70" font-size="13" fill="#12211a">acks=1</text><circle cx="140" cy="70" r="6" fill="#3d7dca"/><text x="220" y="75" font-size="12.5" fill="#4a5d54">リーダーの書き込みのみ待つ</text><text x="30" y="115" font-size="13" fill="#12211a">acks=all</text><circle cx="140" cy="115" r="6" fill="#198754"/><text x="220" y="120" font-size="12.5" fill="#4a5d54">ISR 全員の受領を待つ (最も durable)</text></svg>'
+          + '<p class="cap">図: 待つ範囲が広がるほど安全になるが、レイテンシも増える。</p></div>'
+    }
+  },
+  {
+    q: 'ブローカー側の min.insync.replicas の役割として最も正確なものは？',
+    opts: [
+      'コンシューマが同時にそのトピックへ接続できる最大数を制限する設定',
+      'パーティションの数をトラフィックに応じて自動的に増減させる設定',
+      'acks=all の成功に必要な ISR の最小数を決め、下回れば拒否する',
+      'プロデューサが確保できるメモリバッファの最小量を指定する設定',
+      'トピックに保持されるメッセージの最小保持期間を指定する設定'
+    ],
+    ans: 2,
+    exps: [
+      'コンシューマ接続数の制限とは無関係。',
+      'パーティション数の自動増減とは無関係。',
+      '<b>これが正解。</b>acks=all のとき、書き込み成功に必要な ISR の最小数を指定し、ISR がこれを下回ると NotEnoughReplicas 例外で書き込みが拒否される。',
+      'プロデューサのメモリ設定とは無関係。',
+      '保持期間 (retention.ms など) とは別の設定。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ISR の人数が min.insync.replicas を下回ると、acks=all の書き込みは成功しません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="min.insync.replicasのしきい値の図"><line x1="40" y1="110" x2="520" y2="110" stroke="#9aa" stroke-width="2"/><rect x="60" y="60" width="40" height="50" fill="#198754" opacity="0.4"/><rect x="120" y="60" width="40" height="50" fill="#198754" opacity="0.4"/><rect x="180" y="80" width="40" height="30" fill="#c0492f" opacity="0.4"/><line x1="40" y1="70" x2="520" y2="70" stroke="#b5401f" stroke-width="1.5" stroke-dasharray="4 4"/><text x="230" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">min.insync.replicas</text><text x="280" y="135" font-size="13" text-anchor="middle" fill="#12211a">ISR がこの線を下回ると acks=all の書き込みは拒否される</text></svg>'
+          + '<p class="cap">図: min.insync.replicas は ISR の下限を定め、下回ると書き込みが拒否される。</p></div>'
+    }
+  },
+  {
+    q: '冪等プロデューサ (enable.idempotence=true) が実際に防いでいることは？',
+    opts: [
+      '複数のトピックにまたがる書き込みを全部成功か全部失敗かに揃えること',
+      '再送によって同じメッセージが同じパーティションに重複して書き込まれるのを防ぐ',
+      '異なるプロデューサが同じキーを使うことを禁止して防ぐこと',
+      'コンシューマが同じメッセージを誤って 2 回読んでしまうことを防ぐこと',
+      'ブローカーが故障したときにデータそのものが失われることを完全に防ぐこと'
+    ],
+    ans: 1,
+    exps: [
+      'それはトランザクションの役割で、冪等プロデューサ単体の範囲ではない。',
+      '<b>これが正解。</b>PID とシーケンス番号を使い、ネットワーク再送によって同じメッセージが同じパーティションに重複して書き込まれることを防ぐ。',
+      'キーの重複利用を防ぐ機能ではない。',
+      'コンシューマ側の重複読み取りは別の問題で、冪等プロデューサが対象にしているのは書き込み側の重複。',
+      'データ消失の防止は ISR や acks=all の役割で、冪等プロデューサ単体では解決しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>PID とシーケンス番号の組で、ブローカーは「同じメッセージの再送」を見分けられます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="冪等プロデューサの重複検出の図"><circle cx="120" cy="40" r="7" fill="#3d7dca"/><text x="120" y="25" font-size="12.5" text-anchor="middle" fill="#0f5132">送信 (seq=5)</text><circle cx="220" cy="40" r="7" fill="#3d7dca"/><text x="220" y="25" font-size="12.5" text-anchor="middle" fill="#0f5132">再送 (seq=5)</text><line x1="120" y1="47" x2="300" y2="90" stroke="#9aa" stroke-width="1.5"/><line x1="220" y1="47" x2="300" y2="90" stroke="#9aa" stroke-width="1.5"/><rect x="225" y="90" width="170" height="36" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="310" y="113" font-size="12" text-anchor="middle" fill="#0f5132">同じ seq は 1 回だけ記録</text></svg>'
+          + '<p class="cap">図: 同じシーケンス番号の再送は、ブローカー側で重複として検出され無視される。</p></div>'
+    }
+  },
+  {
+    q: 'トランザクションを使う Kafka コンシューマで isolation.level=read_committed を設定する目的は？',
+    opts: [
+      'コンシューマがメッセージを読み取る速度を自動的に向上させること',
+      '同じパーティション内のメッセージの順序を強制的に入れ替えること',
+      'ブローカー側で使われているディスクの使用量を減らすこと',
+      'プロデューサ側の acks 設定を自動的に all へ変更すること',
+      'まだコミットされていないトランザクションのメッセージを見せないようにする'
+    ],
+    ans: 4,
+    exps: [
+      '速度向上が目的の設定ではない。',
+      '順序の入れ替えとは無関係。',
+      'ディスク使用量とは無関係。',
+      'プロデューサ側の acks 設定をコンシューマ側から変更することはできない。',
+      '<b>これが正解。</b>read_committed にすると、まだコミットされていない (または中断された) トランザクションのメッセージをコンシューマが読まないようになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>read_committed のコンシューマには、確定していないトランザクションの中身は見えません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="read_committedの図"><rect x="30" y="30" width="220" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132">コミット済みメッセージ</text><rect x="310" y="30" width="220" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 4"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f">未コミットのメッセージ</text><text x="140" y="100" font-size="12.5" text-anchor="middle" fill="#198754">read_committed のコンシューマに見える</text><text x="420" y="100" font-size="12.5" text-anchor="middle" fill="#b5401f">read_committed のコンシューマには見えない</text></svg>'
+          + '<p class="cap">図: read_committed は未確定のトランザクション分をコンシューマから隠す。</p></div>'
+    }
+  },
+  {
+    q: 'Kafka の順序保証について最も正確な説明は？',
+    opts: [
+      '同じパーティション内では書き込んだ順に読めるが、トピック全体やパーティションをまたいだ順序は保証されない',
+      'トピック全体で、書き込んだ順に必ず読める',
+      '順序は保証されず、どのメッセージが先に読めるかは常に不定である',
+      'コンシューマグループが同じであれば、パーティションをまたいでも順序が保証される',
+      '順序はプロデューサの acks の値によってのみ決まり、パーティションとは無関係である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Kafka が保証する順序はパーティション内に限られ、トピック全体やパーティション間の順序は保証されない。',
+      'トピック全体での順序保証は無く、パーティション単位にとどまる。',
+      '完全に不定というのは誤りで、少なくとも同一パーティション内では順序が保たれる。',
+      'コンシューマグループが同じでも、パーティションをまたいだ順序は保証されない。',
+      '順序はキーによるパーティション割り当てで決まり、acks の値とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。保証されるのはパーティションの中だけです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="パーティション内順序の図"><rect x="30" y="30" width="220" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">パーティション内</text><text x="140" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">順序が保証される</text><rect x="310" y="30" width="220" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">パーティション間</text><text x="420" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">順序は保証されない</text></svg>'
+          + '<p class="cap">図: 順序の保証はパーティション内に限られる。</p></div>'
+    }
+  },
+  {
+    q: '広告クリックの集計システムで、パーティションキーに ad_id (広告ID) を選んだ結果として最も起こりやすい問題は？',
+    opts: [
+      'すべてのパーティションに均等にクリックが分散し、理想的な負荷分散になる',
+      'コンシューマグループのオフセット管理が不可能になる',
+      'プロデューサの acks 設定が自動的に 0 に変更される',
+      '人気の広告に紐づくパーティションだけが混雑する、ホットパーティションが発生する',
+      'メッセージの保持期間が自動的に短くなる'
+    ],
+    ans: 3,
+    exps: [
+      '逆である。人気の広告にアクセスが集中し、均等な分散にはならない。',
+      'オフセット管理自体はキーの選び方とは無関係に機能する。',
+      'acks の設定がキーの選び方で自動的に変わることはない。',
+      '<b>これが正解。</b>同じキーは同じパーティションに入るため、人気の広告 1 つにクリックが集中すると、そのパーティションを担当するブローカーだけが過負荷になる。',
+      '保持期間はキーの選び方とは無関係の設定。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。人気の広告 1 つがパーティションを独占してしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="ホットパーティションの再確認図"><rect x="30" y="30" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="105" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">partition 0 (通常)</text><rect x="210" y="30" width="150" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="285" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">partition 1 (人気広告)</text><rect x="390" y="30" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/><text x="465" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">partition 2 (通常)</text><text x="285" y="100" font-size="13" text-anchor="middle" fill="#b5401f">このパーティションだけ過負荷になる</text></svg>'
+          + '<p class="cap">図: 集計単位をそのままキーにすると、人気の対象 1 つがパーティションを独占する。</p></div>'
+    }
+  },
+  {
+    q: 'あるチームが「acks=all にしたので絶対にデータは失われない」と考えていたが、min.insync.replicas=1 のままだった。この構成の問題点として最も正確な指摘は？',
+    opts: [
+      'min.insync.replicas はコンシューマ側の設定なので、この構成に問題はない',
+      'acks=all にした時点で min.insync.replicas の値は無視されるので、問題はない',
+      'ISR が 1 つ (リーダーのみ) まで減っても書き込みが成功してしまい、そのリーダーが壊れるとデータを失う',
+      'この構成では書き込みが常に NotEnoughReplicas で失敗し続ける',
+      'min.insync.replicas=1 にすると acks=all の設定そのものが無効化される'
+    ],
+    ans: 2,
+    exps: [
+      'min.insync.replicas はブローカー側 (トピック) の設定であり、コンシューマとは無関係。',
+      '無視されるのではなく、acks=all の書き込みが成功する条件として実際に使われる。',
+      '<b>これが正解。</b>min.insync.replicas=1 では ISR がリーダー 1 台まで減っても書き込みが成功してしまい、そのリーダーが壊れると複製されていなかった分のデータを失う。複製数に対して十分な値 (例: 複製数 3 なら 2) にする必要がある。',
+      '値が小さいので失敗し続けるわけではなく、むしろ条件が緩く通りやすくなる。',
+      'acks=all の設定自体が無効化されるわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>min.insync.replicas が小さすぎると、ISR がほとんど減っていなくても壊れた瞬間にデータを失います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="min.insync.replicas=1の危険性の図"><rect x="30" y="30" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">リーダー 1 台のみ</text><text x="105" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">min.insync.replicas=1 なら</text><text x="105" y="108" font-size="12.5" text-anchor="middle" fill="#12211a">これだけで書き込み成功</text><rect x="300" y="30" width="230" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">このリーダーが壊れるとデータ消失</text></svg>'
+          + '<p class="cap">図: min.insync.replicas を低くしすぎると、複製の薄い状態でも書き込みが成立してしまう。</p></div>'
+    }
+  },
+  {
+    q: 'ストリーム処理で「イベント時刻」ではなく「処理時刻」でウィンドウを切った場合に起こりやすい問題は？',
+    opts: [
+      'メッセージの保持期間 (retention) が自動的に延長されてしまう',
+      '遅れて届いたメッセージが、実際とは違う時間帯のウィンドウに集計されてしまう',
+      'コンシューマグループのオフセットが誤って二重に進んでしまう',
+      'プロデューサの冪等性の設定が自動的に無効化されてしまう',
+      'トピックのパーティションの数が自動的に減らされてしまう'
+    ],
+    ans: 1,
+    exps: [
+      '保持期間の延長とは無関係。',
+      '<b>これが正解。</b>処理時刻は「Kafka がそれを処理した時刻」であり、遅延で届いたメッセージは実際の発生時刻とは違うウィンドウに入ってしまう。',
+      'オフセットの二重進行とは別の問題。',
+      '冪等性の無効化とは無関係。',
+      'パーティション数が自動的に変わることはない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。処理時刻を使うと、遅れて届いたデータが別のウィンドウに紛れ込みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="イベント時刻と処理時刻のずれの図"><text x="30" y="25" font-size="12.5" fill="#12211a">イベント時刻 (実際の発生)</text><circle cx="400" cy="25" r="6" fill="#198754"/><text x="30" y="80" font-size="12.5" fill="#12211a">処理時刻 (Kafka が読んだ時)</text><circle cx="470" cy="80" r="6" fill="#c0492f"/><line x1="400" y1="32" x2="470" y2="73" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/><text x="300" y="115" font-size="13" text-anchor="middle" fill="#12211a">遅延の分だけ、違うウィンドウに入ってしまう</text></svg>'
+          + '<p class="cap">図: 処理時刻は遅延の影響を直接受け、実際の発生タイミングとずれる。</p></div>'
+    }
+  },
+  {
+    q: '分析チームと通知チームが同じトピックを、別々のコンシューマグループで読んでいる。分析チームの処理が一時的に遅れて止まった。通知チームへの影響として最も正確なものは？',
+    opts: [
+      '通知チームの読み取りも同時に停止する',
+      'トピックのパーティション数が自動的に減らされる',
+      '分析チームが止まった分だけ、通知チームのメッセージが失われる',
+      'プロデューサが新しいメッセージの送信を拒否されるようになる',
+      '通知チームは自分のオフセットで独立に読み進められ、影響を受けない'
+    ],
+    ans: 4,
+    exps: [
+      'コンシューマグループごとにオフセットが独立しているため、他のグループの停止は影響しない。',
+      'パーティション数の自動変更とは無関係。',
+      'ログは消費されても消えないため、分析チームの停止でメッセージが失われることはない。',
+      'プロデューサの送信とコンシューマグループの状態は別の話。',
+      '<b>これが正解。</b>コンシューマグループごとに読み取り位置 (オフセット) が独立しているため、分析チームが止まっても通知チームは自分のオフセットで読み進められる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文 1 節の図を思い出してください。グループごとの読み取り位置は完全に独立しています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="コンシューマグループの独立性の図"><rect x="30" y="30" width="500" height="34" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="52" font-size="13" text-anchor="middle" fill="#1f4a68">トピック (ログ)</text><line x1="150" y1="64" x2="150" y2="90" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 4"/><text x="150" y="105" font-size="12.5" text-anchor="middle" fill="#b5401f">分析チーム (停止中)</text><line x1="420" y1="64" x2="420" y2="90" stroke="#198754" stroke-width="2"/><text x="420" y="105" font-size="12.5" text-anchor="middle" fill="#198754">通知チーム (進み続ける)</text></svg>'
+          + '<p class="cap">図: 片方のグループが止まっても、もう片方のオフセットは独立して進み続ける。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

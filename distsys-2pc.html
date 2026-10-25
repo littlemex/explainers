@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分散トランザクションと 2PC ― コーディネータが消えたら誰が決めるか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 19 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>分散トランザクションと 2PC ― コーディネータが消えたら誰が決めるか</h1>
+  <p>2PC は全員の同意を待って同じ決定を配る仕組みだが、決定を下した直後にコーディネータが消えると、参加者は自分では決められずブロックし続ける</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 18 回 <a href="./distsys-isolation-concurrency.html">分離レベルと並行制御</a> (1 つの DB の中のトランザクション)、第 17 回 <a href="./distsys-failure-detection.html">障害検知とゴシップ</a> (コーディネータの故障を検知する難しさ)</p>
+  <p class="intro">1 つのデータベースの中のトランザクションなら、第 18 回で見た分離レベルとロックで ACID を守れます。しかし、データが別々のデータベースやサービスに分かれているとき、「全部成功したら確定、1 つでも失敗したら全部取り消す」をどう実現するかは別の問題です。2PC (Two-Phase Commit, 2 相コミット) はこの問題への最初の答えですが、決定を下す役であるコーディネータが決定の直後に消えると、参加者は自分では決められずに待ち続けるという弱点を持ちます。結論を先に言うと、2PC は「全員が合意するまで誰も確定しない」という安全性を買う代わりに、コーディネータの単一障害点という代償を払っています。</p>
+
+  <!-- ===== 解説パート 1: この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― データが複数のデータベースに分かれている</h2>
+    <p>SDFC の digital-wallet (デジタルウォレット) を例にします。ウォレットから送金する操作は、送金元のウォレットの残高を減らし、送金先のウォレットの残高を増やし、取引履歴を記録する、という複数の書き込みから成ります。これらが同じ 1 つのデータベースの中にあれば、第 18 回で見た ACID トランザクションで「全部成功か全部失敗か」を保証できます。</p>
+    <p>しかし、負荷に応じて複数のデータベースやサービスに分けている場合 (例えば送金元のウォレットと送金先のウォレットが別のシャードにある、あるいはウォレットサービスと取引履歴サービスが別のデータベースを持つ場合)、1 つのトランザクションでは済ませられません。片方だけが成功して片方が失敗すると、お金が消えたり二重に生まれたりします。これが<b>分散トランザクション</b>の問題です。</p>
+    <p><b>2PC (Two-Phase Commit, 2 相コミット)</b> は、この問題に対する最初の、そして最も基本的な答えです。1 台の<b>コーディネータ (coordinator)</b> が音頭を取り、関係するすべての<b>参加者 (participant)</b> に「準備はできたか」を尋ね、全員が「できた」と答えてから初めて「確定してよい」という指示を出します。この回ではこの仕組みの中身と、なぜそれが時々止まってしまうのかを見ていきます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 200" role="img" aria-label="複数のDBにまたがる送金操作の図">
+        <rect x="30" y="60" width="180" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="85" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ウォレット DB (送金元)</text>
+        <text x="120" y="105" font-size="12" text-anchor="middle" fill="#12211a">balance -= 100</text>
+        <rect x="390" y="20" width="180" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="480" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">ウォレット DB (送金先)</text>
+        <text x="480" y="65" font-size="12" text-anchor="middle" fill="#12211a">balance += 100</text>
+        <rect x="390" y="110" width="180" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="480" y="135" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">取引履歴 DB</text>
+        <text x="480" y="155" font-size="12" text-anchor="middle" fill="#12211a">txn レコードを追加</text>
+        <text x="300" y="195" font-size="13" text-anchor="middle" fill="#4a5d54">3 つとも成功するか、3 つとも取り消すかのどちらかにしたい</text>
+      </svg>
+      <p class="cap">図: 1 回の送金が複数のデータベースへの書き込みに分かれている。全部成功か全部失敗かを揃えたい。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: prepareとcommit ===== -->
+  <section>
+    <h2>2. 仕組み ― prepare と commit の 2 段階</h2>
+    <p>2PC は名前の通り 2 段階で進みます。<b>第 1 段階 (prepare)</b> では、コーディネータがすべての参加者に「この変更をコミットする準備はできるか」と問い合わせます。各参加者は、自分の側で変更を適用できることを確認し、まだコミットはせずに<b>変更を確定できる状態でロックを保持したまま</b>「準備できた (yes)」と返します。もし適用できない事情があれば「できない (no)」と返します。</p>
+    <p><b>第 2 段階 (commit/abort)</b> では、コーディネータが第 1 段階の結果を見て決定します。全員が「yes」と答えていれば、全員に「commit (確定してよい)」を送ります。1 人でも「no」と答えていれば、全員に「abort (取り消せ)」を送ります。参加者はこの指示を受け取ってから、実際にロックを解放して変更を確定または取り消します。</p>
+    <p>重要なのは、第 1 段階で「yes」と答えた参加者は、コーディネータの決定が届くまで<b>ロックを保持したまま待つ</b>という点です。これにより、全員が同じ決定に揃うことが保証されます。この厳密な手続きは <b>X/Open の XA 仕様</b> として標準化され、多くのデータベースやメッセージキューが XA に対応したドライバを提供しています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 230" role="img" aria-label="2PCのprepareとcommitのタイムライン図">
+        <defs>
+          <marker id="tpcArrowDark" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#0f5132"/>
+          </marker>
+          <marker id="tpcArrowMid" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#198754"/>
+          </marker>
+        </defs>
+        <text x="20" y="20" font-size="12.5" fill="#12211a">Coordinator</text>
+        <line x1="70" y1="28" x2="70" y2="174" stroke="#9aa" stroke-width="1"/>
+        <text x="270" y="20" font-size="12.5" fill="#12211a">参加者 A</text>
+        <line x1="300" y1="28" x2="300" y2="174" stroke="#9aa" stroke-width="1"/>
+        <text x="500" y="20" font-size="12.5" fill="#12211a">参加者 B</text>
+        <line x1="530" y1="28" x2="530" y2="174" stroke="#9aa" stroke-width="1"/>
+        <line x1="70" y1="48" x2="296" y2="48" stroke="#0f5132" stroke-width="1.5" marker-end="url(#tpcArrowDark)"/>
+        <text x="185" y="41" font-size="11.5" text-anchor="middle" fill="#0f5132">1. prepare → A</text>
+        <line x1="70" y1="66" x2="526" y2="66" stroke="#0f5132" stroke-width="1.5" marker-end="url(#tpcArrowDark)"/>
+        <text x="410" y="59" font-size="11.5" text-anchor="middle" fill="#0f5132">1. prepare → B</text>
+        <line x1="300" y1="96" x2="74" y2="96" stroke="#198754" stroke-width="1.5" marker-end="url(#tpcArrowMid)"/>
+        <text x="185" y="89" font-size="11.5" text-anchor="middle" fill="#198754">A → yes (ロック保持)</text>
+        <line x1="530" y1="114" x2="74" y2="114" stroke="#198754" stroke-width="1.5" marker-end="url(#tpcArrowMid)"/>
+        <text x="410" y="107" font-size="11.5" text-anchor="middle" fill="#198754">B → yes (ロック保持)</text>
+        <line x1="70" y1="146" x2="296" y2="146" stroke="#0f5132" stroke-width="1.5" marker-end="url(#tpcArrowDark)"/>
+        <text x="185" y="139" font-size="11.5" text-anchor="middle" fill="#0f5132">2. commit → A</text>
+        <line x1="70" y1="164" x2="526" y2="164" stroke="#0f5132" stroke-width="1.5" marker-end="url(#tpcArrowDark)"/>
+        <text x="410" y="157" font-size="11.5" text-anchor="middle" fill="#0f5132">2. commit → B</text>
+        <text x="300" y="190" font-size="12.5" text-anchor="middle" fill="#4a5d54">全員 yes の後にだけ commit が送られる (1 人でも no なら abort)</text>
+      </svg>
+      <p class="cap">図: prepare で全員の yes を集め、全員が揃って初めて commit (または 1 つでも no なら abort) を送る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: コーディネータ障害によるブロッキング ===== -->
+  <section>
+    <h2>3. どこで壊れるか ― コーディネータ障害によるブロッキング</h2>
+    <p>2PC の安全性は、コーディネータが決定を下し、それを全員に伝え切ることを前提にしています。この前提が崩れるのが、<b>参加者が「yes」と答えてロックを保持した後、コーディネータが決定を下す前後にクラッシュする</b>場合です。</p>
+    <p>参加者は、コーディネータから commit か abort かの指示が届くまで、自分の判断だけでは動けません。なぜなら、自分以外の参加者が何と答えたかを知らないからです。もしかしたら他の参加者が「no」と答えていて、コーディネータは abort を決めていたかもしれません。もしかしたら全員が「yes」で、コーディネータは commit を決めていたかもしれません。どちらだったかは、コーディネータ (あるいはコーディネータの記録) が復旧するまで分かりません。この間、参加者はロックを保持したまま<b>ブロック</b>し続けます。これが 2PC の「ブロッキング問題」と呼ばれる弱点です。</p>
+    <p>他の参加者に問い合わせても解決しない場合があります。参加者同士も「コーディネータが実際に何を決めたか」を知らされていないため、聞き合っても真実にはたどり着けません。コーディネータ自身が障害から復旧し、自分が書いた決定のログを読み返すまで、ブロック状態が続くことがあります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 210" role="img" aria-label="コーディネータ障害でブロックする参加者の図">
+        <rect x="220" y="20" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">コーディネータ</text>
+        <text x="300" y="62" font-size="12" text-anchor="middle" fill="#12211a">決定の直後にクラッシュ</text>
+        <rect x="40" y="120" width="180" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="130" y="145" font-size="12.5" text-anchor="middle" fill="#0f5132">参加者 A: yes 済み</text>
+        <text x="130" y="163" font-size="12" text-anchor="middle" fill="#b5401f">ロックを保持してブロック中</text>
+        <rect x="380" y="120" width="180" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="470" y="145" font-size="12.5" text-anchor="middle" fill="#1f4a68">参加者 B: yes 済み</text>
+        <text x="470" y="163" font-size="12" text-anchor="middle" fill="#b5401f">ロックを保持してブロック中</text>
+        <line x1="260" y1="70" x2="150" y2="118" stroke="#9aa" stroke-width="1" stroke-dasharray="4 4"/>
+        <line x1="340" y1="70" x2="450" y2="118" stroke="#9aa" stroke-width="1" stroke-dasharray="4 4"/>
+        <text x="300" y="200" font-size="12.5" text-anchor="middle" fill="#4a5d54">A も B も commit か abort か分からず、自分では決められない</text>
+      </svg>
+      <p class="cap">図: コーディネータが決定直後に消えると、参加者は commit か abort か分からずロックを保持したままブロックする。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 3PCが実用されない理由 ===== -->
+  <section>
+    <h2>4. 仕組み ― なぜ 3PC は実用されていないか</h2>
+    <p>このブロッキング問題を解決しようとした提案が、Dale Skeen が 1981 年の論文で示した <b>3PC (Three-Phase Commit, 3 相コミット)</b> です。3PC は prepare と commit の間に「<b>pre-commit</b>」という段階を追加し、各参加者にタイムアウトを設けることで、コーディネータが消えても参加者が自分で決定を下せるようにしようとしました。</p>
+    <p>しかし 3PC には 2 つの代償があります。1 つは、段階が増えることで通信のラウンドトリップが増え、レイテンシが伸びることです。もう 1 つがより本質的な問題で、<b>ネットワーク分断</b>が起きている状況では、タイムアウトによる自己判断がノード群ごとに食い違う決定を生み出しうるということです。分断で 2 つに分かれたノード群が、それぞれ別々にタイムアウトを判断すると、片方の群は「もう commit してよいはずだ」と判断し、もう片方は「もう abort すべきだ」と判断してしまう可能性が残ります。分断が無い前提ではブロッキングを解消できますが、分断が実際に起きる現実の環境では、この保証が崩れてしまうのです。この理由から、3PC は理論的には知られていても実運用でほとんど使われていません。</p>
+  </section>
+
+  <!-- ===== 解説パート 5: 合意でコーディネータを補強する ===== -->
+  <section>
+    <h2>5. 仕組み ― 合意でコーディネータの単一障害点を補強する</h2>
+    <p>2PC のブロッキング問題の根っこは、「決定」という情報が 1 台のコーディネータのメモリや 1 枚のログにしか存在しないことです。そのマシンが本当に失われると、決定そのものが失われます。これを解決する現実的な方法は、第 25 回で学ぶ<b>合意アルゴリズム (Paxos / Raft)</b> を使って、コーディネータの決定をあらかじめ複数台に複製しておくことです。</p>
+    <p>Google の Spanner はこの考え方を採用しています。Spanner では、トランザクションに関わる各参加者グループ自体が Paxos で複製された小さなグループであり、コーディネータの役割もそのグループのリーダーが担います。コーディネータ役のマシンが落ちても、同じ Paxos グループの別のレプリカが複製済みのログを読んでリーダーを引き継ぎ、その続きから決定を進めることができます。つまり「コーディネータが 1 台である」という 2PC の弱点を、「コーディネータの状態そのものを合意で複製する」ことで補強しているわけです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="コーディネータの状態を合意で複製する図">
+        <rect x="200" y="20" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">コーディネータ (リーダー) 障害</text>
+        <rect x="40" y="110" width="140" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="110" y="135" font-size="12.5" text-anchor="middle" fill="#1f4a68">複製 1 (旧リーダー)</text>
+        <rect x="230" y="110" width="140" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="135" font-size="12.5" text-anchor="middle" fill="#0f5132">複製 2 (新リーダー)</text>
+        <rect x="420" y="110" width="140" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="490" y="135" font-size="12.5" text-anchor="middle" fill="#1f4a68">複製 3</text>
+        <text x="300" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">決定のログは合意アルゴリズムで複数台に複製済み</text>
+        <text x="300" y="178" font-size="12.5" text-anchor="middle" fill="#4a5d54">複製 2 がログを読み、続きから決定を進める</text>
+      </svg>
+      <p class="cap">図: コーディネータの決定ログを合意アルゴリズムで複製しておけば、リーダーが落ちても別のレプリカが引き継げる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: 実システムでの例 ===== -->
+  <section>
+    <h2>6. 実システムでの例</h2>
+    <p>X/Open の XA 仕様は、多くのリレーショナルデータベースやメッセージキューに実装され、異なる製品のリソース同士を 2PC でまとめる標準的な方法として広く使われてきました。一方で、XA の 2PC はロックを長時間保持することと、コーディネータのブロッキング問題を抱えることから、マイクロサービスのように多数のサービスが独立してスケールする環境では避けられる傾向があります。</p>
+    <p>SDFC の digital-wallet の議論でも、複数のデータベースにまたがる送金処理を 2PC で実現する案は、ロックを長く持つ代償が大きいとして退けられ、代わりに個々の操作を結果整合性で進める <b>Saga</b> という手法が検討されていました。2PC が買っていた「全員が同時に確定する」という強い保証を手放す代わりに、各操作を独立した短いトランザクションに分け、失敗したら<b>補償 (compensate)</b> する、という考え方です。この Saga の仕組みは次回、第 20 回で詳しく見ていきます。</p>
+    <p>まとめると、2PC は「全員の合意が取れるまで誰も確定しない」という安全性を提供しますが、その安全性はコーディネータという単一の決定者に依存しており、そこが落ちると参加者はブロックします。合意アルゴリズムで決定を複製するか、2PC そのものを避けて Saga のような結果整合性のパターンに移るかが、現実的な 2 つの選択肢です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/digital-wallet" target="_blank" rel="noopener">SDFC: digital-wallet</a> ― 複数のデータベースにまたがる送金処理の例、2PC のロックが長くなる代償、Saga への移行の議論の参照に使った。</li>
+      <li><a href="https://pubs.opengroup.org/onlinepubs/009680699/toc.pdf" target="_blank" rel="noopener">X/Open Company, "Distributed Transaction Processing: The XA Specification" (1991)</a> ― prepare/commit の厳密な手続きを標準化した XA 仕様の一次情報。</li>
+      <li>Skeen, "Nonblocking Commit Protocols" (1981, ACM SIGMOD) ― 3PC (pre-commit 段階の追加) の出典 (安定したリンクを確認できなかったため著者 ・ 年のみ記載)。</li>
+      <li><a href="https://static.googleusercontent.com/media/research.google.com/en//archive/spanner-osdi2012.pdf" target="_blank" rel="noopener">Corbett et al., "Spanner: Google's Globally-Distributed Database" (OSDI 2012)</a> ― 各参加者グループを Paxos で複製し、コーディネータ役をそのグループのリーダーが担うことで 2PC の単一障害点を補強する設計の一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-isolation-concurrency.html">← 第 18 回 分離レベルと並行制御</a><a href="./distsys-index.html">目次</a><a href="./distsys-saga-outbox-cdc.html">第 20 回 Saga・Outbox・CDC →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '2PC (Two-Phase Commit) が解決しようとしている問題として最も適切なものは？',
+    opts: [
+      '複数のサービスにまたがる書き込みを、全部成功か全部失敗かで揃えること',
+      'ネットワークの帯域を物理的に増やすこと',
+      'クライアントとサーバーの時計を完全に同期させること',
+      '1 台のデータベースの中の SQL 文の実行速度を上げること',
+      'ハートビートの送信間隔を短くすること'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>2PC は複数のデータベースやサービスに分かれた書き込みを、全部成功か全部失敗かで揃えるための分散トランザクションの仕組み。',
+      '帯域の増強とは無関係。',
+      '時計の同期は別の課題 (第 15 回) であり、2PC の目的ではない。',
+      '実行速度の向上ではなく、複数箇所にまたがる書き込みの一貫性を揃えることが目的。',
+      'ハートビートの送信間隔とは無関係の話題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>複数の場所に分かれた書き込みを、全部成功か全部失敗かに揃えるのが目的です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="2PCの目的を示す図"><rect x="30" y="20" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">DB 1 への書き込み</text><rect x="210" y="20" width="150" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="285" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">DB 2 への書き込み</text><text x="280" y="90" font-size="13" text-anchor="middle" fill="#12211a">全部成功か全部失敗かを揃えたい</text></svg>'
+          + '<p class="cap">図: 複数のデータベースへの書き込みを、全部成功か全部失敗かに揃えるのが 2PC の目的。</p></div>'
+    }
+  },
+  {
+    q: 'prepare 段階で参加者が「yes」と答えた後、コーディネータから commit か abort の指示が届くまでの間、参加者はどういう状態にあるか？',
+    opts: [
+      '自動的にトランザクションをコミットし、ロックを解放する',
+      'ロックを保持したまま待機し、自分では決定を下さない',
+      '自動的にトランザクションをアボートし、変更を取り消す',
+      '他の参加者に投票を依頼し、過半数で決定する',
+      'コーディネータとの接続を自動的に切断する'
+    ],
+    ans: 1,
+    exps: [
+      '「yes」と答えた段階ではまだコミットしていない。自動的にコミットしてしまうと、他の参加者が「no」だった場合に矛盾が起きる。',
+      '<b>これが正解。</b>「yes」と答えた参加者は、コーディネータからの指示が届くまでロックを保持したまま待機し、自分では commit か abort かを決めない。',
+      '自動的にアボートするなら「yes」と答えた意味が無く、他の参加者が「yes」だった場合に矛盾する。',
+      '2PC は多数派決議の仕組みではなく、コーディネータが一元的に決定する仕組み。',
+      '接続を切断すると、コーディネータからの指示を受け取れなくなり、むしろ都合が悪い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「yes」と答えた後も、確定はまだしていません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="yes後の待機状態を示す図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">yes と回答 (ロック保持)</text><rect x="320" y="30" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">commit/abort の指示待ち</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">指示が届くまで自分では決めない</text></svg>'
+          + '<p class="cap">図: yes と答えた後も、指示が届くまでロックを保持したまま待機する。</p></div>'
+    }
+  },
+  {
+    q: 'コーディネータが commit を送るか abort を送るかを決める基準として最も正確なものは？',
+    opts: [
+      '最初に返事をした参加者の答えだけを採用する',
+      '参加者の過半数が「yes」であれば commit する',
+      '全員 yes なら commit、1 人でも no なら abort する',
+      '参加者の数が偶数のときだけ commit する',
+      'コーディネータが最も信頼する参加者 1 人の答えだけで決める'
+    ],
+    ans: 2,
+    exps: [
+      '最初の 1 人だけで決めると、後から「no」の参加者が出てきた場合に矛盾する。',
+      '過半数ではなく、全員の同意が必要。多数派決議は 2PC の決定ルールではない。',
+      '<b>これが正解。</b>全員が「yes」の場合だけ commit、1 人でも「no」であれば abort という全員一致の規則で決まる。',
+      '参加者の数の偶奇とは無関係の判断基準。',
+      '特定の 1 人だけの答えで決めるのではなく、全員の答えを集めてから決める。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 人でも「no」があれば、全体は abort になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="全員一致ルールの図"><rect x="30" y="20" width="130" height="35" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="95" y="43" font-size="12" text-anchor="middle" fill="#0f5132">A: yes</text><rect x="180" y="20" width="130" height="35" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="245" y="43" font-size="12" text-anchor="middle" fill="#0f5132">B: yes</text><rect x="330" y="20" width="130" height="35" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="395" y="43" font-size="12" text-anchor="middle" fill="#b5401f">C: no</text><text x="245" y="95" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">1 人でも no があれば全体は abort</text></svg>'
+          + '<p class="cap">図: 全員一致が条件なので、1 人の no が全体の決定を abort にする。</p></div>'
+    }
+  },
+  {
+    q: '2PC の「ブロッキング問題」が起きる根本的な原因として最も適切なものは？',
+    opts: [
+      '参加者の数が多すぎて通信量が破綻するから',
+      'コーディネータが落ち、決定が失われ判断できないから',
+      'データベースのディスク容量が不足するから',
+      'すべての参加者が同時にクラッシュするから',
+      '参加者がタイムゾーンの違う地域に分散しているから'
+    ],
+    ans: 1,
+    exps: [
+      '通信量の破綻という量的な問題ではなく、決定の情報がどこにあるかという質的な問題が根本原因。',
+      '<b>これが正解。</b>決定という情報が 1 台のコーディネータにしか存在しない状態で、そのコーディネータが決定の前後にクラッシュすると、参加者は commit か abort かを自分では判断できずブロックする。',
+      'ディスク容量とは無関係。',
+      '全員同時クラッシュという特殊な前提ではなく、コーディネータ 1 台だけのクラッシュでも起きる問題。',
+      'タイムゾーンの違いとは無関係の問題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>決定の情報が 1 箇所にしかないことが問題の核心です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="決定が1箇所にしかないことが問題の図"><rect x="200" y="20" width="160" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f">決定はここにしか無い</text><text x="280" y="90" font-size="13" text-anchor="middle" fill="#12211a">このマシンが落ちると、決定自体が消える</text></svg>'
+          + '<p class="cap">図: 決定という情報が 1 箇所にしか存在しないため、そこが落ちると参加者は判断材料を失う。</p></div>'
+    }
+  },
+  {
+    q: '3PC (Three-Phase Commit) が 2PC に追加した段階と、その目的として最も適切なものは？',
+    opts: [
+      'repeat 段階を追加し、同じ commit を何度も送り直すことを目的とした',
+      'encrypt 段階を追加し、通信内容を暗号化することを目的とした',
+      'backup 段階を追加し、データを別のリージョンにコピーすることを目的とした',
+      'retry 段階を追加し、失敗した通信を無限に再送することを目的とした',
+      'pre-commit 段階を追加し、タイムアウトで参加者が自分で決められるようにした'
+    ],
+    ans: 4,
+    exps: [
+      '同じ commit の繰り返しではなく、新しい段階 (pre-commit) の追加が 3PC の特徴。',
+      '暗号化の追加ではない。3PC の目的は決定のブロッキングを避けることで、暗号化とは無関係。',
+      'バックアップの追加ではなく、コミット手続きの段階を 1 つ増やすという話。',
+      '無限再送が目的ではなく、タイムアウトで自律的に判断できるようにすることが目的。',
+      '<b>これが正解。</b>3PC は prepare と commit の間に pre-commit という段階を追加し、各参加者にタイムアウトを設けることで、コーディネータが消えても自分で決定を下せるようにしようとした。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>段階を 1 つ増やすことで、参加者が自分で判断できる余地を作ろうとしました。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="3PCがpre-commitを追加する図"><rect x="30" y="40" width="130" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="95" y="65" font-size="12.5" text-anchor="middle" fill="#0f5132">prepare</text><rect x="210" y="40" width="130" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="275" y="65" font-size="12.5" text-anchor="middle" fill="#1f4a68">pre-commit (新規)</text><rect x="390" y="40" width="130" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="455" y="65" font-size="12.5" text-anchor="middle" fill="#0f5132">commit</text></svg>'
+          + '<p class="cap">図: 3PC は prepare と commit の間に pre-commit を挟み、タイムアウトでの自律判断を可能にしようとした。</p></div>'
+    }
+  },
+  {
+    q: '3PC が実運用でほとんど使われていない理由として最も適切なものは？',
+    opts: [
+      '分断時はタイムアウトの自己判断がノード群ごとに食い違う決定を生みうるため',
+      '3PC は理論的に実装することが数学的に不可能であるため',
+      '3PC はコーディネータという役割を完全に廃止してしまうため',
+      '3PC は暗号化に対応していないため',
+      '3PC は 1 台の参加者しか扱えない設計だから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>分断が無い前提ではブロッキングを解消できるが、実際にネットワーク分断が起きる環境では、分かれたノード群がそれぞれ別のタイムアウト判断を下し、矛盾した決定 (片方は commit、片方は abort) を生み出しうる。',
+      '実装自体は可能で、3PC は実際に定義・実装されている。不可能という主張は誤り。',
+      'コーディネータの役割は 3PC でも残っている。廃止されたわけではない。',
+      '暗号化とは無関係の話題。',
+      '1 台の参加者しか扱えないという制約は無く、複数の参加者を扱う前提の設計。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>分断で 2 つに分かれたノード群が、それぞれ違う判断を下してしまう可能性が残ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="3PCが分断時に食い違う決定を生む図"><rect x="30" y="20" width="200" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="130" y="50" font-size="12.5" text-anchor="middle" fill="#1f4a68">群 A: タイムアウトで commit 判断</text><rect x="310" y="20" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="50" font-size="12.5" text-anchor="middle" fill="#b5401f">群 B: タイムアウトで abort 判断</text><line x1="230" y1="45" x2="310" y2="45" stroke="#c0492f" stroke-width="3" stroke-dasharray="5 5"/><text x="270" y="35" font-size="12" text-anchor="middle" fill="#c0492f">分断</text><text x="280" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">分断時はそれぞれの判断が食い違いうる</text></svg>'
+          + '<p class="cap">図: 分断で分かれた群がそれぞれ別の判断を下すと、矛盾した決定になりうる。</p></div>'
+    }
+  },
+  {
+    q: 'SDFC の digital-wallet のように、送金元と送金先のウォレットが別々のデータベースに分かれている場合、1 つの DB のトランザクションだけでは送金を安全に処理できない理由として最も適切なものは？',
+    opts: [
+      'DB のトランザクションは常に読み取り専用の操作しか扱えないから',
+      'DB のトランザクションは一度に 1,000 行以上を更新できないから',
+      '1 つの DB の中の変更しかまとめられず、別の DB の変更は別々に確定するから',
+      'DB のトランザクションは暗号化された通信の上では動作しないから',
+      'DB のトランザクションは必ず 1 秒以内に完了しなければならないから'
+    ],
+    ans: 2,
+    exps: [
+      '読み取り専用に限られるという前提は誤り。トランザクションは書き込みも扱える。',
+      '行数の上限が理由ではない。本質的な理由は別の DB にまたがる点にある。',
+      '<b>これが正解。</b>1 つの DB のトランザクションが保証する「全部成功か全部失敗か」は、その DB の中だけに閉じている。別の DB への変更は別のトランザクションとして確定するため、両方をまとめて揃えるには 2PC のような分散トランザクションの仕組みが必要になる。',
+      '暗号化通信の有無とは無関係の問題。',
+      '時間制限が理由ではない。本質的な理由は DB の境界をまたぐことにある。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>トランザクションの「全部成功か全部失敗か」は、1 つの DB の中にしか効きません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="DBトランザクションの境界を示す図"><rect x="30" y="30" width="220" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">DB 1 (送金元)</text><text x="140" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">トランザクションが</text><text x="140" y="103" font-size="12.5" text-anchor="middle" fill="#12211a">ここだけをまとめる</text><rect x="310" y="30" width="220" height="90" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">DB 2 (送金先)</text><text x="420" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">別のトランザクションで</text><text x="420" y="103" font-size="12.5" text-anchor="middle" fill="#12211a">独立して確定する</text></svg>'
+          + '<p class="cap">図: 1 つの DB トランザクションの範囲はその DB の中だけで、別の DB への変更はまとめられない。</p></div>'
+    }
+  },
+  {
+    q: 'Google Spanner のように、コーディネータの決定を合意アルゴリズム (Paxos) で複製しておく設計の利点として最も適切なものは？',
+    opts: [
+      '参加者の数を自動的に減らせる点',
+      '通信の暗号化が自動的に不要になる点',
+      'トランザクションの分離レベルが自動的に Serializable 以上になる点',
+      'コーディネータ役のマシンが落ちても、決定の情報が複製先に残っているため、別のレプリカが引き継いで決定を進められる点',
+      'ネットワーク分断が理論的に二度と起きなくなる点'
+    ],
+    ans: 3,
+    exps: [
+      '参加者の数を減らす仕組みではない。複製はコーディネータの決定の耐久性を上げる話。',
+      '暗号化とは無関係の利点。',
+      '分離レベルの話とは別の軸であり、複製の有無が分離レベルを自動的に決めるわけではない。',
+      '<b>これが正解。</b>決定の情報を複数台に複製しておくことで、コーディネータ役のマシンが落ちても別のレプリカが同じ情報を持ち、引き継いで決定を進められる。これが 2PC の単一障害点を補強する。',
+      '分断自体を無くす仕組みではない。分断が起きても決定の情報を失わないようにする仕組み。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>決定の情報を複数台に持たせておけば、1 台が落ちても情報は残ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="合意アルゴリズムで決定を複製する利点の図"><rect x="30" y="20" width="150" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f">旧リーダー (落ちた)</text><rect x="210" y="20" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="285" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">複製先が引き継ぐ</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">決定の情報が複数台にあるので、1 台が落ちても失われない</text></svg>'
+          + '<p class="cap">図: 決定の情報を複製しておくことで、コーディネータ 1 台の障害でも情報が失われない。</p></div>'
+    }
+  },
+  {
+    q: 'X/Open の XA 仕様が実際に果たしている役割として最も適切なものは？',
+    opts: [
+      'すべてのネットワーク通信を自動的に暗号化する役割',
+      'データベースの分離レベルを Serializable に固定する役割',
+      'クロックのずれを自動的に補正する役割',
+      'prepare/commit を標準化し、異なる製品を 2PC でまとめられる役割',
+      'すべてのトランザクションを自動的に Saga に変換する役割'
+    ],
+    ans: 3,
+    exps: [
+      '暗号化は XA の役割ではない。',
+      '分離レベルを固定する仕様ではない。',
+      'クロックの補正とは無関係の仕様。',
+      '<b>これが正解。</b>XA は prepare/commit の手続きを標準化し、異なるベンダーのデータベースやメッセージキューが共通の手順で 2PC に参加できるようにする仕様。',
+      'Saga への自動変換という機能は無い。XA はむしろ 2PC を標準化する仕様であり、Saga とは別の方式。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>XA は異なる製品同士が同じ手順で 2PC に参加できるようにする共通言語のようなものです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="XA仕様が共通言語として働く図"><rect x="30" y="20" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">DB 製品 A</text><rect x="210" y="20" width="140" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">XA (共通の手順)</text><rect x="390" y="20" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="460" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">キュー製品 B</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">異なる製品同士が同じ手順で 2PC に参加できる</text></svg>'
+          + '<p class="cap">図: XA は異なる製品が共通の手順で 2PC に参加するための標準。</p></div>'
+    }
+  },
+  {
+    q: '2PC のブロッキング問題への現実的な対処として「合意アルゴリズムで決定を複製する」と「2PC を避けて Saga のような結果整合性のパターンに移る」の 2 つがある。この選択の判断軸として最も適切なものは？',
+    opts: [
+      'どちらを選んでも結果はまったく同じなので、判断軸自体が存在しない',
+      '参加者の数が偶数か奇数かだけで自動的に決まる',
+      'ネットワークの帯域が十分にあるかどうかだけで自動的に決まる',
+      '使用するプログラミング言語の種類だけで自動的に決まる',
+      '強い保証がどこまで必要か、ロックを長く持つ代償を払えるかで決まる'
+    ],
+    ans: 4,
+    exps: [
+      '結果が同じという前提は誤り。合意で複製すれば強い保証を保ったままコーディネータの弱点を補強できるが、Saga は強い保証そのものを手放す別の設計になる。',
+      '参加者数の偶奇とは無関係の判断軸。',
+      '帯域だけで自動的に決まるものではなく、要件次第の設計判断。',
+      'プログラミング言語の種類とは無関係の判断軸。',
+      '<b>これが正解。</b>全員が同時に確定するという強い保証がどこまで必要か、ロックを長く持つ代償 (スループットの低下) を払えるかという要件に応じて、合意で補強するか Saga に移るかを選ぶ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>強い保証を保つか、保証を緩めて自由度を得るかの選択です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="2つの対処法の判断軸を示す図"><rect x="30" y="20" width="220" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">合意で複製</text><text x="140" y="65" font-size="12" text-anchor="middle" fill="#12211a">強い保証を保つ</text><rect x="310" y="20" width="220" height="60" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">Saga に移る</text><text x="420" y="65" font-size="12" text-anchor="middle" fill="#12211a">保証を緩めて自由度を得る</text></svg>'
+          + '<p class="cap">図: どちらを選ぶかは、強い保証がどこまで必要かという要件で決まる。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

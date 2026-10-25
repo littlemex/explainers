@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRDT ― マージ順序を気にせず合流できる構造</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 27 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>CRDT ― マージ順序を気にせず合流できる構造</h1>
+  <p>半束(semilattice)という 1 つの数学的な性質をマージ関数に持たせるだけで、オフラインで独立に更新されたレプリカが、手動の衝突解決なしにどんな順序でも同じ状態に合流する。</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 26 回 分散ロック・リース・フェンシングトークン、第 13 回 一貫性モデル</p>
+  <p class="intro">結論から言うと、CRDT はマージ関数に可換性・結合性・冪等性という 3 つの性質を持たせることで、複数のレプリカがオフラインで独立に更新しても、後でどんな順序でマージしても必ず同じ状態に収束することをデータ構造の性質だけで保証する。この回では Shapiro et al. (2011) の分類に沿って、状態ベース(CvRDT)と操作ベース(CmRDT)の違い、G-Counter ・ PN-Counter ・ OR-Set ・ LWW-Register ・ RGA という具体例、そして収束が保証する範囲の限界まで見る。</p>
+
+  <section>
+    <h2>1. この回で解く問題 ― マージのたびに衝突解決会議をしたくない</h2>
+    <p>結論から言うと、CRDT (Conflict-free Replicated Data Type) は、複数のレプリカがオフラインで独立に更新を重ねても、後でどんな順序でマージしても必ず同じ状態に合流することを、データ構造の性質だけで保証する仕組みである。複数の端末が同じカレンダーの予定やショッピングカートをオフラインで編集し、あとで同期するような場面を考える。2 台の端末がネットワークから切れている間に別々の更新をし、後でオンラインに戻ったときにどちらの更新を正とするか、人間が毎回判断するのは現実的ではない。</p>
+    <p>Shapiro, Preguiça, Baquero, Zawirski (2011) が提案した CRDT は、この合流 (マージ) の手続きそのものに「可換・結合・冪等」という 3 つの数学的な性質を持たせることで、マージ処理が実行される順序に関係なく同じ結果に落ち着くことを保証する。これは一般的な「結果整合性 (eventual consistency)」より強い保証であり、同じ更新の集合を受け取った 2 つのレプリカは、受け取った順序に関係なく等価な状態になる。巻き戻りや手動の衝突解決、特別な調整役は不要である。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="CRDTが解く合流問題の図">
+        <rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132">端末 A: オフラインで更新</text>
+        <rect x="370" y="30" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="480" y="60" font-size="13" text-anchor="middle" fill="#1f4a68">端末 B: オフラインで更新</text>
+        <line x1="140" y1="80" x2="310" y2="130" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="480" y1="80" x2="310" y2="130" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="220" y="130" width="180" height="50" rx="8" fill="#fff3e6" stroke="#b5401f" stroke-width="2"/>
+        <text x="310" y="160" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">merge(A, B)</text>
+        <text x="310" y="200" font-size="13" text-anchor="middle" fill="#4a5d54">どの順序で merge しても同じ結果に収束する(可換・結合・冪等)</text>
+      </svg>
+      <p class="cap">図: CRDT はマージ関数の性質だけで、どの順序でマージしても同じ状態に落ち着くことを保証する。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>2. 半束 (join semilattice) ― 合流順序に依存しない理由</h2>
+    <p>CRDT の収束を支える道具は<b>半束 (semilattice)</b> という数学的な構造である。半順序 $\le$ を持つ集合で、どの 2 つの要素 $x, y$ にも最小上界 (LUB, least upper bound) $x \sqcup y$ が存在するとき、その集合を join semilattice と呼ぶ。LUB の定義から、この演算 $\sqcup$ には 3 つの性質が自動的に成り立つ。<b>可換性</b> ($x \sqcup y = y \sqcup x$、順番を変えても結果は同じ)、<b>冪等性</b> ($x \sqcup x = x$、同じ値を 2 回マージしても増えない)、<b>結合性</b> ($(x \sqcup y) \sqcup z = x \sqcup (y \sqcup z)$、まとめる順序を変えても結果は同じ) である。</p>
+    <p>CRDT の状態 (ペイロード) がこの半束の値を取り、merge 関数を LUB そのもの ($merge(x,y) = x \sqcup y$) として定義すれば、受け取ったメッセージが失われても・順序が入れ替わっても・ 2 回届いても (可換・冪等性のおかげで) 最終的な状態は変わらない。さらに、更新のたびにペイロードの値がこの半順序で単調に大きくなっていく (monotonic semilattice と呼ぶ) なら、マージの結果は常に「これまでに受け取った全ての更新の LUB」になる。これが CRDT が合意アルゴリズムのような通信の往復やブロッキングを一切使わずに収束を保証できる理由である。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="半束の性質の図">
+        <rect x="20" y="20" width="175" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="107" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">可換性</text>
+        <text x="107" y="65" font-size="12" text-anchor="middle" fill="#12211a">x⊔y = y⊔x</text>
+        <rect x="212" y="20" width="175" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="300" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">冪等性</text>
+        <text x="300" y="65" font-size="12" text-anchor="middle" fill="#12211a">x⊔x = x</text>
+        <rect x="405" y="20" width="175" height="60" rx="8" fill="#f4e9d8" stroke="#8a6a1c" stroke-width="2"/>
+        <text x="492" y="45" font-size="13" text-anchor="middle" fill="#8a6a1c" font-weight="700">結合性</text>
+        <text x="492" y="65" font-size="12" text-anchor="middle" fill="#12211a">(x⊔y)⊔z = x⊔(y⊔z)</text>
+        <text x="300" y="130" font-size="13.5" text-anchor="middle" fill="#12211a">3 つ全てが揃うと、メッセージの順序・重複・欠落に耐えられる</text>
+        <text x="300" y="155" font-size="13" text-anchor="middle" fill="#4a5d54">これが CRDT の収束を支える唯一の土台である</text>
+      </svg>
+      <p class="cap">図: 可換性・冪等性・結合性の 3 つが揃うことで、合流の順序に一切依存しない結果が得られる。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>3. 状態ベース (CvRDT) と操作ベース (CmRDT) の違い</h2>
+    <p>CRDT には 2 つの実装方式がある。<b>状態ベース CRDT (CvRDT, Convergent Replicated Data Type)</b> は、各レプリカが自分の全状態 (ペイロード) を他のレプリカに送り、受け取った側は merge 関数で自分の状態と合体させる。通信路に求める条件は非常に緩い ― メッセージが失われても、順序が入れ替わっても、同じ状態が 2 回届いても構わない。必要なのは「いつかは直接・間接に全レプリカへ状態が伝わる」ことだけである (Shapiro et al. 2011, Proposition 2.1)。</p>
+    <p><b>操作ベース CRDT (CmRDT, Commutative Replicated Data Type)</b> は、状態全体ではなく個々の更新操作をブロードキャストする。この方式は通信路に対してより強い条件を要求する ― 全ての更新が全レプリカに確実に届く、かつ<b>因果順序 (causal order)</b> を保った配送でなければならない。その代わり、互いに因果関係のない (並行な) 操作どうしが可換であることさえ示せれば、どの順序で適用しても同じ状態に収束する (Proposition 2.2)。CvRDT は通信路の要求が緩い分、状態全体を送るので通信量が大きくなりやすく、CmRDT は通信量を抑えられる分、信頼できる因果順序ブロードキャストという強い通信路の仕組みが要る、という設計上のトレードオフがある。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="CvRDTとCmRDTの比較の図">
+        <rect x="30" y="30" width="260" height="110" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">CvRDT(状態ベース)</text>
+        <text x="160" y="78" font-size="12" text-anchor="middle" fill="#12211a">全状態を送って merge</text>
+        <text x="160" y="98" font-size="12" text-anchor="middle" fill="#12211a">通信路: ロス/順序入替/重複 OK</text>
+        <text x="160" y="118" font-size="12" text-anchor="middle" fill="#12211a">通信量は大きくなりやすい</text>
+        <rect x="330" y="30" width="260" height="110" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="460" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">CmRDT(操作ベース)</text>
+        <text x="460" y="78" font-size="12" text-anchor="middle" fill="#12211a">個々の操作をブロードキャスト</text>
+        <text x="460" y="98" font-size="12" text-anchor="middle" fill="#12211a">通信路: 因果順序配送が必須</text>
+        <text x="460" y="118" font-size="12" text-anchor="middle" fill="#12211a">並行操作が可換なら収束</text>
+      </svg>
+      <p class="cap">図: CvRDT は通信路への要求が緩く通信量が大きい、CmRDT は通信路への要求が強く通信量を抑えられる。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>4. 具体例 ― G-Counter ・ PN-Counter ・ OR-Set ・ LWW-Register</h2>
+    <p><b>G-Counter (加算専用カウンタ)</b> は、単純に 1 つの整数を max でマージする方式では増分が消えてしまう (2 台が同時に+1 しても、max を取ると 1 としか増えない)。そこで、レプリカごとに 1 つの枠を持つ配列を使う。自分の枠だけを増やし、値は配列の合計、merge は配列の各要素ごとの max を取る。これなら各レプリカの増分がそれぞれ別の枠に記録されるため、合計すれば増分が消えない。</p>
+    <p><b>PN-Counter (増減可能カウンタ)</b> は、G-Counter を 2 つ組み合わせる。増加用の P (positive) と減少用の N (negative) をそれぞれ別の G-Counter として持ち、値は P の合計から N の合計を引いたものになる。merge は P と N をそれぞれ独立にマージする。</p>
+    <p><b>OR-Set (Observed-Remove Set)</b> は、集合の要素ごとに一意なタグを割り当てる。追加操作 add(e) はユニークなタグを生成して (e, タグ) の組を加える。削除操作 remove(e) は、削除する時点で<b>自分が観測した (e, タグ) の組だけ</b>を取り除く。この設計により、削除と並行して行われた追加 (別のタグを持つ) は削除の対象にならず残る ― つまり<b>追加が削除より優先される (add-wins)</b> という直感的な挙動になる。削除された組は墓石 (tombstone) として記録が必要になる。</p>
+    <p><b>LWW-Register (Last-Writer-Wins Register)</b> は、更新ごとに一意でかつ因果順序と矛盾しないタイムスタンプを付け、merge ではタイムスタンプが最大の値を採用する。単純で分かりやすいが、並行した更新のうち一方が無条件に消えるため、<b>並行更新の片方が黒白無言で失われる</b>という代償がある。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="4つのCRDTの図">
+        <rect x="20" y="20" width="285" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="162" y="42" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">G-Counter</text>
+        <text x="162" y="62" font-size="11.5" text-anchor="middle" fill="#12211a">レプリカごとの枠を加算</text>
+        <text x="162" y="80" font-size="11.5" text-anchor="middle" fill="#12211a">merge=各枠の max</text>
+        <rect x="335" y="20" width="285" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="477" y="42" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">PN-Counter</text>
+        <text x="477" y="62" font-size="11.5" text-anchor="middle" fill="#12211a">P(増加)と N(減少)の 2 つの G-Counter</text>
+        <text x="477" y="80" font-size="11.5" text-anchor="middle" fill="#12211a">値=sum(P)-sum(N)</text>
+        <rect x="20" y="130" width="285" height="90" rx="8" fill="#fff3e6" stroke="#b5401f" stroke-width="2"/>
+        <text x="162" y="152" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">OR-Set</text>
+        <text x="162" y="172" font-size="11.5" text-anchor="middle" fill="#12211a">要素+一意タグ、観測したタグのみ削除</text>
+        <text x="162" y="190" font-size="11.5" text-anchor="middle" fill="#12211a">add-wins(追加が優先)</text>
+        <rect x="335" y="130" width="285" height="90" rx="8" fill="#f4e9d8" stroke="#8a6a1c" stroke-width="2"/>
+        <text x="477" y="152" font-size="13" text-anchor="middle" fill="#8a6a1c" font-weight="700">LWW-Register</text>
+        <text x="477" y="172" font-size="11.5" text-anchor="middle" fill="#12211a">タイムスタンプ最大が勝つ</text>
+        <text x="477" y="190" font-size="11.5" text-anchor="middle" fill="#12211a">並行更新の片方が無言で消える</text>
+      </svg>
+      <p class="cap">図: 4 つの代表的な CRDT。それぞれ違う方法で可換・結合・冪等なマージを実現している。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>5. 列 (sequence) の CRDT ― RGA と墓石のガベージコレクション</h2>
+    <p>テキストの共同編集のように「順序を持つ列」を CRDT にするのは、集合やカウンタよりも難しい。複数の端末が同時に同じ位置に別々の文字を挿入すると、挿入後にどちらが先に来るべきかを決める全順序が必要になる。<b>RGA (Replicated Growable Array, Roh et al.)</b> は、挿入される各要素に (タイムスタンプ, レプリカ ID) の組からなる一意な識別子を振り、この識別子に基づく全順序で列の中の位置を決める。並行に挿入された要素があっても、識別子の比較だけで全レプリカが同じ並び順に収束できる。</p>
+    <p>削除については、列の CRDT でも<b>墓石 (tombstone)</b> という考え方を使う。要素を物理的に削除してしまうと、その要素を参照して「この要素の次に挿入する」という並行な操作の基準点が失われてしまうため、削除された要素は墓石として位置の情報だけ残し、内容を無効化する。墓石は増え続けるため、ある時点より前の全ての更新が全レプリカに届いたことが保証できる (因果的安定性, causal stability) タイミングを見て、ガベージコレクションで実際に取り除く運用が必要になる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="RGAの墓石の図">
+        <rect x="30" y="30" width="110" height="40" fill="#8fd6b4" stroke="#0f5132"/><text x="85" y="55" font-size="12.5" text-anchor="middle">A</text>
+        <rect x="150" y="30" width="110" height="40" fill="#e0e0e0" stroke="#777" stroke-dasharray="3 3"/><text x="205" y="55" font-size="12" text-anchor="middle">墓石(旧 B)</text>
+        <rect x="270" y="30" width="110" height="40" fill="#8fd6b4" stroke="#0f5132"/><text x="325" y="55" font-size="12.5" text-anchor="middle">C</text>
+        <rect x="390" y="30" width="110" height="40" fill="#9dc3e8" stroke="#1f4a68"/><text x="445" y="55" font-size="12.5" text-anchor="middle">D(並行挿入)</text>
+        <text x="300" y="110" font-size="13.5" text-anchor="middle" fill="#12211a">削除された要素は位置情報を残したまま墓石になる</text>
+        <text x="300" y="140" font-size="13" text-anchor="middle" fill="#4a5d54">因果的安定性が確認できた時点でガベージコレクションする</text>
+      </svg>
+      <p class="cap">図: 削除した要素を即座に消さず墓石として残すことで、並行な挿入の基準点を保つ。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>6. どこで壊れるか・何を諦めるか・実システムでの例</h2>
+    <p>CRDT が保証するのは「技術的な収束 (全レプリカが同じデータ構造の状態に落ち着く)」であり、<b>利用者の意図の衝突</b>までは解決しない。共有カレンダーのイベントを例にすると、2 人が同時にオフラインで同じ予定の時間を別々の時間帯に変更した場合、LWW-Register ならどちらかのタイムスタンプが勝って一方の変更が黒白無言で失われる。OR-Set のような add-wins の集合なら、両方の変更が残り「2 つの時間帯が両方セットされている」という技術的には収束した、しかし利用者にとっては意味不明な状態になる。CRDT はデータが壊れない (型として矛盾した状態にならない) ことは保証するが、「どちらの意図を優先するか」というアプリケーション固有の判断は、通知や UI で利用者に委ねるか、別のビジネスロジックで補う必要がある。</p>
+    <p>また、墓石やタグが増え続けることによる<b>メモリ・ストレージの肥大化</b>も現実的な制約になる。ガベージコレクションのタイミングを誤ると、まだ全レプリカに届いていない削除操作の基準点を消してしまい、整合性が崩れる恐れがある。因果的安定性の確認には、各レプリカの既知の状態をやりとりする追加の仕組みが要る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="CRDTが保証する範囲の図">
+        <rect x="30" y="30" width="250" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="155" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">CRDT が保証すること</text>
+        <text x="155" y="75" font-size="12" text-anchor="middle" fill="#12211a">データ構造としての技術的な収束</text>
+        <rect x="320" y="30" width="250" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="445" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">CRDT が保証しないこと</text>
+        <text x="445" y="75" font-size="12" text-anchor="middle" fill="#12211a">利用者の意図の衝突の解決</text>
+        <text x="300" y="130" font-size="13" text-anchor="middle" fill="#4a5d54">「壊れない」ことと「意味が通る」ことは別の軸である</text>
+      </svg>
+      <p class="cap">図: CRDT はデータの技術的な収束を保証するが、意図の衝突の解決は別の仕組みに委ねる必要がある。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://hal.inria.fr/inria-00555588/document" target="_blank" rel="noopener">Shapiro, Preguiça, Baquero, Zawirski, "A comprehensive study of Convergent and Commutative Replicated Data Types" (Inria RR-7506, 2011) ― 半束・ CvRDT/CmRDT ・ G-Counter/PN-Counter/OR-Set/LWW-Register/RGA の定義の出典</a></li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/google-calendar" target="_blank" rel="noopener">SDFC, google-calendar ― 複数端末での共同編集という設計題材(文脈として使用)</a></li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-locks-leases-fencing.html">← 第 26 回 分散ロック・リース・フェンシング</a><a href="./distsys-index.html">目次</a><a href="./distsys-storage-engines.html">第 28 回 ストレージエンジンと分散 DB →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+ {
+  "q": "join semilatticeにおけるLUB(最小上界)を使ったmerge演算が、CRDTの収束にとって重要である理由として正しいものはどれか？",
+  "opts": [
+   "LUBから導かれる可換性・冪等性・結合性により、メッセージが失われても・順序が入れ替わっても・重複しても最終的な状態が変わらないから",
+   "LUBを使うと、全レプリカが常に同じ物理時刻にメッセージを受け取ることが自動的に保証されるようになるから",
+   "LUBを使うと、ネットワーク分断そのものが二度と発生しなくなり、通信路の設計を一切考えなくてよくなるから",
+   "LUBは常に2つの値の平均値を計算する演算であり、極端な値による影響を自動的に打ち消すことができるから",
+   "LUBを使うと、全レプリカのストレージ使用量が常に一定のまま増加しなくなり、墓石も不要になるから"
+  ],
+  "ans": 0,
+  "exps": [
+   "<b>これが正解。</b>LUBの定義から可換性・冪等性・結合性という3つの性質が自動的に成り立ち、これによってメッセージの喪失・順序の入れ替わり・重複配送があっても最終的な状態は変わらない。",
+   "LUBは値の演算であり、メッセージが届く時刻やタイミングを揃える仕組みではない。",
+   "LUBはデータの合流方法を定義するものであり、ネットワーク分断の発生そのものを防ぐ効果は持たない。",
+   "LUBは最小上界であり、平均値を計算する演算ではない。この説明は演算の定義を取り違えている。",
+   "墓石やタグの蓄積により、CRDTのストレージ使用量は一般に増加し続ける傾向がある。LUBがこれを防ぐ効果は無い。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>LUBの3つの性質が揃うことで、メッセージの順序・重複・欠落に関係なく同じ結果に収束する。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"LUBの効果の図\"><rect x=\"30\" y=\"40\" width=\"500\" height=\"50\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\" stroke-width=\"2\"/><text x=\"280\" y=\"70\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#0f5132\">可換性+冪等性+結合性 → 通信路の弱い保証でも収束</text><text x=\"280\" y=\"120\" font-size=\"13\" text-anchor=\"middle\" fill=\"#4a5d54\">メッセージの喪失・重複・順序入れ替えに耐えられる</text></svg><p class=\"cap\">図: LUBの性質が通信路への要求を緩める。</p></div>"
+  }
+ },
+ {
+  "q": "操作ベースCRDT(CmRDT)が状態ベースCRDT(CvRDT)と比べて、通信路に対して追加で要求する条件は何か？",
+  "opts": [
+   "全てのレプリカが物理的に同じデータセンターのラックに配置されていること",
+   "全ての更新操作が確実に届き、かつ因果順序(causal order)を保った配送であること",
+   "通信路がメッセージを常に暗号化した状態で送受信するよう設定されていること",
+   "全てのレプリカが常に同じバージョンのソフトウェアを実行し続けていること",
+   "通信路が1秒あたりに送れるメッセージ数に上限を設けないよう構成されていること"
+  ],
+  "ans": 1,
+  "exps": [
+   "データセンターの配置はCmRDTの要件とは無関係であり、分散CRDTの前提には含まれない。",
+   "<b>これが正解。</b>CmRDTは個々の操作をブロードキャストする方式であり、全ての更新が確実に届き、かつ因果順序を保った配送でなければ並行操作の可換性だけでは収束が保証できない。",
+   "暗号化はセキュリティの話であり、CmRDTが収束のために要求する通信路の条件には含まれない。",
+   "ソフトウェアのバージョンが揃っていることは、CmRDTが収束のために直接要求する条件ではない。",
+   "メッセージ数の上限を設けないという要求はCmRDTの定義には無く、無関係な制約をこじつけたもの。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>CmRDTは因果順序を保った確実な配送を前提にすることで、並行操作の可換性だけで収束を保証する。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"CmRDTの通信路要件の図\"><rect x=\"30\" y=\"40\" width=\"500\" height=\"50\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"280\" y=\"70\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#1f4a68\">確実な配送 + 因果順序 → 並行操作の可換性で収束</text></svg><p class=\"cap\">図: CmRDTはCvRDTより強い通信路の保証を前提にする。</p></div>"
+  }
+ },
+ {
+  "q": "2台のレプリカが同じカウンタに対して同時に+1を実行したとき、単純に「1つの整数をmax演算でマージする」設計では、どのような問題が起きるか？",
+  "opts": [
+   "2回の増分が両方正しく反映され、値は正しく2増える",
+   "maxを取ると整数がオーバーフローし、カウンタの値が負の数になってしまう",
+   "2回の増分のうち1回分しか反映されず、本来2増えるはずの値が1しか増えない",
+   "2台のレプリカのうち片方が自動的にクラッシュしたと判定され、クラスタから除外される",
+   "値が2倍に増幅され、本来2増えるはずの値が4増えてしまう"
+  ],
+  "ans": 2,
+  "exps": [
+   "単純なmax演算では増分が消えてしまうため、2回とも正しく反映されるという記述は誤り。これを解決するのがレプリカごとの配列を使うG-Counterの設計である。",
+   "この問題はオーバーフローではなく、maxという演算の性質上、同じ値どうしをマージしても増加しないことが原因である。",
+   "<b>これが正解。</b>両方のレプリカが0から1に増やした後、max(1,1)=1となり、本来2であるはずの値が1にしかならない。これが単純なmax演算だけでは増分が消えてしまう問題である。",
+   "max演算の結果からクラッシュを判定する仕組みは存在しない。この説明は無関係な理由をこじつけたもの。",
+   "max演算は値を増幅する効果を持たない。むしろ逆に、本来増えるはずの値が増えなくなるという問題が起きる。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>単純なmaxマージでは、同時に増やした分の片方が消えてしまう。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"maxマージの問題の図\"><rect x=\"30\" y=\"30\" width=\"220\" height=\"40\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"140\" y=\"55\" font-size=\"13\" text-anchor=\"middle\">レプリカ1: 0→1</text><rect x=\"310\" y=\"30\" width=\"220\" height=\"40\" fill=\"#e3edf5\" stroke=\"#2f5f8a\"/><text x=\"420\" y=\"55\" font-size=\"13\" text-anchor=\"middle\">レプリカ2: 0→1</text><text x=\"280\" y=\"110\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">max(1,1)=1 本来2のはずが1のまま</text></svg><p class=\"cap\">図: maxマージだけでは2つの増分を区別できず、片方が消える。</p></div>"
+  }
+ },
+ {
+  "q": "PN-Counter(増減可能なカウンタCRDT)の設計として正しいものはどれか？",
+  "opts": [
+   "1つの整数のペイロードを持ち、increment時は+1、decrement時は-1した値をそのままmergeでmaxを取る設計にする",
+   "increment専用のレプリカとdecrement専用のレプリカを物理的に分けて配置し、お互いの値を直接書き換える",
+   "カウンタの値が負にならないよう、decrement操作そのものを常に拒否する",
+   "増加用のP(positive)と減少用のN(negative)という2つのG-Counterを組み合わせ、値はsum(P)からsum(N)を引いたものにする",
+   "全レプリカが単一のグローバルロックを取得してから、increment/decrementを直接実行する"
+  ],
+  "ans": 3,
+  "exps": [
+   "1つの整数をそのままmaxでマージする方式は、decrementがmaxという演算の性質上effectを持たなくなってしまい、減少を正しく表現できない。",
+   "物理的にレプリカを分けて直接書き換える設計はCRDTの考え方ではなく、むしろ相互排他的な調整が必要になってしまう。",
+   "decrement操作そのものを拒否する設計はPN-Counterの目的(増減可能なカウンタ)に反する。",
+   "<b>これが正解。</b>PN-Counterは増加用のP・減少用のNという2つのG-Counterを組み合わせ、値はPの合計からNの合計を引いたものとして計算する。mergeはPとNをそれぞれ独立にマージする。",
+   "グローバルロックを前提にする設計は、オフラインでの独立更新を前提とするCRDTの目的そのものに反する。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>PN-Counterは増加用と減少用の2つのG-Counterを組み合わせる。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"PN-Counterの構成の図\"><rect x=\"30\" y=\"40\" width=\"220\" height=\"60\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"140\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">P(増加用G-Counter)</text><text x=\"140\" y=\"85\" font-size=\"12\" text-anchor=\"middle\">incrementで+1</text><rect x=\"310\" y=\"40\" width=\"220\" height=\"60\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\"/><text x=\"420\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">N(減少用G-Counter)</text><text x=\"420\" y=\"85\" font-size=\"12\" text-anchor=\"middle\">decrementで+1</text><text x=\"280\" y=\"130\" font-size=\"13\" text-anchor=\"middle\" fill=\"#4a5d54\">値 = sum(P) - sum(N)</text></svg><p class=\"cap\">図: PN-CounterはPとNという2つのG-Counterの組。</p></div>"
+  }
+ },
+ {
+  "q": "OR-Set(Observed-Remove Set)で、ある要素eのadd(e)とremove(e)が並行して(互いを観測せずに)実行された場合、一般にどうなるか？",
+  "opts": [
+   "removeがaddに優先し(remove-wins)、要素eは集合から消える",
+   "addとremoveが衝突した時点で例外が発生し、処理全体が中断される",
+   "最後に処理されたクライアントのタイムスタンプが大きい方が常に優先される",
+   "addとremoveの両方が無効化され、要素eは最初から存在しなかったことになる",
+   "addがremoveに優先し(add-wins)、要素eは集合に残る"
+  ],
+  "ans": 4,
+  "exps": [
+   "OR-Setの設計はadd-winsであり、remove-winsになるのは2P-Setのような別のSet CRDTの挙動である。",
+   "並行な操作の衝突で例外が発生して処理が中断するという挙動はCRDTの目的(自動的な収束)に反し、OR-Setの設計には無い。",
+   "OR-Setの振る舞いはタグの観測関係によって決まり、タイムスタンプの大小で優先順位を決める設計ではない(それはLWW-Registerの考え方)。",
+   "並行操作があってもadd自体は有効であり、両方が無効化されて要素が消えるという挙動はOR-Setの設計には無い。",
+   "<b>これが正解。</b>OR-Setではremoveは「自分が観測したタグ」だけを消す。並行して行われたaddが生成した新しいタグはremoveの時点で観測されていないため消えず、結果として要素は集合に残る(add-wins)。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>removeは観測済みのタグだけを消すため、並行なaddの新タグは残る。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"OR-Setのadd-winsの図\"><rect x=\"30\" y=\"40\" width=\"220\" height=\"50\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"140\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">remove(e)は(e,α)だけ消す</text><rect x=\"310\" y=\"40\" width=\"220\" height=\"50\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"420\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">並行add(e)の(e,β)は残る</text></svg><p class=\"cap\">図: 観測していない新タグは削除対象にならず残る。</p></div>"
+  }
+ },
+ {
+  "q": "LWW-Register(Last-Writer-Wins Register)を使って2つのレプリカが並行にそれぞれ別の値を書き込んだ場合に生じる代償として正しいものはどれか？",
+  "opts": [
+   "タイムスタンプが小さい方の書き込みが、通知もされずに無言で失われる",
+   "両方の書き込みが結合され、新しい1つの値として自動的にマージされる",
+   "両方の書き込みがそのまま別々の値として保持され、利用者がどちらも参照できる",
+   "書き込みの順序が不明なため、レジスタの値が不定(undefined)のままになる",
+   "並行書き込みを検知した時点でレプリカ間の通信が完全に停止してしまう"
+  ],
+  "ans": 0,
+  "exps": [
+   "<b>これが正解。</b>LWW-Registerはタイムスタンプが最大の値だけを採用するため、並行して書かれたタイムスタンプの小さい方の値は、特に通知もされずに失われる。",
+   "LWW-Registerは値を結合するのではなく、タイムスタンプの大小だけで片方を選ぶ設計であり、値同士の自動的な結合は行われない。",
+   "両方を保持するのはOR-Setのような集合型のCRDTの挙動であり、LWW-Registerは単一の値しか保持しない設計である。",
+   "LWW-Registerはタイムスタンプが一意かつ全順序を持つことを前提に設計されており、常に一方の値に確定する。不定のままになることはない。",
+   "並行書き込みの検知によって通信そのものが停止するという挙動はCRDTの目的に反し、LWW-Registerの設計には無い。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>LWW-Registerはタイムスタンプが大きい方だけが生き残り、もう一方は無言で消える。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"LWW-Registerの代償の図\"><rect x=\"30\" y=\"40\" width=\"220\" height=\"50\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"140\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">ts=105の値が勝つ</text><rect x=\"310\" y=\"40\" width=\"220\" height=\"50\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\"/><text x=\"420\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">ts=102の値は無言で消える</text></svg><p class=\"cap\">図: LWW-Registerは片方の更新を黒白無言で失う代償を払う。</p></div>"
+  }
+ },
+ {
+  "q": "RGA(Replicated Growable Array)のような列CRDTで、削除された要素を即座に物理削除せず「墓石(tombstone)」として残す理由は何か？",
+  "opts": [
+   "墓石を残すことでストレージの使用量そのものを削減し、ディスク容量を節約できるから",
+   "削除された要素を参照して「この要素の次に挿入する」という並行な操作の基準点が失われてしまうのを防ぐため",
+   "墓石が無いと、全レプリカのネットワーク帯域が自動的に制限されてしまうことになるから",
+   "墓石を残すことで、削除操作自体の実行速度が物理削除よりも速くなる効果があるから",
+   "墓石は単に過去の操作のログを残すための監査目的のものであり、収束には関係しないから"
+  ],
+  "ans": 1,
+  "exps": [
+   "墓石は削除された要素の情報を保持し続けるものであり、むしろストレージ使用量は増加する方向に働く。節約にはならない。",
+   "<b>これが正解。</b>要素を物理的に削除すると、その要素を基準点にして「次に挿入する」という並行な挿入操作が参照先を失ってしまう。墓石として位置情報を残すことで、並行な挿入の基準点を保てる。",
+   "墓石の有無とネットワーク帯域の制限は無関係であり、そのような効果は存在しない。",
+   "墓石を残す主目的は基準点の保持であり、削除操作自体の実行速度を上げる効果を狙ったものではない。",
+   "墓石は監査目的だけのものではなく、並行な挿入操作の正しい収束を実現するために不可欠な仕組みである。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>削除された要素を基準点にした並行挿入が成立するよう、墓石として位置情報を残す。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"墓石の必要性の図\"><rect x=\"30\" y=\"40\" width=\"160\" height=\"50\" fill=\"#8fd6b4\" stroke=\"#0f5132\"/><text x=\"110\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">A</text><rect x=\"200\" y=\"40\" width=\"160\" height=\"50\" fill=\"#e0e0e0\" stroke=\"#777\" stroke-dasharray=\"3 3\"/><text x=\"280\" y=\"70\" font-size=\"12\" text-anchor=\"middle\">墓石(旧B)</text><rect x=\"370\" y=\"40\" width=\"160\" height=\"50\" fill=\"#9dc3e8\" stroke=\"#1f4a68\"/><text x=\"450\" y=\"70\" font-size=\"12\" text-anchor=\"middle\">並行挿入(旧Bの次)</text></svg><p class=\"cap\">図: 墓石が無いと並行挿入の挿入先が特定できなくなる。</p></div>"
+  }
+ },
+ {
+  "q": "複数の端末がオフラインで共有カレンダーの同じ予定の時間帯を、それぞれ別の時間帯に変更した。この状況にCRDTを適用した場合、最も正確な理解はどれか？",
+  "opts": [
+   "CRDTを使えば、どんな場合でも利用者の意図を自動的に推測し、どちらが正しい時間帯かを自動的に選び出してくれる仕組みになっている",
+   "CRDTはこのような時間に関する衝突には適用できず、カレンダーのような時間を扱うデータには一切使うべきではないとされている",
+   "CRDTの種類によって挙動が変わり、片方が無言で消えるか両方が意味不明な状態で残るかのどちらかで、どちらが正しいかはCRDT自体では決まらない",
+   "CRDTを使うと、2つの変更が常に自動的に1つの新しい時間帯へと平均化されて合体するよう計算される仕組みになっている",
+   "CRDTを使えば、ネットワークが繋がった瞬間に片方の端末が自動的にロックされ、矛盾が物理的に発生しなくなる仕組みになっている"
+  ],
+  "ans": 2,
+  "exps": [
+   "CRDTは利用者の意図を推測する機能を持たない。あくまでデータ構造のマージ規則に従って技術的に収束するだけである。",
+   "CRDTは時間を扱うデータにも広く使われている(LWW-Registerのタイムスタンプなど)。適用できないという記述は誤り。",
+   "<b>これが正解。</b>CRDTはデータ構造としての技術的な収束を保証するだけで、利用者の意図の衝突までは解決しない。LWW-Registerなら片方が無言で消え、add-wins集合なら両方が技術的に残って意味不明な状態になり得る。どちらを正とするかはアプリケーション側の判断が必要。",
+   "時間帯のような値を自動的に平均化して合体する一般的な仕組みはCRDTには無い。そのような挙動は特殊な型を独自に定義しない限り起きない。",
+   "CRDTはオフラインでの独立更新を前提にしており、ネットワーク接続時に片方を自動的にロックするという仕組みは無い。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>CRDTは技術的な収束は保証するが、どちらの意図が正しいかという判断はアプリケーション側に残る。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"意図の衝突の図\"><rect x=\"30\" y=\"40\" width=\"230\" height=\"70\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"145\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">CRDTが決めること</text><text x=\"145\" y=\"90\" font-size=\"12\" text-anchor=\"middle\">データ構造としての収束</text><rect x=\"300\" y=\"40\" width=\"230\" height=\"70\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\"/><text x=\"415\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">CRDTが決めないこと</text><text x=\"415\" y=\"90\" font-size=\"12\" text-anchor=\"middle\">どちらの意図が正しいか</text></svg><p class=\"cap\">図: 技術的な収束と意図の正しさは別の軸。</p></div>"
+  }
+ },
+ {
+  "q": "ある開発者が「結果整合性(eventual consistency)を使っているシステムなら、CRDTを採用する意味は無い」と主張した。この主張への最も正確な反論はどれか？",
+  "opts": [
+   "CRDTは結果整合性と全く無関係な、強い一貫性(線形化可能性)そのものを保証する仕組みであり、この2つを比較すること自体が誤りである",
+   "結果整合性を使っているシステムでは、そもそも複数レプリカが同時に書き込むという事態が起きないため、CRDTは常に不要だということになる",
+   "CRDTは結果整合性よりも遅いことが理論的に証明されており、速度を優先するなら採用する意味は無い",
+   "一般的な結果整合性は最終的に一致することしか約束しないが、CRDTはそれに加え手動の衝突解決や巻き戻りなしに等価な状態になることまで保証する",
+   "CRDTは結果整合性のうち、特にAP系のデータベースにのみ使われる専用の実装方法であり、一般的な概念ではない"
+  ],
+  "ans": 3,
+  "exps": [
+   "CRDTは線形化可能性のような強い一貫性を保証するものではなく、結果整合性に類する保証の一種として位置づけられる。この説明は逆の主張をしている。",
+   "CRDTが想定する場面はまさに複数レプリカが同時に(あるいは独立に)書き込む状況であり、「そもそも起きない」という前提は誤り。",
+   "CRDTの速度が結果整合性の他の実装より一律に遅いという一般的な証明は無く、この主張は根拠が無い。",
+   "<b>これが正解。</b>結果整合性は「最終的に一致する」ことしか約束しないが、CRDTはさらに「同じ更新を受け取ったレプリカは手動の衝突解決なしに等価な状態になる」という、合流の手続きそのものの性質まで保証する点で区別される強みを持つ。",
+   "CRDTはAP系データベースに限らず、P2Pアプリケーションやオフライン編集など幅広い場面で使われる一般的な概念である。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>結果整合性は「いつか一致する」だけ、CRDTは「衝突解決なしに一致する」まで保証する。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"結果整合性とCRDTの違いの図\"><rect x=\"30\" y=\"40\" width=\"230\" height=\"70\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"145\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">結果整合性(一般)</text><text x=\"145\" y=\"90\" font-size=\"12\" text-anchor=\"middle\">いつか一致する</text><rect x=\"300\" y=\"40\" width=\"230\" height=\"70\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"415\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">CRDT</text><text x=\"415\" y=\"90\" font-size=\"12\" text-anchor=\"middle\">衝突解決なしに一致する</text></svg><p class=\"cap\">図: CRDTは結果整合性に「手動解決不要」という性質を追加する。</p></div>"
+  }
+ },
+ {
+  "q": "ある開発者が、墓石(tombstone)が溜まり続けてストレージが肥大化する問題を解決するため、「全レプリカの最新の同期時刻から1時間経過した墓石は無条件に即削除する」という独自のガベージコレクションを実装した。この設計の問題点として最も適切なものはどれか？",
+  "opts": [
+   "この設計には問題が無く、どんな場合でも安全にストレージを節約できる最適な方法である",
+   "墓石を削除するとCRDTの型そのものが別の型に変化してしまい、以後は一切のマージができなくなる",
+   "1時間という時間の単位を使うこと自体が、物理時計を前提にしない設計方針そのものに反するため、どんな長さであっても許されない",
+   "墓石の削除は常にネットワーク帯域を増加させる操作であり、削除しない方が通信コストの観点で望ましい",
+   "1時間以内にまだ全レプリカへ届いていない並行な操作が存在する場合、その操作が参照していた基準点が消えてしまい、整合性が崩れる恐れがある"
+  ],
+  "ans": 4,
+  "exps": [
+   "固定の時間だけを基準にする設計は、因果的安定性を確認していない点で安全ではなく、「問題が無い」とは言えない。",
+   "墓石を削除してもCRDTの型定義自体が変化するわけではなく、「別の型になる」という説明は誤り。",
+   "TTLのような時間の概念を一切使えないわけではないが、因果的安定性の確認を伴わない単純な時間基準だけでは不十分というのが問題の核心であり、「どんな長さでも許されない」という全否定は過度な一般化。",
+   "墓石の削除自体はストレージの話であり、ネットワーク帯域の消費を直接増加させる操作ではない。",
+   "<b>これが正解。</b>因果的安定性(全レプリカが該当の更新を受け取ったことの確認)なしに時間だけを基準に削除すると、まだ届いていない並行操作の基準点が消え、収束が崩れる恐れがある。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>因果的安定性を確認せずに時間だけで削除すると、未達の並行操作の基準点を失う危険がある。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"安全でないGCの図\"><rect x=\"30\" y=\"40\" width=\"230\" height=\"70\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\"/><text x=\"145\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">時間だけで削除</text><text x=\"145\" y=\"90\" font-size=\"12\" text-anchor=\"middle\">未達の並行操作が基準点を失う</text><rect x=\"300\" y=\"40\" width=\"230\" height=\"70\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"415\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">因果的安定性を確認</text><text x=\"415\" y=\"90\" font-size=\"12\" text-anchor=\"middle\">全レプリカが受領済みと確認してから削除</text></svg><p class=\"cap\">図: 安全なGCには因果的安定性の確認が要る。</p></div>"
+  }
+ }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

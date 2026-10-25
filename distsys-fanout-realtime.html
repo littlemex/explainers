@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大規模ファンアウトとリアルタイム配信 ― 誰に何をいつ届けるか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 29 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>大規模ファンアウトとリアルタイム配信 ― 誰に何をいつ届けるか</h1>
+  <p>push と pull どちらで配るかという一つの選択が、有名人問題・再接続の嵐・プレゼンスの鮮度をすべて左右する</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 09 回 <a href="./distsys-message-queues.html">メッセージキューと Pub/Sub</a>、第 17 回 <a href="./distsys-failure-detection.html">障害検知とゴシップ</a>、第 07 回 <a href="./distsys-consistent-hashing.html">コンシステントハッシュ</a></p>
+
+  <p class="intro">1 件の書き込みを何人に、どの経路で届けるか。<b>プッシュ (push, 書いた瞬間に配る)</b> と<b>プル (pull, 読まれた瞬間に集める)</b> のどちらを選ぶかで、有名人のフォロワーが 100 万人いる「有名人問題 (celebrity problem)」の重さが変わる。チャットやプレゼンス表示も同じ軸で説明できる。</p>
+
+  <section>
+    <h2>1. push、pull、ハイブリッド ― Twitter のタイムライン設計</h2>
+    <p>Twitter のようなタイムライン (自分がフォローしている人の投稿を時系列に見る画面) を作る方法は大きく 2 つある。<b>プッシュ型 (fan-out on write)</b> は、誰かが投稿した瞬間にその人のフォロワー全員のタイムライン (受信箱) にコピーを書き込む。読み取りは自分の受信箱を見るだけで済み、高速。<b>プル型 (fan-out on read)</b> は、投稿はフォロー関係を気にせず 1 か所に保存し、タイムラインを開いた瞬間にフォローしている全員の投稿を集めてマージする。</p>
+    <p>プッシュ型には<b>有名人問題</b>がある。1,000 万人にフォローされているアカウントが投稿すると、1,000 万件の書き込みが一瞬で発生する。逆にプル型は、フォロー数が多い人ほどタイムラインを開くたびに多くの相手の投稿を集める必要があり、読み取りが重くなる。実務では<b>ハイブリッド</b>が定石で、フォロワー数が少ない通常のユーザーはプッシュ、フォロワー数が極端に多い有名人だけはプル (読み取り時に別経路でマージ) にする。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="push型とpull型とハイブリッドの比較図">
+        <text x="140" y="24" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">プッシュ型 (fan-out on write)</text>
+        <rect x="40" y="40" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="65" font-size="13" text-anchor="middle" fill="#12211a">投稿時に全フォロワーへ書込</text>
+        <text x="140" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">読取は速いが有名人で書込が爆発</text>
+        <text x="480" y="24" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">プル型 (fan-out on read)</text>
+        <rect x="380" y="40" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="480" y="65" font-size="13" text-anchor="middle" fill="#12211a">閲覧時にフォロー先を集めて結合</text>
+        <text x="480" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">書込は軽いがフォロー数が多いと読取が重い</text>
+        <line x1="140" y1="115" x2="140" y2="150" stroke="#9aa" stroke-width="1"/>
+        <line x1="480" y1="115" x2="480" y2="150" stroke="#9aa" stroke-width="1"/>
+        <rect x="140" y="155" width="360" height="55" rx="8" fill="#fff6e8" stroke="#a9710f" stroke-width="2"/>
+        <text x="320" y="178" font-size="13" text-anchor="middle" fill="#8a5c0c" font-weight="700">ハイブリッド: 通常ユーザーはプッシュ</text>
+        <text x="320" y="197" font-size="13" text-anchor="middle" fill="#8a5c0c" font-weight="700">フォロワー数が極端に多い相手だけプルで結合</text>
+      </svg>
+      <p class="cap">図: 有名人問題を避けるため、実運用はフォロワー数でプッシュ/プルを切り分けるハイブリッドに落ち着く。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. WebSocket を張り続ける ― Slack のチャネル配信と再接続の嵐</h2>
+    <p>チャットのようにリアルタイム性が要るサービスは、クライアントごとに<b>WebSocket (双方向の持続的接続)</b> を張り続ける。接続が切れたクライアントは再接続を試みるが、サーバ側の再起動やロードバランサの入れ替えなどで多数のクライアントが同時に切断されると、全員が一斉に再接続を試みて新規接続要求がサーバ群に押し寄せる<b>再接続の嵐 (reconnection storm)</b> が起きる。これを避けるため、再接続までの待ち時間に<b>指数バックオフとジッタ (ランダムなばらつき)</b> を入れ、クライアントごとに再接続のタイミングを散らすのが定石(第 10 回のリトライ設計と同じ発想)。</p>
+    <p>Slack のメッセージは、WebApp (API を受ける) → Admin Server (チャネル ID から担当の Channel Server を探す) → Channel Server (そのチャネルの履行済みの履歴を保持) という経路で送信され、Gateway Server (地域ごとに配置され WebSocket 接続を保持) と Envoy (サービスプロキシ) を経由して受信者に push される。チャネル数が膨大なため、Channel Server への割り当てには<b>コンシステントハッシュ (第 7 回)</b> が使われる。1 台の Channel Server が落ちると、そのチャネルを張っていた WebSocket 接続全員が同時に切断され、再接続の嵐の種になる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="Slackメッセージの経路図">
+        <rect x="20" y="30" width="110" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="75" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">WebApp</text>
+        <line x1="130" y1="50" x2="170" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f1)"/>
+        <rect x="170" y="30" width="110" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="225" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">Admin Server</text>
+        <line x1="280" y1="50" x2="320" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f1)"/>
+        <rect x="320" y="30" width="130" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="385" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Channel Server</text>
+        <line x1="385" y1="70" x2="385" y2="110" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f1)"/>
+        <rect x="320" y="110" width="130" height="40" rx="8" fill="#fff6e8" stroke="#a9710f" stroke-width="2"/>
+        <text x="385" y="135" font-size="12.5" text-anchor="middle" fill="#8a5c0c" font-weight="700">Gateway Server</text>
+        <line x1="385" y1="150" x2="385" y2="180" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f1)"/>
+        <rect x="320" y="180" width="130" height="30" rx="8" fill="#effef3" stroke="#198754" stroke-width="2"/>
+        <text x="385" y="200" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">Envoy → 受信者</text>
+        <text x="550" y="95" font-size="12" text-anchor="middle" fill="#4a5d54">チャネル ID を</text>
+        <text x="550" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">コンシステント</text>
+        <text x="550" y="129" font-size="12" text-anchor="middle" fill="#4a5d54">ハッシュで割当</text>
+        <defs><marker id="arr-f1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: Slack のメッセージ経路。Channel Server の割当にコンシステントハッシュを使う。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. オンライン表示 (presence) は配信そのものより鮮度管理が本体</h2>
+    <p>「オンラインかどうか」の表示は、一見単純だが、WhatsApp のような 1 対 1/小グループと Discord のような大規模グループで必要な設計が変わる。小規模向けの素直な実装は、クライアントが一定間隔で<b>ハートビート (生存信号)</b> を送り、それを Redis の Pub/Sub で直接関係者に配る方式。これは専用のメッセージストアを持たないシステムでも動く。</p>
+    <p>規模が大きくなると、全員に毎回配信するのはコストが高くなるため、変化があったときだけ配信する設計に寄っていく。具体的には、ハートビートを Redis に <b>TTL (有効期限)</b> つきで書き込み、TTL が切れて「消えた」ことを検知した時だけオンライン→オフラインへの変化を配信する。これにより、無変化の間は配信コストがかからない。逆にポーリング方式(クライアントが能動的に状態を問い合わせる)は、リアルタイム性を諦める代わりに配信の仕組みそのものを無くせるという選択肢にもなる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="プレゼンス配信の2方式比較図">
+        <rect x="30" y="30" width="260" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">毎回配信 (小規模向け)</text>
+        <text x="160" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">ハートビート毎に Pub/Sub で配信</text>
+        <text x="160" y="96" font-size="12.5" text-anchor="middle" fill="#4a5d54">実装は単純、規模が増えると負荷増</text>
+        <rect x="350" y="30" width="260" height="90" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="480" y="55" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">変化だけ配信 (大規模向け)</text>
+        <text x="480" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">TTL 失効時だけ状態変化を配信</text>
+        <text x="480" y="96" font-size="12.5" text-anchor="middle" fill="#4a5d54">無変化の間は配信コストゼロ</text>
+      </svg>
+      <p class="cap">図: 規模が増えるほど「毎回配信」から「変化だけ配信」への移行が合理的になる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 順序と既読 ― タイムスタンプはどこで打つべきか</h2>
+    <p>複数リージョンにまたがるグループチャットでは、クライアントの時計はずれているため、クライアント側のタイムスタンプで並べ替えると順序が乱れる。実務では<b>サーバ側でタイムスタンプを打ち、クライアントはそれに従って並べ替える</b>のが素直な対策になる。これは第 15 回で見る物理時計のずれの問題と同じ構造で、完全な解決(全順序の保証)には追加の合意機構が要るが、ユーザー体験としては「サーバ基準の順序」で十分なことが多い。</p>
+    <p>既読 (read receipt) は、メッセージ本体とは別の「誰がどこまで読んだか」という状態を持つ。配信と既読を同じ経路に乗せると、既読の更新頻度(読むたびに発生)がメッセージ配信の負荷に上乗せされるため、既読は別のテーブル・別の配信経路に分離して、まとめて (バッチで) 反映する設計が一般的。</p>
+  </section>
+
+  <section>
+    <h2>5. Reddit がフォロー型ファンアウトを採らない理由</h2>
+    <p>Reddit の投稿一覧 (TOP/NEW/HOT) は Twitter のフォロー型タイムラインとは違う配信方式を採る。Twitter はフォロー関係に沿って「新しい投稿が時系列の先頭に追加される」だけだが、Reddit の HOT や TOP の順位はスコア (投票数と時間経過の関数) によって<b>頻繁に順位が入れ替わる</b>。プッシュ型ファンアウトは「誰かの受信箱に一度書いたら基本そのまま読まれる」ことを前提にした最適化であり、頻繁に並び順が変わるランキングには向かない。Reddit はこの性質と、人気サブレディットに投稿が集中する「ホットパーティション」問題を踏まえ、フォロー型ファンアウトではなく投稿そのものの集計・ランキングを中心に据えた設計を採る。</p>
+  </section>
+
+  <section>
+    <h2>6. 実システムの規模: Netflix のプッシュ通知</h2>
+    <p>Netflix は 2 億 2,000 万人のユーザーに、iOS、Android、スマート TV、Roku、Amazon Fire Stick、Web ブラウザなど多種多様なクライアントへ通知を送る。設計は、時計・ユーザー操作・内部システムから発生したイベントを<b>イベント管理エンジン</b>が受け取り、優先度に基づいて複数のキューに振り分け、<b>優先度別の処理クラスタ</b>が通知データを生成して Cassandra に保存し、最後に Android は FCM、Apple は APNs、Web、TV、その他デバイスは Netflix 独自の "Zuul Push" という<b>送信先ごとに異なる外部ゲートウェイ</b>へ渡す、という流れになっている。優先度でキューを分けておくことで、重要度の低い通知が重要な通知の配信を遅らせない設計になっている。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Netflixのプッシュ通知経路図">
+        <rect x="20" y="60" width="140" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="90" y="85" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">イベント管理</text>
+        <line x1="160" y1="80" x2="210" y2="80" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f2)"/>
+        <rect x="210" y="30" width="150" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a"/>
+        <text x="285" y="50" font-size="12" text-anchor="middle" fill="#1f4a68">高優先度キュー</text>
+        <rect x="210" y="95" width="150" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a"/>
+        <text x="285" y="115" font-size="12" text-anchor="middle" fill="#1f4a68">低優先度キュー</text>
+        <line x1="360" y1="45" x2="410" y2="80" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="360" y1="110" x2="410" y2="80" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="410" y="60" width="110" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="465" y="85" font-size="12" text-anchor="middle" fill="#5b3d80" font-weight="700">処理クラスタ</text>
+        <line x1="520" y1="80" x2="560" y2="80" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f2)"/>
+        <text x="600" y="60" font-size="11.5" text-anchor="middle" fill="#4a5d54">FCM / APNs</text>
+        <text x="600" y="78" font-size="11.5" text-anchor="middle" fill="#4a5d54">/ Zuul Push</text>
+        <defs><marker id="arr-f2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: Netflix は優先度別のキューで重要な通知を低優先度の通知から守る。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. どこで壊れるか・何を諦めるか</h2>
+    <ul>
+      <li><b>有名人問題</b>: プッシュ型のまま対応すると書き込みが爆発する。フォロワー数の閾値でプル型に切り替えるハイブリッド化が必要。</li>
+      <li><b>再接続の嵐</b>: 1 台の Channel Server/Gateway Server 障害が、張られていた WebSocket 全員の同時切断を生む。指数バックオフとジッタが無いと復旧直後のサーバに再接続が集中し、二次障害を招く。</li>
+      <li><b>プレゼンスの鮮度と配信コストの両立</b>: 毎回配信は鮮度は高いがコストが高く、ポーリングはコストは低いが鮮度が落ちる。TTL + 変化時配信は中間点だが、TTL の長さがそのまま「オフライン判定までの遅れ」になる。</li>
+      <li><b>クライアント時計への依存</b>: クライアントのタイムスタンプで順序付けすると、時計のずれでメッセージの前後関係が乱れる。サーバ側タイムスタンプを基準にする必要がある。</li>
+    </ul>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい/なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/twitter" target="_blank" rel="noopener">SDFC: twitter</a> ― タイムラインのプッシュ/プル設計と有名人問題の議論</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/chat-app" target="_blank" rel="noopener">SDFC: chat-app</a> ― ロングポーリング/WebSocket の比較と CDC 方式の選択</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/online-presence-indicator" target="_blank" rel="noopener">SDFC: online-presence-indicator</a> ― ハートビート配信と TTL ベースの変化検知の設計変種</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/reddit" target="_blank" rel="noopener">SDFC: reddit</a> ― フォロー型ファンアウトを採らない理由とホットパーティションの議論</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-does-netflix-scale-push-messaging-for-millions-of-devices.md" target="_blank" rel="noopener">ByteByteGo: How Does Netflix Scale Push Messaging</a> ― イベント優先度別キューと FCM/APNs/Zuul Push への送信経路</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/what-is-the-journey-of-a-slack-message.md" target="_blank" rel="noopener">ByteByteGo: What is the Journey of a Slack Message</a> ― WebApp/Admin Server/Channel Server/Gateway Server とコンシステントハッシュによる Channel 割当</li>
+
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-storage-engines.html">← 第 28 回 ストレージエンジンと分散 DB</a><a href="./distsys-index.html">目次</a><a href="./distsys-scheduler-workflow.html">第 30 回 分散スケジューラとワークフロー →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+
+  {
+    q: 'フォロワー数が平均的な通常ユーザーだけのサービスに、フォロワー 2,000 万人の有名人アカウントが参加するようになった。プッシュ型ファンアウトのままにした場合、最も起きやすい問題は何か。',
+    opts: [
+      '有名人の投稿のたびに 2,000 万件規模の書き込みが一瞬で発生し、書き込み経路に過大な負荷がかかる',
+      '有名人のタイムライン読み取りだけが極端に遅くなり、本人が自分の投稿を見られなくなるという現象が起きる',
+      'フォロワー数が多いアカウントほど自動的に投稿頻度の上限が課され、投稿そのものが拒否されるようになる',
+      'プッシュ型の投稿保存先データベースが自動的にプル型の構成へ切り替わり、問題は自己解決してしまう',
+      'フォロワーのタイムラインに重複した投稿が表示されるだけで、書き込み負荷そのものには影響しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>プッシュ型は投稿時に全フォロワーの受信箱へ書き込むため、フォロワー数が書き込み量に直結する。2,000万人規模だと1回の投稿で2,000万件の書き込みが瞬時に発生し、これが「有名人問題」の本質。',
+      '問題が起きるのは主に書き込み側(ファンアウト)であり、本人の読み取りが遅くなるという記述は、プッシュ型の負荷のかかり方を取り違えている。',
+      'プッシュ型のファンアウト機構自体に、フォロワー数に応じて投稿を拒否する仕組みは無い。これは実在しない挙動の想定。',
+      'ストレージ構成が負荷に応じて自動的に切り替わる仕組みは一般的なプッシュ型実装には無く、設計者が意図的にハイブリッド化する必要がある。',
+      '重複表示は別の実装上の不具合であり、有名人問題の核心である書き込み量の爆発とは別の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>プッシュ型は投稿のたびにフォロワー数だけ書き込みが発生する構造です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="有名人問題の図"><rect x="40" y="50" width="120" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="100" y="75" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">1回の投稿</text><line x1="160" y1="70" x2="220" y2="70" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q1)"/><rect x="220" y="30" width="300" height="80" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="370" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">2,000万件の書き込みが同時発生</text><text x="370" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">フォロワー数 = 書き込み量</text><defs><marker id="arr-q1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: プッシュ型ではフォロワー数がそのまま書き込み量になる。</p></div>'
+    }
+  },
+  {
+    q: 'プル型 (fan-out on read) のタイムライン設計で、フォロー数が極端に多いユーザー (例: 10 万人をフォローしている) が抱える問題として最も正確なものはどれか。',
+    opts: [
+      '投稿そのものが保存できなくなり、フォロー数の上限に自動的に抵触してエラーになる',
+      'フォロー関係そのものがデータベースの整合性を破壊し、CAP定理のPが常時発生する状態になる',
+      '書き込み時に 10 万人分の受信箱へのコピーが必要になり、書き込み経路の負荷が急増する',
+      'プル型では必ずキャッシュが無効化され、全ユーザーの読み取りが一律に遅くなる',
+      'タイムラインを開くたびに 10 万人分の投稿を集めて結合する必要があり、読み取りが重くなる'
+    ],
+    ans: 4,
+    exps: [
+      'フォロー数に上限が自動的に課される仕組みはプル型の本質的な性質ではなく、別の運用上の制約と混同している。',
+      'フォロー関係のデータ量が多いこと自体は、ネットワーク分断(CAP定理のP)とは無関係の別の層の問題。',
+      '書き込み時の受信箱コピーが発生するのはプッシュ型の特徴であり、設問はプル型について聞いているため逆の説明になっている。',
+      'プル型でもキャッシュは有効に使える。むしろ頻繁にタイムラインを開くユーザーの結合結果をキャッシュすることで負荷を抑える設計が一般的。',
+      '<b>これが正解。</b>プル型はタイムラインを開く瞬間にフォローしている全員の投稿を集めて結合するため、フォロー数がそのまま読み取りの重さになる。書き込みが多いのではなく、読み取りが重いのがプル型の弱点。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>プル型では「読む側」がフォロー数に応じたコストを負います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="プル型のコストの図"><rect x="40" y="50" width="120" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="100" y="75" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">タイムラインを開く</text><line x1="160" y1="70" x2="220" y2="70" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q2)"/><rect x="220" y="30" width="300" height="80" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="370" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">10万人分の投稿を都度結合</text><text x="370" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">フォロー数 = 読み取りの重さ</text><defs><marker id="arr-q2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: プル型はプッシュ型と逆に、フォロー数の多さが読み取りコストになる。</p></div>'
+    }
+  },
+  {
+    q: 'ある SNS が「投稿後すぐにタイムラインに反映されること」を重視しつつ、有名人問題も避けたいと考えている。最も妥当な設計方針はどれか。',
+    opts: [
+      '全ユーザーを例外なくプッシュ型にし、有名人アカウントだけ投稿頻度を制限して書き込み量を人為的に抑える',
+      '全ユーザーを例外なくプル型にし、キャッシュのTTLを極端に長くすることで読み取り負荷を常に一定に保つ',
+      '通常ユーザーはプッシュ型、フォロワー数が閾値を超える一部のアカウントだけはプル型にして、読み取り時に別経路で結合するハイブリッドにする',
+      'フォロー関係を全廃し、全ユーザーの投稿を一つの巨大なグローバルタイムラインとして全員に同じ内容を表示する',
+      'データベースをLSM-treeからB-treeに変更するだけで、プッシュ型・プル型どちらの問題も解決する'
+    ],
+    ans: 2,
+    exps: [
+      '投稿頻度の制限はユーザー体験を損ない、有名人問題の根本原因(書き込み量とフォロワー数の直結)を解消する設計上の対処ではない。',
+      'TTLを長くすると鮮度が落ちて「投稿後すぐに反映」という要件に反する。読み取り負荷の抑制と鮮度はトレードオフであり、両立しない。',
+      '<b>これが正解。</b>フォロワー数が少ない大多数はプッシュ型で高速な読み取りを確保し、フォロワー数が極端に多い一部だけプル型で読み取り時に結合することで、書き込みの爆発と読み取りの重さの両方を避けるのがハイブリッドの要点。',
+      'フォロー関係を無くすと「自分がフォローしている人の投稿を見る」という要件自体が成立しなくなり、前提が崩れる。',
+      'ストレージエンジンの選択はデータ構造の読み書き特性の話であり、ファンアウト方式(誰にいつ配るか)という別の軸の問題を解決する手段ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>閾値でプッシュ/プルを切り分けると、両方の弱点を同時に避けられます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ハイブリッド設計の図"><rect x="30" y="30" width="230" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">フォロワー数 少</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">プッシュ型(読取が速い)</text><rect x="300" y="30" width="230" height="90" rx="8" fill="#efe8f7" stroke="#7a5a9e"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">フォロワー数 極端に多</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">プル型(書込の爆発を回避)</text></svg>'
+          + '<p class="cap">図: 閾値を境にプッシュ/プルを切り分けるのがハイブリッドの要点。</p></div>'
+    }
+  },
+  {
+    q: 'チャットサービスのロードバランサを入れ替える作業で、張られていた WebSocket 接続が数万件同時に切断された。クライアントが即座に(待ち時間なしで)再接続を試みる実装になっていた場合、最も起きやすい問題は何か。',
+    opts: [
+      '切断前と全く同じ内容がそのまま再送され、ユーザーには何の影響も出ない',
+      '数万件の再接続要求が一斉に新しいサーバ群へ押し寄せ、復旧直後のサーバに過大な負荷がかかる再接続の嵐が起きる',
+      'WebSocketの仕様上、同時に複数のクライアントが再接続することは技術的に不可能なため、問題は起きない',
+      '再接続のたびに自動的にプル型のファンアウトへ切り替わり、負荷が自然に分散される',
+      'サーバ側が再接続要求を受けるたびにコンシステントハッシュのリング全体を再構築し、処理が停止する'
+    ],
+    ans: 1,
+    exps: [
+      '接続の切断自体でメッセージ内容が自動的に再送される保証は無く、「何の影響も出ない」は実際の挙動と異なる。',
+      '<b>これが正解。</b>一斉切断されたクライアントが待ち時間なく一斉に再接続すると、復旧直後の限られたサーバ群に要求が集中し、再接続の嵐と呼ばれる二次障害を招く。指数バックオフとジッタで再接続のタイミングを散らす対策が必要。',
+      'WebSocketの技術的な制約として同時再接続が不可能という事実は無く、現実にはむしろ同時に起きやすいことが問題の核心。',
+      'ファンアウト方式の切り替えは再接続とは無関係の別の設計判断であり、再接続集中時に自動的に起こる仕組みではない。',
+      'コンシステントハッシュのリング自体は再接続のたびに再構築されるものではなく、ノード構成が変わらない限り安定している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>待ち時間なしの一斉再接続は、復旧直後のサーバに負荷を集中させます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="再接続の嵐の図"><rect x="30" y="60" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="100" y="85" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">数万クライアント</text><line x1="170" y1="80" x2="230" y2="80" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-q4)"/><rect x="230" y="60" width="140" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="300" y="85" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">一斉に即時再接続</text><line x1="370" y1="80" x2="430" y2="80" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-q4)"/><rect x="430" y="60" width="110" height="40" rx="6" fill="#fff6e8" stroke="#a9710f"/><text x="485" y="85" font-size="12" text-anchor="middle" fill="#8a5c0c" font-weight="700">復旧直後に過負荷</text><defs><marker id="arr-q4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: ジッタ無しの即時再接続は、復旧直後のサーバへの負荷集中を招く。</p></div>'
+    }
+  },
+  {
+    q: 'Slack のようにコンシステントハッシュでチャネルを Channel Server に割り当てる設計で、1 台の Channel Server が突然落ちた場合に起きることとして最も正確なものはどれか。',
+    opts: [
+      'すべてのチャネルが影響を受け、全チャネルの接続が同時に切断される',
+      '落ちたサーバが担当していたチャネルだけが影響を受け、該当チャネルの接続が切断されて再接続が必要になる',
+      'コンシステントハッシュを使っている以上、サーバが落ちても接続に一切影響は出ない仕組みになっている',
+      '落ちたサーバの担当チャネルは自動的に全チャネルへ再分配され、負荷が均等化される',
+      'Channel Server が落ちると、Admin Server もまとめて機能停止し、全チャネルへのメッセージ送信が止まる'
+    ],
+    ans: 1,
+    exps: [
+      'コンシステントハッシュは「どのノードが落ちても全体が同じ影響を受ける」ことを避けるための仕組みであり、全チャネルが同時に影響を受けるという記述はその利点と矛盾する。',
+      '<b>これが正解。</b>コンシステントハッシュの利点は影響範囲を限定できることで、落ちたサーバが担当していたチャネルだけが影響を受ける。該当チャネルを張っていたWebSocket接続は切断され、再接続(と再割当)が必要になる。',
+      '接続に一切影響が出ないという記述は誤り。担当サーバが落ちれば、そのチャネルを張っていた接続は実際に切断される。',
+      '自動的に全チャネルへ再分配されるという挙動はコンシステントハッシュの動作とは異なる。再配置は後続ノードへの引き継ぎに限定される(第7回参照)。',
+      'Admin Serverは別の役割(チャネルIDからChannel Serverを探す)を持つ独立したコンポーネントであり、特定のChannel Serverの障害でAdmin Server自体が連鎖的に止まるという設計上の必然性は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>コンシステントハッシュの利点は影響範囲を担当チャネルだけに限定できることです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Channel Server障害の影響範囲の図"><rect x="40" y="30" width="480" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="280" y="50" font-size="13" text-anchor="middle" fill="#0f5132">他のChannel Serverのチャネルは無影響</text><rect x="200" y="80" width="160" height="54" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="280" y="100" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">落ちたサーバの</text><text x="280" y="116" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">担当分だけ切断</text></svg>'
+          + '<p class="cap">図: 影響は担当チャネルに限定され、他のチャネルは継続稼働する。</p></div>'
+    }
+  },
+  {
+    q: 'オンライン表示 (presence) を「TTL付きのハートビートが切れたときだけ状態変化を配信する」方式にした場合、TTL を極端に短く設定すると何が起きるか。',
+    opts: [
+      '配信コストが完全にゼロになり、どれだけ接続が不安定でもオフライン判定の誤りは起きなくなる',
+      'サーバ側のストレージ使用量だけが増加し、オンライン判定の精度には影響しない',
+      'TTLの設定値はクライアントのタイムスタンプ生成方式とは無関係であり、どの値でも結果は同じになる',
+      '通信が一瞬途切れただけでもTTLが切れやすくなり、実際には繋がっているのに一時的にオフラインと誤判定される頻度が増える',
+      'TTLを短くすることで、ハートビート自体の送信頻度を上げる必要が完全に無くなる'
+    ],
+    ans: 3,
+    exps: [
+      '配信コストはTTLが切れる頻度に依存するため、TTLを短くすると一時的な途切れでも失効が増え、むしろ配信(状態変化通知)が増える方向に働く。',
+      'TTLの長さはオンライン判定の精度(誤判定の起きやすさ)に直結する設計パラメータであり、ストレージ使用量だけの話ではない。',
+      'TTLの値はハートビートの送信間隔との相対関係で意味を持ち、クライアント側の挙動と無関係に結果が同じになるという記述は誤り。',
+      '<b>これが正解。</b>TTLを極端に短くすると、ネットワークの一瞬の途切れやパケット遅延だけでTTLが切れてしまい、実際には接続が継続しているのに一時的にオフラインと誤判定される頻度が増える。TTLの長さとオフライン判定までの遅れはトレードオフになる。',
+      'TTLを短くするとハートビートの送信間隔もそれに合わせて短くする必要が生じやすく、「送信頻度を上げる必要が完全に無くなる」という記述は逆の方向を示している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>TTLが短いほど、一瞬の途切れが誤ったオフライン判定につながりやすくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="TTLと誤判定の図"><line x1="40" y1="80" x2="520" y2="80" stroke="#9aa" stroke-width="2"/><circle cx="150" cy="80" r="6" fill="#c0492f"/><text x="150" y="60" font-size="12.5" text-anchor="middle" fill="#b5401f">一瞬の遅延</text><text x="150" y="105" font-size="12.5" text-anchor="middle" fill="#12211a">TTL短いと失効→誤オフライン</text><circle cx="400" cy="80" r="6" fill="#198754"/><text x="400" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">同じ遅延</text><text x="400" y="105" font-size="12.5" text-anchor="middle" fill="#12211a">TTL長いと許容され誤判定なし</text></svg>'
+          + '<p class="cap">図: TTLの長さは「誤判定の頻度」と「オフライン検知の速さ」のトレードオフ。</p></div>'
+    }
+  },
+  {
+    q: '複数リージョンに参加者が分散するグループチャットで、各クライアントが自分のローカル時計でタイムスタンプを付けてサーバに送る設計にした。この設計が引き起こす最も可能性の高い問題は何か。',
+    opts: [
+      'クライアントの時計を使う設計は、第15回で見たNTPやうるう秒の問題と完全に無関係であり、何の影響も受けない',
+      'サーバ側でタイムスタンプを使わないため、既読管理の機能そのものが技術的に実装不可能になる',
+      'クライアントのタイムスタンプを使っても、WebSocketの仕様により送信順序は自動的に保証される',
+      'リージョンが複数になることと時計のずれは無関係であり、単一リージョンでも複数リージョンでも結果は変わらない',
+      'クライアントの時計がずれているため、実際に送った順番とタイムスタンプ順が一致せず、受信者の画面でメッセージの前後関係が乱れることがある'
+    ],
+    ans: 4,
+    exps: [
+      '物理時計のずれという現象はクライアント・サーバのどちらで発生しても同じ根本原因(第15回のNTP・うるう秒の議論)に基づいており、「完全に無関係」という記述は誤り。',
+      '既読管理はメッセージ本体のタイムスタンプとは別の状態として実装できるため、タイムスタンプの付け方だけで既読機能が不可能になるという主張は過大。',
+      'WebSocketはバイトストリームの到達順序を保証する仕組み(第2回のTCP)の上に乗るが、アプリケーション側でタイムスタンプとして何を使うかという判断までは保証しない。',
+      '複数リージョンに分散するほど、クライアント間の時計のずれや通信経路の違いが大きくなりやすく、単一リージョンと比べて問題が顕在化しやすい。',
+      '<b>これが正解。</b>クライアントの時計はNTPで同期していても誤差や遅延があり、特に複数リージョンに分散していると時差・経路の違いでずれが大きくなりやすい。クライアント側のタイムスタンプで並べ替えると、実際の送信順と表示順が一致しない事態が起きる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>クライアントの時計がずれていると、送信順とタイムスタンプ順が逆転することがあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="クライアント時計のずれの図"><rect x="40" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">クライアントA: 送信が先</text><rect x="320" y="30" width="200" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">クライアントB: 送信が後</text><text x="280" y="105" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">時計がBの方が進んでいると表示順が逆転する</text></svg>'
+          + '<p class="cap">図: クライアント時計のずれは表示順の逆転を招く。サーバ基準のタイムスタンプで回避する。</p></div>'
+    }
+  },
+  {
+    q: 'Reddit が Twitter のようなフォロー型プッシュファンアウトを採用せず、投稿の集計・ランキングを中心に据えた設計を採る理由として最も妥当なものはどれか。',
+    opts: [
+      'Redditのサーバ台数がTwitterより少なく、プッシュ型を実装する技術力が無いから',
+      'Redditにはフォロー関係という概念自体が存在しないため、ファンアウトという発想が原理的に成立しないから',
+      'HOT/TOPの順位は投票数と時間経過の関数で頻繁に入れ替わるため、プッシュ型のように受信箱へ一度書いたらそのまま読まれるという前提が成立しにくいから',
+      'プッシュ型はコストが高すぎて、どのような規模のサービスでも採算が取れないことが実証されているから',
+      'Redditの投稿は匿名性が高く、誰が誰に配信するかを特定できないため配信そのものが不可能だから'
+    ],
+    ans: 2,
+    exps: [
+      '技術力の問題という説明は実際の設計判断の根拠として不正確で、本文で触れたランキングの性質という構造的な理由を無視している。',
+      'Redditにもサブレディットへの参加やフォローに類する概念はあり、「ファンアウトという発想が原理的に成立しない」という全否定は過大な記述。',
+      '<b>これが正解。</b>プッシュ型は「一度受信箱に書いたら基本そのまま読まれる」ことを前提にした最適化だが、HOT/TOPはスコアの再計算で頻繁に順位が入れ替わるため、この前提が成立しにくく、ランキング中心の設計の方が噛み合う。',
+      'プッシュ型はTwitterのように実際に大規模運用されている実例があり、「どの規模でも採算が取れない」という一般化は事実と矛盾する。',
+      '配信先の特定可否は匿名性とは別の技術的な問題であり、Redditの投稿の見え方(サブレディット単位の公開)から配信そのものが不可能という主張は成立しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>プッシュ型は「一度書いたら順位が変わらない」前提に乗った最適化です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Redditのランキング変動の図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="150" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Twitter: 時系列で確定</text><rect x="300" y="30" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="410" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">Reddit: スコアで順位が変動</text><text x="280" y="105" font-size="13" text-anchor="middle" fill="#12211a">順位が変わる対象をプッシュ型で固定するのは無駄が多い</text></svg>'
+          + '<p class="cap">図: 順位が変動するランキングはプッシュ型の前提と噛み合わない。</p></div>'
+    }
+  },
+  {
+    q: 'Netflix のプッシュ通知システムが、イベントを優先度別の複数キューに振り分けてから処理クラスタに渡す設計を採っている理由として最も妥当なものはどれか。',
+    opts: [
+      'キューを複数に分けると実装コードの行数が減り、保守コストが下がるという理由だけで採用されている',
+      '優先度別に分けなくても、処理クラスタの性能次第でどのような通知もすべて同じ速さで届くため、設計上の意味はほとんど無い',
+      '優先度の概念はCassandraへの保存処理には一切関係せず、通知の送信先(FCM/APNs/Zuul Push)を決めるためだけに使われている',
+      'キューを分けることで、重要度の低い通知(例: マーケティング系)が重要度の高い通知(例: 視聴中のエラー通知)の配信を遅らせないようにできるから',
+      '優先度別キューは障害発生時に自動的にすべての通知を一つのキューへ統合し、処理を単純化するための仕組みだから'
+    ],
+    ans: 3,
+    exps: [
+      'キューを分ける主目的は実装コードの行数ではなく、本文で述べた配信の優先順位の制御という運用上の理由にある。',
+      '処理クラスタの性能が有限である以上、キューが1本だと混雑時に優先度の低い通知が高い通知の処理を妨げる。「同じ速さで届く」という前提そのものが成立しにくい。',
+      '優先度はイベント管理エンジンでのキューへの振り分けの基準であり、送信先の選択(FCM/APNs/Zuul Push)はクライアントの種類に基づく別の判断軸であって、優先度の用途をその一点に限定するのは不正確。',
+      '<b>これが正解。</b>優先度別にキューを分けることで、マーケティング系のような重要度の低い通知が、視聴中のエラー通知のような重要度の高い通知の処理・配信を遅らせないようにできる。これは第24回のバルクヘッド(隔離)と同じ発想。',
+      '障害発生時にキューを自動的に統合する仕組みは本文の説明には無く、むしろ優先度を分けておくことで障害時でも高優先度の通知を優先して処理できるようにするのが狙い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>優先度別のキューは、低優先度の混雑が高優先度の処理を妨げないようにする隔離の仕組みです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="優先度キューの隔離効果の図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="150" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">高優先度キュー(独立)</text><rect x="40" y="90" width="220" height="40" rx="6" fill="#fff6e8" stroke="#a9710f"/><text x="150" y="115" font-size="13" text-anchor="middle" fill="#8a5c0c" font-weight="700">低優先度キュー(混雑しても隔離)</text><text x="420" y="65" font-size="13" text-anchor="middle" fill="#12211a">処理クラスタ</text></svg>'
+          + '<p class="cap">図: キューの分離が、低優先度の混雑から高優先度の処理を守る。</p></div>'
+    }
+  },
+  {
+    q: 'あるメッセージアプリが、フォロワー型のタイムラインは持たず、WebSocket による1対1・小グループのチャットとプレゼンス表示だけを提供している。設計レビューで「有名人問題への対策が無い」と指摘された場合、最も妥当な返答はどれか。',
+    opts: [
+      '有名人問題はフォロー型のプッシュファンアウトが抱える問題であり、本アプリにはフォロー型タイムラインが無いため、その対策は本質的に不要である。一方で、WebSocket接続の再接続嵐やプレゼンスのTTL設計は別に対策が必要',
+      'サービスの種類に関わらず、分散システムにはすべて有名人問題が発生するため、必ず対策を講じなければならない',
+      '有名人問題が無いということは、このアプリには負荷の集中という問題が原理的に一切発生しないことを意味する',
+      'WebSocketを使っている以上、有名人問題は自動的にプル型の仕組みで解決されているはずなので、追加の確認は不要である',
+      'プレゼンス表示機能があるアプリは、必ずフォロー型タイムラインも内部に持っているため、有名人問題への対策は必須である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>有名人問題はフォロー型プッシュファンアウト特有の問題であり、フォロー型タイムラインを持たないアプリには当てはまらない。ただし、WebSocketの再接続嵐(本文2節)やプレゼンスのTTL設計(本文3節)は別の負荷集中の問題として残るため、指摘への返答としては「この問題は無いが、別の対策は必要」という整理が正確。',
+      '有名人問題はフォロー型プッシュファンアウトという特定の設計に起因する問題であり、分散システム全般に必ず発生するという一般化は誤り。',
+      '有名人問題が無いことと、負荷の集中が一切発生しないことは別の主張。グループの参加人数が多い場合の一斉配信など、別の形の負荷集中は残りうる。',
+      'WebSocketの使用自体はファンアウト方式(プッシュかプルか)とは別の軸の技術選択であり、「自動的にプル型で解決されている」という因果関係は成立しない。',
+      'プレゼンス表示機能とフォロー型タイムラインの有無は独立した機能であり、プレゼンス機能があるからフォロー型タイムラインを必ず持つという関係は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>有名人問題はフォロー型ファンアウト固有の問題で、他の負荷集中(再接続嵐・プレゼンス)とは別の軸にあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="問題の軸の分離を示す図"><rect x="30" y="30" width="230" height="45" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="58" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">有名人問題(フォロー型特有・対象外)</text><rect x="300" y="30" width="230" height="45" rx="6" fill="#fff6e8" stroke="#a9710f"/><text x="415" y="58" font-size="13" text-anchor="middle" fill="#8a5c0c" font-weight="700">再接続嵐・プレゼンスTTL(別に対策要)</text></svg>'
+          + '<p class="cap">図: 対策が不要な問題と、別途対策が要る問題を取り違えないことが重要。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

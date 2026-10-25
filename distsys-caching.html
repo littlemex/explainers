@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャッシュ戦略 ― 速さと整合性の引き換えをどう設計するか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 04 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>キャッシュ戦略 ― 速さと整合性の引き換えをどう設計するか</h1>
+  <p>キャッシュは読み取りを速くする代わりに「本当の値 (DB)」と「写しの値 (キャッシュ)」という 2 つの真実を生み、そのズレをどう扱うかが設計の本体になる</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 03 回 <a href="./distsys-scaling-lb.html">スケーリングとロードバランサ</a></p>
+  <p class="intro">DB への問い合わせは、メモリ上の読み取りに比べて桁違いに時間がかかります。同じ値を何度も読むなら、一度読んだ結果を手近な速いストレージに置いておき、次回はそこから返せば済みます。これが<b>キャッシュ</b>の基本的な発想です。しかしキャッシュを置いた瞬間、システムには「本当の値を持つ DB」と「その写しを持つキャッシュ」という 2 つの場所が生まれ、両者がズレたときにどう振る舞うかという新しい設計判断が発生します。この回では、キャッシュと DB をどう同期させるか、古いデータをどう追い出すか、そしてキャッシュ特有の障害パターンにどう備えるかを、OTP (使い捨てパスワード) 認証と気象センサーの実例で確認します。</p>
+
+  <!-- ===== 解説パート 1: C・A・P の正確な定義 ===== -->
+
+  <!-- ===== クイズパート ===== -->
+  <section>
+    <h2>1. なぜキャッシュが要るのか ― 速い記憶を DB の前に置く</h2>
+    <p>DB (ディスクを使う永続的なデータストア) への問い合わせは、ネットワークのやり取りとディスクの読み取りを含むため、メモリ上だけで完結する読み取りに比べて桁違いに遅くなります。同じキーに対する読み取りが何度も繰り返されるなら、1 回目の結果をメモリ上の速いストア (Redis のような分散キャッシュや、アプリケーションサーバ自身のメモリ) に置いておき、2 回目以降はそこから返せば、DB への問い合わせ自体を減らせます。</p>
+    <p>キャッシュが向くのは、<b>読み取りが書き込みより圧倒的に多い</b>、かつ<b>データの更新頻度が低い</b>場面です。更新が頻繁なデータをキャッシュすると、キャッシュと DB のズレ (古いデータを読んでしまう) が起きやすく、同期の手間の方が利益を上回ることがあります。</p>
+    <p>具体例として、ログイン時に送られる<b>OTP (使い捨てパスワード, one-time password)</b> の検証を考えます。ユーザが入力した OTP が正しいかどうかは、発行から 1 分程度のごく短い期間だけ有効であればよく、恒久的に DB へ保存する必要はありません。そこで OTP とその有効期限、認証に関わる情報 (操作内容など) をキャッシュだけに TTL (time-to-live, 生存時間) 付きで保存する設計が使われます。例えばキャッシュ 1 台に 16 GB のメモリがあり、TTL を 300 秒、1 件あたりのデータサイズを 500 バイトとすると、TTL の間に保持できる最大件数は次のように見積もれます。</p>
+    $$ \text{保持件数} = \frac{16 \times 10^9 \text{バイト}}{500 \text{バイト}} \approx 3.2 \times 10^7 \text{件} $$
+    <p>TTL 300 秒の間にこの件数まで新規発行を受け止められるので、1 秒あたりに処理できる発行数の目安は $3.2 \times 10^7 \div 300 \approx 10$ 万件 / 秒となります。この計算はキャッシュ 1 台分のメモリ上限から負荷の上限を逆算する、容量設計の基本的な考え方です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="キャッシュがDBへの問い合わせを減らす図">
+        <rect x="30" y="70" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="95" y="100" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">アプリ</text>
+        <rect x="235" y="20" width="130" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="300" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">キャッシュ (速い)</text>
+        <rect x="235" y="120" width="130" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="300" y="150" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">DB (遅いが正)</text>
+        <line x1="160" y1="90" x2="235" y2="50" stroke="#198754" stroke-width="2"/>
+        <text x="225" y="40" font-size="12.5" text-anchor="end" fill="#0f5132">1 回目以降</text>
+        <line x1="160" y1="100" x2="235" y2="140" stroke="#9aa" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="225" y="155" font-size="12.5" text-anchor="end" fill="#4a5d54">キャッシュ無い時だけ</text>
+        <text x="460" y="80" font-size="13" text-anchor="middle" fill="#12211a">同じキーの読み取りは</text>
+        <text x="460" y="100" font-size="13" text-anchor="middle" fill="#12211a">以後キャッシュだけで済む</text>
+      </svg>
+      <p class="cap">図: キャッシュに値があれば DB へ行かずに済み、読み取りの大半をメモリ上で処理できる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 読み書きの同期方式 ― cache-aside ・ read-through ・ write-through ・ write-back ・ write-around</h2>
+    <p>キャッシュと DB という 2 つの場所をどう同期させるかには、いくつかの決まった形があります。読み取り側では 2 通りです。<b>cache-aside</b> はアプリケーションが自分でキャッシュを確認し、無ければ DB から読んでキャッシュに書き込む方式で、最も広く使われます。<b>read-through</b> はキャッシュ自身が DB への読み取りを代行し、アプリケーションからはキャッシュだけを見ているように振る舞う方式です。</p>
+    <p>書き込み側は 3 通りです。<b>write-through</b> はキャッシュと DB の両方へ同時に書き込み、常にキャッシュを最新に保ちますが、書き込みのたびに両方への反映を待つ分遅くなります。<b>write-back (write-behind)</b> はまずキャッシュだけに書き込んで応答を返し、DB への反映は後でまとめて行う方式で、書き込みは速くなりますが、キャッシュが落ちると未反映のデータを失う危険があります。<b>write-around</b> は DB にだけ書き込み、キャッシュには触れない方式で、cache-aside と組み合わせて「書き込み時はキャッシュを汚さず、次に読まれたときに最新値がキャッシュに載る」という形で使われることが多くあります。</p>
+    <p>OTP の例では、発行時に DB を経由せずキャッシュへ直接書き込みます (TTL 付きの書き込みなので write-through や write-around という分類にはやや馴染みませんが、発想としては「キャッシュがそのまま正とみなせる短命データ」を扱う cache-aside の一種です)。次のコードは、より一般的な cache-aside の読み取りパターンを、TTL 付きの辞書ベースの簡易キャッシュで示したものです。</p>
+    <pre><code>import time
+
+class Cache:
+    def __init__(self):
+        self.store = {}
+
+    def get(self, key):
+        entry = self.store.get(key)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if time.time() > expires_at:
+            del self.store[key]
+            return None
+        return value
+
+    def set(self, key, value, ttl):
+        self.store[key] = (value, time.time() + ttl)
+
+def get_user(user_id, cache, db):
+    value = cache.get(user_id)
+    if value is not None:
+        return value
+    value = db[user_id]
+    cache.set(user_id, value, ttl=300)
+    return value
+
+cache = Cache()
+db = {'u1': 'Alice'}
+print(get_user('u1', cache, db))
+print(get_user('u1', cache, db))</code></pre>
+    <p>1 回目の呼び出しではキャッシュが空なので DB から読み、300 秒の TTL でキャッシュに書き込みます。2 回目の呼び出しではキャッシュに値が残っているため、DB には一切アクセスしません。これが cache-aside の最小の形です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="cache-asideとwrite-throughの違いを示す図">
+        <rect x="20" y="20" width="270" height="160" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="45" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">cache-aside (読み取り)</text>
+        <text x="155" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">1. キャッシュを見る</text>
+        <text x="155" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">2. 無ければ DB から読む</text>
+        <text x="155" y="121" font-size="12.5" text-anchor="middle" fill="#12211a">3. 結果をキャッシュに書く</text>
+        <text x="155" y="155" font-size="12.5" text-anchor="middle" fill="#4a5d54">制御はアプリケーション側</text>
+        <rect x="330" y="20" width="270" height="160" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="465" y="45" font-size="14" text-anchor="middle" fill="#1f4a68" font-weight="700">write-through (書き込み)</text>
+        <text x="465" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">キャッシュと DB の両方へ</text>
+        <text x="465" y="103" font-size="12.5" text-anchor="middle" fill="#12211a">同時に書き込む</text>
+        <text x="465" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">常に最新だが書き込みは遅い</text>
+      </svg>
+      <p class="cap">図: 読み取りは cache-aside、書き込みは write-through / write-back / write-around から選ぶ。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 追い出し方式 ― 満杯になったら何を消すか</h2>
+    <p>キャッシュのメモリには限りがあるため、新しいデータを入れる余地が無くなったら何かを消す必要があります。この「何を消すか」を決めるのが<b>追い出し (eviction) アルゴリズム</b>です。最も広く使われる<b>LRU (Least Recently Used)</b> は、最後に使われたのが一番古いデータから消します。直近使われたデータは再び使われやすいという経験則に基づいています。<b>LFU (Least Frequently Used)</b> は、アクセス回数そのものが少ないデータから消すため、たまに読まれるだけの古いデータでも頻繁に読まれていれば残ります。<b>FIFO (First In First Out)</b> はアクセス頻度を一切見ず、入れた順番が古いものから単純に消す、最も実装が軽い方式です。<b>TTL</b> は厳密には追い出しアルゴリズムではありませんが、各データに生存時間を設定し、期限が切れたら自動的に無効にする点で同じ役割を果たします。</p>
+    <p>OTP の例では TTL が中心的な役割を果たします。OTP そのものの有効期限は発行から 1 分程度と短く設定し、キャッシュのエントリ自体の TTL はそれより長い 5 分程度に設定することで、期限切れの OTP がキャッシュ上に残っていても検証時に「期限切れ」として弾けるようにします。また、同じ OTP に対して間違った入力が繰り返された場合に備え、エントリの中に失敗回数のカウンタを持たせ、一定回数を超えたら正しい OTP が入力されても認証を成立させない、という設計も組み合わせます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="LRUが最後に使われたのが古いデータを追い出す図">
+        <rect x="30" y="30" width="110" height="40" rx="6" fill="#8fd6b4" opacity="0.6" stroke="#0f5132"/>
+        <text x="85" y="55" font-size="12.5" text-anchor="middle" fill="#12211a">最近使用</text>
+        <rect x="150" y="30" width="110" height="40" rx="6" fill="#8fd6b4" opacity="0.4" stroke="#0f5132"/>
+        <text x="205" y="55" font-size="12.5" text-anchor="middle" fill="#12211a">やや前に使用</text>
+        <rect x="270" y="30" width="110" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="325" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">最も古い</text>
+        <text x="325" y="90" font-size="12.5" text-anchor="middle" fill="#b5401f">→ 新規データが来たら追い出される</text>
+        <text x="300" y="140" font-size="13" text-anchor="middle" fill="#12211a">LRU: 最後に使われた時刻が最も古いものを消す</text>
+        <text x="300" y="165" font-size="12.5" text-anchor="middle" fill="#4a5d54">LFU ならアクセス回数が最も少ないものを消す</text>
+      </svg>
+      <p class="cap">図: LRU は最後に使われた時刻の古いデータを追い出し枠の先頭に置く。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. キャッシュ特有の故障モード ― どこで壊れるか</h2>
+    <p>キャッシュを挟むことで新しく生まれる障害パターンが 4 つあります。1 つ目は<b>サンダリングハード (thundering herd)</b> で、多数のキーが同じ瞬間に期限切れになり、そのすべてのリクエストが一度に DB へ直撃して DB を過負荷にする現象です。対策は、キーごとの TTL にランダムな揺らぎ (ジッタ) を加えて期限切れの瞬間を分散させることです。</p>
+    <p>2 つ目は<b>キャッシュ貫通 (cache penetration, cache miss attack)</b> で、そもそも DB にも存在しないキーへの問い合わせが繰り返されるケースです。キャッシュにも DB にも値が無いため、毎回 DB まで問い合わせが素通りしてしまいます。悪意のあるユーザがこの性質を悪用し、存在しないキーを大量に問い合わせることで DB に負荷をかける攻撃にもなり得ます。対策は 2 つあり、存在しないことが分かったキーに対して「無い」という結果自体を短い TTL でキャッシュする方法と、<b>ブルームフィルタ (Bloom filter)</b> という確率的なデータ構造を使って「そもそも存在しない可能性が高いキー」を DB へ問い合わせる前にふるい落とす方法です。</p>
+    <p>3 つ目は<b>キャッシュブレークダウン (cache breakdown)</b> で、全体のアクセスの大部分を占める 1 つの<b>ホットキー (hot key)</b> がちょうど期限切れになった瞬間、そのキーへの大量のリクエストが一斉に DB へ向かう現象です。サンダリングハードの特殊ケースともいえ、対策としてはアクセスが極端に集中するキーには TTL を設定しない (期限切れという概念自体を無くす) という割り切りがよく使われます。4 つ目は<b>キャッシュクラッシュ (cache crash)</b> で、キャッシュ自体が落ちて全リクエストが DB に向かう現象です。サーキットブレーカー (一定数の失敗が続いたらキャッシュへのアクセス自体を一時的に諦める仕組み) やキャッシュのクラスタ化 (複数台構成で一部が落ちても全滅しない構成) で備えます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="キャッシュ貫通とサンダリングハードの図">
+        <rect x="20" y="20" width="280" height="170" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="160" y="45" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">サンダリングハード</text>
+        <text x="160" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">多数のキーが同時に期限切れ</text>
+        <text x="160" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">→ 一斉に DB へ問い合わせ</text>
+        <text x="160" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">対策: TTL にランダムな揺らぎを加える</text>
+        <rect x="320" y="20" width="280" height="170" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="460" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">キャッシュ貫通</text>
+        <text x="460" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">存在しないキーへの問い合わせ</text>
+        <text x="460" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">→ 毎回 DB まで素通りする</text>
+        <text x="460" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">対策: null キャッシュ or ブルームフィルタ</text>
+      </svg>
+      <p class="cap">図: サンダリングハードとキャッシュ貫通は、どちらもキャッシュを素通りして DB に負荷を集中させる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 実システムでの例 ― OTP 認証と気象センサーのダッシュボード</h2>
+    <p>OTP 認証の設計をもう一度まとめます。ユーザ名をキーに、OTP の値、発行時刻、紐づく操作の内容をまとめてキャッシュに保存し、エントリ全体の TTL を 5 分、OTP そのものの有効期限を 1 分とします。失敗回数のカウンタを同じエントリに持たせ、閾値を超えたら以後の入力を無条件に拒否します。この設計には明確な割り切りがあります。キャッシュが落ちた場合のフォールバックは「OTP を再発行してもらう」だけで、キャッシュの内容を他の場所から復元する仕組みは持ちません。つまりこの OTP ストアは意図的に耐障害性を持たせていません。短命で再発行が容易なデータだからこそ、この割り切りが成立します。</p>
+    <p>対照的な例が、多数の気象センサーからの温度データをもとに作る州全体のヒートマップ (気温分布を色で示した画像) です。センサー 1 つが画像の 1 ピクセルに対応するとすると、画像全体のサイズはセンサーの台数で決まる固定サイズになり、更新頻度もセンサーの送信間隔で決まる既知のペースになります。この「サイズが固定」「読み取りが大半」「更新頻度が緩やか」という性質は、まさに最初の節で述べたキャッシュが向く条件そのものです。そこで、最新のヒートマップ画像そのものをメモリ上 (ElastiCache のような分散キャッシュ) に丸ごと保持しておき、閲覧リクエストが来るたびに DB やオブジェクトストレージへ行かずにメモリから直接返す、という設計が使えます。センサーからの新しい値が届いたときだけ、該当するピクセルを更新してキャッシュ上の画像を書き換えます。</p>
+    <p>この 2 つの例は対照的な設計判断を示しています。OTP は「短命でキャッシュが正そのものであり、失っても再発行すればよい」という前提のもとキャッシュだけで完結させています。ヒートマップは「生成コストの高い派生データを、更新が来たときだけ書き換えながらメモリ上に保持する」という前提のもと、キャッシュを事実上の読み取り専用ストアとして使っています。どちらも「読み取りが多く、更新頻度が緩やか」という条件を満たしているからこそキャッシュが機能しており、更新が頻繁で読み取りと競合するような用途には同じ設計は持ち込めません。</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin:12px 0">
+      <tr style="background:#eaf5ef"><th style="padding:8px;border:1px solid #d9e5df;text-align:left">観点</th><th style="padding:8px;border:1px solid #d9e5df;text-align:left">OTP 認証</th><th style="padding:8px;border:1px solid #d9e5df;text-align:left">気象ヒートマップ</th></tr>
+      <tr><td style="padding:8px;border:1px solid #d9e5df">データの寿命</td><td style="padding:8px;border:1px solid #d9e5df">数十秒 ・ TTL で消える</td><td style="padding:8px;border:1px solid #d9e5df">常に最新版 1 つを保持</td></tr>
+      <tr><td style="padding:8px;border:1px solid #d9e5df">キャッシュが落ちたら</td><td style="padding:8px;border:1px solid #d9e5df">再発行してもらう (割り切り)</td><td style="padding:8px;border:1px solid #d9e5df">センサーの最新値から再構築する</td></tr>
+      <tr><td style="padding:8px;border:1px solid #d9e5df">正とする場所</td><td style="padding:8px;border:1px solid #d9e5df">キャッシュ自体が正</td><td style="padding:8px;border:1px solid #d9e5df">センサー群のデータが正、画像はその派生物</td></tr>
+    </table>
+    <p>キャッシュを入れるかどうかを決める判断は、結局この回で見てきた観点に戻ってきます。読み取りが書き込みより多いか、更新頻度は緩やかか、キャッシュを失ったときに許容できる代償は何か。この 3 つに答えられないままキャッシュを足すと、ヒット率やレイテンシといった指標を測る前に、サンダリングハードやキャッシュ貫通のような壊れ方の方を先に引き起こすことになります。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/top-5-caching-strategies.md" target="_blank" rel="noopener">ByteByteGo: Top 5 Caching Strategies</a> ― cache-aside ・ read-through ・ write-through ・ write-back ・ write-around の 5 方式の分類を第 2 節に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/top-8-cache-eviction-strategies.md" target="_blank" rel="noopener">ByteByteGo: Top 8 Cache Eviction Strategies</a> ― LRU ・ LFU ・ FIFO ・ TTL など追い出しアルゴリズムの定義を第 3 節に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-can-cache-systems-go-wrong.md" target="_blank" rel="noopener">ByteByteGo: How Can Cache Systems Go Wrong?</a> ― サンダリングハード ・ キャッシュ貫通 ・ キャッシュブレークダウン ・ キャッシュクラッシュの 4 つの故障モードとその対策を第 4 節に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/cache-miss-attack.md" target="_blank" rel="noopener">ByteByteGo: Cache Miss Attack</a> ― キャッシュ貫通への null キャッシュ ・ ブルームフィルタという 2 つの対策を第 4 節に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/things-to-consider-when-using-cache.md" target="_blank" rel="noopener">ByteByteGo: Things to Consider When Using Cache</a> ― キャッシュが向く条件 (読み取り主体 ・ 更新頻度が低い) と、ヒット率やレイテンシなどの運用指標を第 1 節と第 5 節に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/otp-with-cache" target="_blank" rel="noopener">SDFC: OTP with Cache</a> ― OTP のキャッシュ設計 (TTL 5 分 ・ 有効期限 1 分 ・ 失敗回数カウンタ ・ キャッシュクラッシュ時に再発行で済ませる割り切り)、16 GB / TTL 300 秒 / 500 バイトからの容量計算を第 1 節と第 5 節の具体例に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/weather-app" target="_blank" rel="noopener">SDFC: Weather App with Millions of Sensors</a> ― センサー 1 台 1 ピクセルのヒートマップ画像をメモリ上に丸ごと保持する設計を第 5 節の具体例に使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-scaling-lb.html">← 第 03 回 スケーリングとロードバランサ</a><a href="./distsys-index.html">目次</a><a href="./distsys-replication-basics.html">第 05 回 レプリケーション入門 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'cache-aside 方式と write-through 方式の違いについて、最も正確な記述はどれか？',
+    opts: [
+      'cache-aside はキャッシュ自身が DB への読み取りを代行する方式であり、write-through はアプリケーションが自分で DB を読む方式である',
+      'cache-aside も write-through も、どちらも書き込みの高速化だけを目的とした方式であり、読み取りには関与しない',
+      'cache-aside はアプリケーションが自分でキャッシュを確認し無ければ DB から読む読み取り方式、write-through はキャッシュと DB の両方へ同時に書き込む書き込み方式である',
+      'cache-aside は TTL を一切使わない方式であり、write-through は必ず TTL を使う方式である',
+      'cache-aside は書き込み専用の方式であり、write-through は読み取り専用の方式である'
+    ],
+    ans: 2,
+    exps: [
+      '説明が入れ替わっている。キャッシュ自身が読み取りを代行するのは read-through であり、cache-aside はアプリケーション側が制御する方式である。',
+      'cache-aside は読み取り側の方式、write-through は書き込み側の方式であり、どちらも読み書きの一方だけに関わるものではない説明になっている。',
+      '<b>これが正解。</b>cache-aside はアプリケーションが自分でキャッシュを確認し、無ければ DB から読んでキャッシュに書き込む読み取り方式。write-through はキャッシュと DB の両方へ同時に書き込む書き込み方式である。',
+      'TTL の有無で cache-aside と write-through を区別する分類は無く、両者は読み取りか書き込みかという別の軸で分かれている。',
+      'cache-aside は読み取り時の動きを定義する方式であり、書き込み専用という説明は不正確。write-through も読み取り専用という説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>cache-aside は読み取りの手順、write-through は書き込みの手順を定義したものです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="cache-asideとwrite-throughの軸の違い"><rect x="30" y="20" width="220" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">cache-aside</text><text x="140" y="80" font-size="13" text-anchor="middle" fill="#12211a">読み取りの手順</text><rect x="310" y="20" width="220" height="110" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">write-through</text><text x="420" y="80" font-size="13" text-anchor="middle" fill="#12211a">書き込みの手順</text></svg>'
+          + '<p class="cap">図: 読み取りの同期方式と書き込みの同期方式は別の軸で選ぶ。</p></div>'
+    }
+  },
+  {
+    q: 'ログインの OTP (使い捨てパスワード) のように、発行から 1 分程度で無効になる短命なデータをキャッシュに保存する場合、追い出し方式としてどれが最も中心的な役割を果たすか？',
+    opts: [
+      'FIFO。入れた順番だけで追い出すため、短命データの管理に最も向いているから',
+      'LFU。アクセス頻度の低いデータから優先して消すことで、短命データを早期に排除できるから',
+      'LRU。最後に使われた時刻が古いものから消すことで、使われなくなった OTP を優先的に排除できるから',
+      'Two-Tiered Caching。1 次層と 2 次層を分けることで、短命データの寿命管理を自動化できるから',
+      'TTL。各データに生存時間を設定し、期限が切れたら自動的に無効にする方式が、1 分という決まった寿命の管理に最も合うから'
+    ],
+    ans: 4,
+    exps: [
+      'FIFO は単純に入れた順で消す方式で、各データが持つ「発行から 1 分」という個別の寿命を表現できない。',
+      'LFU はアクセス頻度を基準にする方式で、1 分という時間そのものに基づいた無効化を表現する仕組みではない。',
+      'LRU は最後に使われた時刻を基準にする方式で、OTP が一度も使われなくても 1 分経てば無効になるべきという要件を直接表現できない。',
+      'Two-Tiered Caching は階層構成の話であり、個々のデータの寿命管理そのものを解決する仕組みではない。',
+      '<b>これが正解。</b>TTL は各データに生存時間を直接設定でき、発行から 1 分という決まった寿命をそのまま表現できるため、この要件に最も合う。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>TTL は「使われたかどうか」ではなく「発行からどれだけ時間が経ったか」だけで無効化を判断します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="TTLが時間だけで無効化する図"><line x1="40" y1="70" x2="500" y2="70" stroke="#9aa" stroke-width="2"/><circle cx="100" cy="70" r="6" fill="#0f5132"/><text x="100" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">発行</text><circle cx="380" cy="70" r="6" fill="#c0492f"/><text x="380" y="55" font-size="12.5" text-anchor="middle" fill="#c0492f">TTL 経過で無効化</text><text x="240" y="110" font-size="13" text-anchor="middle" fill="#12211a">アクセス頻度やアクセス有無とは無関係に時間だけで決まる</text></svg>'
+          + '<p class="cap">図: TTL は時間の経過だけを基準に無効化するため、決まった寿命を持つデータに合う。</p></div>'
+    }
+  },
+  {
+    q: '存在しないユーザ ID への問い合わせが悪意を持って大量に送られ、キャッシュにも DB にも値が無いためすべてのリクエストが DB まで素通りしてしまう現象の名称と、最も妥当な対策はどれか？',
+    opts: [
+      'キャッシュ貫通 (cache penetration) と呼ばれる現象であり、存在しないという結果自体を短い TTL でキャッシュするか、ブルームフィルタで事前にふるい落とす対策が有効である',
+      'キャッシュブレークダウン (cache breakdown) と呼ばれる現象であり、アクセスが集中するホットキーに TTL を設定しないことが唯一の対策である',
+      'キャッシュクラッシュ (cache crash) と呼ばれる現象であり、サーキットブレーカーとクラスタ構成を導入することが唯一の対策である',
+      'サンダリングハード (thundering herd) と呼ばれる現象であり、多数のキーの TTL にランダムな揺らぎを加えることが唯一の対策である',
+      'この現象には特定の名称は無く、キャッシュのメモリを増強することでしか対策できないと考えられている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>この現象はキャッシュ貫通 (cache miss attack) と呼ばれ、存在しない結果を null キャッシュとして短い TTL で保存する方法と、ブルームフィルタで DB へ行く前にふるい落とす方法の 2 つが代表的な対策となる。',
+      'キャッシュブレークダウンはアクセスの大部分を占めるホットキーが期限切れになる現象であり、存在しないキーへの問い合わせとは別の現象である。',
+      'キャッシュクラッシュはキャッシュ自体が落ちる現象であり、存在しないキーの問い合わせとは別の現象である。',
+      'サンダリングハードは多数のキーが同時に期限切れになる現象であり、存在しないキーへの問い合わせとは別の現象である。',
+      'この現象には「キャッシュ貫通」という確立した名称があり、メモリの増強だけでは存在しないキーへの問い合わせ自体を減らせない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>存在しないキーはキャッシュにも DB にも値が無いため、何度問い合わせても毎回 DB まで素通りします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="キャッシュ貫通の図"><rect x="30" y="50" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="95" y="80" font-size="13" text-anchor="middle" fill="#0f5132">問い合わせ</text><rect x="220" y="50" width="130" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="285" y="75" font-size="12.5" text-anchor="middle" fill="#b5401f">キャッシュに無い</text><rect x="410" y="50" width="130" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="475" y="75" font-size="12.5" text-anchor="middle" fill="#b5401f">DB にも無い</text><line x1="160" y1="75" x2="220" y2="75" stroke="#c0492f" stroke-width="2"/><line x1="350" y1="75" x2="410" y2="75" stroke="#c0492f" stroke-width="2"/><text x="285" y="125" font-size="13" text-anchor="middle" fill="#12211a">毎回この経路を素通りし続ける</text></svg>'
+          + '<p class="cap">図: 存在しないキーは毎回キャッシュを素通りして DB に直撃する。</p></div>'
+    }
+  },
+  {
+    q: 'ある EC サイトで、セール開始の瞬間に合わせて何千個もの商品ページのキャッシュを一括で同じ TTL で設定していた。セール開始から TTL 経過後、DB への問い合わせが突発的に急増した。この現象への最も妥当な対策はどれか？',
+    opts: [
+      '存在しない商品 ID への問い合わせを防ぐため、ブルームフィルタを導入する',
+      'アクセスが集中する商品だけ TTL を設定しないようにし、期限切れという概念自体を無くす',
+      'キャッシュのクラスタ化を進め、1 台が落ちても全滅しない構成にする',
+      'キーごとの TTL に小さなランダムな揺らぎ (ジッタ) を加え、期限切れになる瞬間を分散させる',
+      'サーキットブレーカーを導入し、一定数の失敗が続いたらキャッシュへのアクセス自体を一時的に諦める'
+    ],
+    ans: 3,
+    exps: [
+      'ブルームフィルタは存在しないキーへの問い合わせ (キャッシュ貫通) 対策であり、この問題は実在する商品の TTL が同時に切れたことが原因であって、現象の種類が異なる。',
+      'アクセスが集中する一部のキーに TTL を外す対策はキャッシュブレークダウン (単一ホットキー) に有効だが、ここでは何千個もの商品ページが一括で同じ TTL になったことが原因であり、個別のキーの対応では解決しない。',
+      'クラスタ化はキャッシュ自体が落ちるキャッシュクラッシュへの対策であり、ここではキャッシュは正常に動いた上で TTL が同時に切れたことが原因であるため直接の解決にはならない。',
+      '<b>これが正解。</b>この現象はサンダリングハードであり、一括で設定された同じ TTL が同時に切れたことが原因。TTL にランダムな揺らぎを加えて期限切れのタイミングを散らすことで、DB への問い合わせが一点に集中しなくなる。',
+      'サーキットブレーカーはキャッシュ自体にアクセスできない状況への対策であり、ここではキャッシュは機能している (期限切れが起きただけ) ため、この現象の直接の解決にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ TTL を一括で設定すると、期限切れの瞬間も一括で揃ってしまいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="TTLにジッタを加えて期限切れを分散する図"><line x1="40" y1="50" x2="500" y2="50" stroke="#9aa" stroke-width="2"/><circle cx="270" cy="50" r="7" fill="#c0492f"/><text x="270" y="35" font-size="12.5" text-anchor="middle" fill="#c0492f">一括で同時に期限切れ</text><line x1="40" y1="110" x2="500" y2="110" stroke="#9aa" stroke-width="2"/><circle cx="220" cy="110" r="6" fill="#198754"/><circle cx="260" cy="110" r="6" fill="#198754"/><circle cx="300" cy="110" r="6" fill="#198754"/><circle cx="340" cy="110" r="6" fill="#198754"/><text x="270" y="135" font-size="12.5" text-anchor="middle" fill="#0f5132">ジッタで期限切れの瞬間を散らす</text></svg>'
+          + '<p class="cap">図: ジッタを加えると期限切れの瞬間が散らばり、DB への問い合わせも分散する。</p></div>'
+    }
+  },
+  {
+    q: 'ある SNS で、全体のアクセスの 80 % が特定の 1 人の有名人のプロフィールキーに集中している。このキーが TTL で期限切れになった瞬間、DB への問い合わせが急増した。この現象の名称と最も妥当な対策はどれか？',
+    opts: [
+      'サンダリングハードと呼ばれる現象であり、関係する多数のキーの TTL にランダムな揺らぎを加えることが対策になる',
+      'キャッシュブレークダウンと呼ばれる現象であり、このようなアクセスが極端に集中するキーには TTL を設定しないという割り切りが対策になる',
+      'キャッシュ貫通と呼ばれる現象であり、存在しない結果を null キャッシュとして保存する対策が有効である',
+      'キャッシュクラッシュと呼ばれる現象であり、キャッシュのクラスタ化とサーキットブレーカーの併用が対策になる',
+      'この現象は理論上起こり得ず、観測された急増は別の原因 (ネットワーク障害やデプロイ作業など) によるものと考えるべきである'
+    ],
+    ans: 1,
+    exps: [
+      'サンダリングハードは多数のキーが同時に期限切れになる現象で、ここでは「1 つのホットキー」が原因であり、対策もランダムな揺らぎではなく個別のキーの扱いを変えることが有効。',
+      '<b>これが正解。</b>この現象はキャッシュブレークダウンと呼ばれ、アクセスの大部分を占める単一のホットキーが期限切れになったことが原因。このようなキーには TTL を設定せず期限切れという概念自体を無くす割り切りが有効な対策になる。',
+      'キャッシュ貫通は存在しないキーへの問い合わせが原因の現象で、ここでは実在するキーが期限切れになったことが原因であり現象の種類が異なる。',
+      'キャッシュクラッシュはキャッシュ自体が落ちる現象で、ここではキャッシュは正常に動作しているため当てはまらない。',
+      'アクセスが 1 点に集中するキーが期限切れになった瞬間に DB 負荷が急増する現象は実際に起こり得るものであり、「理論上起こり得ない」という説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>アクセスの大半を占める 1 つのキーが期限切れになると、そのキーだけで DB への問い合わせが急増します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ホットキーが期限切れになる図"><rect x="200" y="20" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">ホットキー (全体の 80%)</text><line x1="280" y1="70" x2="280" y2="100" stroke="#c0492f" stroke-width="2"/><text x="292" y="88" font-size="12.5" text-anchor="start" fill="#c0492f">期限切れ</text><rect x="180" y="100" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#5b3d80">このキーだけで DB 負荷が急増</text></svg>'
+          + '<p class="cap">図: 1 つのホットキーの期限切れが、全体の負荷急増を引き起こす。</p></div>'
+    }
+  },
+  {
+    q: 'あるサービスで、キャッシュサーバのプロセスが落ち、全てのリクエストが直接 DB へ向かうようになり DB も過負荷で応答が遅くなった。この状況に対する最も妥当な恒久対策はどれか？',
+    opts: [
+      '存在しないキーへの問い合わせを減らすため、ブルームフィルタを事前に導入しておく',
+      'アクセスの集中するホットキーに対してだけ TTL を設定しないようにしておく',
+      'キャッシュをクラスタ構成にして単一障害点を無くし、加えてサーキットブレーカーで DB への問い合わせ自体を一時的に制限する',
+      '関係するキーの TTL にランダムな揺らぎを加えて期限切れのタイミングを分散させる',
+      'キャッシュのキーをすべて手動で事前にウォームアップし直せば、この問題は二度と起こらないと考える'
+    ],
+    ans: 2,
+    exps: [
+      'ブルームフィルタはキャッシュ貫通への対策であり、キャッシュプロセス自体が落ちる現象 (キャッシュクラッシュ) への対策にはならない。',
+      'TTL を設定しない対策はキャッシュブレークダウン (ホットキーの期限切れ) への対策であり、キャッシュ自体が落ちる現象とは別の問題に向けた対策である。',
+      '<b>これが正解。</b>この現象はキャッシュクラッシュであり、キャッシュを複数台のクラスタ構成にして一部が落ちても全滅しないようにすることと、サーキットブレーカーで一定数の失敗が続いたときに DB への問い合わせ自体を一時的に制限することの組み合わせが有効な対策になる。',
+      'TTL のランダムな揺らぎはサンダリングハード (多数のキーの同時期限切れ) への対策であり、キャッシュプロセス自体が落ちる現象には対応しない。',
+      'ウォームアップはキャッシュを再起動した直後の一時的な対応であり、キャッシュプロセスが再び落ちることを防ぐ恒久対策にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>キャッシュが落ちると全リクエストが DB に向かうため、クラスタ化とサーキットブレーカーの両方で備えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="キャッシュクラッシュへの対策の図"><rect x="30" y="50" width="130" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="95" y="80" font-size="12.5" text-anchor="middle" fill="#b5401f">キャッシュ全滅</text><line x1="160" y1="75" x2="260" y2="75" stroke="#c0492f" stroke-width="2"/><rect x="260" y="50" width="130" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="325" y="75" font-size="12.5" text-anchor="middle" fill="#5b3d80">DB 過負荷</text><rect x="430" y="50" width="110" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="485" y="75" font-size="12.5" text-anchor="middle" fill="#0f5132">ブレーカーで制限</text><text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#12211a">クラスタ化で「全滅」そのものを避けるのが本筋</text></svg>'
+          + '<p class="cap">図: クラスタ化で全滅を避け、サーキットブレーカーで DB への波及を抑える。</p></div>'
+    }
+  },
+  {
+    q: 'OTP 認証のキャッシュ設計で、ユーザが OTP を何度も間違って入力し続けた場合に備える仕組みとして、最も妥当な実装はどれか？',
+    opts: [
+      'OTP のエントリ全体の TTL を間違えるたびに延長し、ユーザが根気よく入力し続けられるようにする',
+      'キャッシュを LFU 方式に切り替え、間違った入力の頻度に応じてエントリの優先度を上げる',
+      '間違えた回数をカウンタとしてエントリに持たせ、一定回数を超えたら正しい OTP が入力されても認証を成立させないようにする',
+      '間違えるたびに新しいキャッシュサーバを追加し、台数で問題を吸収する',
+      '間違った入力を検出したら即座にキャッシュサーバ全体を再起動し、状態をリセットする'
+    ],
+    ans: 2,
+    exps: [
+      'TTL を延長してしまうと、総当たり的な入力に対して有効期限を実質無効化してしまい、むしろ総当たり攻撃を助けることになる。',
+      'LFU は追い出しの優先順位を決める仕組みであり、間違った入力に対する認証の成否の判定ロジックとは別の役割を持つ。',
+      '<b>これが正解。</b>失敗回数をエントリ内のカウンタで管理し、閾値を超えたら以後の入力を無条件に拒否することで、総当たり的な入力から守ることができる。',
+      'サーバを追加しても、同じエントリに対する総当たり的な入力の試行回数自体は減らず、問題の解決にならない。',
+      'キャッシュサーバ全体の再起動は、その OTP だけでなく他の全ユーザの認証状態も消してしまい、過剰かつ的外れな対応になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じエントリの中に失敗回数のカウンタを持たせ、閾値を超えたら認証自体を拒否します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="失敗回数カウンタの図"><rect x="40" y="30" width="220" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">OTP エントリ</text><text x="150" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">OTP 値 ・ 発行時刻</text><text x="150" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">失敗回数カウンタ</text><rect x="340" y="30" width="180" height="90" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="430" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">閾値超え</text><text x="430" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">正しい値でも拒否</text></svg>'
+          + '<p class="cap">図: 失敗回数カウンタが閾値を超えたら、正しい OTP でも認証を拒否する。</p></div>'
+    }
+  },
+  {
+    q: '州全体の気象センサーからの温度データを 1 ピクセル 1 センサーのヒートマップ画像として表示するシステムで、最新の画像全体をメモリ上のキャッシュに丸ごと保持する設計がうまく機能する理由として最も妥当なものはどれか？',
+    opts: [
+      '画像のサイズがセンサーの台数で固定され、読み取りが大半を占め、更新頻度もセンサーの送信間隔で決まる緩やかなペースであるため、キャッシュが向く条件に合っているから',
+      '気象データは法律上センサーの送信元でのみ保持してよいと定められているため、画像全体をメモリに置くことしか選択肢が無いから',
+      '画像データは常に書き込みの方が読み取りよりも多いため、書き込みの速さを高める目的でキャッシュが使われているから',
+      'ヒートマップ画像は毎回ランダムな内容になるため、キャッシュしても次回には別の値になってしまい意味が無いから',
+      'センサーの台数が増えるほど画像全体のサイズは逆に小さくなっていくため、キャッシュに乗せやすくなるから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>画像のサイズが固定、読み取りが大半、更新頻度が緩やかという 3 つの条件が揃っており、これはこの回で確認したキャッシュが向く条件そのものである。',
+      '法律上の保持場所の制約という設定はこの題材には含まれておらず、キャッシュが向く理由の説明にもならない。',
+      'このシステムは閲覧 (読み取り) の方が多いと想定される典型的な読み取り主体のダッシュボードであり、書き込みの方が多いという前提は不正確。',
+      'センサーからの値は観測された実際の温度であり、ランダムに変わるものではない。むしろ一貫した値を速く返すためにキャッシュが使われる。',
+      'センサーの台数が増えればピクセル数も増え、画像サイズはむしろ大きくなる。台数とサイズの関係が逆になっている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>固定サイズ ・ 読み取り主体 ・ 緩やかな更新という 3 条件が揃うと、キャッシュがよく機能します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="キャッシュが向く3条件の図"><rect x="20" y="20" width="160" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">サイズ固定</text><rect x="200" y="20" width="160" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">読み取り主体</text><rect x="380" y="20" width="160" height="90" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="460" y="50" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">更新が緩やか</text></svg>'
+          + '<p class="cap">図: 3 条件が揃うほど、画像全体をキャッシュに丸ごと置く設計が機能しやすい。</p></div>'
+    }
+  },
+  {
+    q: 'cache-aside と write-around を組み合わせたシステムで、ある値を更新するとき DB だけを更新してキャッシュには触れない設計にした。更新直後に別のリクエストが同じキーを読みに来た場合、最も妥当に起こることはどれか？',
+    opts: [
+      'キャッシュには更新前の古い値が残っているため、TTL が切れるかキャッシュが明示的に無効化されるまで古い値が返り続ける可能性がある',
+      'write-around は更新と同時にキャッシュも自動的に書き換えるため、常に最新の値が返る',
+      'cache-aside と write-around を組み合わせることは技術的に不可能であり、この構成自体が成立しない',
+      'DB の更新が完了した瞬間、キャッシュの対応するエントリは自動的に削除される仕組みが write-around の定義に含まれている',
+      '古い値が返ることはあっても、それは一瞬 (ミリ秒未満) で必ず解消されることが write-around の定義で保証されている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>write-around は DB にだけ書き込み、キャッシュには触れない方式なので、更新前の古い値がキャッシュに残り続け、TTL が切れるか明示的な無効化が行われるまで、その古い値が読み取りで返り続ける可能性がある。',
+      'write-around の定義は「キャッシュには触れない」ことであり、自動的にキャッシュも書き換えるという説明は定義と矛盾する。',
+      'cache-aside (読み取り方式) と write-around (書き込み方式) は実際によく組み合わせて使われる構成であり、技術的に不可能という説明は誤り。',
+      '自動的にエントリが削除される仕組みは write-around の定義には含まれていない。明示的な無効化処理を別途実装しない限り、古い値は残り続ける。',
+      '解消までの時間は TTL の設定値に依存し、一瞬で必ず解消されるという保証は write-around の定義には存在しない。TTL が長ければ古い値が長く残る。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>write-around は DB だけを更新するため、キャッシュには古い値がそのまま残ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="write-aroundで古い値が残る図"><rect x="30" y="20" width="160" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="110" y="50" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">DB: 新しい値</text><rect x="30" y="90" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="110" y="120" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">キャッシュ: 古い値</text><text x="380" y="60" font-size="13" text-anchor="middle" fill="#12211a">write-around は DB だけ更新</text><text x="380" y="120" font-size="13" text-anchor="middle" fill="#12211a">TTL が切れるまで古い値が残る</text></svg>'
+          + '<p class="cap">図: write-around は DB だけを更新するため、キャッシュ側は TTL が切れるまで古い値を保持し続ける。</p></div>'
+    }
+  },
+  {
+    q: 'キャッシュサーバ 1 台のメモリが 16 GB、OTP エントリ 1 件のサイズが 500 バイト、エントリの TTL が 300 秒であるとき、このキャッシュ 1 台だけで持続的に処理できる OTP 発行の目安 (1 秒あたりの件数) に最も近いものはどれか？',
+    opts: [
+      '約 1,000 件 / 秒',
+      '約 10 万件 / 秒',
+      '約 16 万件 / 秒',
+      '約 500 万件 / 秒',
+      '件数の上限は無く、メモリとは無関係に無限に発行できる'
+    ],
+    ans: 1,
+    exps: [
+      'この見積もりでは小さすぎる。16 GB を 500 バイトで割ると約 3200 万件が TTL 300 秒の間に保持できる計算になり、1 秒あたりではその 300 分の 1 である約 10 万件になる。',
+      '<b>これが正解。</b>保持可能な総件数は 16 × 10⁹ ÷ 500 ≈ 3.2 × 10⁷ 件。TTL 300 秒の間にこの件数まで保持できるので、1 秒あたりの持続可能な発行数の目安は 3.2 × 10⁷ ÷ 300 ≈ 10 万件 / 秒となる。',
+      'この見積もりは総保持件数 (約 3200 万件) に近いが、1 秒あたりの値ではなく TTL 300 秒全体で保持できる総数に近い値であり、問われている「1 秒あたり」の値としては大きすぎる。',
+      'この値は総保持件数 (約 3200 万件) よりもさらに大きく、16 GB というメモリ容量から導かれる上限を超えている。',
+      'メモリの容量には限りがあるため、TTL の間に保持できる件数には必ず上限が生じる。「無限に発行できる」という説明はメモリの有限性と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>総保持件数をメモリ容量とエントリサイズから出し、それを TTL の秒数で割ると 1 秒あたりの目安が出ます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="容量からスループットを逆算する図"><rect x="30" y="20" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">16 GB ÷ 500 B ≈ 3200 万件</text><line x1="140" y1="70" x2="140" y2="100" stroke="#0f5132" stroke-width="2"/><rect x="30" y="100" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="130" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">÷ TTL 300 秒 ≈ 10 万件 / 秒</text></svg>'
+          + '<p class="cap">図: 総保持件数を TTL の秒数で割ると、持続可能な 1 秒あたりの発行数の目安が出る。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

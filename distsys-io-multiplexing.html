@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I/O 多重化 ― 1 スレッドで 1 万本の接続を相手にする</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 12 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>I/O 多重化 ― 1 スレッドで 1 万本の接続を相手にする</h1>
+  <p>1 接続に 1 スレッドを使う設計はいつか限界に当たる。select / poll / epoll はその限界を超えるための仕組み</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 02 回 <a href="./distsys-sockets.html">ソケットプログラミング入門</a></p>
+  <p class="intro">第 02 回では、1 本のソケットを相手に <code>recv()</code> や <code>send()</code> を手で呼びました。しかし分散システムのサーバーは、同時に数百から数万本の接続を抱えます。「1 本の接続に 1 本のスレッドを割り当てる」という素朴な設計は、接続数が増えるとメモリとスレッド切り替えのコストで先に力尽きます。この回では、1 スレッドで大量の接続を同時に扱うための仕組みである I/O 多重化 (select / poll / epoll) と、それを核にしたイベントループの作り方、そして分散システムの至る所で出てくる「速い送信者と遅い受信者」の問題であるバックプレッシャーを見ていきます。</p>
+
+  <!-- ===== 解説パート 1: ブロッキングI/Oの限界とC10K問題 ===== -->
+  <section>
+    <h2>1. 1 接続 1 スレッドが壁に当たる ― C10K 問題</h2>
+    <p>最も素朴なサーバーの作り方は、<code>accept()</code> で新しい接続を受け取るたびに、新しいスレッド (またはプロセス) を 1 本立ち上げて、そのスレッドの中で <code>recv()</code> を呼ぶというものです。<code>recv()</code> はデータが届くまで呼び出し元を<b>ブロッキング (停止させる)</b> ため、1 本のスレッドは 1 本の接続だけを見ていれば済みます。実装が単純で分かりやすいのが利点です。</p>
+    <p>ところがこの設計は、同時接続数が増えると先に力尽きます。スレッドにはスタック用のメモリが必要で、OS がスレッドを切り替えるたびにコンテキストスイッチ (レジスタやスタックポインタの退避と復元) のコストがかかります。接続数が数百までなら問題になりませんが、数千 ・ 数万本の接続を同時に抱えようとすると、ほとんどのスレッドが「データなんて来ない」まま待っているだけなのに、メモリとスケジューラの負荷だけが積み重なっていきます。この壁は 2000 年前後に<b>C10K 問題 (1 台のマシンで 1 万本の同時接続を処理できるか)</b> という名前で広く議論されました。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="1接続1スレッドモデルの限界の図">
+        <text x="310" y="24" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">1 接続 1 スレッドモデル</text>
+        <rect x="40" y="45" width="100" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="90" y="67" font-size="12.5" text-anchor="middle" fill="#12211a">スレッド 1</text>
+        <rect x="160" y="45" width="100" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="210" y="67" font-size="12.5" text-anchor="middle" fill="#12211a">スレッド 2</text>
+        <rect x="280" y="45" width="100" height="36" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="330" y="67" font-size="12.5" text-anchor="middle" fill="#12211a">スレッド 3</text>
+        <text x="420" y="67" font-size="16" text-anchor="middle" fill="#4a5d54">…</text>
+        <rect x="460" y="45" width="130" height="36" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="525" y="67" font-size="12.5" text-anchor="middle" fill="#b5401f">スレッド 10000</text>
+        <text x="310" y="115" font-size="13" text-anchor="middle" fill="#12211a">ほとんどが recv() でただ待っているだけ</text>
+        <text x="310" y="140" font-size="13" text-anchor="middle" fill="#12211a">それでもスタックメモリとコンテキストスイッチのコストは積み重なる</text>
+        <text x="310" y="170" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">C10K 問題: 1 台で 1 万本の同時接続をどう処理するか</text>
+      </svg>
+      <p class="cap">図: 接続ごとに 1 スレッドを使うモデルは、待っているだけのスレッドの数に比例してコストが増える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: select/pollの仕組みと限界 ===== -->
+  <section>
+    <h2>2. select / poll ― 複数の fd を 1 回の呼び出しで見張る</h2>
+    <p>I/O 多重化 (I/O multiplexing) とは、「複数のソケット (ファイルディスクリプタ、fd) のうち、どれが読み書き可能になったか」を 1 回のシステムコールでまとめて問い合わせる仕組みです。これがあれば、スレッドを増やさずに 1 本のスレッドで多数の接続を見張れます。</p>
+    <p><code>select()</code> は最も古い実装で、監視したい fd の集合をビットマスク (fd_set) として渡します。しかし <code>select()</code> が監視できる fd の番号には <b>FD_SETSIZE (1024)</b> という固定された上限があり、man page 自身が「現代的なアプリケーションには不合理に低い上限であり、この制限は変更されない」と明記しています。<code>poll()</code> はこの上限を取り払い、構造体の配列で任意の数の fd を監視できるようにした改良版です。</p>
+    <p>ただし <code>select()</code> と <code>poll()</code> には共通の弱点があります。どちらも呼び出すたびに<b>監視対象の fd を毎回すべて OS に渡し、OS 側もその全部を毎回スキャンして「どれが準備できたか」を調べる</b>という仕組みです。監視している fd の数を $n$ とすると、1 回の呼び出しのコストは $n$ に比例して増えます (準備ができている fd がどれだけ少なくても、全部を見る必要があります)。接続数が数千を超えると、この「全部を毎回見る」コストそのものがボトルネックになります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 180" role="img" aria-label="select/pollの全件スキャンの図">
+        <text x="310" y="22" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">select() / poll() を 1 回呼ぶたびに</text>
+        <rect x="40" y="40" width="60" height="34" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="110" y="40" width="60" height="34" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="180" y="40" width="60" height="34" rx="5" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="210" y="62" font-size="12.5" text-anchor="middle" fill="#b5401f">準備 OK</text>
+        <rect x="250" y="40" width="60" height="34" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="320" y="40" width="60" height="34" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="420" y="62" font-size="16" text-anchor="middle" fill="#4a5d54">…</text>
+        <rect x="460" y="40" width="60" height="34" rx="5" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">準備できているのは 1 つだけでも、監視対象を全部スキャンする</text>
+        <text x="280" y="135" font-size="13" text-anchor="middle" fill="#4a5d54">監視対象の数 n に比例してコストが増える</text>
+        <text x="280" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">select() はさらに fd 番号に FD_SETSIZE (1024) の上限がある</text>
+      </svg>
+      <p class="cap">図: select() / poll() は呼び出しごとに監視対象をすべてスキャンするため、数が増えるとコストが増える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: epoll/kqueueとイベントループ ===== -->
+  <section>
+    <h2>3. epoll / kqueue とイベントループ ― 動くサーバーで確認する</h2>
+    <p>select() / poll() の「毎回全部スキャンする」という弱点を解決したのが、Linux の <b>epoll</b> と BSD 系 (macOS を含む) の <b>kqueue</b> です。考え方はどちらも同じです。監視したい fd を OS 側に一度登録しておけば、OS はその fd に変化がある度に内部の準備済みリストを更新しておき、アプリケーションが問い合わせたとき (<code>epoll_wait()</code>) には<b>既に準備ができている fd だけ</b>を返します。監視対象の数 $n$ がどれだけ多くても、呼び出しのコストは「実際に準備ができた数」にしか依存しません。</p>
+    <p>epoll にはさらに<b>レベルトリガ (既定)</b> と<b>エッジトリガ (EPOLLET)</b> という 2 つの通知モードがあります。レベルトリガは「読めるデータが残っている限り、何度問い合わせても準備完了として通知される」モードで、エッジトリガは「状態が変化した瞬間にだけ 1 回通知される」モードです。エッジトリガを使う場合、1 回の通知で読めるだけ読み切らないと、残ったデータに気づけなくなるという注意点があります。</p>
+    <p>この仕組みの上に乗るのが<b>イベントループ</b>です。1 本のスレッドが「準備ができた fd を問い合わせる → それぞれの fd に対応する処理を実行する → また問い合わせる」というループを回し続けます。Python の <code>selectors</code> モジュールは、OS ごとに epoll / kqueue / select を自動で選んで同じ API を提供してくれます。以下は実際に手元で実行して、2 つのクライアントから同時に接続できることを確認したイベントループ型のエコーサーバーです。</p>
+    <pre><code>import selectors
+import socket
+
+HOST = "127.0.0.1"
+PORT = 50009
+sel = selectors.DefaultSelector()
+
+def accept(sock):
+    conn, addr = sock.accept()
+    conn.setblocking(False)
+    sel.register(conn, selectors.EVENT_READ, read)
+
+def read(conn):
+    data = conn.recv(1024)
+    if data:
+        conn.send(data.upper())
+    else:
+        sel.unregister(conn)
+        conn.close()
+
+def main():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind((HOST, PORT))
+    listener.listen()
+    listener.setblocking(False)
+    sel.register(listener, selectors.EVENT_READ, accept)
+    while True:
+        for key, _ in sel.select(timeout=2):
+            callback = key.data
+            callback(key.fileobj)
+
+if __name__ == "__main__":
+    main()</code></pre>
+    <p>サーバーを 1 つ起動したまま、2 つのクライアントがそれぞれ別のテキストを送ると、サーバー側のスレッドは 1 本のままで両方に正しく応答が返ることを確認できました (実際に手元で実行した結果、クライアント A は <code>b'HI FROM A'</code>、クライアント B は <code>b'HI FROM B'</code> をそれぞれ正しく受け取りました)。ポイントは、<code>accept()</code> も <code>recv()</code> も <code>setblocking(False)</code> でノンブロッキングにしてあることです。もしここでブロッキングのままだと、1 つの接続の処理に詰まった瞬間、ループ全体が止まってしまいます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="イベントループの図">
+        <rect x="230" y="20" width="160" height="50" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="310" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">sel.select()</text>
+        <line x1="310" y1="70" x2="310" y2="100" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-m1)"/>
+        <rect x="140" y="100" width="340" height="50" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="310" y="130" font-size="13" text-anchor="middle" fill="#1f4a68">準備できた fd それぞれの callback を実行</text>
+        <line x1="480" y1="125" x2="560" y2="125" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="560" y1="125" x2="560" y2="45" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="560" y1="45" x2="390" y2="45" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-m1)"/>
+        <text x="310" y="185" font-size="12.5" text-anchor="middle" fill="#4a5d54">1 本のスレッドのまま、callback がブロッキングしなければループは止まらない</text>
+        <defs><marker id="arr-m1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: イベントループは「準備できた fd を問い合わせて処理し、また問い合わせる」を 1 本のスレッドで回し続ける。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: スレッド/プロセスモデルとの比較 ===== -->
+  <section>
+    <h2>4. スレッド / プロセスモデルとイベントループの比較</h2>
+    <p>C10K 問題への答えは、イベントループ 1 本だけではありません。実際の設計は大きく 3 通りに整理できます。<b>1 接続 1 スレッド (または 1 プロセス)</b> は実装が単純で、1 つの接続の処理が重くても他の接続をブロックしない (OS のスケジューラが切り替えてくれる) 利点がありますが、同時接続数に応じてメモリとスイッチングコストが積み重なります。<b>1 スレッドのイベントループ</b> はメモリ効率が良く、大量の待機中接続を安く抱えられますが、1 つの処理がうっかりブロッキング呼び出しをすると、ループ全体が止まってその間すべての接続が待たされます。</p>
+    <p>実務でよく使われるのは、この 2 つを組み合わせた<b>ハイブリッド型</b>です。CPU コア数と同じくらいの数のイベントループを立てて (プロセスまたはスレッドとして並列に動かし)、それぞれのループが多数の接続を安くさばく、という構成です。nginx のワーカープロセスはこの形の代表例として知られています。どの形を選ぶかは、「1 件あたりの処理が I/O 待ちが多いか、CPU 計算が重いか」で変わります。I/O 待ちが多いなら 1 スレッドのイベントループで多くの接続をさばける一方、CPU 計算が重い処理は 1 本のイベントループを長時間止めてしまうため、ワーカーを複数に分けるか、重い処理だけ別スレッド / 別プロセスに切り出す設計が必要になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="3つの並行処理モデルの比較図">
+        <rect x="10" y="20" width="190" height="130" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="105" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">1 接続 1 スレッド</text>
+        <text x="105" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">実装が単純</text>
+        <text x="105" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">1 件の重い処理が</text>
+        <text x="105" y="106" font-size="12.5" text-anchor="middle" fill="#12211a">他をブロックしない</text>
+        <text x="105" y="130" font-size="12.5" text-anchor="middle" fill="#b5401f">数が増えるとコスト増</text>
+        <rect x="215" y="20" width="190" height="130" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="310" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">1 スレッドのループ</text>
+        <text x="310" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">メモリ効率が良い</text>
+        <text x="310" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">大量の待機接続を</text>
+        <text x="310" y="106" font-size="12.5" text-anchor="middle" fill="#12211a">安くさばける</text>
+        <text x="310" y="130" font-size="12.5" text-anchor="middle" fill="#b5401f">1 件がブロックすると全体停止</text>
+        <rect x="420" y="20" width="190" height="130" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="515" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">ハイブリッド型</text>
+        <text x="515" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">コア数分のループを</text>
+        <text x="515" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">並列に動かす</text>
+        <text x="515" y="110" font-size="12.5" text-anchor="middle" fill="#12211a">(nginx のワーカーなど)</text>
+        <text x="515" y="130" font-size="12.5" text-anchor="middle" fill="#0f5132">実務での標準的な形</text>
+      </svg>
+      <p class="cap">図: 1 接続 1 スレッド ・ 1 スレッドのイベントループ ・ 両者を組み合わせたハイブリッド型の 3 通り。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: backlogとacceptキュー ===== -->
+  <section>
+    <h2>5. backlog と accept キュー</h2>
+    <p>第 02 回で見た <code>listen(sockfd, backlog)</code> の <code>backlog</code> 引数には、実は 2 段階の待ち行列が関わっています。1 段目は<b>SYN キュー (半開き接続の待ち行列)</b> で、3-way ハンドシェイクの途中、つまり SYN は受け取ったが ACK がまだ返ってきていない接続がここに溜まります。2 段目は<b>accept キュー (完了済み接続の待ち行列)</b> で、ハンドシェイクが完了したものの、アプリケーションがまだ <code>accept()</code> を呼んでいない接続がここに溜まります。</p>
+    <p><code>listen()</code> の man page には、「<code>backlog</code> の上限に達した状態で新しい接続要求が来た場合、クライアントは <code>ECONNREFUSED</code> エラーを受け取るか、プロトコルが再送をサポートしていればその要求は黙って無視され、クライアント側の再試行で後から成功することがある」と明記されています。つまり、<code>accept()</code> を呼ぶ側の処理が遅れて accept キューが埋まると、新しいクライアントから見て「接続拒否」または「応答が来ない」という形で遅延が表面化します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 180" role="img" aria-label="SYNキューとacceptキューの図">
+        <rect x="20" y="30" width="180" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">SYN キュー</text>
+        <text x="110" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">ハンドシェイク未完了</text>
+        <line x1="200" y1="60" x2="250" y2="60" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-m2)"/>
+        <rect x="250" y="30" width="180" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="340" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">accept キュー</text>
+        <text x="340" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">完了済み ・ accept() 待ち</text>
+        <line x1="430" y1="60" x2="480" y2="60" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-m2)"/>
+        <rect x="480" y="30" width="120" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="540" y="60" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">accept()</text>
+        <text x="310" y="135" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">accept() の呼び出しが遅れると accept キューが埋まり、新規接続が拒否 / 遅延する</text>
+        <defs><marker id="arr-m2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 接続は SYN キュー (ハンドシェイク中) → accept キュー (処理待ち) の順に進む。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 6: バックプレッシャー ===== -->
+  <section>
+    <h2>6. バックプレッシャー ― 速い送信者と遅い受信者</h2>
+    <p>イベントループで accept キューが埋まる現象は、実は分散システム全体で繰り返し出てくる、より一般的な問題の 1 つの現れです。<b>送信者がデータを作る速度が、受信者がそれを処理する速度を上回ると、両者の間のどこかにデータが積み重なっていく</b>という問題です。これを<b>バックプレッシャー (backpressure, 背圧)</b> と呼び、「積み重なる前に、送信者側に『もう送らないで』と伝え返す」仕組みの総称を指します。</p>
+    <p>イベントループの文脈では、処理が追いつかずソケットの受信バッファが溜まり続けると、OS は TCP の仕組み (受信ウィンドウのサイズ通知) を使って送信側に自然に「送る速度を落とすよう」伝えます。これはアプリケーションが何も実装しなくても TCP 自身が持っている最低限のバックプレッシャーです。しかしアプリケーション層では、これだけでは不十分な場面が多く、accept() を一時的に呼ぶのを止める、処理待ちのキューに上限を設けて超えたら新規受付を拒否する、上流に対して明示的に「遅くして」と伝える、といった設計が必要になります。この考え方は、この先の回で出てくるメッセージキューの可視性タイムアウトや、レートリミッタ、サーキットブレーカーといった仕組みの土台になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="バックプレッシャーの図">
+        <text x="120" y="24" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">速い送信者</text>
+        <rect x="30" y="40" width="180" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">データを作り続ける</text>
+        <line x1="210" y1="60" x2="280" y2="60" stroke="#9aa" stroke-width="2"/>
+        <rect x="280" y="40" width="140" height="80" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="350" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">積み重なるキュー</text>
+        <text x="350" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">(受信バッファ ・</text>
+        <text x="350" y="102" font-size="12.5" text-anchor="middle" fill="#12211a">accept キューなど)</text>
+        <line x1="420" y1="80" x2="480" y2="80" stroke="#9aa" stroke-width="2"/>
+        <rect x="480" y="60" width="120" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="540" y="85" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">遅い受信者</text>
+        <line x1="350" y1="135" x2="120" y2="135" stroke="#198754" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arr-m3)"/>
+        <line x1="350" y1="120" x2="350" y2="135" stroke="#198754" stroke-width="2"/>
+        <line x1="120" y1="135" x2="120" y2="80" stroke="#198754" stroke-width="2" marker-end="url(#arr-m3)"/>
+        <text x="235" y="160" font-size="12.5" text-anchor="middle" fill="#0f5132">「送る速度を落として」という信号を送信者側へ返す</text>
+        <defs><marker id="arr-m3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#198754"/></marker></defs>
+      </svg>
+      <p class="cap">図: バックプレッシャーは、積み重なる前に受信側から送信側へ「遅くして」と伝え返す仕組み。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://man7.org/linux/man-pages/man2/select.2.html" target="_blank" rel="noopener">Linux man-pages: select(2)</a> ― select() の FD_SETSIZE (1024) の上限と、poll(2) / epoll(7) を推奨する旨の一次情報。</li>
+      <li><a href="https://man7.org/linux/man-pages/man7/epoll.7.html" target="_blank" rel="noopener">Linux man-pages: epoll(7)</a> ― epoll の仕組みと、レベルトリガ / エッジトリガ (EPOLLET) の違いの一次情報。</li>
+      <li><a href="https://man7.org/linux/man-pages/man2/listen.2.html" target="_blank" rel="noopener">Linux man-pages: listen(2)</a> ― backlog の意味、SYN キュー (tcp_max_syn_backlog) と accept キュー (somaxconn で上限が切られる) が別であることの一次情報。</li>
+      <li><a href="https://docs.python.org/3/library/selectors.html" target="_blank" rel="noopener">Python docs: selectors — High-level I/O multiplexing</a> ― 本文のイベントループ型エコーサーバーのコードで使った selectors モジュールの API の出典。</li>
+      <li><a href="https://web.archive.org/web/2024/http://www.kegel.com/c10k.html" target="_blank" rel="noopener">Dan Kegel: "The C10K problem" (archive.org 保存版)</a> ― C10K 問題という呼称と、1 台で 1 万本の同時接続を処理する発想の出典 (元サイトは自動アクセスを拒否するため archive.org の保存版を使用)。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-do-processes-talk-to-each-other-on-linux.md" target="_blank" rel="noopener">ByteByteGo: How do processes talk to each other on Linux?</a> ― プロセス間通信の手段の全体像の参照に使用。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-unique-id.html">← 第 11 回 分散 ID 生成</a><a href="./distsys-index.html">目次</a><a href="./distsys-consistency-models.html">第 13 回 一貫性モデル →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '「1 接続に 1 スレッドを割り当てる」サーバーが、同時接続数が数万に増えると性能が悪化しやすい主な理由はどれか？',
+    opts: [
+      'スレッドを増やすと、ソケットの accept() が自動的に無効化され、新規接続を受け付けられなくなるため',
+      'TCP のバイトストリームが、スレッド数が増えるほどメッセージの境界をより頻繁に失うようになるため',
+      'スレッドのスタック用メモリとコンテキストスイッチのコストが、待っているだけのスレッドの数に比例して積み重なるため',
+      'OS のスレッド数が増えると、ネットワークの帯域幅そのものが自動的に縮小される仕様になっているため',
+      'スレッドごとに別々の IP アドレスが必要になり、IP アドレスの枯渇が先に発生するため'
+    ],
+    ans: 2,
+    exps: [
+      'accept() が自動的に無効化されるという仕様は無く、スレッド数の増加とは独立した呼び出しである。',
+      'TCP の境界の崩れはスレッド数とは無関係に起きる現象であり、スレッド数が増えるほど境界が崩れやすくなるという関係は存在しない。',
+      '<b>これが正解。</b>スレッドにはスタック用のメモリが要り、OS がスレッドを切り替えるたびにコンテキストスイッチのコストがかかる。多くが待っているだけでも、この積み重ねが同時接続数に比例して増える。',
+      'ネットワークの帯域幅はスレッド数と連動して縮小するような仕組みにはなっておらず、この説明は事実と合わない。',
+      'ソケットの通信に個別の IP アドレスが必要という前提が誤り。同じ IP ・同じポートで多数の接続を区別するのが TCP の仕組みである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>待っているだけのスレッドでも、数が増えればメモリとスケジューラの負荷は増え続けます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 568 140" aria-label="スレッド数とコストの比例関係の図"><line x1="50" y1="110" x2="520" y2="110" stroke="#9aa" stroke-width="2"/><line x1="50" y1="110" x2="50" y2="20" stroke="#9aa" stroke-width="2"/><text x="30" y="20" font-size="12.5" fill="#12211a">コスト</text><text x="500" y="130" font-size="12.5" fill="#12211a">スレッド数</text><path d="M60,105 L480,30" stroke="#c0492f" stroke-width="3" fill="none"/><text x="300" y="25" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">待機中でも数に比例してコストが増える</text></svg>'
+          + '<p class="cap">図: スレッドが待機中であっても、数が増えればメモリとスイッチングのコストは増え続ける。</p></div>'
+    }
+  },
+  {
+    q: '「C10K 問題」という呼び名が指している課題を最も正確に表しているものはどれか？',
+    opts: [
+      'データベースのテーブルに 1 万件のレコードを追加する際に発生する、インデックス再構築のコストの問題',
+      'クライアント証明書を 1 万件発行すると、認証サーバーの処理が追いつかなくなるという課題',
+      'ネットワークケーブルの距離が 1 万キロメートルを超えると、レイテンシが急激に悪化するという物理的な課題',
+      '1 万行を超えるソースコードをコンパイルする際に、ビルド時間が急激に悪化するという課題',
+      '1 台のマシンで 1 万本の接続を同時に処理できるようにする、という当時のサーバー設計の課題'
+    ],
+    ans: 4,
+    exps: [
+      'データベースのインデックス再構築のコストは別の話題であり、C10K という呼び名が指している「同時接続数」の課題とは異なる。',
+      '証明書発行の処理能力の課題も実在するが、C10K という呼び名が元々指しているのは同時接続数の処理能力の話である。',
+      'レイテンシが距離に応じて増えるのは事実だが、C10K という呼び名はそれを指すものではなく、同時接続数の処理能力を指す。',
+      'ビルド時間の悪化はソフトウェア開発のプロセス上の課題であり、サーバーの同時接続処理とは別の話題。',
+      '<b>これが正解。</b>C10K 問題は、2000 年前後に Dan Kegel らが議論した「1 台のマシンで 1 万本の同時接続をどう処理するか」という課題を指す呼び名。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>C10K は「1 台のマシンで何本の接続を同時に抱えられるか」という問いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="C10K問題の図"><rect x="200" y="30" width="160" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">1 台のマシン</text><text x="280" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">同時 10,000 接続</text><text x="280" y="115" font-size="12.5" text-anchor="middle" fill="#4a5d54">どう処理能力を確保するか、という設計課題</text></svg>'
+          + '<p class="cap">図: C10K 問題は同時接続数のスケールに関する設計課題を指す。</p></div>'
+    }
+  },
+  {
+    q: 'select() を使った I/O 多重化について、man page が明記している制約として正しいものはどれか？',
+    opts: [
+      'select() は TCP のソケットだけを監視でき、UDP のソケットは監視対象にできない仕組みになっている',
+      'select() は Linux では使用できず、BSD 系 OS 専用に用意された特別なシステムコールである',
+      'select() は 1 回の呼び出しにつき、同時に 1 つの fd しか監視できない制約を持っている',
+      '監視できる fd の番号には FD_SETSIZE (1024) という上限があり、低すぎる値だと man page 自身が明記している',
+      'select() を使うと、TCP の 3-way ハンドシェイクの手順が自動的に省略されてしまう仕組みになっている'
+    ],
+    ans: 3,
+    exps: [
+      'select() は TCP に限らず、ソケット以外の fd も含めて監視できる汎用的な仕組みであり、「TCP だけ」という制約は無い。',
+      'select() は POSIX 系の API であり、Linux でも利用できる。「BSD 系専用」という説明は誤り。',
+      'select() はビットマスクで複数の fd を一度に監視するための仕組みであり、「1 つしか監視できない」というのは select() の存在意義と矛盾する。',
+      '<b>これが正解。</b>select() が監視できる fd の番号には FD_SETSIZE (1024) という上限があり、man page は「現代的なアプリケーションには不合理に低い上限であり、この制限は変更されない」と明記している。',
+      'ハンドシェイクは TCP 自体の仕組みであり、I/O 多重化の API を使うかどうかとは無関係に必ず行われる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>select() の弱点は、全件スキャンのコストだけでなく、監視できる fd 番号の範囲そのものにもあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="FD_SETSIZEの上限の図"><rect x="40" y="40" width="480" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="65" font-size="13" text-anchor="middle" fill="#12211a">fd 番号 0 〜 1023 (FD_SETSIZE) までしか監視できない</text><text x="280" y="105" font-size="12.5" text-anchor="middle" fill="#4a5d54">man page 自身がこの制限は変更されないと明記している</text></svg>'
+          + '<p class="cap">図: select() の FD_SETSIZE (1024) の上限は、仕様として変更されないと明記されている。</p></div>'
+    }
+  },
+  {
+    q: 'poll() は select() の改良版として設計されたが、依然として共通して残っている弱点はどれか？',
+    opts: [
+      'poll() は複数のプロセスから同時に呼び出すとデータが必ず破損してしまう仕組みになっている',
+      'poll() は select() と違い、ソケット以外の fd を一切監視できなくなっている仕組みになっている',
+      'poll() を使うと、TCP の接続が自動的に UDP に変換されてしまう仕組みになっている',
+      'poll() は select() よりも監視できる fd の上限がさらに厳しく制限されている仕組みになっている',
+      'poll() も select() と同様に、監視対象の fd を毎回全部スキャンするため、数に比例してコストが増える'
+    ],
+    ans: 4,
+    exps: [
+      '複数プロセスからの呼び出しでデータが必ず破損するという前提は誤りで、通常はプロセスごとに独立した fd の集合を監視する。',
+      'poll() もソケット以外の fd を監視できる汎用的な仕組みであり、「一切監視できない」という説明は誤り。',
+      'TCP から UDP への変換はプロトコルの選択の話であり、I/O 多重化の API を変えても自動的には起きない。',
+      'poll() は構造体の配列を使う方式で、むしろ select() の FD_SETSIZE のような上限は無い改良版である。「さらに厳しい」は逆の説明。',
+      '<b>これが正解。</b>poll() は FD_SETSIZE の上限こそ取り払ったが、呼び出すたびに監視対象を全部スキャンするという select() と共通の弱点は残っている。監視対象の数に比例してコストが増える。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>poll() は上限を取り払ったが、全件スキャンというコスト構造自体は select() と同じです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="pollの改善点と残る弱点の図"><rect x="30" y="30" width="230" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">改善した点</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">FD_SETSIZE の上限を撤廃</text><rect x="300" y="30" width="230" height="70" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">残った弱点</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">毎回全件スキャンのコスト</text></svg>'
+          + '<p class="cap">図: poll() は上限を撤廃したが、全件スキャンのコスト構造は select() と共通。</p></div>'
+    }
+  },
+  {
+    q: 'epoll や kqueue が select() / poll() と比べて、大量の接続を扱う場面で有利になる本質的な違いはどれか？',
+    opts: [
+      'epoll や kqueue を使うと、OS がアプリケーションの代わりに recv() の処理内容まで自動的に実行してくれる',
+      'epoll や kqueue は TCP ではなく UDP 専用に最適化されているため、TCP の処理コストを気にしなくてよい',
+      '監視対象を OS 側に一度登録しておき、問い合わせ時には準備ができた fd だけが返るため、コストが準備ができた数に依存する',
+      'epoll や kqueue は監視対象の数を常に 10 個以下に制限することで、スキャンのコストを一定に保っている',
+      'epoll や kqueue は複数のマシンをまたいで fd を共有できる、分散対応のシステムコールである'
+    ],
+    ans: 2,
+    exps: [
+      'recv() の呼び出し自体はアプリケーションが行う必要があり、OS が代わりに処理内容を実行してくれるという機能は無い。',
+      'epoll も kqueue も TCP ・ UDP を問わず汎用的に fd を監視する仕組みであり、「UDP 専用」という制約は無い。',
+      '<b>これが正解。</b>epoll / kqueue は監視対象を OS 側に事前登録しておき、問い合わせ (epoll_wait() など) では準備ができた fd だけを返す。コストは監視対象の総数ではなく、準備ができた数に依存する。',
+      '監視対象の数を一定数以下に制限する仕組みは epoll / kqueue には無く、むしろ大量の fd を効率的に扱うことが目的である。',
+      'epoll や kqueue は 1 台の OS 内のローカルな fd を対象とする仕組みであり、複数マシンをまたいで fd を共有する機能ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。OS 側が準備済みリストを管理し、問い合わせ時には準備ができた分だけを返します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="epollのコストが準備数に依存する図"><rect x="30" y="30" width="230" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">select / poll</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">コストは監視対象の総数 n</text><rect x="300" y="30" width="230" height="70" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">epoll / kqueue</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">コストは準備済みの数</text></svg>'
+          + '<p class="cap">図: epoll / kqueue のコストは監視対象の総数ではなく、準備ができた fd の数に依存する。</p></div>'
+    }
+  },
+  {
+    q: 'epoll を EPOLLET (エッジトリガ) で使っているサーバーで、1 回の epoll_wait() の通知に対して recv() を 1 回だけ呼んで処理を終えるという実装にした場合、何が起きやすいか？',
+    opts: [
+      'ソケットに残っているデータがあっても、次の変化が起きるまで通知が来ず、残りのデータに気づけないことがある',
+      'レベルトリガに設定が自動的に切り替わり、次回以降は何度でも通知が来るようになる',
+      'TCP の接続が強制的に切断され、クライアントは即座に再接続を求められる',
+      'OS がエラーを返して epoll_wait() 自体の呼び出しが以後すべて失敗するようになる',
+      'recv() を 1 回しか呼ばなくても、残っているデータは自動的に次の recv() の戻り値にまとめて追加される'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>エッジトリガは「状態が変化した瞬間にだけ」通知する。1 回の recv() で読み切らずに残したデータがあっても、次に新しい変化が起きない限り通知が来ず、残りのデータに気づけなくなることがある。',
+      'EPOLLET で登録した fd のトリガモードが実行中に自動でレベルトリガへ切り替わるという仕組みは無い。',
+      'エッジトリガの通知漏れは TCP の接続状態そのものには影響せず、接続が強制切断されるという説明は誤り。',
+      '通知漏れが起きても epoll_wait() 自体が以後すべて失敗するようになるという仕様は無い。',
+      '残っているデータが自動的に次の recv() にまとめて追加されるという仕組みは無く、読み残した分はソケットバッファに残ったままになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>エッジトリガは「変化した瞬間」だけを通知します。読み残しがあっても、次の変化が来るまで気づけません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="エッジトリガの通知漏れの図"><text x="280" y="20" font-size="13" text-anchor="middle" fill="#12211a">2KB 届く → 通知 → 1KB だけ recv()</text><rect x="40" y="40" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">残り 1KB がバッファに残る</text><line x1="240" y1="60" x2="320" y2="60" stroke="#9aa" stroke-width="2" stroke-dasharray="5 5"/><rect x="320" y="40" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">次の変化が無いと通知されない</text><text x="280" y="120" font-size="12.5" text-anchor="middle" fill="#4a5d54">エッジトリガでは「読めるだけ読み切る」実装が必須</text></svg>'
+          + '<p class="cap">図: エッジトリガで読み残しを放置すると、次の変化が来るまで気づけない。</p></div>'
+    }
+  },
+  {
+    q: '1 スレッドのイベントループの中で、ある接続の処理にうっかりブロッキングな (結果が返るまで止まる) データベース呼び出しを書いてしまった場合、最も起きやすい問題はどれか？',
+    opts: [
+      'その呼び出しが終わるまで、ループ全体が止まり、他のすべての接続の処理も一緒に待たされる',
+      'ブロッキング呼び出しをしたスレッドだけが終了し、他の接続は影響を受けずに処理が続く',
+      'OS が自動的にその呼び出しを別スレッドに移し、イベントループ本体は止まらずに済む',
+      'TCP の接続が自動的に切断され、クライアントに再接続を促すエラーが返る',
+      'データベース呼び出しの結果が破損し、誤ったデータが返されるようになる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>イベントループは 1 本のスレッドで順番に処理を進める構造のため、1 つの処理がブロッキングで止まると、その間ループ自体が先に進めず、他のすべての接続の処理も待たされる。',
+      '1 本のスレッドで動くイベントループでは「ブロッキング呼び出しをしたスレッドだけが終了する」という切り分けはできず、ループ全体が影響を受ける。',
+      'OS がブロッキング呼び出しを自動的に別スレッドへ移すという仕組みは標準では無く、これを避けるには明示的に非同期の呼び出しに書き換える必要がある。',
+      '接続が自動的に切断されるわけではなく、単に応答が遅れるだけであることが多い。切断は別の要因で起きる現象。',
+      'データの破損はブロッキング呼び出しそのものが引き起こす現象ではなく、別の種類の不具合である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 本のスレッドが順番に処理する以上、途中で止まれば後続もすべて止まります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 590 130" aria-label="イベントループが1箇所で止まる図"><rect x="30" y="40" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="65" font-size="12.5" text-anchor="middle" fill="#b5401f">接続 A: ブロッキング呼び出し中</text><rect x="250" y="40" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5" opacity="0.5"/><text x="325" y="65" font-size="12.5" text-anchor="middle" fill="#4a5d54">接続 B: 待たされる</text><rect x="420" y="40" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5" opacity="0.5"/><text x="495" y="65" font-size="12.5" text-anchor="middle" fill="#4a5d54">接続 C: 待たされる</text><text x="300" y="105" font-size="12.5" text-anchor="middle" fill="#12211a">1 本のスレッドなので、A が止まると B も C も進めない</text></svg>'
+          + '<p class="cap">図: イベントループは 1 本のスレッドのため、1 箇所のブロッキングが全体を止める。</p></div>'
+    }
+  },
+  {
+    q: '動画のエンコード処理のように、1 件あたり数秒の CPU 計算を要する重い処理を提供するサーバーを設計する場合、最も適切な構成はどれか？',
+    opts: [
+      '1 本のイベントループだけで全接続を処理し、重い計算もそのループの中で直接実行する',
+      'CPU コア数程度のワーカー (プロセスまたはスレッド) に分け、重い計算は別ワーカーや別スレッドに切り出して、イベントループ本体を長時間止めないようにする',
+      '接続ごとに新しいマシンを 1 台ずつ用意し、常に 1 対 1 の専用サーバーを立て続ける',
+      '全てのリクエストを 1 つの巨大なキューに入れ、キューが空になるまで新規リクエストを一切受け付けない',
+      'select() を使わず、必ず素のブロッキング I/O だけでシングルスレッドで処理する'
+    ],
+    ans: 1,
+    exps: [
+      '重い CPU 計算を 1 本のイベントループの中で直接実行すると、その間ループ全体が止まり、他の軽い接続も待たされてしまう。I/O 待ちが多い処理には向いているが、CPU が重い処理には不向き。',
+      '<b>これが正解。</b>CPU コア数程度のワーカーに分け、重い計算は別ワーカーや別スレッドに切り出すことで、イベントループ本体を長時間止めずに他の接続もさばける。I/O 待ちが多い部分とCPU が重い部分を分離する設計。',
+      '接続ごとに新しいマシンを用意するのはコストが膨大で、現実的な設計としては成立しにくい極端な案。',
+      '新規リクエストを一切受け付けないという制約は可用性を大きく損ない、通常の設計では採用されない極端な案。',
+      'ブロッキング I/O だけのシングルスレッド構成は、1 件処理している間は他の接続を一切処理できず、重い処理には最も不向きな組み合わせ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>I/O 待ちが多い部分と CPU が重い部分を分離すると、どちらの得意分野も活かせます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="重い処理の切り出しの図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">イベントループ本体</text><text x="140" y="82" font-size="12.5" text-anchor="middle" fill="#12211a">軽い I/O 待ちの接続を処理</text><line x1="250" y1="70" x2="310" y2="70" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-m4)"/><rect x="310" y="30" width="220" height="80" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">別ワーカー / 別スレッド</text><text x="420" y="82" font-size="12.5" text-anchor="middle" fill="#12211a">CPU が重い処理を実行</text><defs><marker id="arr-m4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 重い CPU 計算は別ワーカーへ切り出し、イベントループ本体は軽い処理に専念させる。</p></div>'
+    }
+  },
+  {
+    q: 'サーバーのログを調べたところ、accept キューが頻繁に埋まっていることが分かった。最も妥当な原因と対処の組み合わせはどれか？',
+    opts: [
+      'DNS の TTL 設定が短すぎることが原因であり、TTL を伸ばせば accept キューの詰まりは解消する',
+      'アプリケーションが accept() を呼ぶ処理 (または呼んだ後の処理) が遅れているのが原因であり、処理を高速化するか並列度を上げる必要がある',
+      'TLS 証明書の鍵長が不足しているのが原因であり、鍵長を伸ばせば accept キューの詰まりは解消する',
+      'クライアント側のエフェメラルポートが枯渇しているのが原因であり、サーバー側の設定を変えても解消できない',
+      'UDP のパケットロス率が高いのが原因であり、UDP の設定を見直せば TCP の accept キューの詰まりも解消する'
+    ],
+    ans: 1,
+    exps: [
+      'DNS の TTL は名前解決のキャッシュ期間を決める設定であり、accept キューが埋まる現象とは直接関係しない。',
+      '<b>これが正解。</b>accept キューは「ハンドシェイクが完了したが、まだ accept() されていない接続」が溜まる場所。アプリケーション側の accept() やその後の処理が遅れると、ここが埋まりやすくなる。処理の高速化や並列度の向上が対処になる。',
+      'TLS 証明書の鍵長は暗号強度に関わる設定であり、accept キューの詰まりとは別の問題。',
+      'クライアント側のエフェメラルポートの枯渇は接続を開始する側の問題であり、サーバー側の accept キューの詰まりとは別の現象として整理すべき。',
+      'UDP のパケットロスは UDP 自体の話であり、TCP の accept キューという別のトランスポート層の仕組みの詰まりの説明にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。accept() が遅れると、完了済み接続の待ち行列が埋まっていきます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="acceptキューが埋まる原因の図"><rect x="30" y="40" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="70" font-size="13" text-anchor="middle" fill="#1f4a68">accept キュー (埋まっている)</text><line x1="250" y1="65" x2="310" y2="65" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-m5)"/><rect x="310" y="40" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="65" font-size="13" text-anchor="middle" fill="#b5401f">accept() の呼び出しが遅い</text><defs><marker id="arr-m5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: accept キューの詰まりは、アプリケーション側の accept() の遅れを疑うのが筋。</p></div>'
+    }
+  },
+  {
+    q: '上流のサービスからメッセージを受け取って処理するワーカーが、処理速度より速いペースでメッセージを受け取り続けると、受信側の内部キューが無限に伸び続けてメモリを使い果たす恐れがある。これを防ぐ設計として最も適切なのはどれか？',
+    opts: [
+      '内部キューのサイズに上限を設けず、処理が追いつくまでそのまま受け取り続ける',
+      'ワーカーを再起動する処理を定期的に仕込み、キューをその都度リセットすることで対応する',
+      '上流からのデータを受け取るすべてのログを削除し、メモリ使用量の見かけ上の増加を防ぐ',
+      '内部キューに上限を設け、上限に近づいたら受け取りを一時停止するなどして、上流に向けて速度を落とすよう伝え返す',
+      'メッセージの内容を検証せず、形式が正しいかどうかに関わらずすべて受理してから後で捨てる'
+    ],
+    ans: 3,
+    exps: [
+      '上限を設けずに受け取り続けると、処理が追いつかない限りキューは伸び続け、最終的にメモリを使い果たす恐れがそのまま残る。',
+      '再起動でキューをリセットすることは、溜まっていたメッセージを失うことと同義であり、根本的な速度差を解決する対処ではない。',
+      'ログの削除はメモリ使用量の記録を消すだけであり、実際に積み重なっているキューのデータ量そのものを減らすわけではない。',
+      '<b>これが正解。</b>内部キューに上限を設け、上限に近づいたら受け取りを一時停止するなどして、上流に対して明示的に速度を落とすよう伝え返すのがバックプレッシャーの基本的な設計。',
+      'メッセージの検証を省略することは受理の速度には影響するが、処理と受信の速度差そのものを解消する対処にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文のバックプレッシャーの図を思い出してください。積み重なる前に「遅くして」と伝え返すのが要点です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="バックプレッシャーの設計の図"><rect x="30" y="40" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="70" font-size="13" text-anchor="middle" fill="#12211a">上流 (速い送信者)</text><rect x="330" y="40" width="200" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="430" y="70" font-size="13" text-anchor="middle" fill="#1f4a68">ワーカー (上限付きキュー)</text><line x1="330" y1="95" x2="230" y2="110" stroke="#198754" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arr-m6)"/><text x="280" y="120" font-size="12.5" text-anchor="middle" fill="#0f5132">上限に近づいたら速度を落とすよう伝え返す</text><defs><marker id="arr-m6" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#198754"/></marker></defs></svg>'
+          + '<p class="cap">図: 上限付きキューと、上流への明示的な信号の組み合わせがバックプレッシャーの基本形。</p></div>'
+    }
+  }
+
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

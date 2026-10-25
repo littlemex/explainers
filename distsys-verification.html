@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分散システムの正しさを確かめる ― Jepsen ・ TLA+ ・ 決定論的シミュレーション</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 37 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>分散システムの正しさを確かめる ― Jepsen ・ TLA+ ・ 決定論的シミュレーション</h1>
+  <p>「動いているから正しい」は錯覚。正しさの規則を先に書き、それを破る実行を実際に、あるいは網羅的に探しに行く仕組みが要る</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 13 回 <a href="./distsys-consistency-models.html">一貫性モデル</a>、第 18 回 <a href="./distsys-isolation-concurrency.html">分離レベルと並行制御</a>、第 25 回 <a href="./distsys-raft-paxos.html">合意 Paxos / Raft</a></p>
+  <p class="intro">この回の結論は一つです。分散システムの正しさは、何を「正しい」とするかの規則を先に形式的に (曖昧さなく、機械的に判定できる形で) 書き、その規則を破る実行を実際に起こす、あるいは網羅的に探しに行く仕組みが無ければ確認できません。「本番で何か月も動いているから正しい」は、単にその規則を破る実行がまだ観測されていないというだけのことです。ここでは 3 つの代表的な仕組み ― 実機を外から壊して履歴を判定する Jepsen、実装前に設計を網羅的に検査する TLA+、実コードを再現可能な壊れた世界で走らせる決定論的シミュレーション (FoundationDB) ― を、それぞれ何を検査し、何を諦めているかに焦点を当てて確認します。</p>
+
+  <!-- ===== 解説パート 1: なぜ「動いている」では正しさを確認できないか ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― なぜ「動いている」では正しさを確認できないか</h2>
+    <p>単一のプロセスのプログラムなら、同じ入力に対して毎回同じ実行順序でコードが動きます。だから典型的な入力をいくつか試すテストで、かなりの自信が持てます。分散システムではこの前提が崩れます。複数のノードが並行に動き、メッセージの到着順序は毎回変わり、途中でノードが落ちたり遅くなったりします。同じコードでも、たった 1 回の実行で起こり得る「出来事の順序」の組み合わせは、ノード数と操作数が増えるだけで爆発的に増えます。</p>
+    <p>しかも、本当に悪いバグは<b>滅多に起きない特定の順序でしか発生しない</b>ことがあります。後の節で見る実例では、ある複製アルゴリズムのバグは障害とその回復が特定の順序で 35 段階重なったときにだけ発生しました。普通のテストや、何人もでコードを読むレビューが、たまたまその 35 段階の順序を踏む確率は天文学的に低く、何か月本番で動かしても再現しないことがあります。つまり「本番で長期間問題なく動いている」という事実は、そのバグを破る実行がまだ観測されていないというだけで、そのバグが存在しないことの証明には全くなりません。</p>
+    <p>この問題に対する答え方は大きく 3 つに分かれます。(1) 実際に動いているシステムを外から壊してみて、起きたことを厳密な規則で判定する (Jepsen)。(2) コードを書く前に、設計を抽象的なモデルとして書き、あり得る状態をすべて網羅的に調べる (TLA+)。(3) 実際のコードを、障害注入と実行順序を完全に再現できる「壊れた世界」の上で大量に走らせる (FoundationDB の決定論的シミュレーション)。どの道を選んでも共通して必要なのは、「何が正しいか」を人間の感覚ではなく、機械的に判定できる規則として先に書くことです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="単一プロセスと分散システムで再現性が崩れる図">
+        <rect x="20" y="20" width="260" height="80" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="48" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">単一プロセス</text>
+        <text x="150" y="70" font-size="13" text-anchor="middle" fill="#12211a">同じ入力 → ほぼ同じ実行順序</text>
+        <text x="150" y="88" font-size="12.5" text-anchor="middle" fill="#4a5d54">少数のテストで自信が持てる</text>
+        <rect x="340" y="20" width="260" height="80" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="470" y="48" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">分散システム</text>
+        <text x="470" y="70" font-size="13" text-anchor="middle" fill="#12211a">毎回ちがう到着順序・障害</text>
+        <text x="470" y="88" font-size="12.5" text-anchor="middle" fill="#4a5d54">順序の組合せが爆発的に増える</text>
+        <line x1="150" y1="100" x2="150" y2="140" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="470" y1="100" x2="470" y2="140" stroke="#7a5a9e" stroke-width="1.5"/>
+        <text x="150" y="160" font-size="13" text-anchor="middle" fill="#12211a">テストが実行順序をほぼ覆う</text>
+        <text x="470" y="160" font-size="13" text-anchor="middle" fill="#12211a">35 段階の稀な順序は通常再現しない</text>
+        <text x="310" y="200" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">正しさの規則を先に書き、破る実行を探しに行く仕組みが要る</text>
+      </svg>
+      <p class="cap">図: 分散システムでは「出来事の順序」の組み合わせが爆発するため、普通のテストでは稀な順序に依存するバグを踏まない。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: Jepsen ===== -->
+  <section>
+    <h2>2. Jepsen ― 実機を外から壊し、履歴を規則で判定する</h2>
+    <p>Jepsen (jepsen.io) は Kyle Kingsbury が開発した、分散データストアを<b>ブラックボックス</b>として検証する試験フレームワークです。ソースコードは読みません。実際のクラスタを本物のソフトウェアで立て、並行する複数のクライアントに読み書きなどの操作を送り続けながら、同時に「ネミシス (nemesis、厄災役)」と呼ぶ妨害プロセスにネットワーク分断・クロックのずれ・プロセスの強制終了などの障害を注入します。</p>
+    <p>このときクライアント側で記録するのが<b>履歴 (history)</b> です。各操作は「:invoke (呼び出した)」「:ok (成功した)」「:fail (失敗が確定した)」「:info (結果不明、タイムアウトなど)」のいずれかの状態を持ちます。ここで重要なのは、タイムアウトして応答が来なかった操作 (:info) は、サーバ側で実際に処理が完了していたかどうかが分からないという点です。チェッカーは :info な操作を「起きたかもしれない」候補として扱い、どちらで解釈しても規則に反しないかを確認します。</p>
+    <p>履歴ができたら、<b>チェッカー</b>がそれを規則と照合します。Jepsen は 2 種類の代表的なチェッカーを使い分けます。<b>Knossos</b> は単一のレジスタや CAS、集合といった単純なオブジェクトに対する<b>線形化可能性</b> (第 13 回参照) を判定するチェッカーで、Gavin Lowe の改良アルゴリズムに基づき、観測された履歴に矛盾しない「正しい順序」が存在するかを探します。一方 <b>Elle</b> は、複数のキーにまたがる複数ステートメントのトランザクションの<b>分離性異常</b> (第 18 回参照) を検出するために作られたチェッカーです。各トランザクションにリストへの追記のような値を書かせることで、読み取った値から「どのバージョンがどの順で書かれたか」を逆算し、書き込み同士 (ww)・書き込みから読み取り (wr)・読み取りから書き込みへの逆依存 (rw) という依存関係のグラフを作ります。このグラフにサイクルが見つかれば、Adya の異常階層における G0 (ダーティライト) から G2 (非直列化可能) までの、具体的な異常が実際に起きた証拠になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="Jepsenの検証パイプライン">
+        <rect x="20" y="20" width="170" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="105" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">並行クライアント操作</text>
+        <text x="105" y="63" font-size="12.5" text-anchor="middle" fill="#12211a">読み書きを送り続ける</text>
+        <rect x="20" y="100" width="170" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="105" y="125" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">ネミシス</text>
+        <text x="105" y="143" font-size="12.5" text-anchor="middle" fill="#12211a">分断 ・ クロックずれ ・ kill</text>
+        <line x1="190" y1="50" x2="250" y2="90" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="190" y1="130" x2="250" y2="92" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="250" y="60" width="190" height="70" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="345" y="88" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">履歴</text>
+        <text x="345" y="106" font-size="12.5" text-anchor="middle" fill="#12211a">:invoke / :ok / :fail / :info</text>
+        <line x1="440" y1="95" x2="490" y2="95" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="490" y="60" width="130" height="70" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="555" y="84" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">チェッカー</text>
+        <text x="555" y="102" font-size="12.5" text-anchor="middle" fill="#12211a">Knossos / Elle</text>
+        <text x="555" y="118" font-size="12.5" text-anchor="middle" fill="#12211a">valid か 反例</text>
+        <text x="330" y="195" font-size="13.5" text-anchor="middle" fill="#12211a">ソースコードを読まず、起きた事実だけを規則と照合する</text>
+      </svg>
+      <p class="cap">図: Jepsen は実機に負荷と障害を同時に与え、記録した履歴を Knossos (線形化可能性) や Elle (分離性異常) で判定する。</p>
+    </div>
+    <p>この方法で、実際の公開済みデータベースのバージョンに対する分析が <a href="https://jepsen.io/analyses" target="_blank" rel="noopener">jepsen.io/analyses</a> に蓄積されています。ただし、チェッカーが「違反なし (valid)」と判定しても、それはその試行の範囲内で規則を破る証拠が見つからなかったというだけで、バグが存在しないことの証明ではありません。別の障害パターンや、もっと長い時間動かせば違反が見つかる可能性は常に残ります。</p>
+  </section>
+
+  <!-- ===== 解説パート 3: TLA+ ===== -->
+  <section>
+    <h2>3. TLA+ ― 実装の前に、設計を網羅的に検査する</h2>
+    <p>Jepsen は「実装済みのコード」を外から壊します。これとは逆の時点、つまりまだ 1 行もコードを書いていない<b>設計の段階</b>でバグを見つける道具が、Leslie Lamport が作った <b>TLA+</b> (Temporal Logic of Actions、時相論理に基づく仕様記述言語) です。TLA+ では、システムを「初期状態 (Init)」と「次の状態への遷移の集合 (Next)」として書きます。これはちょうど、各ノードが取り得る行動 (リーダーに立候補する、ログを複製する、応答を返す、など) を 1 つずつ数式として列挙した、精密な状態機械の定義です。そこに「安全性の不変条件」― 例えば「ある時点で確定したリーダーは 1 つしかない」― を書き添えます。</p>
+    <p>この仕様を検査するツールが <b>TLC</b> (モデル検査器) です。TLC は、ノード数や扱う値の範囲など有限の境界をあなたが指定すると、その境界の中で到達できる状態をすべて列挙し、各状態で不変条件が破れていないかを総当たりで確かめます。違反が見つかれば、どの行動をどの順に積んだときに起きるかを示す、具体的な反例の実行列を出力します。ここで誤解してはいけないのは、TLC が示すのは「指定した境界の中では違反が見つからなかった」ということだけであり、境界を超えた規模や、仕様化していない振る舞いについては何も保証しない点です。これは、任意の個数のノードについて数学的帰納法で証明する TLAPS (TLA の機械証明系) とは別の、有界だが網羅的な検査です。実際に Raft の提案論文も、合意メカニズムの仕様を TLA+ で書き、ログの完全性に関する性質 (Log Completeness Property) は TLAPS による機械証明まで行っていますが、状態機械安全性 (State Machine Safety) については仕様のみに基づく非形式的な証明に留めています。</p>
+    <p><b>実システムでの例</b>: Amazon は 2012 年、DynamoDB の複製アルゴリズムの検証に TLA+ を使いました。担当エンジニアは、分散版の TLC を 10 台の EC2 インスタンス上で走らせ、設計レビューとコードレビュー、そして長時間の実機ストレステストのすべてを通過していたバグを見つけました。そのバグが発生する最短の反例は、障害とその回復が 35 段階も積み重なった、極めて特定的な順序でした。普通のテストや人間によるレビューがこの順序にたまたま行き着く確率は非常に低く、担当者自身が「通常の手法ではこのバグを見つけられなかった」と述べています (出典: Amazon の CACM 2015 論文)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 210" role="img" aria-label="TLA+とTLCによる網羅検査の図">
+        <rect x="20" y="30" width="190" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="115" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">仕様 (TLA+)</text>
+        <text x="115" y="73" font-size="12.5" text-anchor="middle" fill="#12211a">Init + Next + 不変条件</text>
+        <line x1="210" y1="65" x2="270" y2="65" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="270" y="30" width="190" height="70" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="365" y="55" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">TLC モデル検査</text>
+        <text x="365" y="73" font-size="12.5" text-anchor="middle" fill="#12211a">境界内の状態を総当たり</text>
+        <line x1="365" y1="100" x2="365" y2="130" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="365" y1="130" x2="230" y2="160" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="365" y1="130" x2="500" y2="160" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="120" y="160" width="220" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="230" y="185" font-size="12.5" text-anchor="middle" fill="#0f5132">境界内で違反なし (保証は境界内のみ)</text>
+        <rect x="390" y="160" width="220" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="500" y="185" font-size="12.5" text-anchor="middle" fill="#b5401f">反例トレース (具体的な実行列)</text>
+      </svg>
+      <p class="cap">図: TLC は仕様 (抽象モデル) を有界に総当たりし、違反があれば具体的な反例を返す。実装コード自体は検査していない。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 決定論的シミュレーション ===== -->
+  <section>
+    <h2>4. 決定論的シミュレーション ― 実コードを再現可能な壊れた世界で走らせる</h2>
+    <p>TLA+ が検査するのは「設計」という抽象モデルであり、実際に動くコードそのものではありません。これに対し、分散データベース FoundationDB は、<b>本番で動く実コードそのもの</b>を、障害注入と実行順序を完全に再現できる「壊れた世界」の上で走らせる、第 3 の道を選びました。</p>
+    <p>FoundationDB は C++ の非同期ランタイム <b>Flow</b> の上に書かれています。Flow は協調的スケジューリングの単一スレッドでコルーチン群を動かす仕組みで、同じアプリケーションコードを、本番用の実ネットワーク・実ディスク・実時計の上でも、テスト用の<b>シミュレーション</b>された (差し替え可能な) ネットワーク・ディスク・時計の上でも、どちらでも動かせるように作られています。シミュレーション側では、1 つの乱数シード値が、障害をいつ起こすかだけでなく、単一スレッド上でどのコルーチンを次に進めるかという<b>実行順序そのもの</b>も支配します。だから同じシードで走らせれば、同じ並行実行とバグを毎回正確に再現できます。これは並行性バグのデバッグで最も難しい「再現できない」という問題を根本から解消します。</p>
+    <p>公式ドキュメントによれば、FoundationDB は毎晩数万回のシミュレーションを実行し、これまでの累積で約 1 兆 CPU 時間相当のシミュレーションを行ったと述べています。試験の一つに、キーと値のペアを環状に並べてトランザクションで更新し、環の整合性が保たれているかを調べる「サイクルテスト」があり、これはトランザクションの分離性を直接検査します。障害注入の手法にも工夫があり、クラスタ内の一部のノードを選んでネットワーク接続を 1 本ずつ「詰まらせ (clog)」、その後ランダムな順で 1 本ずつ「詰まりを解消する (unclog)」という「swizzle-clogging」という手法が、実世界で最も稀にしか起きないような深いバグを見つけるのに特に有効だったと報告されています。</p>
+    <p>この方法にも限界があります。シミュレーションされたネットワークやディスクは、あくまで現実の模型であり、実際のカーネルやハードウェアの挙動と完全に一致するとは限りません (シミュレーションと現実の間のギャップ)。さらに、この手法を使うには、I/O (ネットワーク・ディスク・時刻) へのすべてのアクセスを、差し替え可能な抽象の向こう側に押し込み、実行順序をプログラム自身が制御できる構造にしておく必要があります。すでに OS のスレッドと TCP ソケットを直接使って書かれた既存の大規模システムに、後からこの構造を持ち込むのは、設計のやり直しに近い大改造になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="FoundationDBの決定論的シミュレーションの図">
+        <rect x="220" y="15" width="200" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="320" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">同じアプリケーションコード</text>
+        <text x="320" y="62" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">(Flow)</text>
+        <line x1="280" y1="75" x2="180" y2="100" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="360" y1="75" x2="460" y2="100" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="60" y="100" width="230" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="175" y="125" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">本番: 実ネットワーク / 実ディスク</text>
+        <text x="175" y="143" font-size="12.5" text-anchor="middle" fill="#12211a">実行順序は OS が決める</text>
+        <rect x="350" y="100" width="230" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="465" y="125" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">テスト: シミュレーション</text>
+        <text x="465" y="143" font-size="12.5" text-anchor="middle" fill="#12211a">1 つのシードが障害と順序を支配</text>
+        <text x="465" y="190" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">同じシード → 同じ実行 → バグを毎回正確に再現</text>
+      </svg>
+      <p class="cap">図: 同じコードを本番 (実環境) とテスト (シミュレーション) の両方で走らせ、テスト側はシードで完全に再現可能にする。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 3手法の比較 ===== -->
+  <section>
+    <h2>5. 3 つの手法を並べる ― 何を検査し、何を諦めているか</h2>
+    <p>Jepsen、TLA+、決定論的シミュレーションは、どれも「障害を起こして、正しさの規則と照合する」という同じ骨格を持ちますが、検査する対象と、その網羅性の種類が異なります。Jepsen は本番と同じ実行可能ファイルを対象に、ブラックボックスのまま、確率的な障害注入でバグを探します。どんな言語で書かれたどんなシステムにも適用できますが、網羅的ではないので「見つからなかった」が「存在しない」を意味しません。TLA+ は、コードを書く前の抽象的な設計を対象に、指定した境界の中では網羅的に検査します。実装そのものは検査しないので、仕様と実装がずれていれば (いわゆる spec-code ギャップ) 仕様が正しくても実装にバグが残る余地があります。決定論的シミュレーションは、本番と同じ実コードを対象に、大量のランダムな乱数シードで広く試し、しかも結果を正確に再現できますが、ネットワークやディスクの模型そのものが現実と食い違うリスクと、システム全体をその構造で書き直す必要があるという高い導入コストを抱えます。</p>
+    <p>この 3 つに共通する、ツールに依存しない唯一の教訓は、<b>何を「正しい」とみなすかを、曖昧さのない検査可能な規則として先に書く習慣</b>です。Jepsen なら線形化可能性や分離性のモデル、TLA+ なら不変条件、決定論的シミュレーションならサイクルテストのような整合性チェックがそれに当たります。この規則を書かずにただランダムにサーバを落として「動いているように見える」ことを確認するだけでは、何も決定的なことは分かりません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 200" role="img" aria-label="3手法の比較表">
+        <rect x="20" y="15" width="150" height="34" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <rect x="170" y="15" width="150" height="34" rx="0" fill="#eaf5ef" stroke="#0f5132"/>
+        <text x="245" y="38" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Jepsen</text>
+        <rect x="320" y="15" width="150" height="34" fill="#e3edf5" stroke="#2f5f8a"/>
+        <text x="395" y="38" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">TLA+ / TLC</text>
+        <rect x="470" y="15" width="150" height="34" fill="#efe8f7" stroke="#7a5a9e"/>
+        <text x="545" y="38" font-size="11" text-anchor="middle" fill="#5b3d80" font-weight="700">決定論的シミュレーション</text>
+        <rect x="20" y="49" width="150" height="40" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="95" y="73" font-size="12.5" text-anchor="middle" fill="#12211a">検査対象</text>
+        <rect x="170" y="49" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="245" y="73" font-size="12.5" text-anchor="middle" fill="#12211a">本番コード (実行形式)</text>
+        <rect x="320" y="49" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="395" y="73" font-size="12.5" text-anchor="middle" fill="#12211a">抽象的な設計仕様</text>
+        <rect x="470" y="49" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="545" y="73" font-size="12.5" text-anchor="middle" fill="#12211a">本番コード (実行形式)</text>
+        <rect x="20" y="89" width="150" height="40" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="95" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">網羅性</text>
+        <rect x="170" y="89" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="245" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">確率的 (網羅しない)</text>
+        <rect x="320" y="89" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="395" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">境界内のみ網羅的</text>
+        <rect x="470" y="89" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="545" y="113" font-size="12.5" text-anchor="middle" fill="#12211a">広い乱数探索 + 再現可能</text>
+        <rect x="20" y="129" width="150" height="40" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="95" y="153" font-size="12.5" text-anchor="middle" fill="#12211a">導入コスト</text>
+        <rect x="170" y="129" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="245" y="153" font-size="12.5" text-anchor="middle" fill="#12211a">低い (黒箱のまま可)</text>
+        <rect x="320" y="129" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="395" y="153" font-size="12.5" text-anchor="middle" fill="#12211a">低い (コード不要)</text>
+        <rect x="470" y="129" width="150" height="40" fill="#fff" stroke="#d9e5df"/>
+        <text x="545" y="153" font-size="12.5" text-anchor="middle" fill="#12211a">高い (設計をやり直す)</text>
+      </svg>
+      <p class="cap">図: 3 つの手法は検査対象・網羅性・導入コストの軸でそれぞれ異なるトレードオフを持つ。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://jepsen.io/" target="_blank" rel="noopener">jepsen.io</a> ― Jepsen の手法全体 (ネミシス・履歴・チェッカー) の一次情報。</li>
+      <li><a href="https://jepsen.io/consistency" target="_blank" rel="noopener">jepsen.io/consistency</a> ― 一貫性 / 分離性モデルの整理。</li>
+      <li><a href="https://github.com/jepsen-io/jepsen/blob/main/README.md" target="_blank" rel="noopener">GitHub: jepsen-io/jepsen README</a> ― :invoke / :ok / :fail / :info という履歴の形式。</li>
+      <li><a href="https://github.com/jepsen-io/knossos" target="_blank" rel="noopener">GitHub: jepsen-io/knossos</a> ― 線形化可能性チェッカーの実装、Lowe のアルゴリズムへの言及。</li>
+      <li><a href="https://github.com/jepsen-io/elle" target="_blank" rel="noopener">GitHub: jepsen-io/elle</a> ― Adya の異常階層 (G0 ・ G1a/b/c ・ G2) とサイクル検出による分離性異常チェッカーの実装。</li>
+      <li><a href="https://www.vldb.org/pvldb/vol14/p268-alvaro.pdf" target="_blank" rel="noopener">Kingsbury, Alvaro, "Elle: Inferring Isolation Anomalies from Experimental Observations" (VLDB 2020)</a> ― Elle の手法の一次論文。</li>
+      <li><a href="https://jepsen.io/analyses/mongodb-4.2.6" target="_blank" rel="noopener">jepsen.io/analyses/mongodb-4.2.6</a>、<a href="https://jepsen.io/analyses/etcd-3.4.3" target="_blank" rel="noopener">etcd-3.4.3</a>、<a href="https://jepsen.io/analyses/postgresql-12.3" target="_blank" rel="noopener">postgresql-12.3</a> ― 実際の分析例として参照。</li>
+      <li><a href="https://lamport.azurewebsites.net/tla/tla.html" target="_blank" rel="noopener">Lamport, TLA+ Home Page</a> ― TLA+ ・ PlusCal ・ TLC の概要。</li>
+      <li><a href="https://github.com/tlaplus/tlaplus" target="_blank" rel="noopener">GitHub: tlaplus/tlaplus</a> ― TLC モデル検査器の実装。</li>
+      <li><a href="https://lamport.azurewebsites.net/tla/formal-methods-amazon.pdf" target="_blank" rel="noopener">Newcombe et al., "How Amazon Web Services Uses Formal Methods" (CACM, 2015)</a> ― DynamoDB の複製アルゴリズムの検証例 (35 段階の反例、10 台の EC2 での分散 TLC) の一次情報。</li>
+      <li><a href="https://raft.github.io/raft.pdf" target="_blank" rel="noopener">Ongaro, Ousterhout, "In Search of an Understandable Consensus Algorithm" (Raft 論文)</a> ― 9.2 節、TLA+ 仕様と TLAPS による Log Completeness Property の機械証明。</li>
+      <li><a href="https://apple.github.io/foundationdb/testing.html" target="_blank" rel="noopener">FoundationDB 公式ドキュメント: Simulation and Testing</a> ― Flow と決定論的シミュレーション、サイクルテスト、swizzle-clogging、累積約 1 兆 CPU 時間の一次情報。</li>
+      <li><a href="https://www.youtube.com/watch?v=4fFDFbi3toc" target="_blank" rel="noopener">Will Wilson, "Testing Distributed Systems w/ Deterministic Simulation" (Strange Loop)</a> ― FoundationDB のシミュレーション設計の講演。</li>
+      <li><a href="https://github.com/apple/foundationdb" target="_blank" rel="noopener">GitHub: apple/foundationdb</a> ― 実装の参照。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-metastable-tail.html">← 第 36 回 メタ安定障害とテールレイテンシ</a><a href="./distsys-index.html">目次</a><a href="./distsys-papers-map.html">第 38 回 古典論文マップ →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'Jepsen が記録する履歴において、クライアントがタイムアウトして応答が来なかった操作 (:info) をチェッカーが扱う際、最も正確な扱いはどれか？',
+    opts: [
+      'その操作は応答が確認できなかった時点でサーバ側の処理自体も失敗したと確定的にみなし、以後の判定からその操作を失敗として扱ってよい',
+      'その操作は送信自体は届いているはずなので、サーバ側で成功したものとして確定的に扱い、以後の判定の前提にしてよい',
+      'サーバ側で実際に完了したか否かが分からない状態なので、起きた可能性と起きなかった可能性の両方を候補として扱い、どちらかで整合する実行順序があれば違反と判定しない',
+      'タイムアウトした操作は結果が不明で判定を複雑にするだけなので、履歴から取り除いた上で残りの操作だけをチェックすればよい',
+      'ネットワーク層が応答メッセージを破棄したとみなし、再送されないまま終わった操作は常に成功扱いにして進めるのが妥当である'
+    ],
+    ans: 2,
+    exps: [
+      'タイムアウトは応答が来なかっただけで、サーバ側で書き込みなどの副作用が実際に完了していた可能性は残る。確定的に「起きなかった」と決めるのは誤り。',
+      '逆に確定的に「起きた」と決めるのも誤り。クライアントが応答を受け取れなかった以上、完了したかどうかは分からない。',
+      '<b>これが正解。</b>:info な操作は結果不明というそのままの状態で扱い、チェッカーは「起きた」「起きなかった」のどちらで解釈しても規則に反しない実行順序が存在するかを探す。',
+      '除外すると、実際にサーバ側で起きていたかもしれない副作用 (書き込みなど) を見逃し、後続の操作との矛盾を発見できなくなる。',
+      'ネットワーク層が応答を破棄したと断定する根拠は無く、サーバ側の処理自体が遅延しているだけの可能性もある。常に成功扱いにするのは誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>タイムアウトは「応答が来なかった」という事実しか示さず、サーバ側の処理が完了したかどうかは不明のままです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label=":infoの扱いの図"><rect x="30" y="30" width="220" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#1f4a68">クライアント: タイムアウト (:info)</text><rect x="310" y="30" width="220" height="40" rx="8" fill="#fff" stroke="#9aa" stroke-width="1.5"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#12211a">サーバ: 完了したか不明</text><text x="280" y="110" font-size="13.5" text-anchor="middle" fill="#12211a">チェッカーは「起きた」「起きなかった」の両方を候補として整合性を探す</text></svg>'
+          + '<p class="cap">図: :info な操作は、結果不明のまま両方の可能性を候補として扱う。</p></div>'
+    }
+  },
+  {
+    q: 'Knossos と Elle の違いを最も正確に説明しているものはどれか？',
+    opts: [
+      'Knossos は単一の register や CAS のような単純なオブジェクトの線形化可能性判定に向き、Elle は複数キーのトランザクションの分離性異常をサイクル検出で判定する',
+      'Knossos は複数キーをまたぐトランザクションの分離レベル全般を判定でき、Elle は単一レジスタの線形化可能性だけに判定範囲を絞った後発のチェッカーである',
+      '両者は開発された時期が違うだけで、内部で使っているアルゴリズムと判定対象のデータモデルは実質的に同一のものであり呼び名を分けているにすぎない',
+      'Knossos はクラスタのソースコードを静的に解析してレース条件を検出し、Elle は実行時のログや履歴を一切使わずバイナリの差分だけを比較する',
+      'Elle はクラスタ内のネットワークパケットを直接解析して分断の発生そのものを検出するためのツールであり、一貫性や分離性の判定には関与しない仕組みである'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Knossos は単純なオブジェクトの線形化可能性判定に向き、Elle は list-append などの値を使って版の順序を逆算し、ww / wr / rw の依存グラフのサイクルから分離性異常を判定する、より一般的なトランザクション向けのチェッカー。',
+      '実際は逆である。Elle の方が複数キー・複数操作のトランザクションの分離性異常を広く判定でき、Knossos は単純なオブジェクトの線形化可能性に特化している。',
+      '両者は対象とするデータモデルも判定アルゴリズムも異なり、同じ判定をする同義の実装ではない。',
+      'どちらも観測された履行 (実行時の履歴) から判定するブラックボックスのチェッカーであり、ソースコードの静的解析は行わない。',
+      'Elle は観測された読み書きの履歴から依存関係のグラフを作り分離性異常を検出するチェッカーであり、ネットワークパケットの解析は行わない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Knossos は 1 つの値の順序だけを追い、Elle は複数の書き込みと読み取りの依存関係をグラフにしてサイクルを探します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="KnossosとElleの違いの図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="55" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">Knossos</text><text x="140" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">単一オブジェクトの</text><text x="140" y="92" font-size="12.5" text-anchor="middle" fill="#12211a">線形化可能性</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="55" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Elle</text><text x="420" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">依存グラフのサイクルで</text><text x="420" y="92" font-size="12.5" text-anchor="middle" fill="#12211a">分離性異常を検出</text></svg>'
+          + '<p class="cap">図: 対象とするデータモデルの広さが異なる 2 つのチェッカー。</p></div>'
+    }
+  },
+  {
+    q: 'ある履歴に対して Jepsen のチェッカーが「違反なし (valid)」と判定した場合、最も正確な結論はどれか？',
+    opts: [
+      'そのシステムが当該の一貫性モデルをどんな運用条件や未知の障害パターンのもとでも常にずっと満たし続けることが、この一度の判定によって数学的に証明されたと考えてよい',
+      '今後どんな種類の障害パターンや負荷の強さを与えても、同じチェッカーの判定結果が毎回まったく同じように再現されることが保証される',
+      'バグは一切存在しないと完全に確定したので、この時点で以後のテストや追加のコードレビューはすべて行う必要が無くなったと判断できる',
+      'チェッカーの実装自体に判定ロジックの誤りが潜んでいる可能性は、この valid という判定結果が出た時点で完全に排除されたと考えてよい',
+      'この特定の試行で観測された履歴の範囲内では一貫性モデルに反する証拠が見つからなかったというだけであり、より長い時間や別の障害パターンでは異なる履歴が生じ違反が見つかる可能性は残る'
+    ],
+    ans: 4,
+    exps: [
+      '証明ではない。Jepsen は 1 回あるいは数回の試行で観測された履歴を規則と照合しただけで、あらゆる状況での数学的な証明を与えるものではない。',
+      '障害の種類や発生順序、タイミングは試行ごとに変わり得るため、同じ結果が今後も保証されるとは言えない。',
+      '「見つからなかった」ことと「存在しない」ことは異なる。特に稀な順序に依存するバグは、この 1 回の試行では踏まれなかった可能性がある。',
+      'チェッカーの実装の正しさは、この判定とは別の問題であり、無関係な論点。',
+      '<b>これが正解。</b>Jepsen の判定は、その試行で観測された履歴の範囲内の話にとどまり、別の障害パターンやより長時間の試行では違反が見つかる可能性が残る。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「違反なし」は、その試行の範囲で証拠が見つからなかったという限定的な結果です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="validの限定性の図"><rect x="30" y="30" width="220" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#0f5132">この試行: 違反なし (valid)</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#b5401f">別の障害パターン: 未知</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">validは「この範囲では」という限定付きの結果</text></svg>'
+          + '<p class="cap">図: valid という判定は、試行した範囲内でのみ意味を持つ。</p></div>'
+    }
+  },
+  {
+    q: 'TLA+ の仕様に対して TLC モデル検査器が「不変条件の違反は見つからなかった」と報告した場合、最も正確な解釈はどれか？',
+    opts: [
+      '将来どれだけノードの数が増えても、あるいは扱う値の状態空間がどれだけ大きくなっても、その不変条件が数学的に常に成り立つことが、この一度の検査だけで永久に証明されたと考えてよい',
+      '指定した境界 (ノード数や値の集合など) の中で到達可能な状態をすべて網羅的に調べた結果、その範囲内では違反する実行が見つからなかったということであり、範囲を超えた規模やモデル化していない振る舞いについては何も保証しない',
+      'TLAPS のような証明系による帰納法を使った機械的な数学的証明と全く同じ強さの保証が、この一度のモデル検査の実行だけで得られたことになる',
+      '仕様に書かれた不変条件がこの検査で満たされた以上、その仕様に対応する実際の実装コードも同じく正しいことがこの時点ですでに保証されている',
+      'モデル検査の内部では状態の探索順序に乱数による探索を用いるため、同じ仕様と同じ境界に対して検査するたびに結果が変わる可能性が残っている'
+    ],
+    ans: 1,
+    exps: [
+      'TLA+ の任意の個数についての一般的な証明は、帰納法を使う TLAPS のような証明系の役割であり、TLC は指定した有界な範囲の中を網羅するだけ。',
+      '<b>これが正解。</b>TLC は指定したノード数や値の範囲という有界なモデルの中で到達可能な状態を総当たりし、その範囲内で違反が見つからなかったことを報告する。範囲外や仕様化していない振る舞いについては何も言っていない。',
+      'TLC (有界な網羅的モデル検査) と TLAPS (機械的な数学的証明) は異なる保証の強さを持つ別の仕組みであり、同一視できない。',
+      '仕様が正しくても、実装がその仕様を正確に反映しているとは限らない (spec-code ギャップ)。実装コードの正しさは別途確認が必要。',
+      'TLC は乱数ではなく、指定した状態空間を決定的かつ網羅的に探索する。同じ仕様と同じ境界であれば結果は毎回同じになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>TLC が調べるのは、指定した境界の中だけです。境界の外は未知のままです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="TLCの有界性の図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="60" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">指定した境界の中</text><text x="140" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">網羅的に総当たり</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#fff" stroke="#9aa" stroke-width="1.5" stroke-dasharray="5 5"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#4a5d54" font-weight="700">境界の外</text><text x="420" y="85" font-size="12.5" text-anchor="middle" fill="#4a5d54">何も保証しない</text></svg>'
+          + '<p class="cap">図: TLC の保証は指定した境界の中に限られる。</p></div>'
+    }
+  },
+  {
+    q: 'Amazon の DynamoDB の事例で、何か月もの設計レビュー・コードレビュー・実機テストを通過していたバグが TLC によって短時間に見つかった理由として最も適切なものはどれか？',
+    opts: [
+      'TLC はコンパイラの最適化パスのようにソースコードを直接静的解析する仕組みを持つため、人間が目で読んでレビューするより単純に処理速度が速かったから',
+      'そのバグは障害とその回復が 35 段階も積み重なった、極めて特定的な順序でのみ発生する稀な実行だったため、通常のテストやレビューがたまたまその順序を踏む確率は非常に低い一方、TLC は指定した境界の中でその順序を含む状態を網羅的に探索したから',
+      'レビューに参加したエンジニアの人数がもともと少なかったため、TLC がその不足分を補う多数の仮想的なレビューアーの役割をまとめて代行する形になったから',
+      'TLC は本番環境のネットワーク遅延やディスクの故障の挙動、さらには複数データセンター間の通信経路まで物理的に完全に再現するシミュレーション機能を内部に持ち、実環境に極めて近い条件のまま検査できたから',
+      'レビュー担当者がちょうどその開発期間に他の業務で多忙だったという偶然の事情が、論文の中でバグを見逃してしまった主な理由として明確に説明されている'
+    ],
+    ans: 1,
+    exps: [
+      'TLC はソースコードを読まない。検査するのは TLA+ で書かれた仕様 (抽象モデル) であり、静的解析によるコード読解の速さが理由ではない。',
+      '<b>これが正解。</b>そのバグの最短の反例は 35 段階にも及ぶ特定の順序に依存しており、通常のテストや人間のレビューがその順序に偶然到達する確率は天文学的に低い。TLC は境界の中でその順序を含む状態空間を網羅的に探索したため発見できた。',
+      'レビュー人数の多寡は論文の説明の中心ではなく、的外れな理由付け。',
+      'TLC はネットワーク遅延などの物理的な挙動をシミュレーションする機能を持たない。検査するのは抽象的な状態機械の仕様であり、実環境の再現ではない。',
+      'そのような偶然の事情は論文の説明として記載されておらず、根拠のない作り話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>35 段階という長い順序は、ランダムなテストではまず踏まれませんが、網羅的な探索なら必ず含まれます。</p>'
+          + '<div class="fig"><svg viewBox="-19 0 579 140" aria-label="35段階の反例の図"><rect x="30" y="20" width="500" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="40" font-size="13" text-anchor="middle" fill="#0f5132">35 段階の障害とリカバリの特定の組み合わせ</text><text x="140" y="90" font-size="13" text-anchor="middle" fill="#4a5d54">通常のテスト: 偶然その順序を踏む確率は極めて低い</text><text x="420" y="90" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">TLC: 境界内なら必ず踏む</text></svg>'
+          + '<p class="cap">図: 稀な長い順序ほど、ランダムなテストでは踏まれず、網羅的探索では確実に踏まれる。</p></div>'
+    }
+  },
+  {
+    q: 'FoundationDB の決定論的シミュレーションが並行性バグのデバッグを特に容易にする最大の理由は何か？',
+    opts: [
+      '単一の乱数シード値が、障害注入のタイミングだけでなくコルーチンのスケジューリング順序まで支配するため、同じシードで実行すれば同じバグを毎回正確に再現できる',
+      'シミュレーション環境では内部的に常に 1 つの操作だけを順番に実行する設計になっているため、そもそも並行性に起因するバグ自体が発生しない',
+      '本番環境と同じ実ネットワークと実ディスクをそのまま使い、仮想時間ではなく壁時計の実時間で検証するため、現実との食い違いが起きず正確性が高い',
+      'バグが見つかった場合、シミュレータが実行履歴を解析して自動的にソースコードの修正パッチを生成し適用する機能を備えている',
+      '1 回のシミュレーションあたりの実行時間が、障害の規模や複雑さに関わらず常に 1 秒未満に固定されるよう設計されている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>1 つのシード値がフォールト注入と、単一スレッド上でのコルーチンの進行順序の両方を決定するため、同じシードで走らせれば同じ並行実行とバグが毎回正確に再現される。',
+      '並行に見えるスケジュールそのものは再現可能な形で走らせており、並行性バグが起きなくなるわけではない。バグを再現できなければテストの意味がない。',
+      '実際には本番用の実ネットワーク・実ディスクではなく、差し替え可能な模擬のネットワーク・ディスク・時計の上で動かす。実時間ではなく仮想時間を進める。',
+      'そのような自動修正パッチ生成の機能は無く、見つかったバグの原因調査と修正は依然として人間が行う。',
+      '1 回のシミュレーションの実行時間に固定の上限は無く、仮想時間の進み方もシナリオによって変わる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 つのシードが障害とスケジューリング順序の両方を決めるため、再実行すれば同じ実行が再現します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="シードによる再現性の図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">シード値 1 つ</text><text x="140" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">障害のタイミング</text><text x="140" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">コルーチンの進行順序</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="420" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">同じシード</text><text x="420" y="88" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">→ 同じ実行を毎回再現</text></svg>'
+          + '<p class="cap">図: 1 つのシードが全ての非決定性を支配するため、再現性が得られる。</p></div>'
+    }
+  },
+  {
+    q: 'すでに通常の OS スレッドと TCP ソケットを直接使って書かれた既存の大規模システムに、FoundationDB 流の決定論的シミュレーションテストを後から適用しようとする場合、最大の障害は何か？',
+    opts: [
+      '決定論的シミュレーションという検証技術そのものが、まだ新しく専用に設計された限られたプログラミング言語でなければ実装できない性質のものだから',
+      '既存システムが外部のクライアントや内部の他のノードとやり取りするすべての通信プロトコルを、決定論的シミュレーションの導入に合わせて暗号化方式から一から設計し直さなければならないから',
+      '決定論的シミュレーションはソースコードがすべて公開されたオープンソースのシステムに対してしか原理的に適用できない種類の検証技術だから',
+      'I/O (ネットワーク・ディスク・時刻) への全アクセスを差し替え可能な抽象の向こう側に押し込み、実行順序をプログラム自身が制御できる構造になっていなければ、OS のスケジューラやソケット実装が持つ非決定性を外から取り除けず、再現性を保証できないから',
+      '決定論的シミュレーションという検証手法は、可用性よりも一貫性を優先する CP 系の設計方針を採るシステムにしか適用できない技術だから'
+    ],
+    ans: 3,
+    exps: [
+      '決定論的シミュレーションは特定のプログラミング言語に縛られる技術ではなく、C++ 以外の言語でも同じ発想は適用できる。',
+      '通信の暗号化と、実行順序を再現可能にする仕組みとは無関係の話題。',
+      'オープンソースかどうかは決定論的シミュレーションの適用条件とは無関係。',
+      '<b>これが正解。</b>FoundationDB の Flow のような単一スレッド協調スケジューリングの構造を持たない限り、OS のスケジューラやカーネルのソケット実装が持つ非決定性を外から取り除けず、再現性を保証できない。既存システムをこの構造に書き直すのは大改造になる。',
+      '決定論的シミュレーションは CAP の C / A の選択とは別の軸の技術であり、可用性優先のシステムにも原理上適用できる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>決定論的シミュレーションには、I/O を差し替え可能な抽象の向こう側に押し込む構造が前提として必要です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="決定論的シミュレーションの前提構造の図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Flow のような構造</text><text x="140" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">I/O を抽象の向こうへ</text><text x="140" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">単一スレッド協調スケジューリング</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">OS スレッド + 直接ソケット</text><text x="420" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">OS が実行順序を決める</text><text x="420" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">外から再現性を保証できない</text></svg>'
+          + '<p class="cap">図: 決定論的シミュレーションには、I/O と実行順序を自前で制御できる構造が前提になる。</p></div>'
+    }
+  },
+  {
+    q: 'Elle が観測した履歴から構築した依存グラフに、書き込み同士の順序 (ww) と、読み取りが書き込みより前に起きたことを示す逆依存 (rw) を組み合わせたサイクルを見つけたとする。これは何を意味するか？',
+    opts: [
+      'そのサイクルは、試験の実行中にネットワーク分断そのものが実際に発生していたことを、他の計測手段に依らず直接示す証拠である',
+      'そのサイクルの構成に応じて、Adya の異常階層における G2 のような非直列化可能 (non-serializable) な異常が実際に発生したことを示す、観測だけから導かれる証拠である',
+      'そのサイクルは Elle のチェッカー自身の実装に何らかのバグがあることを示しているだけで、検証対象の実システム側には何の問題も無いと即座に判断してよい',
+      'そのサイクルは、関与したすべてのトランザクションの書き込みが一つも失敗せず、すべて正常に成功したことを保証する証拠である',
+      'そのサイクルは、バグの原因が検証対象のサーバ側ではなくクライアント側のコードにあることを、他の調査なしに一意に特定できる証拠である'
+    ],
+    ans: 1,
+    exps: [
+      'Elle は分離性の異常を検出するチェッカーであり、サイクルの存在はネットワーク分断の有無を直接示すものではない。',
+      '<b>これが正解。</b>ww と rw を組み合わせたサイクルは、Adya の異常階層において非直列化可能な異常 (G2 など) に対応する、観測された履歴だけから導かれる具体的な証拠になる。',
+      'サイクルが見つかった場合、まず疑うべきはシステム側の分離性違反であり、チェッカーのバグだと即座に判断するのは早計。',
+      '依存グラフのサイクルは分離性の異常を示すものであり、書き込みの成否とは別の論点。',
+      'サイクルはサーバ側の分離性違反の可能性もあり、原因がクライアントのコードにあるとは一意に特定できない。別途調査が必要。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>依存グラフのサイクルは、順序に矛盾があることを示します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="依存グラフのサイクルの図"><circle cx="160" cy="75" r="40" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="160" y="80" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">T1</text><circle cx="400" cy="75" r="40" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="400" y="80" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">T2</text><line x1="200" y1="65" x2="360" y2="65" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">ww</text><line x1="360" y1="90" x2="200" y2="90" stroke="#c0492f" stroke-width="2"/><text x="280" y="112" font-size="12.5" text-anchor="middle" fill="#b5401f">rw (逆依存)</text></svg>'
+          + '<p class="cap">図: ww と rw の両方向の依存がサイクルを作ると、非直列化可能な異常の証拠になる。</p></div>'
+    }
+  },
+  {
+    q: '自社で一から新しい合意アルゴリズムを設計するチームと、ソースコードを持たない外部ベンダーのデータベースをブラックボックスとして検証したいチーム、それぞれに最も適した手法の組み合わせはどれか？',
+    opts: [
+      'どちらのチームに対しても、FoundationDB 流の決定論的シミュレーションをシステム全体で一から構築して適用するのが最適な組み合わせである',
+      'どちらのチームに対しても Jepsen による実機での障害注入検証だけで十分であり、TLA+ による設計段階の論理検査はどちらにも不要である',
+      '新規設計チームには実機を壊して確認する Jepsen が最適で、外部ブラックボックスチームには設計段階の論理を検査する TLA+ が最適という、ちょうど逆の組み合わせが正しい',
+      'どちらのチームに対しても TLA+ による仕様レベルの検査だけで十分であり、実機を使った動作確認はどちらのチームにも不要である',
+      '新規設計チームはコードを書く前に TLA+ で設計の論理を網羅的に検査でき、外部ブラックボックスチームはソースコードに触れられないため、実際に動かして壊し履歴を判定する Jepsen のような手法が適している'
+    ],
+    ans: 4,
+    exps: [
+      '決定論的シミュレーションは、システム全体を I/O の抽象を通す構造で一から書く必要があり、外部ベンダーのソースコードを持たないチームには構築できない。',
+      'TLA+ はコードを書く前の設計段階で論理の誤りを安く見つけられる手段であり、不要と断じるのは誤り。',
+      '新規設計チームと外部ブラックボックスチームの適性が逆になっている。ソースコードが無い対象には Jepsen のようなブラックボックス手法が向く。',
+      'TLA+ が検証するのは抽象的な仕様であり、実装コードそのものの正しさを保証しない (spec-code ギャップ)。実機での確認は依然として必要。',
+      '<b>これが正解。</b>新規設計チームはコードを書く前に TLA+ で設計の論理を網羅的に検査できる。外部ブラックボックスチームはソースコードに触れられないため、実際に動かして壊し観測された履歴を規則と照合する Jepsen のような手法が適している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ソースコードを持っているかどうかで、適した手法が分かれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="手法選択の図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">新規設計 (コード以前)</text><text x="140" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">TLA+ で設計を網羅検査</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">外部ブラックボックス</text><text x="420" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">Jepsen で実機を壊し判定</text></svg>'
+          + '<p class="cap">図: ソースコードの有無で適した検証手法が変わる。</p></div>'
+    }
+  },
+  {
+    q: 'Raft の提案論文が合意アルゴリズムの正しさをどのように裏付けたかについて、最も正確な記述はどれか？',
+    opts: [
+      'Jepsen のようなブラックボックス手法を用いて実装済みの Raft クラスタに実際に障害注入テストを行い、その観測結果だけを正しさの根拠とした',
+      'TLC モデル検査器による有界な範囲での網羅的探索だけで Log Completeness Property も State Machine Safety もすべて機械的に証明し、TLAPS のような証明系はどの性質に対しても一切使用していない',
+      'FoundationDB の決定論的シミュレーションと同様に、実際に動くコードそのものを対象にしたシミュレーションを大規模に実行して正しさを確認した',
+      '合意メカニズムの正しさについて形式的な検証は一切行わず、Paxos との比較実験で参加者にとっての理解しやすさのみを評価して結論を出した',
+      'TLA+ で合意メカニズムの仕様を記述し、Log Completeness Property については TLA の証明系 (TLAPS) による機械的証明を行った一方、State Machine Safety については仕様のみに基づく非形式的な証明にとどめた'
+    ],
+    ans: 4,
+    exps: [
+      '論文の正しさの根拠は TLA+ による仕様と証明であり、Jepsen を用いた障害注入テストの記述は無い。',
+      'Raft 論文はモデル検査 (TLC) ではなく、TLA の証明系 (TLAPS) による Log Completeness Property の機械的証明を行っている。使用していないとするのは誤り。',
+      '決定論的シミュレーションのような手法への言及は論文に無く、無根拠な数字や手法の転用。',
+      '理解しやすさの比較実験は論文内の別の章の話題であり、正しさの形式的な検証 (TLA+ の仕様と証明) も別途行われている。両者を取り違えてはいけない。',
+      '<b>これが正解。</b>Raft 論文は TLA+ で合意メカニズムの仕様を記述し、Log Completeness Property は TLA の証明系 (TLAPS) で機械的に証明した一方、State Machine Safety については仕様のみに基づく非形式的な証明にとどめている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Raft 論文は、性質によって証明の厳密さを使い分けています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Raft論文の証明の使い分けの図"><rect x="30" y="30" width="220" height="80" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Log Completeness</text><text x="140" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">TLAPS による機械的証明</text><rect x="310" y="30" width="220" height="80" rx="10" fill="#fff" stroke="#9aa" stroke-width="1.5"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">State Machine Safety</text><text x="420" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">仕様のみの非形式的証明</text></svg>'
+          + '<p class="cap">図: Raft 論文は性質ごとに証明の厳密さを使い分けている。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

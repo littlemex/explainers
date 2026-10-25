@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>メタ安定障害・グレー障害・テールレイテンシ ― 平均が隠す本当の障害</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 36 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>メタ安定障害・グレー障害・テールレイテンシ ― 平均が隠す本当の障害</h1>
+  <p>平均は語らないが、裾 (テール) と自己持続するフィードバックループこそが大規模システムを壊す</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 17 回 <a href="./distsys-failure-detection.html">障害検知とゴシップ</a>、第 24 回 <a href="./distsys-resilience.html">回復性パターン</a>、第 10 回 <a href="./distsys-retries-idempotency.html">タイムアウト・リトライ・冪等性</a></p>
+  <p class="intro">「平均レイテンシは正常だったのに、ユーザーの大半は遅さを感じていた」「負荷を元の水準まで下げたのに、システムは戻らなかった」― この回で扱う 3 つの現象は、どれも<b>平均という要約が本当の障害を覆い隠す</b>という共通点を持ちます。テールレイテンシ (tail latency, 応答時間分布の遅い裾) は大規模な fan-out (1 つの要求が多数のサーバーに散らばること) のもとで平均を支配するようになり、グレー障害 (gray failure) はコンポーネント自身の健康観測とシステム全体が受ける影響の間にギャップがあるために見逃され、メタ安定障害 (metastable failure) は原因となった負荷を取り除いてもシステムが自分で悪い状態を維持し続けます。結論を先に言うと、この 3 つはいずれも「平均ではなく分布の形、特に裾と自己強化するループを見る」ことでしか捉えられません。</p>
+
+  <!-- ===== 解説パート 1: 待ち行列理論の直感 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 待ち行列理論の直感</h2>
+    <p>この回で見る 3 つの現象 (テールレイテンシ・グレー障害・メタ安定障害) はどれも、<b>平均という要約が、実際に起きている危険な分布の形を隠してしまう</b>という同じ盲点から生まれます。その土台になる直感が、待ち行列理論の最も基本的な結果です。</p>
+    <p>サーバーを 1 本の窓口、リクエストを窓口に並ぶ行列だと考えます (M/M/1 キュー)。単位時間あたりに来るリクエストの割合を到着率、処理できる割合を処理率とし、その比を<b>利用率 $\rho$</b> (ロー。処理能力のうち使われている割合) とします。待ち行列理論の基本的な結果は、平均待ち時間が $\rho$ に比例して<b>線形に</b>増えるのではなく、おおよそ $\rho / (1 - \rho)$ という形で増えるということです。この式は $\rho$ が 0.5 から 0.7 に増えてもさほど驚かない値のままですが、$\rho$ が 0.9 から 0.95、0.95 から 0.99 と 1 に近づくにつれて、ごく小さな利用率の増加が待ち時間を爆発的に増やします。</p>
+    <p>この直感がこの回全体の土台です。CPU 使用率やキューの利用率の<b>平均値</b>を見ているだけでは「80% くらいで安定している」としか見えませんが、その 80% という値がどれだけ 1 に近い危険域にいるかは、平均という 1 つの数字からは分かりません。テールレイテンシは、この爆発が分布の遅い裾にまず現れる現象であり、メタ安定障害は、この爆発が始まった後にシステム自身がその爆発を維持し続けてしまう現象です。</p>
+    <div class="fig">
+      <svg viewBox="-21 0 621 260" role="img" aria-label="M/M/1キューの利用率と待ち時間の関係を示す図">
+        <line x1="60" y1="210" x2="560" y2="210" stroke="#9aa" stroke-width="2"/>
+        <line x1="60" y1="210" x2="60" y2="20" stroke="#9aa" stroke-width="2"/>
+        <text x="300" y="240" font-size="13.5" text-anchor="middle" fill="#12211a">利用率 ρ (処理能力のうち使われている割合)</text>
+        <text x="25" y="120" font-size="13.5" text-anchor="middle" fill="#12211a" transform="rotate(-90 25 120)">平均待ち時間</text>
+        <text x="150" y="225" font-size="12.5" text-anchor="middle" fill="#4a5d54">0.5</text>
+        <text x="330" y="225" font-size="12.5" text-anchor="middle" fill="#4a5d54">0.9</text>
+        <text x="480" y="225" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">0.99</text>
+        <line x1="330" y1="210" x2="330" y2="20" stroke="#d9e5df" stroke-width="1" stroke-dasharray="3 3"/>
+        <path d="M60,205 C200,200 330,180 420,110 480,60 510,30 530,22" stroke="#198754" stroke-width="3" fill="none"/>
+        <text x="420" y="75" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ρ が 1 に近づくほど</text>
+        <text x="420" y="92" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">待ち時間が爆発的に増える</text>
+        <text x="165" y="195" font-size="12" text-anchor="middle" fill="#4a5d54">利用率が低いうちは緩やかに増える</text>
+      </svg>
+      <p class="cap">図: 平均待ち時間はおよそ ρ/(1-ρ) の形で増え、ρ が 1 に近づくほど小さな増加が爆発的な遅延になる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: The Tail at Scale ===== -->
+  <section>
+    <h2>2. ファンアウトが裾を支配する ― The Tail at Scale</h2>
+    <p>Dean と Barroso の "The Tail at Scale" (CACM 2013) は、大規模な fan-out (1 つの要求を多数のサーバーへ同時に送り、全員の応答を集める構成) において、個々のサーバーの稀な遅さが積み重なって、全体としては珍しくない遅さになることを指摘しました。論文の例では、1 台あたり 1% の確率で 1 秒を超える応答が起きるとき、100 台に並列でファンアウトした要求のうち、少なくとも 1 台が遅くなる確率は $1 - 0.99^{100} \approx 63\%$ になります。1 台あたりでは 1 万回に 1 回 (0.01%) しか起きない遅延でも、2,000 台にファンアウトすれば、ほぼ 5 回に 1 回の要求が 1 秒を超える遅延に遭遇します。</p>
+    <p>この算術が意味するのは、<b>個々のコンポーネントの平均レイテンシや稀な遅延の確率がどれだけ小さくても、ファンアウトの幅が広がるほど、全体としての裾は太くなり、やがて典型的な体験になる</b>ということです。1 台の p99 (99 パーセンタイル、全体の 99% がこれより速いという境界値) が優秀でも、1 つの要求が内部で 100 台や 2,000 台を経由するなら、ユーザーが実際に体感するのはその全体の裾です。</p>
+    <p>対策として論文が挙げる代表例が、<b>ヘッジドリクエスト (hedged requests)</b> と<b>タイドリクエスト (tied requests)</b> です。ヘッジドリクエストは、最初の 1 台への要求から一定時間 (論文のベンチマークでは 10ms) 経っても応答が無ければ、別のレプリカへ 2 本目の要求を送り、先に返ってきた応答を使う方式です。論文が示した実測では、1,000 個のキーを 100 台から読み出すベンチマークで、10ms 遅延後のヘッジングにより 99.9 パーセンタイルのレイテンシが 1,800ms から 74ms に下がり、追加の要求はわずか 2% で済みました。タイドリクエストは、2 台のレプリカそれぞれに「もう一方の存在」を伝えた要求を同時に送り、片方が実行を始めた瞬間に、もう一方へキャンセルを送る方式です。この手法が効くのは、<b>遅さの原因が複数のレプリカで同時に起きることは比較的少ない</b>という前提が成り立つ場合に限られます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="ファンアウトで裾が太くなる図">
+        <text x="310" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">1 台あたり 1% が 1 秒超えのとき、ファンアウト幅ごとの「少なくとも 1 台遅い」確率</text>
+        <rect x="40" y="40" width="130" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="105" y="62" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">1 台</text>
+        <text x="105" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">遅延確率 1%</text>
+        <rect x="245" y="40" width="130" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="310" y="62" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">10 台</text>
+        <text x="310" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">約 10% が遅延</text>
+        <rect x="450" y="40" width="130" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="515" y="62" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">100 台</text>
+        <text x="515" y="80" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">約 63% が遅延</text>
+        <text x="310" y="130" font-size="13.5" text-anchor="middle" fill="#12211a">個々のサーバーは稀にしか遅くならなくても、</text>
+        <text x="310" y="150" font-size="13.5" text-anchor="middle" fill="#12211a">ファンアウト幅が広がるほど「誰か 1 台が遅い」確率は急激に上がる</text>
+        <text x="310" y="190" font-size="13" text-anchor="middle" fill="#4a5d54">ヘッジドリクエスト/タイドリクエストは、この裾を切り落とす対策</text>
+      </svg>
+      <p class="cap">図: 個々のサーバーの稀な遅延も、ファンアウト幅が広がると「全体が遅い」確率を支配するようになる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: グレー障害 ===== -->
+  <section>
+    <h2>3. 見ている場所によって答えが変わる ― グレー障害</h2>
+    <p>Huang らの "Gray Failure: The Achilles' Heel of Cloud-Scale Systems" (HotOS 2017) は、Microsoft Azure の実際のインシデントを分析し、障害検知の仕組みが見逃している故障のパターンに<b>グレー障害 (gray failure)</b> という名前を与えました。中心となる概念は<b>差分観測可能性 (differential observability)</b> です。システムには、障害を監視する<b>観測者 (observer, 例えば第 17 回で見たハートビート型の障害検知器)</b> と、そのシステムを実際に使う<b>アプリ (app, 利用者やクライアント)</b> がいます。グレー障害とは、少なくとも 1 つのアプリが「システムは不健康だ」と観測しているのに、観測者は「システムは健康だ」と観測している状態です。観測者はこの不一致に気づかないため、本来なら動くはずの復旧の仕組み (reactor) が一切発動しません。</p>
+    <p>論文が挙げる具体例の 1 つがこうです。仮想マシン (VM) の内部では、リクエストを処理するモジュールが止まっているのに、ハートビートを送るモジュールだけは動き続けています。VM の外にいる障害検知器はハートビートだけを見ているため「健康だ」と判定しますが、VM に対して実際にサービスを要求しているクライアントは「失敗した」と観測します。ユーザーは苦しんでいるのに、復旧の仕組みは一度も起動しません。</p>
+    <p>もう 1 つの例はより深刻です。あるストレージサービスで、特定のデータサーバーが深刻な容量不足に陥っていましたが、容量を報告する仕組みのバグによって、管理役のストレージマネージャ (観測者でもあり復旧の reactor でもある) はこの問題を検知できませんでした。マネージャはそのデータサーバーへ書き込みを送り続け、サーバーはクラッシュして再起動します。しかし再起動は容量不足という根本原因を直さないため、マネージャは再びそのサーバーへ書き込みを送り、再びクラッシュします。この「クラッシュ→再起動→またクラッシュ」が繰り返された末、障害検知器はようやく「このサーバーは繰り返し再起動している」と検知してサービスから外しますが、その結果残りのサーバー群の容量がさらに圧迫され、別のサーバーも同じ経過をたどり始め、最終的には大規模な連鎖障害に育ちました。この<b>「復旧のつもりの操作が、根本原因を放置したまま別の健全な部分を壊していく」</b>という構図は、次の節で見るメタ安定障害そのものの縮図です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="差分観測可能性(グレー障害)の図">
+        <rect x="30" y="30" width="230" height="60" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="145" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">観測者(ハートビート検知器)</text>
+        <text x="145" y="75" font-size="12.5" text-anchor="middle" fill="#0f5132">「システムは健康」と観測</text>
+        <rect x="340" y="30" width="230" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="455" y="55" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">アプリ(実際のクライアント)</text>
+        <text x="455" y="75" font-size="12.5" text-anchor="middle" fill="#b5401f">「システムは不健康」と観測</text>
+        <line x1="260" y1="60" x2="340" y2="60" stroke="#9aa" stroke-width="2" stroke-dasharray="5 5"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#12211a">観測の不一致</text>
+        <text x="300" y="130" font-size="13.5" text-anchor="middle" fill="#12211a">観測者がこの不一致に気づかない限り、復旧の仕組み(reactor)は発動しない</text>
+        <text x="300" y="155" font-size="13" text-anchor="middle" fill="#4a5d54">苦しんでいるのはアプリ側だけで、システムは「健康」のまま放置される</text>
+      </svg>
+      <p class="cap">図: 観測者とアプリの観測結果が一致しない差分観測可能性が、グレー障害の本質。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: メタ安定障害 ===== -->
+  <section>
+    <h2>4. トリガーを取り除いても戻らない ― メタ安定障害</h2>
+    <p>Bronson らの "Metastable Failures in Distributed Systems" (HotOS 2021) は、第 24 回で見た連鎖障害の中でも特に厄介な一種に<b>メタ安定障害 (metastable failure)</b> という枠組みを与えました。論文はシステムの状態を 3 つに分けます。<b>安定状態 (stable)</b> では負荷が低く、トリガー (一時的な負荷の急増や障害) が起きても自然に回復します。負荷がある閾値を超えると<b>脆弱状態 (vulnerable)</b> に入ります。脆弱状態自体は健康で、何年も問題なく動き続けることもありますが、トリガーが来ると<b>メタ安定状態 (metastable)</b> という、有用な処理量 (goodput) が実質ゼロの悪い状態に落ち込みます。ここで核心となるのが<b>持続効果 (sustaining effect)</b> です。トリガーそのものが去っても、システムが自分自身の反応 (典型的には作業の増幅) によってその悪い状態を維持し続けるため、単純な過負荷とは違って<b>負荷を元の水準に戻すだけでは回復しません</b>。回復には、脆弱状態の閾値よりもさらに低い水準まで負荷を落とすという強い介入が必要です。</p>
+    <p>論文が示す例はこうです。あるステートレスな Web アプリケーションがデータベースに問い合わせるとき、DB は 300 QPS (1 秒あたりの問い合わせ数) 未満では 100ms 未満で応答しますが、それを超えると応答時間が 1 桁以上悪化します。アプリケーションは応答が 1 秒以内に返らないとリトライを 1 回行います。負荷が 150 QPS 未満の安定状態ではトリガーが来ても DB は作業増幅を吸収できますが、150 QPS を超えると脆弱状態に入ります。ある瞬間、ネットワーク機器が 10 秒間不通になり、復旧した瞬間にその間失われていたリクエストとリトライが一気に再送されます (トリガー)。この急増で DB の応答が遅くなり、応答が遅いのでクライアントは次々にリトライし、実質的な負荷は 280 QPS から 560 QPS まで跳ね上がります。この状態では全ての問い合わせがタイムアウトし、goodput はゼロになります。論文によれば、この状態から回復するには、負荷を 150 QPS 未満まで下げるか、リトライの量を 20 QPS 未満に制限するという強い介入が必要で、トリガーだった 10 秒のネットワーク断自体が直ったことは、回復にまったく関係しません。</p>
+    <div class="fig">
+      <svg viewBox="-9 0 629 260" role="img" aria-label="メタ安定障害の3状態とヒステリシスの図">
+        <line x1="60" y1="210" x2="580" y2="210" stroke="#9aa" stroke-width="2"/>
+        <line x1="60" y1="210" x2="60" y2="20" stroke="#9aa" stroke-width="2"/>
+        <text x="320" y="240" font-size="13.5" text-anchor="middle" fill="#12211a">負荷 (QPS)</text>
+        <text x="25" y="110" font-size="13.5" text-anchor="middle" fill="#12211a" transform="rotate(-90 25 110)">goodput</text>
+        <rect x="60" y="170" width="150" height="20" fill="#e7f6ee"/>
+        <text x="135" y="165" font-size="12" text-anchor="middle" fill="#0f5132">安定 (&lt;150 QPS)</text>
+        <rect x="210" y="170" width="140" height="20" fill="#fff3d6"/>
+        <text x="280" y="165" font-size="12" text-anchor="middle" fill="#8a5a00">脆弱 (150-280 QPS)</text>
+        <path d="M60,195 C150,185 210,160 280,100" stroke="#198754" stroke-width="3" fill="none"/>
+        <circle cx="280" cy="100" r="5" fill="#b5401f"/>
+        <text x="300" y="90" font-size="12.5" fill="#b5401f" font-weight="700">トリガー(280 QPS)</text>
+        <line x1="280" y1="105" x2="420" y2="190" stroke="#c0492f" stroke-width="3" stroke-dasharray="5 4"/>
+        <text x="460" y="200" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">metastable: goodput ≈ 0</text>
+        <line x1="420" y1="190" x2="130" y2="190" stroke="#2f5f8a" stroke-width="2" stroke-dasharray="2 3"/>
+        <text x="200" y="208" font-size="12" text-anchor="middle" fill="#1f4a68">回復には 150 QPS 未満まで強く下げる必要</text>
+      </svg>
+      <p class="cap">図: 脆弱状態でトリガーが来るとメタ安定状態に落ち込み、元の負荷に戻すだけでは回復しない。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 実システムでの教訓と対策 ===== -->
+  <section>
+    <h2>5. 3 つの現象を見分け、対策を結びつける</h2>
+    <p>この回で見た 3 つの現象は独立ではありません。グレー障害の節で見たストレージサーバーの例 (容量不足 → クラッシュ → 再起動 → 再びクラッシュ) は、まさにメタ安定障害の持続効果そのものであり、ファンアウトが広いシステムほど The Tail at Scale の算術によってグレー障害の裾が全体を支配しやすくなります。3 つを見分ける実務上の問いは次の通りです。<b>「平均は正常に見えるが、分布の形は健全か」</b> (テールレイテンシ)、<b>「観測者とアプリの見ている健康状態は一致しているか」</b> (グレー障害)、<b>「負荷を元の水準に戻せば本当に回復するか、それとも強い介入が要るか」</b> (メタ安定障害) です。</p>
+    <p>対策は第 24 回で見た回復性パターンと直接結びつきます。<b>ヘッジドリクエスト</b> と<b>タイドリクエスト</b> はテールレイテンシの裾を切り落とします。<b>リトライ予算</b> と<b>サーキットブレーカー</b> は、メタ安定障害の核心である持続効果 (作業増幅) そのものを弱める対策です。<b>キューに基づくロードシェディング</b> は、待ち行列の利用率が危険域に入ったことを (平均ではなく) キューの深さという形で検知し、閾値を超えたら積極的に仕事を減らすことで、脆弱状態に長く留まり続けることを防ぎます。グレー障害に対しては、観測者の監視項目を増やし、アプリ側の end-to-end な観測 (実際のリクエストの成否) と、観測者の内部的な観測 (ハートビートなど) のギャップそのものを監視対象にすることが、論文の提言する方向性です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.sigops.org/s/conferences/hotos/2021/papers/hotos21-s11-bronson.pdf" target="_blank" rel="noopener">Bronson, Aghayev, Charapko, Zhu, "Metastable Failures in Distributed Systems" (HotOS 2021)</a> ― 安定 / 脆弱 / メタ安定の 3 状態、持続効果 (sustaining effect)、150 QPS/280 QPS/560 QPS の DB 例を第 4 節に反映した一次情報。</li>
+      <li><a href="https://web.eecs.umich.edu/~ryanph/paper/grayfailure-hotos17.pdf" target="_blank" rel="noopener">Huang, Guo, Zhou, Lorch, Dang, Chintalapati, Yao, "Gray Failure: The Achilles' Heel of Cloud-Scale Systems" (HotOS 2017)</a> ― 差分観測可能性の定義、ハートビートの例、ストレージサーバーの容量不足からクラッシュ連鎖に至る例を第 3 節に反映した一次情報。</li>
+      <li><a href="https://www.barroso.org/publications/TheTailAtScale.pdf" target="_blank" rel="noopener">Dean, Barroso, "The Tail at Scale" (CACM 2013)</a> ― ファンアウトでの裾の拡大 (100 台で約 63%)、ヘッジドリクエスト/タイドリクエストの実測値 (10ms ヘッジで 99.9 パーセンタイルが 1,800ms→74ms) を第 2 節に反映した一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-global-time.html">← 第 35 回 グローバル時刻と外部一貫性</a><a href="./distsys-index.html">目次</a><a href="./distsys-verification.html">第 37 回 正しさを確かめる →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'M/M/1 キューにおいて、利用率 $\\rho$ が 0.5 から 0.7 に上がった場合と、0.95 から 0.99 に上がった場合を比べると、平均待ち時間の増え方はどう異なるか？',
+    opts: [
+      '0.95→0.99 の増加の方が、$\\rho/(1-\\rho)$ の形から見て、同じ 0.04 の増加でもはるかに大きな待ち時間の増加を引き起こす',
+      'どちらも利用率の増加量(0.2 と 0.04)が違うだけであり、待ち時間の増加量はどの区間でも常に利用率の増加量に単純に比例して決まる',
+      '0.5→0.7 の方が、利用率の絶対値が低いという理由だけで、必ず待ち時間の増加が大きくなる',
+      '利用率がどの値からどの値へ変化しても、M/M/1 キューの平均待ち時間はまったく変化しない',
+      '待ち時間の増え方は利用率ではなく、サーバーの物理的な台数だけで決まり、利用率の値は無関係である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>平均待ち時間はおよそ $\\rho/(1-\\rho)$ の形で増えるため、$\\rho=0.95$ から $0.99$ への変化は分母 $(1-\\rho)$ が $0.05$ から $0.01$ まで 5 分の 1 に縮み、同じ幅の増加であった $0.5$→$0.7$ よりもはるかに急激に待ち時間を増やす。',
+      '$\\rho/(1-\\rho)$ という式が示すとおり、待ち時間の増え方は利用率に対して単純な比例関係ではなく、1 に近づくほど非線形に加速する。',
+      '利用率の絶対値が低いことと増加量の大きさは別の話であり、$0.5$→$0.7$ の方が常に大きいという一般化は式の形と矛盾する。',
+      'M/M/1 キューの基本的な結果は、利用率が上がれば平均待ち時間も増えるというものであり、「まったく変化しない」という説明は誤り。',
+      '利用率 $\\rho$ 自体が到着率と処理率(サーバー台数を含む処理能力)の比で定義されるため、台数だけで決まるという説明は利用率という概念を無視している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、同じ幅の利用率の増加でも、1 に近いところでは待ち時間の増え方がまったく違います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="利用率の同じ増加幅での待ち時間の違いの図"><line x1="40" y1="130" x2="520" y2="130" stroke="#9aa" stroke-width="2"/><rect x="60" y="91" width="100" height="34" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="110" y="106" font-size="11" text-anchor="middle" fill="#0f5132">0.5→0.7:</text><text x="110" y="120" font-size="11" text-anchor="middle" fill="#0f5132">小さく増加</text><rect x="320" y="40" width="160" height="25" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="400" y="57" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">0.95→0.99: 爆発的に増加</text><text x="280" y="150" font-size="13" text-anchor="middle" fill="#12211a">同じ0.04の増加でも、1に近いほど影響が非線形に拡大する</text></svg>'
+          + '<p class="cap">図: 利用率が1に近いほど、同じ増加幅でも待ち時間への影響が非線形に拡大する。</p></div>'
+    }
+  },
+  {
+    q: 'あるサービスのダッシュボードは CPU 使用率の平均値を表示しており、過去 1 か月間ずっと 80% 前後で安定して見えている。この平均値だけを見て「安定している」と判断することの危険性として最も適切な指摘はどれか？',
+    opts: [
+      'CPU 使用率の平均値は常に不正確な値であり、計測の仕組み自体に実装上のバグがある可能性が高い',
+      '平均 80% が利用率 $\\rho$ に近い値なら、その一点が 1 に近い危険域かどうかは平均だけでは分からず、わずかな負荷増で待ち時間が爆発する余地がある',
+      '平均値は常にピーク値よりも高い値を示す指標であるため、実際の危険度を過大に見積もってしまう傾向があり、この点を補正しないまま使うと安全側に偏った判断につながる',
+      'CPU 使用率が 80% を超えることは物理的にあり得ないため、この観測値自体が誤りである',
+      '利用率と待ち時間の関係はこの回で見た式とは無関係の現象であり、平均値を見ている限り心配する必要はない'
+    ],
+    ans: 1,
+    exps: [
+      '計測の仕組みにバグがあるという推測は、この回で見た待ち行列理論の話題とは関係が無く、一般的な計測の信頼性の問題にすぎない。',
+      '<b>これが正解。</b>$\\rho/(1-\\rho)$ の形から、同じ 80% という値でも、そこがどれだけ 1 に近いかによって、もう少し負荷が増えたときの待ち時間の増え方が大きく変わる。平均値という 1 つの数字は、この「崖にどれだけ近いか」を伝えてくれない。',
+      '平均値は定義上ピーク値以下になるのが通常であり、「常にピーク値より高い」という説明は統計の基本的な性質と矛盾する。',
+      '80% という値は現実のシステムで普通に観測される範囲であり、物理的にあり得ないという説明は誤り。',
+      '利用率と待ち時間の関係はこの回の核心であり、平均値を見ているからこそ、その関係が隠れて見えなくなるという点が問題である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ80%という平均値でも、崖までの距離は分かりません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="平均値が崖までの距離を隠す図"><rect x="40" y="30" width="480" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132">平均80%という数字だけが見えている</text><rect x="420" y="75" width="100" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="470" y="95" font-size="12.5" text-anchor="middle" fill="#b5401f">崖(ρ→1)</text><text x="280" y="130" font-size="13" text-anchor="middle" fill="#12211a">平均値だけでは、崖までの距離が分からない</text></svg>'
+          + '<p class="cap">図: 平均値という1つの数字は、利用率が崖にどれだけ近いかを伝えない。</p></div>'
+    }
+  },
+  {
+    q: 'ある検索サービスは 1 つのクエリを 300 台のシャードに同時にファンアウトし、全シャードの応答を待って結果をまとめる。各シャードが単体で 0.5% の確率で 1 秒を超える応答をするとき、このクエリ全体が少なくとも 1 つの遅いシャードに遭遇する確率に最も近いのはどれか？',
+    opts: [
+      '約 0.5% (個々のシャードの確率とほぼ同じ)',
+      '約 22% ($0.995$ の 300 乗にほぼ等しい値)',
+      '約 78% (1 から $0.995$ の 300 乗を引いた値にほぼ等しい)',
+      '約 99.99% (ほぼ確実に遅延が起きる)',
+      'ファンアウトする台数に関係なく、常に個々のシャードの確率である 0.5% のまま変わらない'
+    ],
+    ans: 2,
+    exps: [
+      '個々のシャードの確率そのままという値は、ファンアウトによる積み重ねの効果を考慮していない。',
+      '$0.995^{300}$ は「全シャードが遅延しない」確率そのものであり、「少なくとも1つが遅延する」確率はその補数(1から引いた値)である。',
+      '<b>これが正解。</b>「少なくとも1つが遅延する」確率は $1-0.995^{300}$ で計算し、$0.995^{300}\\approx 0.222$ なので、答えはおよそ $1-0.222=0.778$、約78%になる。',
+      '約99.99%まで達するには、個々の確率かファンアウト数がこの設定よりもっと大きい必要がある。計算上の見積もりが過大である。',
+      'The Tail at Scale が示した核心は、まさにファンアウト数が増えるほどこの確率が無視できないほど上がっていく、という点であり、「台数に関係なく変わらない」という説明はその核心と正反対である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じ計算を、300台のケースで確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="300台ファンアウトの確率計算の図"><text x="280" y="30" font-size="14" text-anchor="middle" fill="#12211a">少なくとも1台遅延 = 1 - 0.995^300</text><rect x="180" y="55" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="80" font-size="15" text-anchor="middle" fill="#b5401f" font-weight="700">≈ 1 - 0.222 = 0.778</text><text x="280" y="120" font-size="13" text-anchor="middle" fill="#12211a">個々は0.5%でも、300台では約78%になる</text></svg>'
+          + '<p class="cap">図: 300台へのファンアウトでは、個々が稀でも全体では高確率で遅延に遭遇する。</p></div>'
+    }
+  },
+  {
+    q: 'ヘッジドリクエスト (hedged requests) とタイドリクエスト (tied requests) の違いとして最も適切なものは？',
+    opts: [
+      'ヘッジドリクエストはレプリカを1台しか使わず、タイドリクエストは構成管理の都合上必ず3台以上のレプリカをあらかじめ用意しておく必要がある',
+      'ヘッジドリクエストはサーバー側だけで動作し、クライアント側の実装を一切必要としない',
+      'タイドリクエストはデータを永続化せず、ヘッジドリクエストは必ずデータを永続化する',
+      'ヘッジドリクエストは一定時間応答が無ければ別レプリカへ2本目を送るのに対し、タイドリクエストは最初から2台に送り、片方が実行を始めた瞬間に相手へキャンセルを送る',
+      'どちらも同じ仕組みの別名であり、実装上の違いは存在しない'
+    ],
+    ans: 3,
+    exps: [
+      'どちらの手法も複数のレプリカを使うことを前提としており、1台しか使わないという説明はヘッジドリクエストの定義と矛盾する。',
+      'ヘッジドリクエストはクライアント側が「いつ2本目を送るか」を判断する仕組みであり、サーバー側だけで完結するものではない。',
+      '永続化の有無はこれらの手法の定義とは別の話題であり、両者を区別する軸ではない。',
+      '<b>これが正解。</b>ヘッジドリクエストは最初の応答を一定時間待ってから2本目を送る遅延つきの方式、タイドリクエストは最初から2台に同時に送り、片方が実行を始めた瞬間に相手へキャンセルを送ることで無駄な重複実行を減らす方式である。',
+      '待つかどうか、最初から2台に送るかどうかという具体的な動作が異なり、同じ仕組みの別名とは言えない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>遅延してから送るか、最初から2台に送ってキャンセルするかの違いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ヘッジドリクエストとタイドリクエストの違いの図"><rect x="30" y="20" width="220" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">ヘッジドリクエスト</text><text x="140" y="65" font-size="12" text-anchor="middle" fill="#12211a">一定時間待って2本目を送る</text><rect x="310" y="20" width="220" height="60" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">タイドリクエスト</text><text x="420" y="65" font-size="12" text-anchor="middle" fill="#12211a">最初から2台に送りキャンセルし合う</text></svg>'
+          + '<p class="cap">図: 待ってから送るか、最初から2台に送るかがヘッジドとタイドの違い。</p></div>'
+    }
+  },
+  {
+    q: 'グレー障害の定義である「差分観測可能性 (differential observability)」を最も正確に表しているものはどれか？',
+    opts: [
+      'システムの全コンポーネントが完全に同時にクラッシュし、誰の目にも明らかな完全な停止状態になることを指す言葉',
+      'システムの一部がハードウェア的に物理的に破損している状態のことを指す言葉',
+      '複数の観測者が、それぞれ異なる暗号化方式でシステムの状態を記録してしまう不整合',
+      '監視システムがそもそも存在せず、誰もシステムの状態を観測できていない状態',
+      '少なくとも1つのアプリ(利用者)がシステムを不健康だと観測しているのに、観測者(障害検知器)はシステムを健康だと観測している状態'
+    ],
+    ans: 4,
+    exps: [
+      '全コンポーネントが同時に明らかにクラッシュする状態は、観測者もアプリも一致して障害を認識できる通常の障害(fail-stop)であり、グレー障害が問題にしている「見逃し」とは異なる。',
+      '物理的な破損は故障の一種だが、差分観測可能性という概念そのものの定義ではない。',
+      '暗号化方式の不整合は差分観測可能性とは無関係な話題であり、この概念の定義に含まれない。',
+      '監視システムが存在しないことと、監視システムが「健康だ」と誤って観測することは異なる状況であり、差分観測可能性は後者を指す。',
+      '<b>これが正解。</b>差分観測可能性とは、少なくとも1つのアプリがシステムを不健康だと観測しているのに、障害検知を担う観測者はシステムを健康だと観測している状態を指す。観測者がこの不一致に気づかない限り、復旧の仕組みは発動しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、観測者とアプリの観測結果が一致しないことがグレー障害の本質です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="差分観測可能性の図"><rect x="30" y="30" width="220" height="60" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">観測者:健康と観測</text><rect x="310" y="30" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">アプリ:不健康と観測</text><text x="280" y="115" font-size="13" text-anchor="middle" fill="#12211a">この不一致に観測者が気づかない限り復旧は起きない</text></svg>'
+          + '<p class="cap">図: 観測者とアプリの観測結果の不一致がグレー障害の本質。</p></div>'
+    }
+  },
+  {
+    q: 'あるクラウドのストレージサービスで、1台のデータサーバーが容量不足に陥ったが、容量を報告する仕組みのバグによりストレージマネージャはこれを検知できなかった。マネージャはそのサーバーへ書き込みを送り続け、サーバーはクラッシュして再起動し、再起動後も同じ問題でまたクラッシュする、という連鎖が起きた。この連鎖から学べる教訓として最も適切なものは？',
+    opts: [
+      '復旧のための操作(再起動)が、根本原因(容量不足)を直さないまま繰り返されると、問題を解決せずにクラッシュのサイクルを続けさせてしまう',
+      'この問題はサーバーのハードウェア一式をすべて新品に交換すれば、原因を調べなくても必ず即座に解決する',
+      '容量不足は再起動のたびに自動的に解消されるため、この連鎖は長期的には問題にならない',
+      'このような連鎖はグレー障害とは無関係であり、単純なハードウェア故障としてのみ扱うべきである',
+      'ストレージマネージャが容量を監視していたことが、そもそもの原因であり、監視をやめれば連鎖は起きない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>再起動という復旧操作は容量不足という根本原因を直さないため、マネージャが同じサーバーへ書き込みを送り続ける限り、クラッシュと再起動が繰り返されるだけで問題は解決しない。これは「復旧のつもりの操作が根本原因を放置したまま繰り返される」というグレー障害とメタ安定障害に共通する構図である。',
+      'ハードウェア交換は容量不足そのものの解決にはならない場合が多く、根本原因(書き込みの集中や容量設計)に対処しなければ同じ問題が別のサーバーでも起こり得る。',
+      '再起動は容量を増やす操作ではなく、容量不足は再起動によって自動的に解消されるものではない。',
+      'この連鎖はまさに差分観測可能性(容量報告のバグによって問題が観測されない)によって起きたグレー障害の典型例であり、無関係という説明は誤り。',
+      '容量監視そのものが原因ではなく、容量報告の仕組みにあったバグ(観測の失敗)が原因である。監視をやめることは問題の原因を無くすことにはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>再起動は容量不足という根本原因を直さないため、同じ結果が繰り返されます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="クラッシュと再起動の連鎖の図"><rect x="30" y="30" width="140" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="100" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">容量不足→クラッシュ</text><line x1="170" y1="50" x2="260" y2="50" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-q6)"/><rect x="260" y="30" width="140" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="330" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80">再起動(容量は直らない)</text><line x1="330" y1="70" x2="100" y2="70" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr-q6)"/><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">根本原因が残る限り、このループは繰り返される</text><defs><marker id="arr-q6" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 再起動は根本原因を直さないため、容量不足が解消しない限りループが繰り返される。</p></div>'
+    }
+  },
+  {
+    q: 'Bronson らの定義に基づくと、「単純な過負荷 (simple overload)」と「メタ安定障害 (metastable failure)」を区別する最も本質的な違いは何か？',
+    opts: [
+      '過負荷は必ず複数台のサーバーをまたいだ構成で起きる現象であり、メタ安定障害は単一の1台のサーバーだけでしか起き得ない現象である',
+      '単純な過負荷は負荷を元の水準まで下げれば回復するが、メタ安定障害は負荷を元の水準まで下げるだけでは回復せず、脆弱状態の閾値よりさらに下まで落とす必要がある',
+      '過負荷はネットワークの問題であり、メタ安定障害はディスクの問題に限定される',
+      '過負荷は必ず人間が気づいて対応するが、メタ安定障害は自動的に誰も気づかずに直る',
+      'この2つに本質的な違いは無く、同じ現象を別の名前で呼んでいるだけである'
+    ],
+    ans: 1,
+    exps: [
+      'サーバーの台数は過負荷とメタ安定障害を区別する軸ではなく、どちらも単一ノードでも複数ノードでも起こりうる。',
+      '<b>これが正解。</b>単純な過負荷はトリガーとなった負荷を元の水準に戻せば自然に回復するのに対し、メタ安定障害は持続効果によって悪い状態が維持されるため、負荷を単に元の水準に戻すだけでは回復せず、脆弱状態の閾値よりもさらに低い水準まで落とす強い介入が必要になる。',
+      'ネットワークかディスクかという具体的な資源の種類は、過負荷とメタ安定障害を分ける本質的な軸ではない。',
+      '人間が気づくかどうかは個々のインシデントの運用上の事情であり、この2つの現象を定義上区別する要素ではない。',
+      '論文はこの2つを明確に異なる現象として定義しており、同じ現象の別名であるという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、メタ安定障害は元の負荷に戻すだけでは回復しません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="過負荷とメタ安定障害の回復の違いの図"><rect x="30" y="30" width="220" height="60" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">単純な過負荷</text><text x="140" y="75" font-size="12" text-anchor="middle" fill="#12211a">負荷を戻すだけで回復</text><rect x="310" y="30" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">メタ安定障害</text><text x="420" y="75" font-size="12" text-anchor="middle" fill="#12211a">脆弱閾値より下まで強く落とす必要</text></svg>'
+          + '<p class="cap">図: メタ安定障害は、トリガーが去っても持続効果によって悪い状態が維持される。</p></div>'
+    }
+  },
+  {
+    q: '本文の DB の例で、ネットワーク断から復旧した瞬間に実質的な負荷が 280 QPS から 560 QPS まで跳ね上がったのはなぜか？',
+    opts: [
+      'DB自体の処理速度が、ネットワーク断の影響で自動的に半分に低下したから',
+      'ネットワーク機器の内部設定が、復旧の際に誤って元のリクエスト数をちょうど2倍にコピーして送信する状態になってしまったから',
+      '失われていた元のリクエストの再送に加え、DBの応答が遅くなったことでクライアントが追加のリトライを送るようになり、両方が合算されたから',
+      'クライアントのアプリケーションが、ネットワーク断を検知して自動的に負荷テストを開始したから',
+      '280 QPSという数字自体が最初から誤って計測されており、実際は常に560 QPSだったから'
+    ],
+    ans: 2,
+    exps: [
+      'DBの処理速度自体が半分になるという説明ではなく、DBへの実質的な負荷(問い合わせの数)が増えたことが本質である。',
+      'ネットワーク機器がリクエストを誤って2倍に複製するという仕組みは一般的ではなく、この現象の説明として不自然である。',
+      '<b>これが正解。</b>断が復旧した瞬間、失われていた分のリクエストが再送され、さらにDBの応答が遅くなったことでクライアントが追加のリトライを送るようになり、この2つが合算されて実質的な負荷が280 QPSから560 QPSへ跳ね上がった。',
+      'クライアントが負荷テストを自発的に開始するという仕組みは前提に含まれておらず、この現象の説明にはならない。',
+      '280 QPSという数字自体は正常時の平常の負荷として前提に明記されており、計測の誤りだったという説明はこの前提と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>再送分とリトライ分の両方が重なって、実質的な負荷が倍近くに増えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="再送とリトライの合算で負荷が倍増する図"><rect x="30" y="30" width="200" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="52" font-size="12.5" text-anchor="middle" fill="#0f5132">失われた分の再送</text><rect x="30" y="74" width="200" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="130" y="96" font-size="12.5" text-anchor="middle" fill="#5b3d80">遅延による追加リトライ</text><text x="400" y="55" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">両方が重なり</text><text x="400" y="90" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">280→560 QPSへ</text></svg>'
+          + '<p class="cap">図: 再送とリトライの両方が重なり、実質的な負荷が倍近くに跳ね上がる。</p></div>'
+    }
+  },
+  {
+    q: 'Bronson らは「脆弱状態 (vulnerable state)」について、どのような性質を指摘しているか？',
+    opts: [
+      '脆弱状態は常に明示的なアラートとして監視画面の目立つ場所に表示され、運用担当者なら誰でも一目でその状態だと分かる仕組みになっている',
+      '脆弱状態に入った瞬間、システムは必ず数秒以内にメタ安定状態へ落ち込む',
+      '脆弱状態の閾値は暗黙的で目に見えず、システムは脆弱状態のまま何年も問題なく動き続けることもあり、むしろ効率の良さからその状態を意図的に選ぶ運用すらある',
+      '脆弱状態は定義上、安定状態より常に処理性能が低く、ユーザーが必ず遅延を感じる',
+      '脆弱状態は理論上の概念にすぎず、実際の本番システムで観測された例は存在しない'
+    ],
+    ans: 2,
+    exps: [
+      '論文はむしろ、脆弱状態の閾値は暗黙的 (implicit) かつ目に見えない (invisible) ものであり、明示的なアラートとして常に表示されるものではないと指摘している。',
+      '脆弱状態自体は健康な状態であり、トリガーが来なければメタ安定状態に落ち込むことはなく、必ず数秒以内に落ち込むという説明は誤り。',
+      '<b>これが正解。</b>脆弱状態の閾値は暗黙的で目に見えず、システムは何年もこの状態のまま問題なく動き続けることがある。実際、多くの本番システムは効率の良さを理由に、意図的に脆弱状態で運用を続けている。',
+      '脆弱状態は安定状態より効率が良い(高いスループットを出せる)ことがあり、処理性能が常に低いという説明は論文の指摘と逆である。',
+      '論文はAzureなど実際の本番システムで観測された事例を多数報告しており、理論上の概念にすぎないという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>脆弱状態は健康に見えるまま、暗黙の閾値の内側に留まり続けることがあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="脆弱状態の見えない閾値の図"><rect x="30" y="30" width="500" height="40" rx="8" fill="#fff3d6" stroke="#8a5a00" stroke-width="2"/><text x="280" y="55" font-size="13.5" text-anchor="middle" fill="#8a5a00" font-weight="700">脆弱状態: 健康に見えるまま何年も続くこともある</text><text x="280" y="100" font-size="13" text-anchor="middle" fill="#12211a">閾値そのものが暗黙的で目に見えないため、気づかれにくい</text></svg>'
+          + '<p class="cap">図: 脆弱状態の閾値は目に見えず、システムは気づかず長期間そこに留まり続けることがある。</p></div>'
+    }
+  },
+  {
+    q: 'あるチームが、メタ安定障害に陥ったシステムに対し「トリガーだったネットワーク断は既に復旧しているので、しばらく待てば自然に回復するはずだ」と判断して何もしなかった。この判断の問題点として最も適切な指摘は？',
+    opts: [
+      'ネットワーク断が本当に復旧したかどうかを確認する手段が存在しないため、判断自体が不可能である',
+      'メタ安定障害はトリガーを取り除くだけでは回復しないため、持続効果(作業増幅)を止めるか負荷を脆弱状態の閾値より下まで下げる、という強い介入が無ければ回復しない可能性が高い',
+      'トリガーが復旧していれば、理論上は必ず数秒以内に自然回復するはずなので、この判断は正しい',
+      'メタ安定障害は定義上、人間が一切介入しなくても必ず自然に解消する現象である',
+      'この状況ではリトライを増やしてさらにリクエストを送ることが、最も効果的な回復手段である'
+    ],
+    ans: 3,
+    exps: [
+      'ネットワーク断の復旧確認自体は監視システムで通常可能であり、判断が不可能という説明はこの問題の本質ではない。',
+      '持続効果という観点は正しいが、これは不正解の選択肢であり、問題点の指摘としては他の選択肢と比較する必要がある。',
+      '脆弱状態・メタ安定状態の枠組みでは、トリガーの復旧と持続効果の解消は別の事柄であり、「必ず数秒以内に自然回復する」という保証は無い。',
+      '<b>これが正解。</b>メタ安定障害の核心は持続効果であり、トリガーそのもの(ネットワーク断)が直っても、作業増幅などの自己維持メカニズムが続く限りシステムは悪い状態に留まる。「トリガーが直ったから待てば良い」という判断は、この持続効果を見落としている。',
+      'リトライを増やすことは、本文で見た通り負荷をさらに増幅させる方向に働き、回復を助けるどころか悪化させる可能性が高い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>トリガーが去っても、持続効果が残っている限りシステムは悪い状態のままです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="トリガー復旧だけでは回復しない図"><rect x="30" y="30" width="200" height="54" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="130" y="52" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">トリガー(ネットワーク断)</text><text x="130" y="70" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">は復旧済み</text><rect x="310" y="30" width="220" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">持続効果はまだ続いている</text><text x="280" y="105" font-size="13.5" text-anchor="middle" fill="#12211a">トリガーの復旧と持続効果の解消は別の事柄</text></svg>'
+          + '<p class="cap">図: トリガーが直っても、持続効果が解消されない限りシステムは悪い状態に留まる。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

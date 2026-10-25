@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ストレージエンジンと分散 DB ― B-tree と LSM-tree はどこで差がつくか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 28 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>ストレージエンジンと分散 DB ― B-tree と LSM-tree はどこで差がつくか</h1>
+  <p>読み取りが多いか書き込みが多いかという一点が、索引構造とレプリケーション方式のほぼすべてを決める</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 05 回 <a href="./distsys-replication-basics.html">レプリケーション入門</a>、第 18 回 <a href="./distsys-isolation-concurrency.html">分離レベルと並行制御</a></p>
+
+  <p class="intro">「読み取りが多いか、書き込みが多いか」でストレージエンジンの正解は変わる。<b>B-tree</b> は読み取りが速く、<b>LSM-tree (Log-Structured Merge Tree)</b> は書き込みが速いという一点に、分散データベースの設計判断の多くが帰着する。Discord がメッセージ保存を MongoDB → Cassandra → ScyllaDB と乗り換えた理由も、この一点から説明できる。</p>
+
+  <section>
+    <h2>1. 書く前に記録する ― WAL という土台</h2>
+    <p>どのストレージエンジンを選んでも、まず最初に必要なのは <b>WAL (Write-Ahead Log, 先行書き込みログ)</b> です。データ本体 (B-tree のページや LSM-tree のメモリ内テーブル) を更新する前に、まず「これから何をするか」を追記専用のログファイルに書き切ってから、本体の更新に進みます。</p>
+    <p>こうする理由は単純です。本体の更新はページの一部だけ書けた状態でクラッシュする (部分書き込み) 可能性がありますが、追記専用のログは末尾に 1 行足すだけなので壊れ方がシンプルです。再起動時には WAL を先頭から読み直し、本体に反映されていない分だけを再生 (replay) すれば、クラッシュ直前の状態を復元できます。これは第 25 回で見た Raft のログ複製や、第 33 回で見るステートマシン複製とも同じ発想です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="WALによるクラッシュ復旧の図">
+        <rect x="20" y="20" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">1. WAL に追記</text>
+        <line x1="220" y1="45" x2="280" y2="45" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <rect x="280" y="20" width="200" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="380" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">2. 本体(ページ)を更新</text>
+        <line x1="480" y1="45" x2="560" y2="45" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <text x="520" y="80" font-size="12.5" text-anchor="middle" fill="#c0492f" font-weight="700">ここでクラッシュ</text>
+        <line x1="120" y1="70" x2="120" y2="150" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <rect x="20" y="150" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="175" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">再起動: WAL を先頭から</text>
+        <text x="120" y="192" font-size="12.5" text-anchor="middle" fill="#12211a">未反映分だけ再生</text>
+        <rect x="280" y="150" width="200" height="50" rx="8" fill="#effef3" stroke="#198754" stroke-width="2"/>
+        <text x="380" y="175" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">本体が復元される</text>
+        <text x="380" y="192" font-size="12.5" text-anchor="middle" fill="#12211a">(途中の部分書き込みは捨てる)</text>
+        <line x1="220" y1="175" x2="280" y2="175" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-s1)"/>
+        <defs><marker id="arr-s1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: WAL は「本体更新より先に書く」ことで、クラッシュ時も再生だけで復元できる形にする。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. B-tree と LSM-tree ― 読みが速いか、書きが速いか</h2>
+    <p><b>B-tree</b> はほぼすべての RDBMS (PostgreSQL, MySQL の InnoDB など) が採用する索引構造です。データはディスク上の固定サイズの「ページ」にソート済みで保持され、キーを探すときはルートから子ページへとページ単位で降りていきます。更新は対象ページをその場で (in-place) 書き換えます。読み取りはどのキーでも同じ深さをたどるだけなので速く安定していますが、ランダムな位置のページ書き換えが多数のディスクシークを生みやすく、書き込みは相対的に重くなります。</p>
+    <p><b>LSM-tree</b> は Cassandra, LevelDB, RocksDB, ScyllaDB など多くの NoSQL が採用します。書き込みはまずメモリ内の<b>ソート済み構造 (メモリテーブル)</b> に追記するだけで確定し、それが一定量に達すると、ソート済みのまま丸ごとディスクに「SSTable」として書き出します (この時点ではディスクへのランダムな書き換えが発生しない)。読み取りは新しい SSTable から古い SSTable へ順に探す必要があり、SSTable の数が増えるほど 1 回の読み取りで調べる場所が増えます (読み取り増幅)。古い SSTable 群を定期的にマージして数を減らす処理を<b>コンパクション (compaction)</b> と呼び、これは同じデータを何度も読み書きし直す<b>書き込み増幅 (write amplification)</b> の代償を伴います。存在しないキーの探索を早期に打ち切るため、各 SSTable に<b>ブルームフィルタ (Bloom filter)</b> を添えて「このキーは絶対に無い」を高速に判定するのが定石です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 260" role="img" aria-label="B-treeとLSM-treeの読み書き経路の比較図">
+        <text x="160" y="24" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">B-tree</text>
+        <rect x="60" y="40" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="65" font-size="13" text-anchor="middle" fill="#12211a">write → 対象ページを直接書換</text>
+        <rect x="60" y="100" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="125" font-size="13" text-anchor="middle" fill="#12211a">read → 1 本の経路をルートから</text>
+        <text x="160" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">読み取りは安定して速い</text>
+        <text x="160" y="178" font-size="12.5" text-anchor="middle" fill="#4a5d54">ランダム書換でディスクシーク増</text>
+        <text x="480" y="24" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">LSM-tree</text>
+        <rect x="380" y="40" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="480" y="65" font-size="13" text-anchor="middle" fill="#12211a">write → メモリに追記するだけ</text>
+        <rect x="380" y="100" width="200" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="480" y="125" font-size="11.5" text-anchor="middle" fill="#12211a">read → 新→旧の SSTable を順に探索</text>
+        <text x="480" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">書き込みは速い</text>
+        <text x="480" y="178" font-size="12.5" text-anchor="middle" fill="#4a5d54">SSTable 増加で読取/コンパクション増</text>
+        <line x1="160" y1="200" x2="160" y2="230" stroke="#9aa" stroke-width="1"/>
+        <line x1="480" y1="200" x2="480" y2="230" stroke="#9aa" stroke-width="1"/>
+        <text x="320" y="245" font-size="12.5" text-anchor="middle" fill="#12211a">同じキーバリューの要求でも、最適な構造はワークロードで変わる</text>
+      </svg>
+      <p class="cap">図: B-tree は読み取り安定・書き込み重め、LSM-tree は書き込み軽量・読み取りは SSTable 数に依存。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. レプリケーションログは「ストレージエンジンのログ」をそのまま再利用できる</h2>
+    <p>第 5 回で見たリーダー/フォロワー型のレプリケーションは、何を転送するかで実装が変わります。<b>statement-based</b> (SQL 文そのものを転送) は <code>NOW()</code> や自動採番のような非決定的な関数が混ざると値がずれる弱点があります。<b>WAL shipping</b> (WAL をそのままフォロワーに送る) はストレージエンジン内部の物理フォーマットに依存するため、エンジンのバージョン間で互換性が崩れやすい一方、実装は単純です。<b>logical (row-based) replication</b> は「どの行がどう変わったか」を物理フォーマットと独立に記述するため、ストレージエンジンの内部実装を変えても複製の仕組みを維持できます。</p>
+    <p>LSM-tree 採用のシステムでリーダーレス (leaderless) レプリケーション (第 14 回で見る Dynamo 型) を組み合わせる設計がよく見られるのは偶然ではありません。LSM-tree の追記主体の書き込みパスは、複数ノードが並行に書き込みを受け付けてもコンフリクトの検出・解消 (バージョンベクタや LWW) と相性がよく、書き込みが集中するワークロードでスループットを出しやすいためです。</p>
+  </section>
+
+  <section>
+    <h2>4. SDFC の「分散データベース設計」に見るワークロード別の選択</h2>
+    <p>SDFC (システム設計の練習題材集) の distributed-DB-design は、同じ「分散データベースを設計せよ」という問いに対し、ワークロードの違いで 3 つの別解を用意しています。</p>
+    <p><b>読み取り重視 (read-heavy)</b>: 単一リーダー + B-tree。スナップショット分離 (MVCC) とバージョンベクタで、逐次一貫性に近い振る舞いを狙う。DynamoDB や Spanner のような構成が例として挙がる。</p>
+    <p><b>書き込み重視 (write-heavy)</b>: リーダーレス + LSM-tree。Cassandra/Riak/ScyllaDB 的な構成で、因果一貫性までを目標にし、書き込み衝突は Riak や Cosmos DB のような解消規則に委ねる。</p>
+    <p><b>Ticketmaster のようなフラッシュセール (全順序 + 書き込み超過)</b>: 単一リーダー + LSM-tree という組み合わせ。全順序が要件になるため単一リーダーを維持しつつ、書き込み量そのものに応えるため LSM-tree を選び、シャーディングで負荷を分散する。読み取り重視の構成と比べ、読み取りレプリカは減らしてよい (読み取りはそもそも少ない) というのが設計上の判断点です。</p>
+  </section>
+
+  <section>
+    <h2>5. 実例: Discord が MongoDB → Cassandra → ScyllaDB と乗り換えた理由</h2>
+    <p>Discord のメッセージ保存は、この回の論点がそのまま実際の障害として表れた事例です。2015 年、単一の MongoDB レプリカで開始し、約 1 億件のメッセージでメモリにインデックスが収まらなくなりレイテンシが不安定化、Cassandra (LSM-tree) に移行しました。2017 年には 12 ノードで数十億件を保存し、2022 年初頭には 177 ノードで数兆件規模に成長しましたが、ここで再びレイテンシが不安定になります。</p>
+    <p>原因は LSM-tree の特性そのものでした。LSM-tree は書き込みより読み取りが相対的に重く、同時接続者数の多いチャンネルでは読み取りが集中してホットスポットが生じます。さらにコンパクション (SSTable の再マージ) がノードの CPU ・ディスク I/O を消費し、ガベージコレクションの一時停止がレイテンシのスパイクを生んでいました。Discord は ScyllaDB (Cassandra 互換、C++ 実装) へ再移行し、p99 読み取りレイテンシは 40〜125ms から 15ms に、p99 書き込みレイテンシは 5〜70ms から 5ms に改善しています。これは「LSM-tree を選べば書き込みは解決するが、読み取りとコンパクションの運用コストは別問題として残る」ことを示す実例です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="Discordのストレージ移行の図">
+        <rect x="20" y="30" width="160" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="100" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">MongoDB</text>
+        <text x="100" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">単一レプリカ、1 億件で限界</text>
+        <line x1="180" y1="60" x2="240" y2="60" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-s2)"/>
+        <rect x="240" y="30" width="160" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="320" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">Cassandra (LSM)</text>
+        <text x="320" y="68" font-size="12" text-anchor="middle" fill="#12211a">177 台、数兆件</text>
+        <text x="320" y="82" font-size="12" text-anchor="middle" fill="#12211a">p99 40-125ms</text>
+        <line x1="400" y1="60" x2="460" y2="60" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-s2)"/>
+        <rect x="460" y="30" width="160" height="60" rx="8" fill="#effef3" stroke="#198754" stroke-width="2"/>
+        <text x="540" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ScyllaDB (LSM/C++)</text>
+        <text x="540" y="75" font-size="12.5" text-anchor="middle" fill="#12211a">p99 読み 15ms、書き 5ms</text>
+        <text x="320" y="140" font-size="13" text-anchor="middle" fill="#12211a">原因: 読取ホットスポット、コンパクション負荷、GC 停止</text>
+        <text x="320" y="165" font-size="12.5" text-anchor="middle" fill="#4a5d54">(データ構造を変えても LSM の根本特性は残る。エンジンの実装品質で改善)</text>
+      </svg>
+      <p class="cap">図: Discord の移行はデータ構造(LSM)を変えずに実装(Cassandra→ScyllaDB)を変えて改善した事例。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. どこで壊れるか・何を諦めるか</h2>
+    <ul>
+      <li><b>コンパクション嵐</b>: 書き込みが集中する時間帯にコンパクションが重なると、CPU/I/O を奪われて読み書き両方のレイテンシが跳ねる。コンパクションのスケジューリングと帯域制限が運用上の要点になる。</li>
+      <li><b>トゥームストーン (削除マーカー) の蓄積</b>: LSM-tree での削除は「削除済み」を示す特別な値 (tombstone) の追記であり、実データの即時消去ではない。コンパクションでまとめて消えるまでは残り続け、削除が多いワークロードでは読み取り増幅の原因になる。</li>
+      <li><b>B-tree の書き込み増幅</b>: ページ単位の書き換えは、1 件の小さな更新でもページ全体 (典型的に 4KB〜16KB) を書き直すため、書き込みが集中すると不利になる。</li>
+      <li><b>読み取り/書き込みの比率を見誤る</b>: SDFC の distributed-DB-design が示すように、同じ要件でも読み書き比率で最適なエンジン・レプリケーション方式が入れ替わる。「流行っているから LSM-tree」という選択は、読み取り重視のワークロードでは裏目に出る。</li>
+    </ul>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい/なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/b-tree-vs.md" target="_blank" rel="noopener">ByteByteGo: B-Tree vs. LSM-Tree</a> ― B-tree と LSM-tree の基本的な違い(読み取り重視/書き込み重視)</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/8-data-structures-that-power-your-databases.md" target="_blank" rel="noopener">ByteByteGo: 8 Data Structures That Power Your Databases</a> ― SSTable ・ブルームフィルタなど索引構造の全体像</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-discord-stores-trillions-of-messages.md" target="_blank" rel="noopener">ByteByteGo: How Discord Stores Trillions of Messages</a> ― MongoDB→Cassandra→ScyllaDB の移行経緯と p99 レイテンシの実測値</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/distributed-DB-design" target="_blank" rel="noopener">SDFC: distributed-DB-design</a> ― 読み取り重視/書き込み重視/Ticketmaster 型(全順序+書き込み超過)の 3 変種の設計判断</li>
+
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-crdt.html">← 第 27 回 CRDT</a><a href="./distsys-index.html">目次</a><a href="./distsys-fanout-realtime.html">第 29 回 大規模ファンアウトとリアルタイム配信 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+
+  {
+    q: '読み取りが多く、書き込みが少ないワークロードのデータベースを新規に設計する場合、ストレージエンジンとして最も素直な選択はどれか。',
+    opts: [
+      'LSM-tree。書き込みをメモリ追記だけで済ませられるので、将来書き込みが増えても安心できるから',
+      'B-tree。読み取りがルートから一定の深さを辿るだけで完了し、SSTableの数に依存しないため安定して速いから',
+      'どちらを選んでも読み書きの速さに実質的な差は生じないので、運用実績が多い方を選べばよい',
+      'LSM-tree。コンパクションが自動的に読み取りを高速化してくれるため、読み取り重視にも最適だから',
+      'B-tree。ブルームフィルタを使えるのはB-treeだけであり、存在しないキーの探索を高速化できるから'
+    ],
+    ans: 1,
+    exps: [
+      '書き込みが少ない前提では、LSM-treeの利点(書き込みの軽さ)を活かせない一方、SSTableが増えるほど読み取りが遅くなる欠点だけが残る。',
+      '<b>これが正解。</b>B-treeは読み取り経路の深さがキーに関わらずほぼ一定であり、読み取りが支配的なワークロードでは安定して速い。LSM-treeはSSTable数に応じて読み取りコストが増える。',
+      '読み書き比率によって最適なエンジンは明確に変わる。distributed-DB-designの読み取り重視/書き込み重視の別解がこの差を示している。',
+      'コンパクションは古いSSTableをまとめて読み取り経路を短くする効果はあるが、それ自体がCPU/I/Oを消費する負荷であり、「自動的に読み取り重視に最適化する」仕組みではない。',
+      'ブルームフィルタはLSM-treeのSSTableに付与される機構であり、B-tree固有の機能ではない。この記述は逆である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>読み取りコストの違いを比較します。B-treeは深さが一定、LSM-treeはSSTable数に比例して探索対象が増えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="読み取りコストの比較"><text x="140" y="25" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">B-tree</text><rect x="60" y="40" width="160" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="140" y="60" font-size="12.5" text-anchor="middle" fill="#12211a">深さ固定・読取は常に一定</text><text x="420" y="25" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">LSM-tree</text><rect x="340" y="40" width="160" height="22" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><rect x="340" y="65" width="160" height="22" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><rect x="340" y="90" width="160" height="22" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><text x="420" y="125" font-size="12.5" text-anchor="middle" fill="#12211a">SSTableが増えるほど探索増</text></svg>'
+          + '<p class="cap">図: 読み取り重視ならB-tree、SSTable数が読み取りコストを左右するのがLSM-tree。</p></div>'
+    }
+  },
+  {
+    q: 'LSM-treeのコンパクション(古いSSTableのマージ)を無効化、または極端に遅延させて運用した場合に、最も起きやすい問題は何か。',
+    opts: [
+      '書き込みスループットが即座にゼロになり、新しい書き込みを一切受け付けられなくなるため、サービス全体が停止する',
+      'メモリ内テーブルへの書き込みが完全停止し、WALへの追記だけが残るため、再起動時に全データを再生する必要が生じる',
+      'SSTableの数が増え続け、1回の読み取りで探索する対象が増えて読み取りレイテンシが悪化し、削除マーカー(tombstone)も残り続けてディスク使用量も増える',
+      'B-treeへの変換処理が止まり、索引がすべて失われてフルスキャンが毎回必須になるため、読み取りが極端に遅くなる',
+      '複数ノード間のレプリケーションが即座に停止し、分断(CAP定理のP)が発生して書き込みが受け付けられなくなる'
+    ],
+    ans: 2,
+    exps: [
+      '書き込み自体はメモリテーブルへの追記とSSTable書き出しで継続可能であり、コンパクションの遅延が直接書き込みを止めるわけではない。',
+      'WALと書き込みパスは別の機構であり、メモリテーブルへの書き込みは継続する。コンパクションの遅延がこの経路を止める直接要因ではない。',
+      '<b>これが正解。</b>コンパクションが滞るとSSTableの数が単調に増え、読み取りのたびに調べる対象が増えて読み取り増幅が悪化する。削除マーカーもコンパクションでしか消えないため、ディスク使用量も増え続ける。',
+      'LSM-treeはB-treeに変換する処理を内部に持たない。これは2つの異なるデータ構造の混同である。',
+      'コンパクションの遅延はノード内部の処理であり、ノード間通信の分断(ネットワークパーティション)とは無関係の層の問題である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>コンパクションが遅れるとSSTableが積み重なり、読み取りが調べる層が増えていきます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="コンパクション遅延の図"><rect x="60" y="30" width="400" height="20" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><rect x="60" y="55" width="400" height="20" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><rect x="60" y="80" width="400" height="20" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><rect x="60" y="105" width="400" height="20" rx="4" fill="#efe8f7" stroke="#7a5a9e"/><text x="260" y="140" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">コンパクション無しで層が積み重なる→読取が全層を探索</text></svg>'
+          + '<p class="cap">図: コンパクションを止めると、読み取りコストは時間とともに単調に悪化する。</p></div>'
+    }
+  },
+  {
+    q: 'Discordがメッセージ保存をMongoDBからCassandraへ、さらにCassandraからScyllaDBへと移行した経緯から読み取れる、最も正確な教訓は何か。',
+    opts: [
+      'MongoDBは分散データベースとして根本的に不完全であり、どのような用途でも避けるべきだという、実装の違いを無視した教訓',
+      'LSM-treeを採用すれば読み取り・書き込み・運用コストのすべてが自動的に解決するという、コンパクションの代償を無視した教訓',
+      'データ構造(LSM-tree)は変えずに実装の品質(Cassandra→ScyllaDB)を上げることで、読み取りホットスポットやコンパクション負荷による遅延を改善できるという教訓',
+      'メッセージ保存にはNoSQLではなく常にRDBMSのB-treeを使うべきだという、ワークロードの違いを無視した教訓',
+      'ノード数を増やせば増やすほど、どのストレージエンジンでもレイテンシは単調に改善するという、実際の経緯と矛盾する教訓'
+    ],
+    ans: 2,
+    exps: [
+      'MongoDBからの移行は単一レプリカでメモリに索引が収まらなくなったという特定の運用上の限界が原因であり、「あらゆる用途で不適格」という一般化は過大解釈である。',
+      'Cassandra自体がLSM-treeでありながら読み取りホットスポットやコンパクション負荷、GC停止に苦しんだという事実が、この主張と矛盾する。',
+      '<b>これが正解。</b>CassandraとScyllaDBはいずれもLSM-treeを採用する点で同じだが、ScyllaDBはC++実装でガベージコレクションが無く、実装の品質差がp99レイテンシの大幅な改善(読み取り40-125ms→15ms、書き込み5-70ms→5ms)として表れた。',
+      'Discordの移行はNoSQL(LSM-tree)同士の間での移行であり、RDBMSへの回帰ではない。この記述は経緯と矛盾する。',
+      'Cassandra時代もノード数は177台まで増えていたが、それでもレイテンシが不安定化したという事実が、この一般化を否定している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>移行の軸は「データ構造を変える」ではなく「同じLSM-treeをより良く実装したシステムに乗り換える」でした。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Discord移行の軸の図"><rect x="60" y="40" width="200" height="70" rx="8" fill="#e3edf5" stroke="#2f5f8a"/><text x="160" y="65" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">Cassandra</text><text x="160" y="85" font-size="12" text-anchor="middle" fill="#12211a">LSM-tree / JVM GC</text><rect x="300" y="40" width="200" height="70" rx="8" fill="#effef3" stroke="#198754"/><text x="400" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ScyllaDB</text><text x="400" y="85" font-size="12" text-anchor="middle" fill="#12211a">LSM-tree / C++・GC無し</text><text x="280" y="130" font-size="13" text-anchor="middle" fill="#12211a">データ構造は同じ、実装の違いがレイテンシを分けた</text></svg>'
+          + '<p class="cap">図: 移行の本質は構造の変更ではなく実装品質の差。</p></div>'
+    }
+  },
+  {
+    q: 'WAL(Write-Ahead Log)が「本体のページ更新より先に書く」という順序を守らなかった場合に生じる問題として最も正確なものはどれか。',
+    opts: [
+      '本体のページが先に更新された直後にクラッシュすると、その変更を再現する記録が残らず、データが中途半端な状態のまま復元不能になりうる',
+      'WALを先に書かなくても、OSのファイルシステムキャッシュが自動的に順序を補正するので実害は無い',
+      '順序を守らない方が書き込みスループットが安定して向上するため、性能のためにあえて逆順にする実装が一般的である',
+      '本体更新を先にしても、読み取り時にB-treeが自動的に整合性を検証して修復するため問題にならない',
+      'WALの役割はレプリケーションのためだけであり、単一ノードのクラッシュ復旧には関与しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本体更新を先に行い、その内容をログに書く前にクラッシュすると、「何を書こうとしていたか」の記録が残らない。部分的に書き換えられたページだけが残り、再生による復元ができなくなる。',
+      'ファイルシステムキャッシュは書き込み順序を保証する目的の仕組みではなく、順序の補正を行う機能でもない。これは実際には起きない都合の良い想定である。',
+      '順序を逆にする実装が実在するという事実はなく、WALの前倒し書き込みは耐久性のための基本原則であり性能目的で省略されるものではない。',
+      'B-treeには読み取り時に壊れたページを自動修復する汎用機構は無い。整合性の回復はWALの再生に依存する。',
+      'WALは単一ノードのクラッシュリカバリの基盤であり、レプリケーション(WAL shipping)はその用途を転用したものにすぎない。関与しないという記述は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>順序を逆にすると、クラッシュのタイミングによって「記録の無い変更」が生じる可能性があります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="WAL順序を破った場合の図"><rect x="40" y="40" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="140" y="65" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">1. 本体を先に更新</text><text x="320" y="65" font-size="13" fill="#c0492f" font-weight="700">← ここでクラッシュ</text><rect x="40" y="90" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-dasharray="4 4"/><text x="140" y="115" font-size="12.5" text-anchor="middle" fill="#b5401f">WALに記録が無い → 再生できない</text></svg>'
+          + '<p class="cap">図: 本体更新が先だと、クラッシュ時に「何をしていたか」の記録自体が失われる。</p></div>'
+    }
+  },
+  {
+    q: 'ストレージエンジンの物理フォーマット(B-treeのページ構造やLSM-treeのSSTable形式)を将来的に変更する可能性がある分散データベースで、レプリケーションログの方式として最も柔軟なのはどれか。',
+    opts: [
+      'statement-based replication。SQL文そのものを転送するので物理フォーマットに依存しないが、非決定的な関数の扱いが別問題として残る',
+      'WAL shipping。ストレージエンジン内部のWALをそのまま転送するので、常に最新の実装と完全に一致し、変換の手間が要らず速い',
+      '物理フォーマットが変わる可能性がある場合、レプリケーションの方式は結果に影響しないので、どれを選んでも同程度の柔軟性があると考えてよい',
+      'logical (row-based) replication。「どの行がどう変わったか」を物理フォーマットと独立に記述するため、内部実装が変わっても複製の仕組みを保てる',
+      'ストレージエンジンを変更する予定がある場合は、レプリケーションを一時的に完全に停止するのが唯一の安全な方法であり、他の選択肢は危険である'
+    ],
+    ans: 3,
+    exps: [
+      'statement-based replicationは物理フォーマットには依存しないが、NOW()や自動採番など非決定的な関数が混ざると複製先で値がずれる別の弱点を持つ。「物理フォーマットに依存しない」事実自体は正しいが、設問の「最も柔軟」という比較では、非決定性の問題を抱えない論理的方式に劣る。',
+      'WAL shippingはまさに物理フォーマットに強く依存する方式であり、実装やバージョンが変わるとフォロワー側との互換性が崩れやすい。設問の前提(将来の変更可能性)と最も相性が悪い選択。',
+      '方式によって物理フォーマット変更への耐性は明確に異なるため、「どれでも同程度」という記述は誤り。',
+      '<b>これが正解。</b>logical replicationは行の変更内容を論理的に記述するため、ストレージエンジンの内部実装(B-tree⇄LSM-treeなど)が変わっても複製の仕組み自体は影響を受けにくい。',
+      'レプリケーションの一時停止は可用性を犠牲にする極端な手段であり、「唯一の安全な方法」と言えるほど一般的な運用ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>WAL shippingは物理フォーマットに直結し、logical replicationはその上の論理的な変更内容だけを転送します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="レプリケーション方式の層の図"><rect x="40" y="30" width="480" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="280" y="50" font-size="13" text-anchor="middle" fill="#1f4a68">WAL shipping: 物理フォーマットに直結</text><rect x="40" y="80" width="480" height="30" rx="6" fill="#effef3" stroke="#198754"/><text x="280" y="100" font-size="13" text-anchor="middle" fill="#0f5132">logical replication: 行の変更内容だけを独立に記述</text></svg>'
+          + '<p class="cap">図: 物理層への依存度が低いほど、将来のエンジン変更に対して柔軟。</p></div>'
+    }
+  },
+  {
+    q: 'SDFCの「分散データベース設計」題材で、Ticketmasterのようなフラッシュセール(全順序が必須かつ書き込みが集中する)向けの変種が、読み取り重視の変種と同じ「単一リーダー」を維持しつつストレージエンジンだけLSM-treeに変える理由として最も妥当なものはどれか。',
+    opts: [
+      '単一リーダーをやめてリーダーレスにすると実装が複雑になるので、単に手間を省くためだけの理由であり、要件とは無関係である',
+      '全順序の要件自体がLSM-treeでしか実現できない性質であり、B-treeでは原理的に全順序を扱えないから、エンジンの選択が先に決まる',
+      'LSM-treeに変えると自動的に全順序も保証されるようになるため、リーダー構成を気にする必要が無くなるから、設計が単純になる',
+      '全順序を守るには単一リーダーで書き込みを直列化する必要があるが、書き込み量そのものが多いので、エンジンは書き込みに強いLSM-treeを選ぶのが筋が通る',
+      '読み取り重視の変種と全く同じ構成にしないと、採点基準を満たせないという設計インタビュー特有の制約があるからで、要件には由来しない'
+    ],
+    ans: 3,
+    exps: [
+      'リーダーレスへの変更を避ける理由は実装の手間ではなく、全順序という要件そのものが単一の書き込み経路を要求するという設計上の必然性にある。',
+      '全順序(total ordering)は誰が書き込みを直列化するかという調整の問題であり、特定のストレージエンジンでなければ実現不可能という性質ではない。B-treeでも単一リーダー構成なら全順序を維持できる。',
+      'LSM-treeへの変更はストレージの書き込み特性を変えるだけで、複数ノードの書き込み順序を調整する全順序の保証とは別の軸の話である。',
+      '<b>これが正解。</b>全順序の要件は単一リーダーで書き込みを直列化することで満たされる。その単一リーダーが受ける書き込み量自体が多いなら、リーダー構成はそのままに、書き込みに強いLSM-treeへエンジンだけ差し替えるのが整合的な設計判断になる。',
+      '設計変種の違いは実際のワークロードの性質(読み取り重視か、全順序+書き込み超過か)に基づく判断であり、採点基準への機械的な適合が目的ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「誰が順序を決めるか(リーダー構成)」と「どう保存するか(ストレージエンジン)」は独立した2つの軸です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="軸の分離を示す図"><text x="140" y="25" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">順序の軸</text><rect x="60" y="40" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="140" y="65" font-size="12.5" text-anchor="middle" fill="#12211a">単一リーダー(全順序維持)</text><text x="420" y="25" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">保存の軸</text><rect x="340" y="40" width="160" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="420" y="65" font-size="10.5" text-anchor="middle" fill="#12211a">LSM-tree(書き込み超過対応)</text><text x="280" y="115" font-size="13" text-anchor="middle" fill="#12211a">2軸は独立に選べる。全順序の要件は軸1だけで満たす</text></svg>'
+          + '<p class="cap">図: 全順序はリーダー構成の役割、書き込み量対応はストレージエンジンの役割。</p></div>'
+    }
+  },
+  {
+    q: 'LSM-treeのSSTableに付与されるブルームフィルタ(Bloom filter)の役割を最も正確に説明しているものはどれか。',
+    opts: [
+      '「このキーは絶対に存在しない」を高確率で判定し探索を早期に打ち切る機構で、「存在する」側には一定の偽陽性の余地がある',
+      'SSTable内のキーを完全にソートし直す機構であり、ディスクに書き出された後もソート済みであることを継続的に保証するためのもの',
+      'コンパクションそのものを実行する機構であり、古いSSTableを自動的にマージして削除し、ディスク使用量を減らす役割を持つ',
+      'ネットワーク分断時にどちらのレプリカが新しい値を持つかを、タイムスタンプの比較によって判定するための機構',
+      'B-treeのページキャッシュのヒット率を高めるために、よく読まれるページを予測してあらかじめメモリに先読みしておく機構'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>ブルームフィルタは「絶対に無い」をほぼ確実に判定できる一方、「有るかもしれない」側には一定の偽陽性を許容する確率的な構造。これにより、無いキーの探索でSSTable本体を読まずに済むケースを増やし、読み取りコストを下げる。',
+      'SSTable自体はディスクに書き出す時点でソート済みになっており、ブルームフィルタはソートの保証とは無関係の、別キーの存在判定に特化した補助構造。',
+      'コンパクションはSSTableのマージ・削除を行う別の独立したプロセスであり、ブルームフィルタ自体がその実行を担うわけではない。',
+      'レプリカ間の新旧判定はバージョンベクタやLWW(last-write-wins)などの機構が担い、ブルームフィルタとは全く異なる目的の構造。',
+      'ページキャッシュの先読みはB-tree系の運用でよく使われる発想だが、ブルームフィルタはLSM-treeのSSTableに付与される別の仕組みであり、キャッシュ予測とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ブルームフィルタは「無い」をほぼ確実に、「有るかもしれない」を一定の誤りを許して高速に判定します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ブルームフィルタの判定の図"><rect x="60" y="40" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="160" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">「絶対に無い」→読取省略</text><rect x="320" y="40" width="200" height="56" rx="6" fill="#fff6e8" stroke="#a9710f"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#8a5c0c" font-weight="700">「有るかも」→</text><text x="420" y="78" font-size="13" text-anchor="middle" fill="#8a5c0c" font-weight="700">本体を読む(偽陽性あり)</text></svg>'
+          + '<p class="cap">図: ブルームフィルタは不在判定を高速化する確率的な事前チェック。</p></div>'
+    }
+  },
+  {
+    q: 'リーダーレス(leaderless)レプリケーションとLSM-treeを組み合わせる設計(Cassandra, Riakなど)が、書き込みが集中するワークロードで相性が良いとされる理由として最も正確なものはどれか。',
+    opts: [
+      'リーダーレス構成では書き込み衝突が原理的に発生しないため、LSM-treeの追記構造と組み合わせる意味が無くなるという誤解に基づく理由',
+      'LSM-treeの追記主体の書き込みパスは、複数ノードが並行受付した書き込みを素早く確定でき、その後バージョンベクタやLWWで衝突を解消する設計と噛み合うから',
+      'リーダーレス構成を使うと自動的に全順序(total order)が保証されるため、衝突解消の仕組み自体が不要になるという誤解に基づく理由',
+      'LSM-treeを使うとネットワーク分断が起きなくなるため、リーダーレス構成のデメリットが相殺されるという、層の違う現象を混同した理由',
+      'B-treeではリーダーレス構成を技術的に実装することが不可能であり、選択の余地が無いという、実際には成立しない理由'
+    ],
+    ans: 1,
+    exps: [
+      '複数ノードが並行に書き込みを受け付ける以上、同じキーへの並行更新(衝突)は原理的に発生し得る。リーダーレス構成が衝突を無くすわけではなく、事後に解消する前提で動く。',
+      '<b>これが正解。</b>LSM-treeは各ノードが即座にメモリへ追記して書き込みを確定できるため、並行受付と相性が良い。その後の衝突はバージョンベクタ(第16回)やLWWなどで事後的に解消するのがDynamo系の典型的な設計。',
+      'リーダーレス構成は全順序とは逆方向の設計であり、むしろ因果一貫性や結果整合性にとどめることと引き換えに可用性や書き込みスループットを得る選択。全順序が自動的に付くわけではない。',
+      'ネットワーク分断の発生自体はLSM-treeというデータ構造の採用とは無関係の、ネットワーク層の現象である。',
+      'B-treeを使うリーダーレス構成も技術的には存在しうる。採用例が少ないのは相性の良さの問題であり、技術的な不可能性ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>リーダーレス+LSM-treeは「まず速く確定、あとで解消」という2段構えです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="リーダーレスとLSMの組み合わせの図"><rect x="40" y="30" width="200" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">各ノードが即時追記で確定</text><line x1="240" y1="50" x2="300" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q8)"/><rect x="300" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="410" y="55" font-size="11" text-anchor="middle" fill="#0f5132" font-weight="700">事後にバージョンベクタ/LWWで解消</text><defs><marker id="arr-q8" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 速い確定と事後解消を分けるのがDynamo系の設計。</p></div>'
+    }
+  },
+  {
+    q: '削除が非常に多いワークロード(例: 一時データを大量に書き込み・削除するキャッシュ的な用途)をLSM-tree採用のデータベースで運用する場合、最も注意すべき落とし穴は何か。',
+    opts: [
+      '削除操作はディスクを全く使わないため、ストレージコストの観点では何も心配する必要が無いという、追記の性質を見落とした判断',
+      'B-treeに比べて削除処理がそもそも実行できず、削除要求はすべて失敗するという、LSM-treeの構造と矛盾する判断',
+      '削除は即座に物理データを消去するため、誤って削除したデータの復旧が一切不可能になるという、トゥームストーンの仕組みを無視した判断',
+      '削除はトゥームストーン(削除マーカー)の追記として扱われ、コンパクションが追いつかないとトゥームストーンが溜まり続けてディスク使用量と読み取りコストの両方が悪化する',
+      '削除操作が発生すると自動的にすべてのSSTableが即時再構築され、むしろ読み取り性能が常に改善されるという、コンパクションの実際の挙動と矛盾する判断'
+    ],
+    ans: 3,
+    exps: [
+      '削除もトゥームストーンという値の追記として扱われるため、追記自体はディスクを消費する。「全く使わない」は誤り。',
+      'LSM-treeは削除を追記として扱える構造であり、B-treeと比べて削除が実行できないという事実は無い。',
+      '即時の物理消去ではなく、トゥームストーンという論理的なマーカーの追記にとどまる点が、この記述と矛盾する(即時消去ではない)。',
+      '<b>これが正解。</b>削除はトゥームストーンの追記にすぎず、実データの物理的な消去はコンパクション時にまとめて行われる。削除が多くコンパクションが追いつかないと、トゥームストーンが蓄積し、ディスク使用量の増加と読み取り増幅の悪化を同時に招く。',
+      'コンパクションは削除の度に即時かつ自動で全SSTableに走るわけではなく、スケジュールや閾値に基づいて実行される。「常に改善される」という無条件の記述は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>削除要求はすぐには消えず、トゥームストーンとして積み重なっていきます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="トゥームストーン蓄積の図"><rect x="40" y="40" width="120" height="30" rx="5" fill="#fbeeea" stroke="#c0492f"/><text x="100" y="60" font-size="12" text-anchor="middle" fill="#b5401f">削除マーカー1</text><rect x="170" y="40" width="120" height="30" rx="5" fill="#fbeeea" stroke="#c0492f"/><text x="230" y="60" font-size="12" text-anchor="middle" fill="#b5401f">削除マーカー2</text><rect x="300" y="40" width="120" height="30" rx="5" fill="#fbeeea" stroke="#c0492f"/><text x="360" y="60" font-size="12" text-anchor="middle" fill="#b5401f">削除マーカー3</text><text x="230" y="100" font-size="13" text-anchor="middle" fill="#12211a">コンパクションが遅れるほど積み重なる</text></svg>'
+          + '<p class="cap">図: 削除マーカーはコンパクションまで残り、読み取りにも影響する。</p></div>'
+    }
+  },
+  {
+    q: 'あるサービスが当初は読み取り中心(B-tree + 単一リーダー)で運用していたが、キャンペーンにより突発的な書き込み集中(フラッシュセール的な負荷)が恒常的に発生するようになった。設計を見直す際の最も妥当な方針はどれか。',
+    opts: [
+      '読み取り経路のキャッシュだけを強化すれば、ストレージエンジンやレプリケーション方式は変えずに済むという、書き込み側の構造を見落とした方針',
+      'B-treeのページサイズを小さくするだけで、書き込み集中の問題は根本的に解決するという、構造的な弱点を軽視した方針',
+      '単一リーダーをやめて複数リーダー構成にしさえすれば、ストレージエンジンの選択に関わらず書き込み性能は改善するという、別軸を混同した方針',
+      'レプリカ数を増やすことだけに注力すれば、書き込み集中の負荷は分散されて解消するという、読み取り向けの対策を取り違えた方針',
+      'ワークロードが書き込み重視に変わった以上LSM-treeへの移行を検討する価値があり、全順序の要件が残るなら単一リーダーは維持しつつエンジンだけ差し替える判断が筋が通る'
+    ],
+    ans: 4,
+    exps: [
+      'キャッシュは読み取り負荷の緩和には有効だが、書き込みが集中して重くなるというB-treeの構造的な弱点そのものには効かない。',
+      'ページサイズの調整は性能に一定の影響を与える細かな調整項目ではあるが、ワークロードの質的な変化(読み取り中心→書き込み集中)という根本問題を解決する手段ではない。',
+      '複数リーダーにすると書き込み衝突の解消という新たな複雑さが生じる上、ストレージエンジン自体がB-treeのままなら書き込みの重さという根本原因は残る。',
+      'レプリカ数を増やすことは主に読み取りの分散や可用性向上に効くことが多く、単一リーダーへの書き込み集中そのものを直接解消する手段ではない。',
+      '<b>これが正解。</b>ワークロードの変化(読み取り中心→書き込み集中)に応じてストレージエンジンを見直すのは本文で見たSDFCのTicketmaster変種と同じ発想。全順序などの要件の有無に応じて、単一リーダー+LSM-treeか、リーダーレス+LSM-treeかを要件に基づいて選び分けるのが筋が通る判断。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ワークロードの変化に応じて、維持する要件(全順序の有無)で選ぶエンジン・構成が分かれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="ワークロード変化への対応分岐図"><rect x="200" y="15" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="280" y="40" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">書き込み集中が恒常化</text><line x1="280" y1="55" x2="180" y2="95" stroke="#9aa" stroke-width="1.5"/><line x1="280" y1="55" x2="380" y2="95" stroke="#9aa" stroke-width="1.5"/><rect x="60" y="95" width="220" height="55" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="170" y="118" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">全順序が必要</text><text x="170" y="136" font-size="12" text-anchor="middle" fill="#12211a">単一リーダー+LSM-tree</text><rect x="320" y="95" width="220" height="55" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="430" y="118" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">全順序が不要</text><text x="430" y="136" font-size="12" text-anchor="middle" fill="#12211a">リーダーレス+LSM-tree</text></svg>'
+          + '<p class="cap">図: 要件(全順序の有無)で「単一リーダー維持」か「リーダーレス化」かが分かれる。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

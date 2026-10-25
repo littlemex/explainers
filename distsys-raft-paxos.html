@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>合意アルゴリズム Paxos / Raft ― 多数派の交差が安全性を守る</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 25 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>合意アルゴリズム Paxos / Raft ― 多数派の交差が安全性を守る</h1>
+  <p>複数のノードが故障やネットワーク分断を乗り越えて同じ決定に収束できるのは、多数派同士が必ず 1 台以上で重なるという 1 つの事実の上に Raft と Paxos が立っているからである。</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 14 回 クォーラムと Dynamo 型レプリケーション、第 24 回 回復性パターン</p>
+  <p class="intro">結論から言うと、合意アルゴリズムは「過半数が重なる」という 1 つの事実を使って、ノードが故障してもネットワークが分断しても、ログの同じ位置に書く値が食い違わないことを保証する。この回では Raft と Paxos の仕組みを、Raft の論文が示す図 8 の状況 ― 過半数に複製されたエントリでもコミットとはみなせない理由 ― まで含めて正確に見る。</p>
+
+  <section>
+    <h2>1. この回で解く問題 ― 複数のノードは何に同意すればいいのか</h2>
+    <p>結論から言うと、合意アルゴリズムは「ログの同じ位置(スロット)に、ノードが何台故障してもネットワークが分断しても、全員が最終的に同じ値を書き込む」ことを保証する仕組みである。レプリケーションされたステートマシン (各ノードが同じ命令列を同じ順序で実行することで同じ状態に収束する仕組み) を作るには、命令列そのもの、つまりログの中身についてノード全員が一致しなければならない。1 台のリーダーが勝手に書き込んで、他のノードがそれを追従しなければ、各ノードのステートマシンは別々の歴史を歩んでしまう。</p>
+    <p>合意アルゴリズムが満たすべき性質は 2 種類に分かれる。<b>安全性 (safety)</b> は「正常なノードが同じスロットについて決して異なる値を決定しない」という、何が起きても絶対に破ってはいけない制約。<b>活性 (liveness)</b> は「いつかは何らかの決定がなされる」という、十分にノードが動いていれば進むはずという期待である。この 2 つを両方いつでも保証できるわけではないというのが、この先の回 (第 34 回) でも扱う理論的な限界につながる。Raft も Paxos も「安全性は常に守るが、活性は分断やリーダー不在の間だけ犠牲にする」という設計を取っている。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="ログが一致する場合と分岐する場合の図">
+        <text x="310" y="20" font-size="13.5" text-anchor="middle" fill="#12211a">5 台のノードが保持するログ (スロット 1,2,3)</text>
+        <rect x="30" y="35" width="160" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="58" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">正しい状態</text>
+        <text x="110" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">全ノードが [A,B,C] で一致</text>
+        <rect x="430" y="35" width="160" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="510" y="58" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">壊れた状態</text>
+        <text x="510" y="74" font-size="12.5" text-anchor="middle" fill="#12211a">一部が [A,B,C]、</text>
+        <text x="510" y="88" font-size="12.5" text-anchor="middle" fill="#12211a">一部が [A,B,D]</text>
+        <line x1="230" y1="65" x2="400" y2="65" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="310" y="46" font-size="12.5" text-anchor="middle" fill="#4a5d54">合意アルゴリズムが</text>
+        <text x="310" y="60" font-size="12.5" text-anchor="middle" fill="#4a5d54">防ぎたい分岐</text>
+        <text x="310" y="140" font-size="13.5" text-anchor="middle" fill="#12211a">安全性: スロット 3 の値が食い違うことは絶対に起きない</text>
+        <text x="310" y="162" font-size="13.5" text-anchor="middle" fill="#12211a">活性: 十分なノードが動いていれば、いつかスロット 3 の値が決まる</text>
+        <text x="310" y="195" font-size="13" text-anchor="middle" fill="#4a5d54">この 2 つを「いつでも両方」とはいかないことを第 34 回で見る</text>
+      </svg>
+      <p class="cap">図: 合意アルゴリズムが保証するのは「食い違いが起きないこと (安全性)」。「必ず進むこと (活性)」は別の制約で、常に両立するとは限らない。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>2. 多数派の交差という 1 つの事実 ― クォーラムが安全性の基盤になる</h2>
+    <p>Raft と Paxos はどちらも、ノード数 $N$ のうち $f$ 台までの故障を許容するために $N = 2f+1$ 台を用意し、過半数 (クォーラム、$f+1$ 台以上) の同意を決定の条件にする。このとき成り立つ幾何学的な事実が 1 つある。<b>どの 2 つの過半数集合を選んでも、必ず少なくとも 1 台のノードが重なる。</b>$N=2f+1$ のとき、2 つの過半数の大きさはそれぞれ $f+1$ 以上なので、重なりの最小値は $(f+1)+(f+1)-(2f+1)=1$ 台である。</p>
+    <p>この重なりがなぜ安全性の土台になるのか。ある過半数が「値 $V$ を決定した」という事実を持っているとき、将来別の過半数が別の値 $V'$ を決定しようとしても、その新しい過半数は必ず $V$ を知っている 1 台以上を含む。合意アルゴリズムは、この重なったノードが持つ情報を無視して新しい決定を進められないように設計されている ― Paxos では提案者が過半数からの応答に含まれる「以前に受理した値」を必ず引き継ぐ規則、Raft では投票者が自分より古いログを持つ候補者には投票しない規則によって、である。この後の節で、それぞれの具体的な規則を見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="2つの過半数が重なる図">
+        <text x="280" y="20" font-size="13.5" text-anchor="middle" fill="#12211a">N=5 ノード、過半数は 3 台以上</text>
+        <circle cx="200" cy="130" r="90" fill="#198754" opacity="0.18" stroke="#0f5132" stroke-width="2"/>
+        <circle cx="340" cy="130" r="90" fill="#3d7dca" opacity="0.18" stroke="#1f4a68" stroke-width="2"/>
+        <text x="140" y="110" font-size="13" fill="#0f5132" font-weight="700">多数派 A</text>
+        <text x="400" y="110" font-size="13" fill="#1f4a68" font-weight="700">多数派 B</text>
+        <circle cx="170" cy="150" r="14" fill="#8fd6b4" stroke="#0f5132"/>
+        <circle cx="220" cy="180" r="14" fill="#8fd6b4" stroke="#0f5132"/>
+        <circle cx="270" cy="130" r="14" fill="#e8c38a" stroke="#7a5a18"/>
+        <circle cx="370" cy="90" r="14" fill="#9dc3e8" stroke="#1f4a68"/>
+        <circle cx="400" cy="150" r="14" fill="#9dc3e8" stroke="#1f4a68"/>
+        <text x="270" y="135" font-size="11" text-anchor="middle" fill="#000">共有</text>
+        <text x="280" y="200" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">この 1 台が重なりを保証する</text>
+      </svg>
+      <p class="cap">図: 5 台中どの 3 台を選んでも、別の 3 台と必ず 1 台以上重なる。この重なりが矛盾する決定を防ぐ。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>3. Raft の骨格 ― term ・選挙・ログ複製</h2>
+    <p>Raft は論理時計のように単調増加する<b>term (期間)</b> という番号で時間を区切る。Election Safety という安全性の性質により、<b>同じ term の中でリーダーに選ばれるノードは最大 1 台</b>と保証される (Ongaro &amp; Ousterhout, "In Search of an Understandable Consensus Algorithm")。選挙のたびにノードは term を 1 つ増やして立候補し、RequestVote RPC で他ノードに投票を依頼する。投票が割れて決着しない「split vote」を避けるため、選挙タイムアウトは 150〜300ms のような範囲からランダムに選ばれる ― これにより通常はどれか 1 台だけが先にタイムアウトして立候補し、他が追随する前にハートビートを送って選挙を収める。</p>
+    <p>リーダーはクライアントからの命令をログに追加し、AppendEntries RPC で全フォロワーに複製する。AppendEntries は通常のハートビート (空の複製要求) と命令の複製の両方を兼ねる。Raft はログの一貫性について次の 2 つの性質 (合わせて Log Matching Property と呼ばれる) を常に保つ。1 つ目は「異なるログの同じ index と同じ term のエントリは、同じ命令を格納する」。2 つ目は「異なるログの同じ index と同じ term のエントリがあれば、それより前のエントリも全て一致する」。2 つ目の性質は、AppendEntries が新しいエントリの直前の index と term を常に含み、フォロワーが自分のログにそれと一致するエントリが無ければ要求を拒否する、という単純な一貫性チェックによって保たれる。リーダーは自分のログを一切上書き・削除しない (Leader Append-Only)。フォロワーのログに矛盾があれば、リーダーが自分のログで強制的に上書きする側に回る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 680 250" role="img" aria-label="AppendEntriesによるログ複製の一貫性チェックの図">
+        <rect x="20" y="20" width="190" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="115" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Leader term4</text>
+        <rect x="20" y="75" width="38" height="28" fill="#8fd6b4" stroke="#0f5132"/><text x="39" y="94" font-size="11.5" text-anchor="middle">2</text>
+        <rect x="58" y="75" width="38" height="28" fill="#8fd6b4" stroke="#0f5132"/><text x="77" y="94" font-size="11.5" text-anchor="middle">2</text>
+        <rect x="96" y="75" width="38" height="28" fill="#c7e6d6" stroke="#0f5132"/><text x="115" y="94" font-size="11.5" text-anchor="middle">4</text>
+        <line x1="215" y1="40" x2="465" y2="40" stroke="#0f5132" stroke-width="2" marker-end="url(#arrR)"/>
+        <text x="340" y="13" font-size="11.5" text-anchor="middle" fill="#0f5132">AppendEntries</text>
+        <text x="340" y="27" font-size="11.5" text-anchor="middle" fill="#0f5132">(prevIdx=2, prevTerm=2)</text>
+        <rect x="465" y="20" width="175" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="552" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">Follower</text>
+        <rect x="465" y="75" width="38" height="28" fill="#9dc3e8" stroke="#1f4a68"/><text x="484" y="94" font-size="11.5" text-anchor="middle">2</text>
+        <rect x="503" y="75" width="38" height="28" fill="#9dc3e8" stroke="#1f4a68"/><text x="522" y="94" font-size="11.5" text-anchor="middle">2</text>
+        <text x="552" y="130" font-size="12" text-anchor="middle" fill="#12211a">index2 ・ term2 で一致</text>
+        <text x="552" y="148" font-size="12" text-anchor="middle" fill="#12211a">→ 受理して index3 以降を追記</text>
+        <text x="340" y="195" font-size="13" text-anchor="middle" fill="#4a5d54">直前の index ・ term が食い違うエントリは拒否され、</text>
+        <text x="340" y="215" font-size="13" text-anchor="middle" fill="#4a5d54">リーダーが nextIndex を下げて再送し、食い違う部分を上書きする</text>
+        <defs><marker id="arrR" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: AppendEntries は直前の index ・ term を一緒に送り、フォロワーはそこが一致しない限り新しいエントリを拒否する。これが Log Matching Property を保つ一貫性チェック。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>4. 「前 term のエントリは現 term のコミットを通じてのみコミットされる」(図 8 の状況)</h2>
+    <p>リーダーは、自分が作ったエントリが過半数に複製された時点でそれを<b>コミット済み</b>とみなし、以降は失われないことを保証する。問題は、過半数に複製されたエントリが<b>以前の term で作られたもの</b>だった場合である。Raft の論文 §5.4.2 はこの状況を次のように説明する：「リーダーは、自分の現在の term から来たエントリが過半数に複製された時点でコミットと判断できる。しかし、以前の term から来たエントリについては、過半数に複製されているというだけで、直ちにコミット済みと結論することはできない」。</p>
+    <p>論文の図 8 は、5 台のサーバー (S1〜S5) で次の時系列がなぜ危険かを示す。(a) S1 が term2 のリーダーとなり、index2 のエントリ (term2) を S2 まで部分的に複製する。(b) S1 がクラッシュし、S5 が term3 のリーダーに選ばれる (S3 ・ S4 ・自分自身からの投票で過半数)。S5 は index2 に別のエントリ (term3) を受理する。(c) S5 もクラッシュし、S1 が再起動してリーダーに選ばれ、複製を続ける。この時点で、term2 のエントリは S1 ・ S2 ・ S3 という過半数 (5 台中 3 台) に複製されているが、<b>まだコミットされていない</b>。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="図8(a)-(c): 過半数に複製されてもコミットとみなせない状況">
+        <text x="315" y="18" font-size="13" text-anchor="middle" fill="#12211a">(a)→(b)→(c): term2 のエントリが S1,S2,S3 という過半数に乗る</text>
+        <g>
+          <rect x="20" y="40" width="110" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="75" y="62" font-size="12.5" text-anchor="middle">S1 term2</text>
+          <rect x="140" y="40" width="110" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="195" y="62" font-size="12.5" text-anchor="middle">S2 term2</text>
+          <rect x="260" y="40" width="110" height="34" rx="6" fill="#f4e9d8" stroke="#8a6a1c"/><text x="315" y="62" font-size="12.5" text-anchor="middle">S3 term3</text>
+          <rect x="380" y="40" width="110" height="34" rx="6" fill="#f4e9d8" stroke="#8a6a1c"/><text x="435" y="62" font-size="12.5" text-anchor="middle">S4 term3</text>
+          <rect x="500" y="40" width="110" height="34" rx="6" fill="#f4e9d8" stroke="#8a6a1c"/><text x="555" y="62" font-size="12.5" text-anchor="middle">S5 term3</text>
+          <text x="315" y="30" font-size="11.5" text-anchor="middle" fill="#4a5d54">(b) S5 が term3 で選出</text>
+        </g>
+        <g>
+          <rect x="20" y="110" width="110" height="34" rx="6" fill="#8fd6b4" stroke="#0f5132"/><text x="75" y="132" font-size="12.5" text-anchor="middle">S1 idx2=term2</text>
+          <rect x="140" y="110" width="110" height="34" rx="6" fill="#8fd6b4" stroke="#0f5132"/><text x="195" y="132" font-size="12.5" text-anchor="middle">S2 idx2=term2</text>
+          <rect x="260" y="110" width="110" height="34" rx="6" fill="#8fd6b4" stroke="#0f5132"/><text x="315" y="132" font-size="12.5" text-anchor="middle">S3 idx2=term2</text>
+          <rect x="380" y="110" width="110" height="34" rx="6" fill="#f4e9d8" stroke="#8a6a1c"/><text x="435" y="132" font-size="12.5" text-anchor="middle">S4 idx2=term3</text>
+          <rect x="500" y="110" width="110" height="34" rx="6" fill="#f4e9d8" stroke="#8a6a1c"/><text x="555" y="132" font-size="12.5" text-anchor="middle">S5 idx2=term3</text>
+          <text x="315" y="100" font-size="11.5" text-anchor="middle" fill="#4a5d54">(c) S1 が復帰しリーダーに。term2 が過半数(3 台)に複製</text>
+        </g>
+        <text x="315" y="175" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">過半数に乗っているが term2 はまだコミットされていない</text>
+        <text x="315" y="198" font-size="13" text-anchor="middle" fill="#4a5d54">(自分の term=4 ではなく term2 のまま複製されているため)</text>
+      </svg>
+      <p class="cap">図: 図 8(c)の状況。term2 のエントリが 5 台中 3 台(過半数)に複製されても、Raft はこれをコミットとみなさない。</p>
+    </div>
+    <p>(d) ここで S1 がクラッシュすると、S5 が (S2 ・ S3 ・ S4 の投票を得て) リーダーに選ばれ得る。S5 の最後のログの term は 3 で、投票者である S2 ・ S3 ・ S4 の最後のログの term は 2 なので、term 番号が大きい方が「より新しい」と判定する規則により、ログの長さに関係なく S5 が票を得る。S5 はリーダーになると index2 のエントリを自分の term3 のもので上書きする ― <b>過半数に複製されていたはずの term2 のエントリが消える。</b>(e) しかし、もし S1 が (term4 の) 自分の現在の term のエントリを過半数に複製できていれば、そのエントリは直ちにコミットされ、S5 は選挙に勝てなくなる (S2 や S3 の最後のログの term が 4 になっており、S5 の term である 3 より新しいため)。そしてこの瞬間、Log Matching Property によって、それより前にある index2 のエントリも間接的にコミットされる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 210" role="img" aria-label="図8(d)と(e)の分岐">
+        <rect x="20" y="20" width="285" height="150" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="162" y="45" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">(d) S1 がここで落ちた場合</text>
+        <text x="162" y="70" font-size="12" text-anchor="middle" fill="#12211a">S5 が S2,S3,S4 の票で当選</text>
+        <text x="162" y="92" font-size="12" text-anchor="middle" fill="#12211a">term2 のエントリを自分の</text>
+        <text x="162" y="112" font-size="12" text-anchor="middle" fill="#12211a">term3 で上書き</text>
+        <text x="162" y="140" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">→ 過半数にあった値が消える</text>
+        <rect x="335" y="20" width="285" height="150" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="477" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">(e) 先に現 term を複製できた場合</text>
+        <text x="477" y="70" font-size="12" text-anchor="middle" fill="#12211a">term4 のエントリが過半数に複製</text>
+        <text x="477" y="92" font-size="12" text-anchor="middle" fill="#12211a">→即コミット。S5 は term4 のログに</text>
+        <text x="477" y="112" font-size="12" text-anchor="middle" fill="#12211a">勝てず当選不可</text>
+        <text x="477" y="140" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">→ term2 も間接的にコミット</text>
+      </svg>
+      <p class="cap">図: 図 8(d)(e)。「過半数への複製」だけではコミットを保証できず、自分の現 term のエントリが過半数に乗って初めて、それ以前のエントリも含めて確定する。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>5. Paxos の骨格と Multi-Paxos、メンバー変更</h2>
+    <p>基本の Paxos (1 つの値だけを決める single-decree Paxos) は 2 段階で進む。Phase1 (prepare/promise) では提案者が提案番号 $n$ を使って過半数の acceptor に prepare を送り、acceptor は「これより小さい番号の提案にはもう応じない」と約束 (promise) しつつ、もし既に受理した値があればそれを提案者に返す。Phase2 (accept/accepted) では、提案者は Phase1 で過半数から得た応答の中に既存の受理済みの値があれば、自分の値ではなくその値を使って提案し直す。この規則によって、第 2 節の「クォーラムの交差」が実際に安全性を守る仕組みとして働く ― 過半数が既に値 $V$ を受理していれば、別の過半数は必ず $V$ を知っている 1 台以上を含み、提案者はその情報を無視して別の値を決定することができない。</p>
+    <p>この 2 段階をすべての決定ごとに繰り返すのは非効率なので、Multi-Paxos では安定した提案者 (リーダーに近い役割) が決まっている間は Phase1 を 1 度だけ行い、以降の決定は Phase2 だけを繰り返す。これは Raft が「選挙を一度行えば、以降は AppendEntries の繰り返しだけで複製を進める」構造と同じ考え方である。</p>
+    <p>クラスタの台数を変える (サーバーを入れ替える、増減する) 操作も、安全に行うには工夫が要る。旧構成から新構成へ全ノードを一度に切り替えることはできないため、切り替えの途中でクラスタが旧構成の過半数と新構成の過半数という<b>2 つの独立した多数派</b>に分かれてしまう危険がある。Raft はこれを避けるため、移行期間中は<b>joint consensus (Cold,new)</b>という過渡的な構成を経由する。選挙とログのコミットのどちらも、旧構成の過半数と新構成の過半数の<b>両方</b>の同意を必要とすることで、どちらか一方だけで独立に決定が進む状況を作らない。新構成が単独でコミットできるようになった時点で、初めて新構成への完全な移行が完了する。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="joint consensusの図">
+        <text x="300" y="20" font-size="13.5" text-anchor="middle" fill="#12211a">構成変更の移行期間: Cold,new</text>
+        <rect x="40" y="40" width="230" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">旧構成 Cold の過半数</text>
+        <text x="155" y="85" font-size="12" text-anchor="middle" fill="#12211a">(例: 3 台中 2 台)</text>
+        <rect x="330" y="40" width="230" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="445" y="65" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">新構成 Cnew の過半数</text>
+        <text x="445" y="85" font-size="12" text-anchor="middle" fill="#12211a">(例: 5 台中 3 台)</text>
+        <text x="300" y="135" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">選挙・コミットのどちらも両方の同意が必要</text>
+        <text x="300" y="160" font-size="13" text-anchor="middle" fill="#4a5d54">Cnew が単独でコミットできるようになった時点で移行完了</text>
+      </svg>
+      <p class="cap">図: joint consensus は移行期間中、旧構成と新構成の両方の過半数を同時に要求し、分裂した 2 つの多数派が別々の決定を下す事態を防ぐ。</p>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>6. どこで壊れるか・何を諦めるか・実システムでの例</h2>
+    <p>Raft/Paxos はネットワーク分断が起きても安全性を破らないが、代わりに<b>可用性</b>を犠牲にする。5 台のクラスタが 2 台と 3 台に分かれたとき、過半数を持つ 3 台側だけがリーダーを選出して書き込みを継続でき、2 台側は書き込みを進められない。これは第 8 回で見た CAP 定理の CP 側の選択そのものである。また、ランダム化された選挙タイムアウトが無ければ、複数の候補者が同時に立候補して票が割れ続ける「split vote」が繰り返され、いつまでもリーダーが決まらない活性の問題が起きる。Raft の論文は $\text{broadcastTime} \ll \text{electionTimeout} \ll \text{MTBF}$ という不等式を目安として示しており、ハートビートを送る時間がタイムアウトより十分短く、タイムアウトが平均故障間隔より十分短いことが、安定した運用の条件になる。</p>
+    <p>実システムでは、etcd と Consul は Raft を合意の基盤に使い、Kubernetes のクラスタ状態の保存先として etcd が使われている。ZooKeeper は ZAB (ZooKeeper Atomic Broadcast) という独自の合意プロトコルを使うが、リーダーに基づく複製とクォーラムという考え方は共通している。Google の Chubby ロックサービスは Paxos を基盤にしており、こうした合意の仕組みが分散ロック (次回の第 26 回で扱う) やメタデータ管理の土台になっている。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="可用性を犠牲にする実例の図">
+        <rect x="20" y="30" width="560" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">etcd(Kubernetes) / Chubby(Google) / ZooKeeper(ZAB) は全てこの考え方の上に立つ</text>
+        <text x="300" y="110" font-size="13.5" text-anchor="middle" fill="#12211a">安全性は常に守る。活性(可用性)は分断・リーダー不在の間だけ犠牲にする</text>
+        <text x="300" y="140" font-size="13" text-anchor="middle" fill="#4a5d54">この「安全性優先・活性は条件付き」という設計は第 34 回の FLP 不可能性と地続きである</text>
+      </svg>
+      <p class="cap">図: 実システムは安全性を常に守り、可用性(活性)だけを分断時に犠牲にする設計を共有している。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://raft.github.io/raft.pdf" target="_blank" rel="noopener">Diego Ongaro, John Ousterhout, "In Search of an Understandable Consensus Algorithm" ― term ・選挙・ Log Matching Property ・図 8 のコミット規則・ joint consensus の出典</a></li>
+      <li><a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf" target="_blank" rel="noopener">Leslie Lamport, "Paxos Made Simple" ― Phase1/Phase2 の 2 段階構造の出典</a></li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-resilience.html">← 第 24 回 回復性パターン</a><a href="./distsys-index.html">目次</a><a href="./distsys-locks-leases-fencing.html">第 26 回 分散ロック・リース・フェンシング →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+ {
+  "q": "分散合意アルゴリズムが満たすべき「安全性 (safety)」の性質として最も正確なものはどれか？",
+  "opts": [
+   "正常なノードは、ログの同じスロット(位置)について、どんな故障や実行順序が起きても決して異なる値を決定しない",
+   "全てのノードが常に同じ速度で命令を処理し、処理の遅延が一切発生しないことを前提にしている",
+   "ネットワーク分断が起きても全ノードの応答時間が常に一定に保たれ、タイムアウトが発生しないことを保証する",
+   "クライアントのリクエストがネットワークに到着した順序のまま、必ずその到着順で処理されることを保証する",
+   "ノードが故障してもログの内容が暗号化された状態のまま保持され、平文に復号されないことを保証する"
+  ],
+  "ans": 0,
+  "exps": [
+   "<b>これが正解。</b>安全性はどんな実行順序・故障パターンでも「正常なノードが同じスロットについて食い違う値を決定しない」ことを保証する制約。活性(いつか決まること)とは別の軸。",
+   "処理速度の均一性は要求されない。むしろRaft/Paxosはノードの速度差があっても安全性を保つことを前提に設計されている。",
+   "応答時間の一定性は可用性やレイテンシの話であり、CAP定理のAの話に近い。合意アルゴリズムの安全性の定義ではない。",
+   "到着順の処理順保証はFIFO順序などの別の性質であり、合意アルゴリズムの安全性(値の食い違い防止)とは異なる軸。",
+   "暗号化はセキュリティの話であり、合意アルゴリズムが扱う一貫性の保証とは無関係。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>安全性は「食い違いが起きないこと」、活性は「いつかは決まること」。この2つは別の軸の保証である。</p><div class=\"fig\"><svg viewBox=\"0 0 520 140\" aria-label=\"安全性と活性の図\"><rect x=\"30\" y=\"30\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"140\" y=\"60\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">安全性</text><text x=\"140\" y=\"85\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">食い違いが絶対に起きない</text><rect x=\"280\" y=\"30\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#eaf5ef\" stroke=\"#3d7dca\" stroke-width=\"2\"/><text x=\"390\" y=\"60\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">活性</text><text x=\"390\" y=\"85\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">いつかは決まる</text></svg><p class=\"cap\">図: 安全性と活性は独立した別の保証。</p></div>"
+  }
+ },
+ {
+  "q": "Raftにおける「term」が担う役割として正しい説明はどれか？",
+  "opts": [
+   "全ノードの物理時計を同期させるための基準時刻で、NTPのように時刻合わせに使われる番号",
+   "単調増加する期間の識別子で、同じtermでリーダーに選ばれるノードは最大1台と保証される",
+   "ログに書き込まれた命令の総数を数えるカウンタで、エントリが追加されるたびに1増える番号",
+   "リーダーがハートビートを送る間隔をミリ秒で表した値で、通信の頻度を制御するパラメータ",
+   "フォロワーがリーダーに送るACK応答に付ける連番で、受信確認の順序を管理するための値"
+  ],
+  "ans": 1,
+  "exps": [
+   "termは物理時計の同期とは無関係。Raftはむしろ同期した物理時計を前提にしない設計になっている。",
+   "<b>これが正解。</b>termは選挙が起きるたびに1つ増える論理的な期間の番号であり、Election Safetyという性質により同じtermの中でリーダーに選ばれるのは最大1台と保証される。",
+   "命令の総数はログのindexが数える役割であり、termとは別の概念。termは「いつの話か」を表す期間の番号。",
+   "ハートビートの間隔は選挙タイムアウトなど別のパラメータで決まり、termの値そのものとは無関係。",
+   "ACK応答の連番という仕組みはRaftの基本設計には無く、termと混同した誤り。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>termは選挙のたびに増える区切りで、1つのtermの中にリーダーは最大1台しか存在しない。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"termの区切りの図\"><line x1=\"40\" y1=\"80\" x2=\"520\" y2=\"80\" stroke=\"#9aa\" stroke-width=\"2\"/><rect x=\"40\" y=\"50\" width=\"150\" height=\"30\" fill=\"#8fd6b4\" stroke=\"#0f5132\"/><text x=\"115\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">term2: S1がリーダー</text><rect x=\"190\" y=\"50\" width=\"150\" height=\"30\" fill=\"#f4e9d8\" stroke=\"#8a6a1c\"/><text x=\"265\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">term3: S5がリーダー</text><rect x=\"340\" y=\"50\" width=\"150\" height=\"30\" fill=\"#c7e6d6\" stroke=\"#0f5132\"/><text x=\"415\" y=\"70\" font-size=\"13\" text-anchor=\"middle\">term4: S1がリーダー</text></svg><p class=\"cap\">図: termは選挙ごとに増える区切り。各termにリーダーは最大1台。</p></div>"
+  }
+ },
+ {
+  "q": "N=5台のノードで過半数(3台以上)を合意の条件にしたとき、クォーラムの交差(重なり)が安全性にとって重要な理由として正しいものはどれか？",
+  "opts": [
+   "過半数同士が重なることで、投票や複製のために交換する通信メッセージの総数がクラスタ全体で常にゼロまで減らせるようになる",
+   "過半数の重なりによって、各ノードが持つ物理時計のずれが自動的に補正され、NTPのような時刻同期の仕組みが不要になる",
+   "どの2つの過半数集合を選んでも必ず1台以上重なるため、別の過半数が矛盾する決定を下せなくなる",
+   "重なりがあることで、スイッチやケーブルの故障によって発生するはずのネットワーク分断そのものが起きなくなる",
+   "重なりは暗号的な署名の代わりとして使われ、通信内容が途中で改ざんされていないことを検出できるようになる仕組みである"
+  ],
+  "ans": 2,
+  "exps": [
+   "通信メッセージがゼロになることはない。クォーラムを集めるには実際に投票や複製のメッセージ交換が必要。",
+   "物理時計のずれの補正はクォーラムの役割ではない。別の仕組み(NTPなど第15回参照)が必要な話。",
+   "<b>これが正解。</b>N=2f+1のとき過半数の大きさはf+1以上で、2つの過半数の重なりの最小値は(f+1)+(f+1)-(2f+1)=1台。この1台以上の重なりが、矛盾する決定を防ぐ土台になる。",
+   "クォーラムの重なりは分断の発生を防ぐものではなく、分断が起きた後でも安全性を守るための数学的な性質。",
+   "暗号署名の代替にはならない。クォーラムの重なりは「多数決の論理」であり、改ざん検出の仕組みではない。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>5台中どの3台を選んでも、別の3台と必ず1台以上重なる。</p><div class=\"fig\"><svg viewBox=\"0 0 520 150\" aria-label=\"クォーラムの重なりの図2\"><circle cx=\"190\" cy=\"80\" r=\"60\" fill=\"#198754\" opacity=\"0.18\" stroke=\"#0f5132\" stroke-width=\"2\"/><circle cx=\"290\" cy=\"80\" r=\"60\" fill=\"#3d7dca\" opacity=\"0.18\" stroke=\"#1f4a68\" stroke-width=\"2\"/><text x=\"150\" y=\"40\" font-size=\"13\" fill=\"#0f5132\">多数派X</text><text x=\"330\" y=\"40\" font-size=\"13\" fill=\"#1f4a68\">多数派Y</text><circle cx=\"240\" cy=\"80\" r=\"10\" fill=\"#b5401f\"/><text x=\"240\" y=\"110\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">重なる1台</text></svg><p class=\"cap\">図: 重なった1台が矛盾する決定の発生を防ぐ鍵になる。</p></div>"
+  }
+ },
+ {
+  "q": "Raftの投票制限(election restriction)として正確な規則はどれか？",
+  "opts": [
+   "候補者から届いた投票依頼メッセージの到着時刻が、クラスタ内の全候補者の中でもっとも早かった場合にのみ票を与える仕組みになっている",
+   "候補者が自分で測定して報告してきたCPU使用率の値が、投票者自身の使用率よりも低い場合にのみ票を与える仕組みになっている",
+   "候補者が物理的に所属しているデータセンターやリージョンが、投票者自身のものと同じ場合にのみ票を与える仕組みになっている",
+   "候補者のログが投票者自身のログと同等以上に新しい場合にのみ票を与え、新しさは「最後のエントリのtermが大きい方、同じtermなら長い方」で決める",
+   "候補者が過去に一度でもリーダーとして選ばれて正常に運用された経験を持っている場合にのみ票を与える仕組みになっている"
+  ],
+  "ans": 3,
+  "exps": [
+   "到着時刻の早さは投票の基準ではない。Raftの投票は「ログの新しさ」で決まる。",
+   "CPU使用率は投票条件に一切関係しない。",
+   "データセンターの一致は投票条件に含まれない。Raftはそのような物理的配置を前提にしない。",
+   "<b>これが正解。</b>RequestVote RPCは候補者のログ情報を含み、投票者は自分のログより古い候補者には投票を拒否する。新しさはlast log termが大きい方、同じなら長い方で判定する。",
+   "過去にリーダーだった経験は投票条件に含まれない。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>投票者は自分より古いログを持つ候補者には票を与えない。これによって、コミット済みのエントリを持たない候補者がリーダーになることを防ぐ。</p><div class=\"fig\"><svg viewBox=\"0 0 520 150\" aria-label=\"投票制限の図\"><rect x=\"30\" y=\"50\" width=\"200\" height=\"50\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\"/><text x=\"130\" y=\"80\" font-size=\"13\" text-anchor=\"middle\">投票者: last term=4</text><rect x=\"280\" y=\"50\" width=\"200\" height=\"50\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\"/><text x=\"380\" y=\"80\" font-size=\"13\" text-anchor=\"middle\">候補者: last term=3</text><text x=\"260\" y=\"130\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">termが古い候補者には投票しない</text></svg><p class=\"cap\">図: ログの新しさ比較が投票の条件。</p></div>"
+  }
+ },
+ {
+  "q": "図8(c)の状況で、term2のエントリがS1・S2・S3という過半数(5台中3台)に複製された後も、Raftがそれを「コミット済み」とみなさない理由として正しいものはどれか？",
+  "opts": [
+   "クラスタのネットワーク帯域がこの時点で不足していて、残り2台への複製があとしばらく物理的に不可能な状態だから",
+   "過半数の定義がちょうどこの時点で5台中4台へと変更されたため、3台への複製だけではもう足りなくなったから",
+   "term2のエントリは転送の途中でチェックサムの誤りが生じてしまい、複製そのものが途中で失敗しているから",
+   "S1が過半数への複製をちょうど終えた直後にクラッシュしてしまったため、そのエントリが物理的にディスクの中から消えてしまったから",
+   "そのエントリは過半数に複製されているが現リーダーの現termで作られたものではなく、より新しいtermのリーダーに上書きされ得る余地が残っているから"
+  ],
+  "ans": 4,
+  "exps": [
+   "帯域不足の有無とは無関係。問題は複製の量ではなく、複製されたエントリがどのtermで作られたかという規則上の話。",
+   "過半数の定義はN=5なら3台以上のままで、変更されていない。",
+   "チェックサム誤りの話はこの図8のシナリオには出てこない架空の理由。",
+   "データが物理的に消えるという説明は誤り。S1のクラッシュ後もS2・S3にはそのエントリが残っている。問題は規則上コミットと判定できない点。",
+   "<b>これが正解。</b>Raftは「現在のtermから来たエントリ」だけを過半数複製で直接コミットと判定する。term2のエントリは過半数に乗っていても旧termのものなので、より新しいtermのリーダーが正当に選出されればそれを上書きできる余地が残る。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>過半数に複製されていても、旧termのエントリは「まだ確定していない」扱いになる。</p><div class=\"fig\"><svg viewBox=\"0 0 520 150\" aria-label=\"旧termエントリの不確定性の図\"><rect x=\"30\" y=\"40\" width=\"460\" height=\"50\" rx=\"8\" fill=\"#fff3e6\" stroke=\"#b5401f\" stroke-width=\"2\"/><text x=\"260\" y=\"70\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">term2のエントリ: 過半数(3/5)に複製済みだが未コミット</text><text x=\"260\" y=\"110\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">新しいtermのリーダーが選ばれれば上書きされ得る</text></svg><p class=\"cap\">図: 過半数複製だけでは、旧termのエントリの確定を保証できない。</p></div>"
+  }
+ },
+ {
+  "q": "図8(d)でS5がリーダーに選出され、過半数に複製されていたはずのterm2のエントリを上書きできてしまう理由として正しいものはどれか？",
+  "opts": [
+   "S5の最後のログのtermが3で、投票者S2・S3・S4の最後のログのtermである2より大きく、長さに関係なくS5の方が新しいと判定されるから",
+   "S5が5台のサーバーの中でもCPUやディスクの性能がもっとも高いハードウェアを搭載していたから、他の候補者より優先的に票が集まったから",
+   "S5がランダムに選び直した選挙タイムアウトの値が、他のどの候補者よりも偶然かなり短い値になっていたから",
+   "S5のログの長さがS2・S3・S4の持つログよりも、実際に格納されているエントリ数で物理的に長かったから",
+   "S5がこのクラスタにおいて過半数を構成する必要台数そのものを書き換えられる特別な権限を持っていたから"
+  ],
+  "ans": 0,
+  "exps": [
+   "<b>これが正解。</b>ログの新しさの比較は、まず最後のエントリのtermを見る。S5はterm3、投票者側はterm2なので、ログの長さに関係なくS5の方が新しいと判定され、S2・S3・S4から票を得られる。",
+   "ハードウェア性能は投票条件に一切関係しない。",
+   "選挙タイムアウトの短さは選挙を始めるタイミングには影響するが、ここで問われている「なぜ票を得られたか」の理由にはならない。問われているのはログ比較の規則。",
+   "term同士が異なる場合、ログの長さの比較は行われない。termが大きい方が無条件で新しいと判定される規則が先に適用される。",
+   "過半数の台数を変更する権限という概念はRaftに存在しない。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>ログの新しさの判定はtermを先に見る。termが異なれば長さは比較されない。</p><div class=\"fig\"><svg viewBox=\"0 0 520 150\" aria-label=\"新しさ判定の優先順位の図\"><rect x=\"40\" y=\"30\" width=\"440\" height=\"40\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"260\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">1. 最後のエントリのtermを比較(大きい方が新しい)</text><rect x=\"40\" y=\"85\" width=\"440\" height=\"40\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\"/><text x=\"260\" y=\"110\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1f4a68\" font-weight=\"700\">2. termが同じ場合のみ、ログの長さを比較</text></svg><p class=\"cap\">図: term比較が優先され、termが異なれば長さは見ない。</p></div>"
+  }
+ },
+ {
+  "q": "「前termのエントリは現termのエントリのコミットを通じてのみコミットされる」というRaftの規則の正確な説明はどれか？",
+  "opts": [
+   "古いtermのエントリは、それが過半数に複製された時点で、他のどんな条件にも関係なく即座にコミットされたことになる",
+   "リーダーは現在のtermのエントリが過半数に複製された時だけ直接コミットと判定し、その瞬間にLog Matching Propertyで前方の全エントリも間接的にコミットされる",
+   "古いtermのエントリは、クラスタの全ノードがそれぞれ最低1回の再起動を経験するまでコミットされない仕組みになっている",
+   "コミット判定にはクライアントから届く明示的な確認応答が必須であり、過半数への複製だけでは十分とされない仕組みになっている",
+   "古いtermのエントリは、新しいリーダーがそれを自分のtermの番号で再発行(番号を打ち直す)しない限り永久にコミットされない仕組みになっている"
+  ],
+  "ans": 1,
+  "exps": [
+   "これは図8が否定している誤解そのもの。過半数複製だけでは、旧termのエントリは上書きされ得る余地が残るためコミットとはみなされない。",
+   "<b>これが正解。</b>Raftは現termのエントリが過半数複製された時だけ直接コミットと判定し、その時点でLog Matching Propertyにより前方の全エントリも間接的にコミットされる。これにより他のアルゴリズムで必要な「termの打ち直し」が不要になる。",
+   "再起動の回数とコミット判定は無関係。",
+   "クライアントの明示的な確認応答という仕組みはRaftのコミット判定には存在しない。判定はリーダー側のログ複製状況だけで行われる。",
+   "term番号の打ち直しが必要というのは別の合意アルゴリズムの話で、Raftはそれを避けるために現在の規則を採用している(論文の該当箇所で明言)。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>現termのエントリが過半数に複製された瞬間、Log Matching Propertyでそれ以前のエントリも一気に確定する。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"間接コミットの図\"><rect x=\"30\" y=\"60\" width=\"120\" height=\"40\" fill=\"#c7e6d6\" stroke=\"#0f5132\"/><text x=\"90\" y=\"85\" font-size=\"12.5\" text-anchor=\"middle\">idx2 term2</text><rect x=\"160\" y=\"60\" width=\"120\" height=\"40\" fill=\"#8fd6b4\" stroke=\"#0f5132\"/><text x=\"220\" y=\"85\" font-size=\"12.5\" text-anchor=\"middle\">idx3 term4(現term)</text><text x=\"150\" y=\"40\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">過半数複製で直接コミット</text><path d=\"M220,105 C220,130 90,130 90,105\" stroke=\"#b5401f\" stroke-width=\"2\" fill=\"none\" marker-end=\"url(#arr-q25-7)\"/><text x=\"150\" y=\"145\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">Log Matchingで間接的にコミット</text><defs><marker id=\"arr-q25-7\" markerWidth=\"8\" markerHeight=\"8\" refX=\"4\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L8,4 L0,8 z\" fill=\"#b5401f\"/></marker></defs></svg><p class=\"cap\">図: 現termのコミットが前方のエントリも間接的にコミットする。</p></div>"
+  }
+ },
+ {
+  "q": "基本のPaxos(single-decree)に対してMulti-Paxosが行う最適化として正しいものはどれか？",
+  "opts": [
+   "Phase2(accept/accepted)を完全に廃止し、Phase1(prepare/promise)だけのやり取りで全ての決定を完結させる",
+   "過半数の同意そのものを不要にし、たった1台のacceptorからの応答だけで決定を確定させてしまう",
+   "安定したリーダー(proposer)がいる間は、決定ごとにPhase1(prepare/promise)を繰り返さず、Phase2(accept/accepted)だけ繰り返して通信を減らす",
+   "全てのacceptorの投票に暗号署名を付けることで、過半数が重なるという性質そのものを不要にする",
+   "決定ごとに毎回まったく新しいacceptorの集合をクラスタ全体からランダムに選び直して提案する"
+  ],
+  "ans": 2,
+  "exps": [
+   "Phase2を完全に廃止すると値を実際に受理する手段が無くなり、合意そのものが成立しない。",
+   "過半数の同意は合意の安全性の根幹であり、1台の応答だけでは誤った決定を防げない。",
+   "<b>これが正解。</b>安定したproposerがいる間はPhase1を省略し、Phase2だけを繰り返すことでラウンド数を減らし、連続する多くの決定を効率よく進められる。",
+   "暗号署名を使っても、過半数の交差という数学的な性質そのものは必要であり、不要にはならない(これはビザンチン故障への対策の話で、Multi-Paxosの最適化とは別軸)。",
+   "acceptorの集合をランダムに選び直すと、過半数の重なりの保証が崩れ、安全性が失われる。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>安定したリーダーがいる間はPhase1を省き、Phase2だけを繰り返す。</p><div class=\"fig\"><svg viewBox=\"0 0 520 150\" aria-label=\"Multi-Paxosの最適化の図\"><rect x=\"30\" y=\"30\" width=\"200\" height=\"90\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"130\" y=\"60\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">基本Paxos</text><text x=\"130\" y=\"85\" font-size=\"12.5\" text-anchor=\"middle\">決定毎にPhase1+Phase2</text><rect x=\"290\" y=\"30\" width=\"200\" height=\"90\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\"/><text x=\"390\" y=\"60\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1f4a68\" font-weight=\"700\">Multi-Paxos</text><text x=\"390\" y=\"85\" font-size=\"12.5\" text-anchor=\"middle\">Phase1は1回、以降Phase2のみ</text></svg><p class=\"cap\">図: 安定リーダー下ではPhase1を省略できる。</p></div>"
+  }
+ },
+ {
+  "q": "クラスタの台数を変更する際にRaftが使うjoint consensus(Cold,new)の考え方として正しいものはどれか？",
+  "opts": [
+   "移行期間中はクラスタ全体をいったんオフラインにして設定ファイルを書き換え、その後まとめて再起動する",
+   "新しい構成に加わるサーバーを即座に投票権付きで参加させ、旧構成側のサーバーはその時点で直ちに無視する",
+   "台数変更が進んでいる最中は、冗長性を確保するためにリーダーを常に2台同時に立てておく",
+   "移行期間中は旧構成と新構成の両方で過半数の同意を要求し、両者が同時に別々の決定を独立に下せる状態を作らないようにする",
+   "台数変更の最中だけ過半数という条件そのものを一時的に撤廃し、1台だけの同意で決定を進められるようにする"
+  ],
+  "ans": 3,
+  "exps": [
+   "オフライン化と再起動はRaftが避けたかった手動手順そのもので、論文はこれを可用性が落ちる方法として挙げ、自動化された仕組みを提案している。",
+   "新サーバーをいきなり投票に参加させると、ログが追いついていない新サーバーのせいで可用性が落ちる恐れがあるため、最初は非投票メンバーとして参加させる。",
+   "リーダーは常に1台のみ。2台のリーダーが同時に存在することはElection Safetyに反する。",
+   "<b>これが正解。</b>joint consensusでは選挙も新しいエントリのコミットも、旧構成の過半数と新構成の過半数の両方の同意が必要になる。これにより旧構成と新構成が同時に独立して別の決定を下す状況を防ぐ。",
+   "過半数の条件を撤廃すると安全性が崩れる。joint consensusはむしろ過半数の条件を二重に要求することで安全性を保つ仕組み。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>移行期間中は旧構成と新構成の両方の過半数が必要になり、どちらか一方だけで独立に決定が進むことはない。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"joint consensusの図\"><rect x=\"30\" y=\"40\" width=\"220\" height=\"70\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"140\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">旧構成Coldの過半数</text><rect x=\"310\" y=\"40\" width=\"220\" height=\"70\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\"/><text x=\"420\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1f4a68\" font-weight=\"700\">新構成Cnewの過半数</text><text x=\"280\" y=\"130\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">両方の同意が必要(どちらか単独では決定できない)</text></svg><p class=\"cap\">図: joint consensusは旧新両方の過半数を同時に要求する。</p></div>"
+  }
+ },
+ {
+  "q": "5台のクラスタがネットワーク分断で2台と3台のグループに割れたとき、Raft/Paxosの挙動として正しい記述はどれか？",
+  "opts": [
+   "両方のグループがそれぞれ独立に新しいリーダーを選出し、どちらのグループでも書き込みをそのまま継続できる",
+   "分断が起きた瞬間に過半数の定義そのものが自動的に書き換わり、2台側のグループでも書き込みを継続できる",
+   "分断が起きた瞬間に両グループの間の通信が自動的に復旧し、分断そのものがその場で解消されてしまう",
+   "2台側・3台側のどちらのグループも、分断が続く間は読み取り専用モードに切り替わり書き込みが両方で停止する",
+   "2台側は過半数を持たずリーダーを選出できず書き込みが進まない。3台側は過半数を持つため書き込みを継続できる"
+  ],
+  "ans": 4,
+  "exps": [
+   "両グループが独立にリーダーを選出すると、同時に2台のリーダーが存在してしまい、Election Safetyおよび合意アルゴリズムの安全性に反する。これは絶対に起きないよう設計されている。",
+   "過半数の定義(N台のうちf+1台)は固定であり、分断によって動的に変わることはない。",
+   "分断はネットワーク機器の問題であり、合意アルゴリズムの動作によって自動的に解消されるものではない。",
+   "3台側のグループは過半数を持つため、新リーダーを選出して書き込みを継続できる。両方停止という記述は誤り。",
+   "<b>これが正解。</b>5台中3台を持つグループだけが過半数の条件(3台以上)を満たすため、新リーダーを選出して書き込みを継続できる。2台側は過半数に届かず書き込みが進まない。これは第8回のCAP定理でのCP側の挙動に対応する。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する</h4><p>過半数を持つ側だけが書き込みを継続できる。これがCAP定理のCP側の挙動と対応する。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"分断時の挙動の図\"><rect x=\"30\" y=\"40\" width=\"200\" height=\"70\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\"/><text x=\"130\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\" font-weight=\"700\">2台側</text><text x=\"130\" y=\"90\" font-size=\"12.5\" text-anchor=\"middle\">過半数に届かず停止</text><rect x=\"330\" y=\"40\" width=\"200\" height=\"70\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"430\" y=\"65\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">3台側</text><text x=\"430\" y=\"90\" font-size=\"12.5\" text-anchor=\"middle\">過半数を持ち継続可能</text></svg><p class=\"cap\">図: 過半数を持つ側だけが安全に書き込みを続けられる。</p></div>"
+  }
+ }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

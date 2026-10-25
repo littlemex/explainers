@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分散レートリミッタ ― トークンバケツから原子的カウントまで</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 22 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>分散レートリミッタ ― トークンバケツから原子的カウントまで</h1>
+  <p>1 台のメモリで回数を数えるのは簡単だが、複数台に分散させた瞬間に「数え方」そのものが壊れる</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 04 回 <a href="./distsys-caching.html">キャッシュ戦略</a>、第 18 回 <a href="./distsys-isolation-concurrency.html">分離レベルと並行制御</a></p>
+  <p class="intro">レートリミッタ (rate limiter, 利用回数制限装置) は「1 人のユーザーが決められた回数を超えてリクエストを送れないようにする」仕組みです。目的は DDoS 攻撃のような大量リクエストからの防御、1 ユーザー 1 秒 1 件のようなスパム防止、そして下流の脆いサービスを守ること (レートリミットをかけることでクライアントがキャッシュを使うよう仕向ける効果もあります) です。1 台のサーバーでカウンタを持つだけなら単純ですが、サーバーを複数台に増やした瞬間、「誰が数えるか」「どの瞬間の値を正としてよいか」という分散システムそのものの難しさが現れます。この回では、まず 1 台で動くアルゴリズムを整理し、それを複数台に分散させたときに何が壊れ、実システムはどこで正確さを諦めているかを見ます。</p>
+
+  <!-- ===== 解説パート 1: なぜレートリミッタが要るのか ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― なぜレートリミッタが要るのか</h2>
+    <p>レートリミッタの目的は大きく 3 つあります。1 つ目は DDoS 攻撃のような大量リクエストからサービスを守ること。2 つ目はスパム防止で、例えば「1 ユーザーが 1 秒に送れるメッセージは 1 件まで」「1 つの IP から作れるアカウントは 1 日 5 件まで」のような濫用防止です。3 つ目は下流 (downstream) の壊れやすいサービスを保護することで、呼び出し回数に上限を課すことで、呼び出し側にキャッシュを使うよう仕向ける効果もあります。</p>
+    <p>上限を超えたリクエストに対しては、処理を拒否して <code>HTTP 429 Too Many Requests</code> を返すのが一般的です。これは「リクエストの内容が間違っている」という意味の 4xx エラーとは違い、「今は通せないので少し待ってから出し直してほしい」という時間的な制約を伝えるものです。</p>
+    <p>1 台のサーバーで「直近 1 秒に何件来たか」を数えるだけなら、メモリ上の変数を 1 つ持てば済みます。ところがサービスを複数台に増やした瞬間、この「数える」という一番単純な操作そのものが分散システムの問題になります。どの台が数えるのか、複数の台がそれぞれ数えた値をどう合算するのか ― これが本題です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 230" role="img" aria-label="レートリミッタが許可分と拒否分を振り分ける図">
+        <rect x="20" y="75" width="120" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="80" y="100" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">クライアント群</text>
+        <text x="80" y="118" font-size="12.5" text-anchor="middle" fill="#12211a">大量のリクエスト</text>
+        <line x1="140" y1="105" x2="225" y2="105" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-rl1)"/>
+        <rect x="225" y="70" width="150" height="70" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="300" y="97" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">レートリミッタ</text>
+        <text x="300" y="115" font-size="12.5" text-anchor="middle" fill="#12211a">上限 N 件/秒だけ通す</text>
+        <line x1="375" y1="90" x2="460" y2="62" stroke="#198754" stroke-width="2" marker-end="url(#arr-rl1)"/>
+        <text x="415" y="68" font-size="12.5" text-anchor="middle" fill="#0f5132">上限内</text>
+        <rect x="460" y="35" width="160" height="50" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="540" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">保護対象サービス</text>
+        <line x1="375" y1="120" x2="460" y2="150" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-rl1)"/>
+        <rect x="460" y="130" width="160" height="56" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="540" y="151" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">拒否されたリクエスト</text>
+        <text x="540" y="169" font-size="11.5" text-anchor="middle" fill="#b5401f">429 Too Many Requests</text>
+        <defs><marker id="arr-rl1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: レートリミッタは上限内のリクエストだけを下流サービスへ通し、超えた分を 429 で拒否する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: 単一ノードのアルゴリズム四種 ===== -->
+  <section>
+    <h2>2. 1 台で動く 4 つのアルゴリズム</h2>
+    <p><b>トークンバケツ (token bucket)</b> は、容量 C 個のバケツに一定の速さ r 個/秒でトークンを補充し、リクエスト 1 件につきトークン 1 個を消費します。トークンが無ければ拒否します。バケツに溜まっている分だけ一時的なバースト (急な集中) を許すのが特徴です。</p>
+    <p><b>リーキーバケツ (leaky bucket)</b> はキューとして実装し、入ってきたリクエストを溜めつつ、一定の速さでしか外へ処理を出しません。トークンバケツと違い、出力は常に一定速度に均されるため、バーストはそのまま通さず平滑化します。</p>
+    <p><b>固定ウィンドウ (fixed window)</b> は「直近 1 分間に何件来たか」を 1 分単位の箱で数える方式です。実装は最も簡単ですが、ウィンドウの境界をまたいだ瞬間に上限の約 2 倍のリクエストを通してしまう欠陥があります。</p>
+    <p><b>スライディングウィンドウ (sliding window)</b> は固定ウィンドウの境界問題を解決します。各リクエストの時刻を記録して「直近 N 秒」を常にスライドさせながら数えるログ方式は正確ですが、メモリが件数に比例して増えます。前のウィンドウの件数を比率で重み付けして近似するカウンタ方式は、メモリを一定に抑えつつ境界問題をほぼ解消します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="固定ウィンドウの境界バースト問題">
+        <line x1="40" y1="130" x2="560" y2="130" stroke="#9aa" stroke-width="2"/>
+        <line x1="300" y1="30" x2="300" y2="150" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="170" y="22" font-size="13" text-anchor="middle" fill="#4a5d54">ウィンドウ 1 (0:00-0:59)</text>
+        <text x="430" y="22" font-size="13" text-anchor="middle" fill="#4a5d54">ウィンドウ 2 (1:00-1:59)</text>
+        <rect x="220" y="90" width="70" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="255" y="108" font-size="12.5" text-anchor="middle" fill="#5b3d80">100 件</text>
+        <text x="255" y="124" font-size="12.5" text-anchor="middle" fill="#5b3d80">(0:59)</text>
+        <rect x="310" y="90" width="70" height="40" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="345" y="108" font-size="12.5" text-anchor="middle" fill="#5b3d80">100 件</text>
+        <text x="345" y="124" font-size="12.5" text-anchor="middle" fill="#5b3d80">(1:00)</text>
+        <text x="300" y="168" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">2 秒間で 200 件 (上限 100 件/分の 2 倍) が通る</text>
+      </svg>
+      <p class="cap">図: 固定ウィンドウは境界をまたぐ瞬間、短時間に上限の約 2 倍のリクエストを許してしまう。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: 複数台に分散すると原子性が壊れる ===== -->
+  <section>
+    <h2>3. 複数台に分散すると「数える」が壊れる</h2>
+    <p>アプリケーションサーバーを複数台に増やし、カウンタだけを 1 つの Redis に共有させたとします。素朴な実装は「現在値を GET して、上限未満なら INCR する」という 2 段階です。ここに<b>競合状態 (race condition)</b> が生まれます。上限 100 件のとき、2 台のサーバーがほぼ同時に GET して、どちらも現在値 99 を読み、どちらも「上限未満だ」と判断して INCR してしまうと、最終的な値は 101 になり上限を超えて許可してしまいます。第 18 回で見た「読んでから書く」操作がアトミック (不可分) でないと破綻する構図と同じです。</p>
+    <p>対策は、確認と加算を 1 回の不可分な操作にすることです。実務でよく使われるのは次の 2 つです。1 つ目は <b>INCR 自体の戻り値で判定する</b> 方法で、まず加算してから、戻ってきた新しい値が上限を超えていたら「この 1 件を拒否」と事後的に判定します。INCR はそれ自体が 1 つの不可分なコマンドなので、GET と INCR の間に他のリクエストが割り込む隙間がそもそも生まれません。2 つ目は <b>Lua スクリプト</b> による方法で、Redis はシングルスレッドでコマンドを処理するため、1 本のスクリプトの中に書いた「確認してから加算する」という複数ステップは、実行中に他のクライアントのコマンドが割り込まずに一括で終わります。</p>
+    <pre><code>local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+if current > tonumber(ARGV[2]) then
+  return 0
+end
+return 1</code></pre>
+    <p>スライディングウィンドウログを Redis で実装する場合は、各リクエストの時刻をソート済み集合 (sorted set) に追加し、古い時刻を削除してから件数を数える、という複数コマンドの組み合わせになります。この一連の操作も Lua スクリプトか Redis のトランザクション (MULTI/EXEC) で包まないと、途中に他のリクエストが割り込んで数え間違える余地が残ります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 230" role="img" aria-label="GETとINCRの間の競合状態とLuaスクリプトでの解決">
+        <text x="170" y="20" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">GET→INCR (別々の 2 コマンド)</text>
+        <rect x="15" y="35" width="145" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="87" y="57" font-size="12.5" text-anchor="middle" fill="#12211a">サーバー A: GET→99</text>
+        <rect x="180" y="35" width="145" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="252" y="57" font-size="12.5" text-anchor="middle" fill="#12211a">サーバー B: GET→99</text>
+        <rect x="15" y="80" width="145" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="87" y="102" font-size="12.5" text-anchor="middle" fill="#12211a">両方「99&lt;100」で許可</text>
+        <rect x="180" y="80" width="145" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="252" y="102" font-size="12.5" text-anchor="middle" fill="#12211a">結果: 101 件許可</text>
+        <line x1="15" y1="130" x2="570" y2="130" stroke="#d9e5df" stroke-width="1.5"/>
+        <text x="458" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Lua スクリプト (1 回で不可分)</text>
+        <rect x="345" y="35" width="225" height="79" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="458" y="60" font-size="12.5" text-anchor="middle" fill="#12211a">INCR と上限判定を 1 本の</text>
+        <text x="458" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">スクリプトとして実行</text>
+        <text x="458" y="98" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">他リクエストは割り込めない</text>
+        <text x="300" y="155" font-size="13.5" text-anchor="middle" fill="#12211a">GET と INCR が別コマンドだと間に他のリクエストが割り込める</text>
+        <text x="300" y="175" font-size="13.5" text-anchor="middle" fill="#4a5d54">Lua スクリプト (または INCR 単体の戻り値判定) ならその隙間が無い</text>
+      </svg>
+      <p class="cap">図: 確認と加算を 2 つのコマンドに分けると競合状態が生まれる。1 本の不可分な操作にすれば防げる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 複数のレートリミッタ自体が引き起こす過剰/過小許可 ===== -->
+  <section>
+    <h2>4. レートリミッタを複数台に増やすと何を諦めるか</h2>
+    <p>レートリミッタ自体を複数台に増やす方法は大きく 2 つあります。<b>集中型ストア方式</b>は、全台が 1 つの Redis のようなストアに問い合わせて確認・加算します。正確ですが、全リクエストがその 1 点を経由するためレイテンシが増え、ストアが落ちれば全体が止まる単一障害点になります。<b>ローカル予算配分方式</b>は、上限 (例えば 100 件/秒) をレートリミッタ 3 台にあらかじめ 33 件ずつ割り振り、各台が他台と通信せず自分の割り当てだけを見て判断します。レイテンシは低いままですが、トラフィックが台ごとに偏ると、1 台が早く枯渇して拒否し始める一方で別の台には余裕が残り続け、全体では本来の上限より少ない許可しかできない<b>過小許可</b>が起きます。</p>
+    <p>逆に、各台のローカルな使用量を定期的に中央へ同期する折衷方式を取ると、直前の同期から次の同期までの間は各台が「自分の割り当てはまだ残っている」と独立に判断し続けるため、同期の合間に複数台で合算すると上限を超えて許可してしまう<b>過剰許可</b>の瞬間が生まれます。実際のシステムの多くは、厳密な正確さを諦めて上限より少し低い安全マージンを設定し、低レイテンシな非同期同期を使うという割り切りをしています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 200" role="img" aria-label="ローカル予算配分で過小許可が起きる図">
+        <text x="300" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">全体の上限 99 件/秒 を 3 台に 33 件ずつ割り振り</text>
+        <rect x="40" y="28" width="150" height="48" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="115" y="51" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">ノード 1: 33/33 消化</text>
+        <text x="115" y="69" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">(拒否中)</text>
+        <rect x="225" y="28" width="150" height="48" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">ノード 2: 10/33 消化</text>
+        <rect x="410" y="28" width="150" height="48" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="485" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">ノード 3: 8/33 消化</text>
+        <text x="300" y="100" font-size="13.5" text-anchor="middle" fill="#12211a">実際に通した件数の合計は 51 件 (上限 99 件の約半分)</text>
+        <text x="300" y="122" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">ノード間の通信が無いため、余っている分を使い回せない</text>
+        <text x="300" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">(偏りが逆方向に起きれば、合算は上限を超える「過剰許可」にもなる)</text>
+      </svg>
+      <p class="cap">図: トラフィックの偏りに対し、ローカル予算配分は過小許可か過剰許可のどちらかに振れる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 実システムでの設計判断 ===== -->
+  <section>
+    <h2>5. 実システムでの設計判断</h2>
+    <p>SDFC (System Design Fight Club) のレートリミッタに関する設計議論では、次のような現実的な論点が検討されています。<b>スタンドアロンサービスか per-machine (各マシンに同居させるサイドカー) か</b> という選択はレイテンシと精度/公平性のトレードオフであり、<b>ユーザー ID 単位か IP 単位か</b> という選択では、IP 単位は同じ社内ネットワークや CGNAT (ISP が複数ユーザーを 1 つの IP に集約する仕組み) の裏にいる複数ユーザーをまとめて 1 人として制限してしまう不公平さが論点になります。制限ルール自体の保管場所も、設定ファイル・専用のローカル Redis ストア・クライアントごとに柔らかくルールを変えられるビジネスルールエンジン (例: Drools) のどれを使うかという運用上の判断です。</p>
+    <p>実運用でよく併用される最適化が 2 つあります。<b>リクエスト合流 (request collapsing)</b> は、同一のリソースに対する多数の同時リクエストを検知し、実際の計算は 1 回だけ行って結果を待っている全クライアントに配る手法で、レートリミットとは別の仕組みですが下流保護という同じ目的を持ちます。<b>クライアント側レートリミット</b>は、クライアント自身が送信前に自分を絞ることで、そもそもサーバーに届くリクエスト数を減らす手法です。</p>
+    <p>設計判断の基準は「何を守るための制限か」です。決済ゲートウェイの不正利用防止カウンタのように、少しの数え間違いが不正利用の抜け道になる場合は正確さを優先して集中型ストアを選びます。一方、公開 API ゲートウェイのように多少のブレを許容できる場合は、低レイテンシを優先してローカル予算配分を選ぶのが合理的です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/rate-limiter" target="_blank" rel="noopener">SDFC: rate-limiter</a> ― DDoS 防御 ・ スパム防止 ・ 下流保護という 3 つの目的、standalone vs per-machine、IP 単位の NAT 問題、ルール保管場所 (設定ファイル / ローカル Redis / ビジネスルールエンジン)、リクエスト合流とクライアント側レートリミットという実運用の論点を本文の第 1 ・ 5 節に反映した。</li>
+      <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429" target="_blank" rel="noopener">MDN: 429 Too Many Requests</a> ― レートリミットに達した際の HTTP ステータスコードの定義。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-kafka-log.html">← 第 21 回 ログ中心設計と Kafka</a><a href="./distsys-index.html">目次</a><a href="./distsys-counters-topk.html">第 23 回 分散カウンタと Top-K →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'トークンバケツ (token bucket) とリーキーバケツ (leaky bucket) の最も重要な違いは何か？',
+    opts: [
+      'トークンバケツは秒単位の粒度でしか動かず、リーキーバケツはミリ秒単位の粒度でしか動かない',
+      'トークンバケツはRedisでしか実装できず、リーキーバケツはPostgreSQLでしか実装できない',
+      'トークンバケツはIPアドレス単位でしか制限できず、リーキーバケツはユーザーID単位でしか制限できない',
+      'トークンバケツは容量までのバースト(一時的な集中)を許すが、リーキーバケツは一定の速さでしか処理を出さずバーストを均す',
+      'トークンバケツは失敗したリクエストを自動で再送し、リーキーバケツは再送を一切行わない'
+    ],
+    ans: 3,
+    exps: [
+      '時間の粒度(秒かミリ秒か)はどちらのアルゴリズムでも実装側で自由に選べる設定値であり、アルゴリズムそのものの違いではない。',
+      'どちらも特定のストレージ製品に縛られたアルゴリズムではなく、メモリ上の変数でもRedisでも実装できる。',
+      '制限キーをIPにするかユーザーIDにするかはアルゴリズムの選択とは独立した別の設計判断。',
+      '<b>これが正解。</b>トークンバケツは容量分のトークンが溜まっていればバーストを一時的に許すが、リーキーバケツはキューとして実装され一定速度でしか外に出さないため、バーストをそのまま均してしまう。',
+      'リクエストの再送(リトライ)はレートリミッタの役割ではなくクライアント側の挙動であり、どちらのアルゴリズムにも含まれない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>トークンバケツは「溜まっている分だけ一気に使える」のに対し、リーキーバケツは「入り口の勢いに関係なく出口は一定速度」という違いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="トークンバケツとリーキーバケツの違い"><rect x="20" y="20" width="240" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">トークンバケツ</text><text x="140" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">溜まったトークンまで</text><text x="140" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">バーストを許す</text><rect x="300" y="20" width="240" height="110" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="420" y="45" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">リーキーバケツ</text><text x="420" y="70" font-size="12.5" text-anchor="middle" fill="#12211a">出口は常に一定速度</text><text x="420" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">バーストを均す</text></svg>'
+          + '<p class="cap">図: トークンバケツはバーストを許し、リーキーバケツはバーストを均す。</p></div>'
+    }
+  },
+  {
+    q: '固定ウィンドウ (fixed window) 方式のレートリミッタに特有の欠陥として知られているものは？',
+    opts: [
+      'ウィンドウの境界をまたいだ瞬間、短い時間に上限のおよそ2倍のリクエストを通してしまう',
+      '固定ウィンドウは実装が複雑すぎて、実務ではほとんど採用されたことがない',
+      'ウィンドウの境界では常にリクエストを0件しか通さなくなる',
+      '固定ウィンドウはメモリ使用量がリクエスト数に比例して増え続け、他の方式より必ず重くなる',
+      '固定ウィンドウはユーザー単位の制限には使えず、IP単位の制限専用の方式である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>例えば上限100件/分のとき、1分目の終わり際に100件、2分目の始めにまた100件通ると、2秒足らずの間に200件(上限の2倍)が通ってしまう。これが固定ウィンドウの境界バースト問題。',
+      '固定ウィンドウは実装が最も単純なアルゴリズムであり、シンプルさを理由に広く使われている。複雑だから使われないという説明は逆である。',
+      '境界では「新しいウィンドウのカウンタが0から始まる」だけであり、リクエストを通さなくなるわけではない。むしろ新しいウィンドウの上限をすぐに使い切れる。',
+      'メモリに全リクエストのタイムスタンプを保持するのはスライディングウィンドウログの特徴であり、固定ウィンドウは1個のカウンタしか持たないため他方式よりむしろ軽い。',
+      '固定ウィンドウのキー(カウンタを分ける単位)はユーザーIDでもIPでも自由に選べる設計上の選択であり、アルゴリズム自体が制限する対象を固定しているわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、境界をまたいだ瞬間に上限の2倍近いリクエストが通り得ることを確認します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="固定ウィンドウの境界問題の図"><line x1="30" y1="100" x2="530" y2="100" stroke="#9aa" stroke-width="2"/><line x1="280" y1="30" x2="280" y2="110" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 4"/><rect x="190" y="56" width="80" height="44" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="230" y="76" font-size="12.5" text-anchor="middle" fill="#5b3d80">100件</text><text x="230" y="92" font-size="12.5" text-anchor="middle" fill="#5b3d80">(境界直前)</text><rect x="290" y="56" width="80" height="44" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="330" y="76" font-size="12.5" text-anchor="middle" fill="#5b3d80">100件</text><text x="330" y="92" font-size="12.5" text-anchor="middle" fill="#5b3d80">(境界直後)</text><text x="280" y="135" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">短時間に200件、上限の2倍が通過</text></svg>'
+          + '<p class="cap">図: 境界をまたぐ短い時間に、上限の約2倍のリクエストが通る。</p></div>'
+    }
+  },
+  {
+    q: '複数のアプリケーションサーバーが1つのRedisカウンタを共有しているとき、「現在値をGETして上限未満ならINCRする」という素朴な実装にはどんな問題があるか？',
+    opts: [
+      'GETとINCRは必ず同じサーバープロセスの同じスレッドでしか実行できないという制約があるため、複数台のアプリケーションサーバーという構成そのものが技術的に成立しなくなる',
+      'RedisはGETコマンドを一切サポートしていないため、この実装は最初から成立しない',
+      'GETとINCRの間に別のサーバーが割り込んで同じ古い値を読むと、両方が上限未満と判断して許可してしまう競合状態が起きる',
+      'INCRコマンドは実行するたびにRedis全体を再起動させるため、性能上使うべきではない',
+      'GETとINCRを両方使うと、カウンタの値が必ず負の数になってしまう'
+    ],
+    ans: 2,
+    exps: [
+      'GETとINCRはどのサーバーからでも同じRedisインスタンスに対して発行できるコマンドであり、複数台構成を妨げるものではない。',
+      'RedisはGETコマンドを標準でサポートしている基本的な文字列操作であり、この前提自体が誤り。',
+      '<b>これが正解。</b>GETとINCRが別々のコマンドだと、その間に他のサーバーが割り込んで同じ古い値を読み、両方が「上限未満だ」と判断してしまう競合状態(race condition)が発生し、合計で上限を超えて許可してしまう。',
+      'INCRはRedis内の1つの値を1増やすだけの軽量なコマンドであり、サーバー全体の再起動を引き起こすことはない。',
+      'INCRは正の方向に加算するコマンドであり、通常の使い方でカウンタが負の数になることはない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じ構図です。GETとINCRの間に隙間があると、そこに他のリクエストが入り込めます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="GETとINCRの競合状態の図"><rect x="30" y="20" width="220" height="54" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="42" font-size="13" text-anchor="middle" fill="#12211a">サーバーA: GET→99</text><text x="140" y="60" font-size="13" text-anchor="middle" fill="#12211a">(未満なので許可)</text><rect x="310" y="20" width="220" height="54" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="42" font-size="13" text-anchor="middle" fill="#12211a">サーバーB: GET→99</text><text x="420" y="60" font-size="13" text-anchor="middle" fill="#12211a">(未満なので許可)</text><text x="280" y="110" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">両方が同じ古い値99を見て、両方が許可してしまう</text><text x="280" y="135" font-size="13.5" text-anchor="middle" fill="#4a5d54">結果: 合計101件、上限100件を1件超える</text></svg>'
+          + '<p class="cap">図: GETとINCRの間の隙間に別リクエストが割り込むと、合計で上限を超える。</p></div>'
+    }
+  },
+  {
+    q: 'Redisの Lua スクリプトを使って「確認してから加算する」処理を1本にまとめると、なぜ競合状態が防げるのか？',
+    opts: [
+      'Lua スクリプトはネットワークを経由せずクライアント側のメモリ内だけで完結するから',
+      'Redis はシングルスレッドでコマンドを処理するため、1本のスクリプトの実行中は他クライアントのコマンドが割り込めないから',
+      'Lua スクリプトは実行結果を自動的にすべてのレプリカへ同期的に複製するから',
+      'Lua スクリプトを使うと、そもそもカウンタの値を永続化しなくてもよくなるから',
+      'Lua スクリプトは実行されるたびに自動的に複数のRedisインスタンスへ並列送信され、過半数の応答が一致したときに初めて結果が確定する多数決方式を採用しているから'
+    ],
+    ans: 1,
+    exps: [
+      'Lua スクリプト自体はRedisサーバー内で実行される処理であり、クライアント側のメモリ内だけで完結するものではない。',
+      '<b>これが正解。</b>Redis は1本のコマンド (スクリプトも1つのコマンドとして送られる) を処理している間、他のクライアントからのコマンドを割り込ませない。そのため、スクリプト内の「確認してから加算する」という複数ステップが、外部から見て不可分な1つの操作になる。',
+      '同期的なレプリケーションの有無はLuaスクリプトの機能とは別の話であり、スクリプトを使うこと自体が複製方式を変えるわけではない。',
+      '永続化の設定(RDB/AOFなど)はLuaスクリプトの利用とは独立した別の設定項目。',
+      'Lua スクリプトは単一のRedisインスタンス内で実行されるものであり、複数インスタンスへの並列送信や多数決とは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、1本のスクリプトとして実行される間は他のリクエストが割り込めないことがポイントです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Luaスクリプトの不可分性の図"><rect x="40" y="30" width="480" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">1本のLuaスクリプト = 確認+加算 が不可分に実行</text><rect x="135" y="90" width="290" height="36" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="112" font-size="12" text-anchor="middle" fill="#b5401f">他クライアントのコマンドはこの間待たされる</text></svg>'
+          + '<p class="cap">図: スクリプト実行中はRedisが他コマンドを処理しないため、割り込みが起きない。</p></div>'
+    }
+  },
+  {
+    q: '上限100件/秒を3台のレートリミッタに33件ずつ事前に割り振る「ローカル予算配分」方式で、トラフィックが1台に偏った場合に起きやすい問題は？',
+    opts: [
+      '偏ったトラフィックを受けた台が早く枯渇して拒否し始める一方、他の台には余裕が残り、全体では上限より少ない件数しか許可できないことがある',
+      '各台のレートリミッタが背後で常に通信し合い、空いている他の台へリクエストを自動的に転送することで、常に正確に合計100件という上限を守り続ける',
+      '3台のうち1台が必ずクラッシュし、サービス全体が停止する',
+      '事前の割り振りに関係なく、常に合計で正確に100件だけが許可される',
+      'ローカル予算配分では過剰許可も過小許可も理論上絶対に発生しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>各台は他台と通信せず自分の割り当てだけを見て判断するため、偏ったトラフィックを受けた台は早く枯渇して拒否を始め、空いている台の余裕は使われず、全体では上限より少ない許可しかできない過小許可が起きる。',
+      'ローカル予算配分の前提は各台が独立に判断することであり、自動転送や同期をリアルタイムに行うなら、それはもはやローカル予算配分ではなく集中型ストア方式に近づく。',
+      '予算を使い切ることと台がクラッシュすることは別の事象であり、割り当てを使い切っただけでプロセスが落ちるわけではない。',
+      'まさにこの偏りによって、正確に100件を守れなくなる(過小許可か過剰許可のどちらかに振れる)のがローカル予算配分の弱点である。',
+      '過小許可・過剰許可はいずれもトラフィックの偏りによって実際に起こり得る現象であり、「絶対に発生しない」は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、偏ったトラフィックでは余っている予算を他台が使い回せません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="ローカル予算配分の偏りの図"><rect x="30" y="30" width="150" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="105" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">ノード1: 33/33 (拒否中)</text><rect x="205" y="30" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">ノード2: 5/33 (余裕あり)</text><rect x="380" y="30" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="455" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">ノード3: 4/33 (余裕あり)</text><text x="280" y="105" font-size="13.5" text-anchor="middle" fill="#12211a">ノード間通信が無いため、余裕を使い回せず過小許可になる</text></svg>'
+          + '<p class="cap">図: 偏ったトラフィックでは、余っている他ノードの予算を使い回せない。</p></div>'
+    }
+  },
+  {
+    q: 'スライディングウィンドウの「ログ方式」と「カウンタ(近似)方式」の違いとして正しいものは？',
+    opts: [
+      'ログ方式は時刻を記録するため正確だがメモリが件数に比例し、カウンタ方式は前のウィンドウを重み付けして近似するためメモリが一定で済む',
+      'ログ方式とカウンタ方式はまったく同じ実装であり、呼び方が違うだけである',
+      'カウンタ方式の方がログ方式よりも常に正確で、メモリ使用量も常に少ない',
+      'ログ方式は固定ウィンドウと同じ境界バースト問題をそのまま抱えている',
+      'カウンタ方式は時刻情報を一切使わず、サイコロを振るように完全にランダムな乱数だけでリクエストを許可するか拒否するかをそのつど決定する仕組みになっている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>ログ方式は各リクエストのタイムスタンプを保持して「直近N秒」を正確に数えるためメモリが件数に比例して増える。カウンタ方式は前のウィンドウの件数を時間比で重み付けして近似するため、メモリは一定で済む。',
+      '保持する情報(個々の時刻の列か、集計された件数か)が異なり、メモリ使用量も精度も異なる別の実装である。',
+      'カウンタ方式は近似であり、境界付近では多少の誤差が残るため、常にログ方式より正確というわけではない。トレードオフはメモリ対精度である。',
+      'ログ方式は個々のリクエストの時刻を正確に追跡するため、固定ウィンドウのような境界バースト問題は本質的に解消されている。',
+      'カウンタ方式も時刻を基準に前後のウィンドウの重みを計算しており、ランダムな許可・拒否ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>メモリと精度のどちらを取るかという、よくあるトレードオフの一例です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="スライディングウィンドウのログ方式とカウンタ方式の違い"><rect x="40" y="25" width="220" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">ログ方式</text><text x="150" y="72" font-size="12.5" text-anchor="middle" fill="#12211a">正確・メモリは件数に比例</text><rect x="300" y="25" width="220" height="90" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="410" y="50" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">カウンタ方式</text><text x="410" y="72" font-size="12.5" text-anchor="middle" fill="#12211a">近似・メモリは一定</text></svg>'
+          + '<p class="cap">図: 正確さを取るか、一定メモリを取るかのトレードオフ。</p></div>'
+    }
+  },
+  {
+    q: 'IP アドレス単位でレートリミットをかけることの現実的な弱点として知られているものは？',
+    opts: [
+      'IPアドレス単位の制限は技術的に実装不可能であり、どのプログラミング言語でも扱えない',
+      'IPアドレスはインターネットの仕様上、必ず1人のユーザーに1つだけ恒久的に割り当てられる識別子であるため、ユーザーID単位より厳密に公平な制限方法だと言える',
+      'IPアドレス単位の制限を使うと、通信内容が暗号化されず常に盗聴される危険がある',
+      'IPアドレスは秒単位で必ずランダムに変化するため、どんな制限も技術的に無意味になる',
+      '企業のオフィスやCGNAT配下など、複数の異なるユーザーが同じIPアドレスとして観測され、1人の濫用者のせいで他の無関係な利用者もまとめて制限されてしまう'
+    ],
+    ans: 4,
+    exps: [
+      'IPアドレスからリクエスト元を識別する処理自体は一般的なWebサーバーやミドルウェアで広く実装されている機能であり、実装不可能ではない。',
+      '実際には複数ユーザーが同じIPを共有する状況が珍しくなく、「1ユーザーに1つだけ恒久的に割り当てられる」という前提自体が誤り。',
+      '暗号化の有無(例えばTLS)はIPアドレスを制限キーに使うかどうかとは独立した別の話題であり、直接の関係はない。',
+      'IPアドレスが変化しないまま長時間同じ値を保つことも多く、「秒単位で必ずランダムに変化する」という前提は誤り。',
+      '<b>これが正解。</b>CGNAT (ISPが複数の契約者を少数のグローバルIPに集約する仕組み) や社内ネットワークでは、多数の異なるユーザーが同じIPアドレスとして観測されるため、1人が上限に達すると同じIP配下の無関係な他ユーザーまで制限されてしまう不公平が起きる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じIPの裏に複数の人がいることが、不公平な制限を生む原因です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="CGNATで複数ユーザーが1つのIPに集約される図"><rect x="30" y="20" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="42" font-size="12" text-anchor="middle" fill="#0f5132">ユーザーA</text><rect x="30" y="65" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="87" font-size="12" text-anchor="middle" fill="#0f5132">ユーザーB(濫用)</text><line x1="120" y1="35" x2="260" y2="55" stroke="#9aa" stroke-width="1.5"/><line x1="120" y1="82" x2="260" y2="60" stroke="#9aa" stroke-width="1.5"/><rect x="260" y="40" width="140" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="330" y="62" font-size="12.5" text-anchor="middle" fill="#5b3d80">同一IP(CGNAT)</text><line x1="400" y1="57" x2="470" y2="57" stroke="#c0492f" stroke-width="2" marker-end="url(#arr-q7)"/><rect x="470" y="40" width="70" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="505" y="62" font-size="12" text-anchor="middle" fill="#b5401f">制限</text><text x="280" y="120" font-size="13" text-anchor="middle" fill="#12211a">ユーザーAもBと同じIPとして制限を受ける</text><defs><marker id="arr-q7" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs></svg>'
+          + '<p class="cap">図: 同じIPを共有する無関係な利用者が、まとめて制限を受けてしまう。</p></div>'
+    }
+  },
+  {
+    q: '「リクエスト合流 (request collapsing)」とはどのような手法か？',
+    opts: [
+      '上限を超えて拒否されたリクエストを検知し、それらだけを自動的に別のデータセンターへまとめて転送して処理させる手法',
+      'レートリミッタのカウンタを複数のRedisインスタンス間で合流(マージ)させる手法',
+      '同一のリソースに対する多数の同時リクエストを検知し、実際の計算は1回だけ行って、その結果を待っている全クライアントに配る手法',
+      'リクエストのヘッダ情報を1つのバイナリ形式に圧縮して送信量を減らす手法',
+      'タイムアウトしたリクエストをすべて即座に拒否し、二度と再送させない手法'
+    ],
+    ans: 2,
+    exps: [
+      '別データセンターへの転送はフェイルオーバーやロードバランシングの話であり、リクエスト合流の定義ではない。',
+      'レートリミッタ自体のカウンタ合算は第4節の「複数ノードの同期」の話題であり、リクエスト合流とは別の概念。',
+      '<b>これが正解。</b>多数のクライアントが同じ内容を同時に要求してきたとき、サーバー側で1回だけ計算し、その1つの結果を待っている全クライアントに配ることで、下流への負荷を減らす手法。レートリミットとは別の仕組みだが、下流保護という目的は共通する。',
+      'データ圧縮や通信フォーマットの最適化とは異なる話題であり、リクエスト合流の定義には当てはまらない。',
+      'タイムアウトしたリクエストの扱いはリトライ戦略の話題であり、同時に来た同一リクエストをまとめる手法ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じものを何度も計算するのをやめて、1回の結果を全員に配るのがポイントです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="リクエスト合流の図"><rect x="30" y="20" width="90" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="40" font-size="12" text-anchor="middle" fill="#0f5132">クライアント1</text><rect x="30" y="60" width="90" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="80" font-size="12" text-anchor="middle" fill="#0f5132">クライアント2</text><rect x="30" y="100" width="90" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="120" font-size="12" text-anchor="middle" fill="#0f5132">クライアント3</text><line x1="120" y1="35" x2="260" y2="70" stroke="#9aa" stroke-width="1.5"/><line x1="120" y1="75" x2="260" y2="75" stroke="#9aa" stroke-width="1.5"/><line x1="120" y1="115" x2="260" y2="80" stroke="#9aa" stroke-width="1.5"/><rect x="260" y="55" width="130" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="325" y="80" font-size="12.5" text-anchor="middle" fill="#5b3d80">1回だけ計算</text><line x1="390" y1="75" x2="465" y2="75" stroke="#198754" stroke-width="2" marker-end="url(#arr-q8)"/><text x="480" y="80" font-size="12.5" text-anchor="start" fill="#0f5132">3者へ配る</text><defs><marker id="arr-q8" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#198754"/></marker></defs></svg>'
+          + '<p class="cap">図: 同時に来た同一の要求を1回の計算にまとめ、結果を全員に配る。</p></div>'
+    }
+  },
+  {
+    q: '決済ゲートウェイの「1枚のカードで1時間にN回を超える試行を拒否する」不正利用防止カウンタと、公開APIゲートウェイの一般的なレートリミットを比べたとき、設計方針の違いとして適切なものは？',
+    opts: [
+      '両者とも常に同じ実装を使うべきで、用途によって方針を変える必要は一切ない',
+      '公開APIゲートウェイのような大量アクセスを受けるサービスは必ず集中型ストアを使うべきであり、逆に決済ゲートウェイのような重要な処理はローカル予算配分を使うべきである',
+      '決済ゲートウェイは低レイテンシのみを優先すればよく、正確さは重視しなくてよい',
+      '両者とも正確さよりレイテンシを優先すべきで、多少の数え間違いはどちらも許容してよい',
+      '不正利用防止のように数え間違いが実害に直結する場合は正確さ優先の集中型ストアを選び、ブレを許容できる公開APIでは低レイテンシのローカル予算配分を選ぶのが合理的である'
+    ],
+    ans: 4,
+    exps: [
+      '用途によって「何を守るための制限か」が異なるため、常に同じ実装で済ませるのは設計判断を放棄している。',
+      '説明が決済ゲートウェイと公開APIゲートウェイの組み合わせを逆にしている。正確さが重要な不正利用防止こそ集中型ストアに向く。',
+      '決済関連の不正利用防止は、数え間違いがそのまま実害につながるため、レイテンシよりも正確さを優先すべき典型例である。',
+      '不正利用防止のような安全側の制限では、数え間違いによる実害の大きさを考えると、ブレを許容する判断は適切ではない。',
+      '<b>これが正解。</b>数え間違いが実害(不正利用の抜け道)に直結する場合は正確さを優先して集中型ストアを選び、多少のブレを許容できる公開APIでは低レイテンシを優先してローカル予算配分を選ぶという判断基準が合理的。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「何を守るための制限か」によって、正確さとレイテンシのどちらを優先するかが変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="用途ごとの設計方針の違いの図"><rect x="30" y="30" width="230" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">決済の不正利用防止</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">正確さ優先</text><text x="145" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">集中型ストア</text><rect x="300" y="30" width="230" height="90" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="415" y="55" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">公開APIゲートウェイ</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">低レイテンシ優先</text><text x="415" y="98" font-size="12.5" text-anchor="middle" fill="#12211a">ローカル予算配分</text></svg>'
+          + '<p class="cap">図: 数え間違いの実害の大きさによって、正確さとレイテンシのどちらを優先するか変わる。</p></div>'
+    }
+  },
+  {
+    q: 'レートリミッタを導入する一般的なアーキテクチャ上の位置づけとして正しいものは？',
+    opts: [
+      '保護対象のサービスの内部にある最後の処理ステップとしてのみ実行され、応答をいったん生成した後になってから事後的に件数を数える仕組みである',
+      '通常はミドルウェアとして保護対象のサービスの手前に置かれ、上限を超えたリクエストはサービス本体を呼び出す前に 429 で拒否される',
+      'データベースのディスク書き込みが完了した後にだけ呼び出される仕組みである',
+      'クライアント側には絶対に実装できず、必ずサーバー側だけに置かれる仕組みである',
+      'DNSサーバーの内部でのみ動作し、アプリケーションサーバーには一切関与しない仕組みである'
+    ],
+    ans: 1,
+    exps: [
+      '応答生成後に事後的に数えるのでは、既に下流サービスへ負荷をかけてしまった後になり、保護の目的を果たせない。',
+      '<b>これが正解。</b>レートリミッタは通常、保護対象のサービスの手前に置かれるミドルウェアとして動作し、上限を超えたリクエストはサービス本体を呼び出す前に 429 Too Many Requests で拒否する。これにより下流サービスへの負荷そのものを防げる。',
+      'ディスク書き込み完了後に呼び出すという特定のタイミングに縛られた仕組みではない。',
+      '本文で触れたクライアント側レートリミットのように、クライアント側で自発的に自分を絞る実装も実際に行われている。',
+      'DNSサーバー限定の仕組みではなく、APIゲートウェイやアプリケーションサーバーの手前など多様な場所で使われる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>第1節の図と同じく、レートリミッタは保護対象サービスの手前に立ちます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="レートリミッタの配置の図"><rect x="20" y="45" width="110" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="70" font-size="12.5" text-anchor="middle" fill="#0f5132">クライアント</text><line x1="130" y1="65" x2="210" y2="65" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q10)"/><rect x="210" y="40" width="140" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="70" font-size="12.5" text-anchor="middle" fill="#1f4a68">レートリミッタ(手前)</text><line x1="350" y1="65" x2="430" y2="65" stroke="#198754" stroke-width="2" marker-end="url(#arr-q10)"/><rect x="430" y="40" width="110" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="485" y="70" font-size="12.5" text-anchor="middle" fill="#0f5132">保護対象サービス</text><defs><marker id="arr-q10" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: レートリミッタはサービス本体の手前で、超過リクエストを先に止める。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

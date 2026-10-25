@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分散スケジューラとワークフロー ― 厳密に 1 回は諦め、冪等な再実行に倒す</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 30 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>分散スケジューラとワークフロー ― 厳密に 1 回は諦め、冪等な再実行に倒す</h1>
+  <p>exactly-once が原理的に作れない以上、分散 cron もワークフロー編成も「重複に耐える」方向で設計されている</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 19 回 <a href="./distsys-2pc.html">分散トランザクションと 2PC</a>、第 26 回 <a href="./distsys-locks-leases-fencing.html">分散ロック・リース・フェンシングトークン</a>、第 20 回 <a href="./distsys-saga-outbox-cdc.html">Saga 、Outbox 、CDC</a></p>
+
+  <p class="intro">分散環境で「厳密に 1 回だけ実行する」という要求は、ネットワークが不確実である以上そのままでは実現できない。実務が実際に満たすのは「2 回実行されても結果が 1 回分と同じになる (冪等, idempotent)」という弱い代替であり、分散 cron 、ワークフロー編成・長時間ジョブのスケジューリングはすべてこの代替を軸に設計されている。</p>
+
+  <section>
+    <h2>1. 「厳密に 1 回」はなぜ不可能か</h2>
+    <p>ジョブの実行結果を受け取った側は、常に 2 つの可能性を区別できない。「ジョブが実行されずに応答が消えた」のか、「ジョブは実行されたが、完了の応答だけが消えた」のかである。これはネットワークが応答を失う限り原理的に避けられず、呼び出し側は<b>再送するしかない</b>。再送すれば「少なくとも 1 回 (at-least-once)」は保証できるが、再送した分だけ重複実行の可能性が生まれる。逆に再送しなければ「最大 1 回 (at-most-once)」になるが、実行されない可能性を受け入れることになる。両方を両立させる「厳密に 1 回 (exactly-once)」は、呼び出し側と実行側が完全に状態を共有していない限り作れない。</p>
+    <p>分散 cron (定期実行バッチ) が「同じジョブが 2 台のノードで同時に実行されてしまう」という二重実行の問題を抱えるのも、この不可能性が理由である。対策は「厳密に 1 回」を目指すのではなく、<b>重複実行されても安全なように処理そのものを冪等にする</b>方向に倒すのが定石になる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 180" role="img" aria-label="exactly-onceが成立しない理由の図">
+        <rect x="30" y="20" width="180" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">呼び出し元: 応答が来ない</text>
+        <line x1="210" y1="40" x2="270" y2="40" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-w1)"/>
+        <rect x="270" y="20" width="160" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="350" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">区別できない 2 状態</text>
+        <text x="130" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">A. 実行されず応答も消えた</text>
+        <text x="500" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">B. 実行されたが応答だけ消えた</text>
+        <line x1="350" y1="60" x2="130" y2="80" stroke="#9aa" stroke-width="1"/>
+        <line x1="350" y1="60" x2="500" y2="80" stroke="#9aa" stroke-width="1"/>
+        <text x="320" y="140" font-size="13" text-anchor="middle" fill="#12211a">再送する → at-least-once (重複の可能性)</text>
+        <text x="320" y="160" font-size="13" text-anchor="middle" fill="#12211a">再送しない → at-most-once (未実行の可能性)</text>
+      </svg>
+      <p class="cap">図: 応答の消失は原因を区別できないため、exactly-once は成立せず、どちらかに倒すしかない。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 分散 cron の二重実行防止 ― リースと一意制約</h2>
+    <p>分散 cron は複数台のノードでレプリカを持つのが普通だが、各レプリカが同時に「今がこのジョブの実行時刻だ」と判断すると二重実行が起きる。対策は 2 段構えになる。1 つは<b>リース (lease, 期限付きの独占権)</b> による実行権の調整で、第 26 回で見るフェンシングトークンと同じ発想で「このジョブを今実行する権利」を一時的に 1 ノードだけに与える。もう 1 つは、実行自体が重複しても事後に潰せるよう、<b>一意制約 (uniqueness constraint)</b> を使う方法で、「ジョブ ID + 実行時刻」のような組を primary key にした行を書き込めた者だけが実際の処理を行う、という形にする。</p>
+    <p>一意制約による重複排除が機能するには、書き込み先のデータストアが<b>全順序 (total order)</b> で書き込みを処理できる必要がある。Spanner や CockroachDB、あるいは単一リーダー構成の PostgreSQL のように、直列化可能な書き込み経路を持つデータストアであれば、「同じキーで 2 つのレプリカが同時に書き込もうとしても、片方だけが成功する」という保証が得られる。これは特定の製品でなければ実現できない話ではなく、<b>直列化可能性を提供できるデータストアであれば成立する</b>一般的な性質である。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="分散cronの二重実行防止の図">
+        <rect x="30" y="30" width="160" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">cron レプリカ A</text>
+        <rect x="30" y="90" width="160" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="115" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">cron レプリカ B</text>
+        <line x1="190" y1="50" x2="260" y2="80" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="190" y1="110" x2="260" y2="80" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="260" y="55" width="200" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="360" y="75" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">一意制約: (job_id, 実行時刻)</text>
+        <text x="360" y="92" font-size="12.5" text-anchor="middle" fill="#12211a">片方だけ書込成功</text>
+        <text x="530" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">成功した側だけ</text>
+        <text x="530" y="73" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">実際に実行</text>
+      </svg>
+      <p class="cap">図: 全順序で書き込めるデータストアへの一意制約が、二重実行を事後に 1 件へ絞り込む。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. ワークフロー編成 ― オーケストレーションとコレオグラフィ</h2>
+    <p>複数のステップ (タスク) からなるワークフローを進める方式には 2 つの型がある。<b>オーケストレーション</b> は、中央の指揮者 (Netflix Conductor, Apache Airflow, AWS Step Functions など) が DAG (有向無閉路グラフ, ステップ同士の依存関係) を見て「次にどのステップを誰に実行させるか」を決める。<b>コレオグラフィ</b> は中央の指揮者を置かず、各ステップが完了イベントを発行し、次のステップがそのイベントを購読して自律的に動く。前者は全体の進行状況を 1 か所で追えるが指揮者が単一障害点になりやすく、後者は単一障害点を避けられるが全体の進行状況を追うのが難しくなる。</p>
+    <p>DAG を進める実装では、1 つのステップが完了するたびに「そのステップを親に持つ子ステップのうち、すべての親が完了状態になったものだけ」を次の実行対象として<b>タスクキュー (Celery, RabbitMQ など)</b> に投入する。ここで重要なのは、<b>既に完了したステップの結果をチェックポイントとして保存しておき、ワークフロー全体の再試行時に完了済みのステップはスキップできる</b>という点である。これにより、100 万ステップのうち 99 万 9999 ステップが終わった後の障害でも、最初からやり直す必要が無くなる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 190" role="img" aria-label="オーケストレーションとコレオグラフィの比較図">
+        <text x="150" y="24" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">オーケストレーション</text>
+        <rect x="80" y="40" width="140" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132"/>
+        <text x="150" y="62" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">指揮者 (Conductor 等)</text>
+        <line x1="150" y1="75" x2="60" y2="115" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="150" y1="75" x2="150" y2="115" stroke="#0f5132" stroke-width="1.5"/>
+        <line x1="150" y1="75" x2="240" y2="115" stroke="#0f5132" stroke-width="1.5"/>
+        <rect x="20" y="115" width="80" height="30" rx="5" fill="#fff" stroke="#0f5132"/>
+        <rect x="110" y="115" width="80" height="30" rx="5" fill="#fff" stroke="#0f5132"/>
+        <rect x="200" y="115" width="80" height="30" rx="5" fill="#fff" stroke="#0f5132"/>
+        <text x="150" y="170" font-size="12" text-anchor="middle" fill="#4a5d54">全体を 1 か所で追えるが指揮者が SPOF</text>
+        <text x="480" y="24" font-size="14" text-anchor="middle" fill="#5b3d80" font-weight="700">コレオグラフィ</text>
+        <rect x="420" y="40" width="80" height="30" rx="5" fill="#efe8f7" stroke="#7a5a9e"/>
+        <text x="460" y="60" font-size="11.5" text-anchor="middle" fill="#5b3d80">ステップ A</text>
+        <line x1="460" y1="70" x2="460" y2="100" stroke="#7a5a9e" stroke-width="1.5" marker-end="url(#arr-w2)"/>
+        <rect x="420" y="100" width="80" height="30" rx="5" fill="#efe8f7" stroke="#7a5a9e"/>
+        <text x="460" y="120" font-size="11.5" text-anchor="middle" fill="#5b3d80">ステップ B</text>
+        <text x="460" y="150" font-size="12" text-anchor="middle" fill="#4a5d54">イベントで自律的に連鎖</text>
+        <text x="460" y="168" font-size="12" text-anchor="middle" fill="#4a5d54">SPOF は無いが全体像が追いにくい</text>
+        <defs><marker id="arr-w2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#7a5a9e"/></marker></defs>
+      </svg>
+      <p class="cap">図: 指揮者を置くか置かないかで、観測しやすさと単一障害点の有無が入れ替わる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 長時間ジョブのスケジューリング ― GPU 枯渇とチェックポイント</h2>
+    <p>ハイパーパラメータ探索のように「1 件の実行に数時間かかり、GPU のような特殊なハードウェアが要り、同時に使える GPU 数に上限 (quota) がある」ジョブ群をスケジュールする場合、ワークフロー編成の課題はさらに重くなる。候補の組み合わせを一度に全部投入すると、GPU の上限を超えた分は待機させる必要があり、<b>待機中のジョブをどの順序で GPU に割り当てるか</b>がスケジューラの責務になる。ここで各ジョブの状態 (未着手・実行中・完了・失敗) を単純な関係データベースで管理するだけで十分なことが多く、複雑な専用ストアを持ち込む必要は無い。</p>
+    <p>実行中に障害でノードが落ちた場合、数時間分の学習を最初からやり直すのは高コストなので、<b>定期的にモデルの状態をチェックポイントとして保存</b>し、再実行時はチェックポイントから再開する。これは第 1 節で見た WAL の発想 (本体更新の前に記録しておく) の長時間ジョブ版であり、「exactly-once の実行」を諦めて「再開可能な冪等なステップの繰り返し」に倒す設計が、ここでも繰り返されている。</p>
+  </section>
+
+  <section>
+    <h2>5. 大量一括送信の at-most-once ― バッチメールの例</h2>
+    <p>1,000 万件のメールを 10 分以内に送るようなバッチ送信は、ワークフローというより「同じ種類の軽いタスクを大量に、決まった時間内に処理する」スケジューリング問題になる。ここでの要件は「失敗した送信の数を最小化すること」であり、<b>重複送信よりも未送信の方が安全</b>な領域なので、意図的に at-most-once (最大 1 回) を選ぶ設計も成立する。1 件のメール送信に割ける CPU 時間が短いため、各リクエストをコアに割り当てる数と、1 コアあたりの処理件数の見積もりがスケジューラ設計の起点になる。</p>
+    <p>これは分散 cron やワークフローが重複実行を嫌って冪等性やリースを重視するのと対照的で、<b>「重複のコスト」と「欠落のコスト」のどちらが高いか</b>によって、at-least-once と at-most-once のどちらに倒すべきかが変わるという一般的な設計判断を示す好例になっている。</p>
+  </section>
+
+  <section>
+    <h2>6. どこで壊れるか・何を諦めるか</h2>
+    <ul>
+      <li><b>リースの期限と GC 停止の組み合わせ</b>: リースを持つノードが長い一時停止 (ガベージコレクションなど) に入り、リースが期限切れになった後も自分がまだ有効だと思い込んで処理を続けると、別ノードとの二重実行が起きる。第 26 回のフェンシングトークンが対策になる。</li>
+      <li><b>チェックポイントからの再開が完全に冪等とは限らない</b>: 再開時に「チェックポイント保存直後〜障害直前」の間の副作用 (外部への通知など) が再実行されると、冪等でない処理では重複が発生する。</li>
+      <li><b>オーケストレーションの指揮者のスケール</b>: ワークフロー数が増えると指揮者自体がボトルネック・単一障害点になりやすい。指揮者を冗長化する場合、状態の引き継ぎがまたリースや合意の問題に帰着する。</li>
+      <li><b>GPU quota 下でのデッドロック的な待機</b>: 複数のワークフローが互いに異なる GPU の空きを待ち続けると、全体のスループットが落ちる。公平なスケジューリング方針(優先度・タイムアウト)が無いと、特定のジョブが無期限に待たされる。</li>
+    </ul>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい/なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/distributed-cron" target="_blank" rel="noopener">SDFC: distributed-cron</a> ― 一意制約による重複排除と total order broadcast の議論</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/workflow-automation-service" target="_blank" rel="noopener">SDFC: workflow-automation-service</a> ― DAG に沿ったタスク編成と規模の見積もり</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/orchestration" target="_blank" rel="noopener">SDFC: orchestration</a> ― Netflix Conductor / Airflow / Step Functions とタスクキューの関係</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/batch-emails" target="_blank" rel="noopener">SDFC: batch-emails</a> ― at-most-once を選ぶバッチ送信の規模設計</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/hparam-training" target="_blank" rel="noopener">SDFC: hparam-training</a> ― GPU quota 下での長時間ジョブのスケジューリング</li>
+
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-fanout-realtime.html">← 第 29 回 大規模ファンアウトとリアルタイム配信</a><a href="./distsys-index.html">目次</a><a href="./distsys-observability.html">第 31 回 観測性 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+
+  {
+    q: '「exactly-once (厳密に1回) の実行」が分散システムで原理的に実現できないとされる根本的な理由として最も正確なものはどれか。',
+    opts: [
+      '呼び出し側が、応答が消えたのが未実行によるものか、実行済みで応答だけが消えたものかを区別できないため',
+      'ネットワークの帯域が常に不足しており、どの実装でも通信量を増やせないという物理的な制約があるため',
+      '分散システムでは全てのノードの時計が完全に同期しており、どのイベントが先か判断できなくなるため',
+      'CPUのクロック速度が分散ノード間で一致しないため、処理の完了順序が常に不定になるため',
+      'exactly-onceを実現するアルゴリズムはまだ理論的に発見されておらず、将来の研究で解決される見込みがある未解決問題だから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>応答が届かない場合、呼び出し側には「実行されずに応答も失われた」のか「実行済みで応答だけが失われた」のかを区別する手段が無い。この不可識別性が、再送すれば重複の可能性、再送しなければ未実行の可能性という二択を生む根本原因。',
+      '帯域不足という物理的制約の話ではなく、応答という情報そのものが失われたときに原因を特定できないという情報理論的な限界の話である。',
+      '分散システムの時計は完全には同期しておらず(第15回参照)、むしろ「時計が完全に同期している」という前提自体が誤り。仮に同期していたとしても応答消失の識別不能性は解消されない。',
+      'CPUクロックの不一致は処理速度のばらつきの話であり、応答が失われたときの原因識別という本質的な問題とは異なる軸の話。',
+      'これは未解決の研究課題ではなく、分散システムの基本的な性質(通信の失敗を検知する手段が無い)から導かれる構造的な不可能性であり、将来のアルゴリズム発見によって解決される類の問題ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>応答が消えた原因を区別できないことが、exactly-onceを不可能にします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="exactly-once不可能性の図"><rect x="40" y="55" width="160" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="120" y="80" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">応答が来ない</text><line x1="200" y1="75" x2="260" y2="45" stroke="#9aa" stroke-width="1.5"/><line x1="200" y1="75" x2="260" y2="105" stroke="#9aa" stroke-width="1.5"/><rect x="260" y="25" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="360" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132">A: 未実行で応答も消えた</text><rect x="260" y="85" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="360" y="110" font-size="12.5" text-anchor="middle" fill="#1f4a68">B: 実行済みで応答だけ消えた</text></svg>'
+          + '<p class="cap">図: AとBを区別する情報が無いことがexactly-onceを不可能にする。</p></div>'
+    }
+  },
+  {
+    q: '分散cronの複数レプリカが、同じジョブの実行時刻を同時に検知して二重実行してしまう問題に対し、「(job_id, 実行時刻) への一意制約」で対策する設計が機能するために必須の前提は何か。',
+    opts: [
+      '書き込み先のデータストアが、同じキーへの並行書き込みのうち一方だけを成功させられる、直列化可能な書き込み経路を持つこと',
+      '全てのcronレプリカが同一の物理マシン上で動作し、プロセス間通信だけで調整するという、分散構成を前提としない設計であること',
+      'ジョブの実行内容が全てステートレスであり、外部への副作用を一切持たず、結果が常にメモリ内だけで完結していること',
+      '書き込み先のデータストアが結果整合性だけを提供する、Dynamo型のリーダーレス構成を採用していること',
+      'cronレプリカの数が常に1台に固定されており、将来にわたってスケールアウトを一切行わないという運用方針であること'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>一意制約による重複排除は、同じキーへの複数の並行書き込みのうち1つだけが成功することが保証されて初めて機能する。これには直列化可能な書き込み経路(単一リーダー構成やSpanner/CockroachDBのような強一貫性のストア)が前提になる。',
+      '同一マシン上での動作は必須ではなく、分散した複数ノードであっても、書き込み先が直列化可能であれば一意制約は機能する。',
+      'ジョブの実行内容が副作用を持つこと自体は、一意制約による重複排除の前提とは別の話。むしろ重複実行された際の安全性(冪等性)の話であり、一意制約の成立条件ではない。',
+      '結果整合性のリーダーレス構成は、同じキーへの並行書き込みの衝突を事後的に解消する設計であり、「一方だけを即座に成功させる」直列化可能性とは逆方向の設計。この前提では一意制約は機能しにくい。',
+      'レプリカ数が1台に固定されていれば二重実行そのものが起きにくくなるが、これは一意制約という対策が成立するための前提ではなく、問題自体を別の方法で回避する話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>一意制約が機能するには、同じキーへの競合する書き込みを裁定できる仕組みが要ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="一意制約の前提の図"><rect x="40" y="30" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="120" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">レプリカA書込</text><rect x="40" y="90" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="120" y="115" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">レプリカB書込</text><line x1="200" y1="50" x2="280" y2="75" stroke="#9aa" stroke-width="1.5"/><line x1="200" y1="110" x2="280" y2="75" stroke="#9aa" stroke-width="1.5"/><rect x="280" y="55" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="390" y="80" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">直列化可能なストアが1つだけ採用</text></svg>'
+          + '<p class="cap">図: 直列化可能性が無いと、両方の書き込みが成功して重複が残る可能性がある。</p></div>'
+    }
+  },
+  {
+    q: 'オーケストレーション型(Netflix Conductorのような中央の指揮者がDAGを進める方式)とコレオグラフィ型(各ステップがイベントを発行・購読して自律的に連鎖する方式)を比較したとき、最も正確な特徴の対比はどれか。',
+    opts: [
+      'オーケストレーションは全体の進行状況を1か所で追いやすいが指揮者が単一障害点になりやすく、コレオグラフィは単一障害点を避けやすいが全体像の把握が難しい',
+      'オーケストレーションは単一障害点が原理的に存在しないよう設計されているが、コレオグラフィは必ず単一障害点を持つという非対称な関係にある',
+      'コレオグラフィは中央の指揮者を持つ方式であり、オーケストレーションは各ステップが自律的に連鎖する方式である、という用語の対応が正しい(実際は逆)',
+      'オーケストレーションとコレオグラフィは実装の見た目が違うだけで、観測しやすさや障害点の有無に実質的な差は無い、互換可能な方式である',
+      'コレオグラフィは必ずKafkaのようなログ中心のメッセージキューを使わなければ実装できない、技術スタックに強く縛られた方式である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>中央の指揮者を置くオーケストレーションは全体の進行状況を1か所で追える利点があるが、その指揮者自体が単一障害点になりやすい。指揮者を置かないコレオグラフィは単一障害点を避けやすい一方、全体の進行状況を把握するのが難しくなる。',
+      '単一障害点の有無は実装の冗長化次第であり、「原理的に存在しない」「必ず持つ」という無条件の対比は正確ではない。指揮者を冗長化すればオーケストレーションでも単一障害点を減らせる。',
+      '用語の定義が入れ替わっている。中央の指揮者を持つのはオーケストレーション、各ステップが自律的に連鎖するのはコレオグラフィというのが正しい対応。',
+      '観測しやすさ(全体像の追いやすさ)と障害点の有無という2点で、両者には実質的な差がある。これは本文で述べた通りの重要な対比。',
+      'コレオグラフィの実装手段はイベント発行・購読であればよく、特定のメッセージキュー製品に技術的に縛られるという前提は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>観測しやすさと単一障害点の有無が、2つの方式でちょうど入れ替わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="オーケストレーションとコレオグラフィの対比図"><rect x="30" y="30" width="230" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">オーケストレーション</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">全体像は追いやすい</text><text x="145" y="96" font-size="12.5" text-anchor="middle" fill="#12211a">指揮者がSPOFになりやすい</text><rect x="300" y="30" width="230" height="90" rx="8" fill="#efe8f7" stroke="#7a5a9e"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">コレオグラフィ</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">SPOFを避けやすい</text><text x="415" y="96" font-size="12.5" text-anchor="middle" fill="#12211a">全体像の把握が難しい</text></svg>'
+          + '<p class="cap">図: 中央集権と自律分散のトレードオフが観測性と障害点に表れる。</p></div>'
+    }
+  },
+  {
+    q: 'ハイパーパラメータ探索で、GPUの同時利用数に上限(quota)があるため一部のジョブが待機している状況で、スケジューラが「先着順」で待機ジョブをGPUに割り当てる設計にした。この設計が引き起こしうる問題として最も妥当なものはどれか。',
+    opts: [
+      'GPUを使うジョブと使わないジョブが完全に同数になるまで、全てのジョブの実行が一律に停止する',
+      '実行時間が長いジョブが先にGPUを占有し続けると、後から来た実行時間の短いジョブが不当に長く待たされる可能性がある',
+      '先着順である以上、どのジョブも必ず公平な待ち時間でGPUを取得できることが数学的に保証される',
+      'quotaという概念自体がハイパーパラメータ探索には存在しないため、この設計上の懸念は実際には発生しない',
+      'GPUの割り当て順序は学習結果のF1スコアに直接影響するため、先着順にすると精度が必ず低下する'
+    ],
+    ans: 1,
+    exps: [
+      'quotaに達した場合に全ジョブが一律停止するという挙動は想定された設計ではなく、待機中のジョブがキューで順番を待つのが通常の動作。',
+      '<b>これが正解。</b>先着順だけの単純な方針では、実行時間の長いジョブがGPUを長時間占有し続け、後から来た短いジョブがいつまでもGPUを確保できない、という公平性の問題が生じうる。優先度やタイムアウトなど別の方針を組み合わせる必要がある。',
+      '先着順という方針そのものは、実行時間の長短によって待ち時間が大きく偏る可能性を持ち、「公平な待ち時間」を数学的に保証するものではない。',
+      '本文で述べた通り、GPUのような特殊ハードウェアには同時利用数の上限(quota)が実在する制約であり、「存在しない」という前提は誤り。',
+      'GPUの割り当て順序はジョブがいつ開始・完了するかというスケジューリングの話であり、学習アルゴリズム自体の挙動(F1スコア)に直接影響を与える技術的な因果関係は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>先着順だけでは、長いジョブが短いジョブの順番を奪い続けることがあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="先着順スケジューリングの問題の図"><rect x="40" y="40" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="140" y="65" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">長時間ジョブがGPU占有</text><rect x="280" y="40" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="380" y="65" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">短いジョブが待たされ続ける</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">先着順だけでは解決しない公平性の問題</text></svg>'
+          + '<p class="cap">図: 実行時間の長短を考慮しない先着順は、短いジョブの待ち時間を不当に伸ばす。</p></div>'
+    }
+  },
+  {
+    q: '1,000万件のバッチメール送信を「at-most-once(最大1回)」で設計する判断が、分散cronの二重実行対策(一意制約やリースで重複を避ける)と対照的に見える理由として最も妥当なものはどれか。',
+    opts: [
+      'バッチメール送信にはそもそも失敗が発生しないため、重複や欠落という概念自体が関係しないという前提に基づく判断だから',
+      'どちらも実際には同じ理由でat-least-onceを選んでおり、対照的という見方自体が誤りだという前提に基づく判断だから',
+      '重複送信のコスト(届く不快感)より未送信のコスト(届かない)の方が高いワークロードでは、排除の仕組みを作らずat-most-onceを受け入れる方が合理的だから',
+      'at-most-onceを選んだ時点で、もはやどのメールも絶対に送信されないことが保証されるという前提に基づく判断だから',
+      'メール送信には全順序が不要なので、常にリースや一意制約よりat-most-onceの方が高速に実装できるという普遍的な法則があるという前提に基づく判断だから'
+    ],
+    ans: 2,
+    exps: [
+      'ネットワークやサーバの障害は実際に発生しうるため、失敗が発生しないという前提自体が成立しない。',
+      '分散cronは重複の方を嫌ってat-least-once寄りの対策(一意制約・リース)を取り、バッチメールは重複よりむしろ処理コストと鮮度を優先してat-most-oneceを受け入れており、これは対照的な設計判断であって同じ理由とは言えない。',
+      '<b>これが正解。</b>重複送信によるユーザー体験の悪化と、未送信によるメール不達のどちらがより高いコストかという判断軸があり、重複送信のコストが低いと判断されるワークロードでは、重複排除の仕組みを作らずat-most-onceを受け入れる方が合理的になる。',
+      'at-most-onceは「最大1回」を意味し、実行される場合は正常に1回届くことが前提であり、「絶対に送信されない」ことを保証する仕組みではない。',
+      '全順序の要否とat-most-once/at-least-onceの選択は独立した別の軸の判断であり、「常に高速」という普遍的な法則として一般化するのは不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>重複のコストと欠落のコストのどちらが高いかで、選ぶべき方針が変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="重複と欠落のコスト比較の図"><rect x="30" y="30" width="230" height="80" rx="8" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">分散cron</text><text x="145" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">重複のコストが高い</text><text x="145" y="96" font-size="12.5" text-anchor="middle" fill="#12211a">→ 重複排除を頑張る</text><rect x="300" y="30" width="230" height="80" rx="8" fill="#efe8f7" stroke="#7a5a9e"/><text x="415" y="55" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">バッチメール</text><text x="415" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">重複のコストが低い</text><text x="415" y="96" font-size="12.5" text-anchor="middle" fill="#12211a">→ at-most-onceを受容</text></svg>'
+          + '<p class="cap">図: 重複と欠落、どちらのコストが高いかで方針が決まる。</p></div>'
+    }
+  },
+  {
+    q: 'リースでジョブの実行権を持つノードが、長いガベージコレクション停止(GCポーズ)に入り、その間にリースの期限が切れて別ノードに実行権が移った。GCポーズから復帰したノードが「自分はまだリースを持っている」と思い込んで処理を続けた場合、何が起きるか。',
+    opts: [
+      'リースの仕組みにより、GCポーズから復帰したノードは自動的に処理を停止するため、何も問題は起きないと考えてよい',
+      '復帰したノードの処理は自動的にロールバックされ、新しいリース保持者の処理だけが有効になるという安全な設計になっている',
+      'GCポーズの長さに関わらず、リースの期限切れという概念自体が無効化され、元のノードが処理を継続して問題ないと考えてよい',
+      '新しいリース保持者と復帰した元の保持者が同時に処理する二重実行が起きうる。フェンシングトークンが無いとこの二重実行を検知できない',
+      'GCポーズはネットワーク分断(CAP定理のP)と同一の現象であり、この場合は必ずAP型の挙動が自動的に選ばれるという関係にある'
+    ],
+    ans: 3,
+    exps: [
+      '単純なリースの期限管理だけでは、復帰したノードが自分の状態を外部と確認しない限り、自動的に処理を停止する保証は無い。これが問題の核心。',
+      '処理の自動的なロールバックという機能は、リースの仕組み自体には含まれていない。これは別の仕組み(トランザクションの取り消しなど)が必要な話。',
+      'リースの期限切れという概念はGCポーズの長さに関わらず有効であり、「無効化される」という記述はリースの設計意図と矛盾する。',
+      '<b>これが正解。</b>GCポーズから復帰したノードが古いリースをまだ有効だと誤認したまま処理を続けると、新しいリース保持者と同時に処理が走る二重実行が発生しうる。第26回で見るフェンシングトークンのような、操作ごとに単調増加する識別子を使う仕組みが無いと、この二重実行自体を検知できない。',
+      'GCポーズはプロセス内部の一時停止であり、ネットワーク分断(ノード間通信の喪失)とは異なる現象。両者を同一視し、特定の挙動が自動的に選ばれるという記述は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>GCポーズ中にリースが移っても、復帰したノードが気づかなければ二重実行が起きます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="GCポーズとリース失効の図"><rect x="40" y="30" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="130" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ノードA: GCポーズ中</text><rect x="40" y="90" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="130" y="115" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">復帰: 古いリースで処理続行</text><rect x="320" y="60" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a"/><text x="420" y="85" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">ノードB: 新リースで処理中</text><text x="280" y="140" font-size="13" text-anchor="middle" fill="#12211a">AとBが同時に処理 → 二重実行</text></svg>'
+          + '<p class="cap">図: フェンシングトークン無しでは、この二重実行自体を検知できない。</p></div>'
+    }
+  },
+  {
+    q: '長時間のGPU学習ジョブが、チェックポイントから再開する設計になっている。チェックポイント保存の直後に「学習完了を外部のSlack通知システムへ送る」処理を行い、その直後に障害が発生してチェックポイントから再開した場合、最も注意すべき落とし穴は何か。',
+    opts: [
+      'チェックポイントから再開すれば、外部への通知も含めて全ての処理が自動的に冪等になるため、何も気にする必要は無いと考えてよい',
+      'チェックポイント保存後の「外部への通知」のような副作用は、再開時の再実行で重複する可能性があり、通知を別途冪等にするか配置を見直す必要がある',
+      '外部への通知はネットワークを使わないため、チェックポイントの再開とは無関係に常に1回しか発生しないという性質を持つ',
+      'GPU学習ジョブである以上、Slackのような外部システムへの通知は技術的に実装不可能であるという制約が常に存在する',
+      'チェックポイントの保存自体が外部通知の重複を検知し、2回目以降の通知を自動的に無効化する標準機能を内部に持っている'
+    ],
+    ans: 1,
+    exps: [
+      'チェックポイントが保存するのは学習の状態(モデルのパラメータなど)であり、外部システムへの通知のような副作用までを自動的に冪等にする仕組みでは無い。',
+      '<b>これが正解。</b>チェックポイント保存後に行った副作用(通知など)は、再開時にその箇所から処理が再実行されると重複して発生しうる。通知自体を冪等化する(例: 一意なジョブIDで重複チェック)か、通知の実行タイミングを設計し直す必要がある。',
+      '外部への通知もネットワーク呼び出しを伴う処理であり、チェックポイントからの再開によって再実行される対象になりうる。「無関係」という記述は誤り。',
+      '外部システムへの通知自体は一般的に実装可能な機能であり、GPU学習ジョブという文脈が技術的な実装可能性を妨げる理由にはならない。',
+      'チェックポイントの保存機能自体に、外部通知の重複を検知する標準機能が含まれているという前提は本文に無く、実際にそのような汎用機能が自動的に備わっているとは言えない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>チェックポイントの「後」で起きた副作用は、再開時に再実行される対象になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="チェックポイント後の副作用の図"><rect x="30" y="50" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="105" y="75" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">チェックポイント保存</text><line x1="180" y1="70" x2="240" y2="70" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-w3)"/><rect x="240" y="50" width="130" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="305" y="75" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">Slack通知</text><text x="305" y="105" font-size="12.5" fill="#c0492f" font-weight="700" text-anchor="middle">← ここで障害、再開で再実行</text><defs><marker id="arr-w3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: チェックポイント後の副作用は再開によって重複実行されうる。</p></div>'
+    }
+  },
+  {
+    q: '1 つのワークフロー編成システム(オーケストレーション型)が、ワークフロー数の増加に伴い指揮者(中央コンポーネント)の負荷が限界に近づいてきた。指揮者を複数台に冗長化する際に、最も注意すべき新たな課題は何か。',
+    opts: [
+      '冗長化すれば指揮者の負荷問題は完全に解消し、新たに考慮すべき課題は一切発生しないと考えてよい',
+      '指揮者を冗長化すると、コレオグラフィ型に自動的に設計が変化し、元のDAGの定義が不要になるという関係にある',
+      '冗長化した指揮者間で「どのワークフローをどの指揮者が管理するか」の引き継ぎ・調整が必要になり、結局リースや合意の問題に帰着する',
+      '指揮者の台数を増やすことは、タスクキュー(Celery、RabbitMQなど)の実装を完全に置き換える必要を常に生むという関係にある',
+      '指揮者が複数になると、DAGの依存関係(どのステップがどのステップに依存するか)の定義そのものが意味を持たなくなるという関係にある'
+    ],
+    ans: 2,
+    exps: [
+      '冗長化は負荷分散には有効だが、どの指揮者がどのワークフローを担当するかという調整の問題を新たに生む。「一切発生しない」という記述は楽観的すぎる。',
+      '指揮者を複数台に冗長化することと、中央の指揮者を置かないコレオグラフィ型へ設計方式そのものが変わることは別の話。冗長化しても中央集権的な制御の構造自体は維持される。',
+      '<b>これが正解。</b>複数の指揮者がある場合、各ワークフローをどの指揮者が管理するかという割り当てと、障害時の引き継ぎが新たな課題になる。これは本質的に、第26回で見るリース(誰が今担当するか)や合意(複数の候補のうち誰が正当か)の問題と同じ構造に帰着する。',
+      'タスクキューの実装自体は指揮者の台数とは独立した別のコンポーネントであり、指揮者の冗長化が直接タスクキューの置き換えを要求するわけではない。',
+      'DAGの依存関係の定義はワークフローそのものの構造を表すものであり、それを管理する指揮者が何台であっても依存関係自体の意味は変わらない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>指揮者を増やすと、今度は「誰がどのワークフローを担当するか」の調整問題が生まれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="指揮者冗長化の新課題の図"><rect x="30" y="30" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="105" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">指揮者1</text><rect x="210" y="30" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="285" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">指揮者2</text><text x="195" y="100" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">どちらが担当か？→リース/合意の問題</text></svg>'
+          + '<p class="cap">図: 冗長化は負荷分散と同時に新しい調整問題を生む。</p></div>'
+    }
+  },
+  {
+    q: '複数リージョンに分散したノードから分散cronジョブを発行するシステムで、重複排除用の一意制約を「各リージョンのローカルなデータストア」に書き込む設計にした。この設計が引き起こしうる問題として最も妥当なものはどれか。',
+    opts: [
+      'リージョンが複数あっても一意制約の効果には何の影響も無く、常に全リージョンを通じて重複は完全に排除される',
+      'ローカルなデータストアは必ず結果整合性になるため、一意制約という概念自体がどのリージョンでも成立しなくなる',
+      'ローカルな一意制約はあくまで補助的なキャッシュに過ぎず、実際の重複排除は常にジョブ実行側のアプリケーションコードが自力で検知しているので設計上の懸念は小さい',
+      '一意制約をローカルに置くと、ジョブの実行結果がすべて自動的にグローバルな全順序で記録されるようになる',
+      'この設計はリージョンの数が偶数か奇数かによって、二重実行の有無が機械的に決まるという法則に従う'
+    ],
+    ans: 3,
+    exps: [
+      '一意制約がリージョンごとに分離している場合、リージョンを跨いだ重複は検知できない。「何の影響も無い」という記述は誤り。',
+      '結果整合性かどうかはデータストアの構成次第であり、ローカルなデータストアであっても単一リージョン内では強一貫性(直列化可能性)を提供できる構成は普通にある。「一意制約という概念自体が成立しなくなる」は過大な一般化。',
+      'アプリケーションコード側の検知に頼る設計は、一意制約という仕組みをデータストアに持たせる目的(確実な排他)を自ら放棄しており、「懸念は小さい」という評価はむしろ逆である。',
+      '<b>これが正解。</b>一意制約がリージョンごとにローカルに分離していると、別リージョンのノードが同じジョブを「自分のリージョンでは一意」と判定してしまい、リージョンを跨いだ二重実行を検知できない。グローバルに重複を排除するには、一意制約の対象をリージョンを跨いだ単一のデータストアか、リージョン間の調整機構に置く必要がある。',
+      'リージョン数の偶奇が二重実行の有無を機械的に決めるという法則は存在せず、実際の挙動はデータストアの構成とジョブの到達パターンに依存する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>リージョンごとに分離した一意制約は、リージョンを跨いだ重複を検知できません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="リージョン分離による重複検知漏れの図"><rect x="30" y="30" width="200" height="50" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="130" y="60" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">リージョンA: 一意制約OK</text><rect x="320" y="30" width="200" height="50" rx="6" fill="#efe8f7" stroke="#7a5a9e"/><text x="420" y="60" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">リージョンB: 一意制約OK</text><text x="280" y="115" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">両方とも「一意」と判定 → 実際には二重実行</text></svg>'
+          + '<p class="cap">図: ローカルな一意制約は、リージョンを跨いだ視点では重複を見逃す。</p></div>'
+    }
+  },
+  {
+    q: 'あるチームが「分散cronの重複実行対策(リース+一意制約)」と「ワークフロー編成のチェックポイント再開」と「バッチメールのat-most-once」の3つの設計をすべて学んだ上で、新しい要件「決済処理を1日1回だけ実行し、重複すると二重課金になる」システムを設計する際、最も妥当な方針はどれか。',
+    opts: [
+      '決済処理は重要なので、chatのWebSocket再接続のようなジッタ付きリトライだけを導入すれば十分な対策になる',
+      'バッチメールと同じ発想で、重複よりも未実行の方がコストが高いと判断し、at-most-onceを迷わず選べばよいという判断になる',
+      'ワークフローのチェックポイントを使えば決済処理は自動的に冪等になるため、リースや一意制約は不要であるという判断になる',
+      'exactly-onceを実現する新しいアルゴリズムを独自に発明しない限り、このシステムは原理的に構築できないと結論づけるべきである',
+      '二重課金コストが高いため、リースで実行権を調整し決済IDへの一意制約で重複実行を検知・排除する分散cron型の設計を採り、通知は別途冪等化する'
+    ],
+    ans: 4,
+    exps: [
+      'ジッタ付きリトライ(第10回・第29回で見た再接続嵐対策)は負荷集中を避ける技術であり、二重課金という重複実行そのものの防止には直接効かない。目的が異なる対策を当てはめている。',
+      '決済処理は「重複のコストが非常に高い」ワークロードであり、バッチメールの「未送信の方がコストが高い」という判断軸とは正反対。同じ発想を機械的に流用するのは誤り。',
+      'チェックポイントはジョブの状態を保存する仕組みであり、それ自体が処理内容を自動的に冪等にする魔法ではない。チェックポイント後の副作用(本文Q7参照)が重複する可能性は依然として残る。',
+      'exactly-oneceが原理的に不可能であることは、システムの構築自体を諦める理由にはならない。本文で見た通り、冪等性や重複排除の仕組みを組み合わせることで実用上十分な安全性を達成できる。',
+      '<b>これが正解。</b>重複実行のコストが非常に高い決済処理には、分散cronと同じ発想(リースで実行権を調整し、決済IDへの一意制約で重複した実行を検知・排除する)が適している。さらに、通知のような副作用部分は個別に冪等化する必要があり、3つの学んだ設計の要点を組み合わせる判断が妥当。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>重複のコストが高い決済処理には、分散cronの発想(リース+一意制約)が噛み合います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="決済処理への設計適用の図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="145" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">分散cronの発想(リース+一意制約)</text><line x1="260" y1="50" x2="320" y2="50" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-w4)"/><rect x="320" y="30" width="210" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="425" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">決済処理(重複コスト高)</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#12211a">副作用(通知等)は別途冪等化が必要</text><defs><marker id="arr-w4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: ワークロードの性質に合わせて3つの発想を組み合わせるのが妥当な設計判断。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

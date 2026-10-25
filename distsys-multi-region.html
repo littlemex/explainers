@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マルチリージョンと災害対策 ― RPO と RTO で「諦める量」を先に決める</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 32 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>マルチリージョンと災害対策 ― RPO と RTO で「諦める量」を先に決める</h1>
+  <p>1 つのデータセンターやリージョンが丸ごと落ちたとき、どれだけの時間とどれだけのデータを失ってよいかを先に数値で決め、その数値から戦略を選ぶ</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 01 回 <a href="./distsys-fundamentals.html">なぜ分散するのか</a>、第 05 回 <a href="./distsys-replication-basics.html">レプリケーション入門</a>、第 13 回 <a href="./distsys-consistency-models.html">一貫性モデル</a></p>
+  <p class="intro">マルチリージョン構成の本質は、1 つのリージョンが丸ごと落ちる日が必ず来るという前提の下、復旧にかけてよい時間 (RTO, Recovery Time Objective) と失ってよいデータの量 (RPO, Recovery Point Objective) を先に数値で決め、その数値に見合う戦略 (バックアップ・パイロットライト・ウォームスタンバイ・アクティブアクティブ) を選ぶことにある。複数リージョンで書き込みを受けられるようにした瞬間、今度は衝突の解決と、壁一つ分の障害が全体に広がらないようにする設計 (セル型アーキテクチャ) が新たに必要になる。ここでは具体的な数字とともに、どこまで諦めるかを先に決める考え方を確認する。</p>
+
+  <!-- ===== 解説パート 1: C・A・P の正確な定義 ===== -->
+  <section>
+    <h2>1. なぜマルチリージョンが要るのか ― RPO と RTO</h2>
+    <p>1 つのデータセンターやクラウドのリージョンは、電源設備 ・ ネットワーク ・ 自然災害のいずれかで丸ごと使えなくなる日がいつか来ます。1 つのリージョンの中でレプリカを何台増やしても、そのリージョン自体が落ちれば意味がありません。複数のリージョンに本番環境の複製を持つのがマルチリージョン構成です。</p>
+    <p>ここで先に決めるべき数字が 2 つあります。<b>RTO (Recovery Time Objective)</b> は、障害発生からサービスを復旧させるまでに許容できる最大の時間です。<b>RPO (Recovery Point Objective)</b> は、復旧した時点で失ってもよいデータの最大量を、時間の長さで表したものです (例えば RPO が 1 時間なら、直前 1 時間分の書き込みは失われる可能性がある、という意味)。この 2 つの数字を先に決めないまま「とにかく落ちないようにしてほしい」と言われても、どの戦略を選ぶべきかは決まりません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="RPOとRTOを時間軸で示す図">
+        <line x1="30" y1="100" x2="590" y2="100" stroke="#9aa" stroke-width="2"/>
+        <circle cx="230" cy="100" r="7" fill="#c0492f"/>
+        <text x="230" y="80" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">障害発生</text>
+        <rect x="70" y="115" width="160" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="150" y="137" font-size="12.5" text-anchor="middle" fill="#5b3d80">RPO (失うデータ量)</text>
+        <rect x="230" y="115" width="270" height="34" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="365" y="137" font-size="12.5" text-anchor="middle" fill="#1f4a68">RTO (復旧までの時間)</text>
+        <text x="500" y="80" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">復旧完了</text>
+        <circle cx="500" cy="100" r="7" fill="#198754"/>
+        <text x="310" y="180" font-size="13.5" text-anchor="middle" fill="#12211a">RPO は「障害発生前」を、RTO は「障害発生後」を測る、別の軸の数字</text>
+      </svg>
+      <p class="cap">図: RPO は失われるデータの量、RTO は復旧にかかる時間。向きが異なる 2 つの指標。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2 ===== -->
+  <section>
+    <h2>2. 4 つの DR 戦略 ― RPO / RTO が決まれば形が決まる</h2>
+    <p>災害対策 (Disaster Recovery, DR) の戦略は、求める RTO / RPO が厳しくなるほど、普段から待機させておく設備が増え、その分コストが上がるという 1 本の軸の上に並びます。</p>
+    <ul>
+      <li><b>バックアップ & リストア</b> ― 定期的にバックアップを取るだけで、普段は待機系を動かさない。RTO は数時間 〜 数日、RPO は直前のバックアップ時点まで戻る。最も安いが最も遅い。</li>
+      <li><b>パイロットライト</b> ― 復旧に必要な最小限の構成要素 (データのレプリカなど) だけを常時起動しておき、災害時に残りをスケールさせる。RTO は数分 〜 数時間。</li>
+      <li><b>ウォームスタンバイ</b> ― 縮小版の環境を常時起動したまま最新データに近い状態で待機させる。RTO は数分 〜 数時間だが、パイロットライトより復旧が速い。</li>
+      <li><b>ホットサイト / マルチサイト (アクティブアクティブ)</b> ― フル規模の環境を複数リージョンで常時並行稼働させる。RTO はほぼ即時、RPO も数秒程度まで縮められるが、常時 2 倍以上の設備を維持するコストがかかる。</li>
+    </ul>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="4つのDR戦略をコストとRTOの軸で並べた図">
+        <line x1="60" y1="170" x2="600" y2="170" stroke="#9aa" stroke-width="2"/>
+        <text x="60" y="195" font-size="12.5" fill="#12211a">RTO/RPO 長い (安い)</text>
+        <text x="600" y="195" font-size="12.5" text-anchor="end" fill="#12211a">RTO/RPO 短い (高い)</text>
+        <rect x="70" y="100" width="110" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="125" y="130" font-size="12.5" text-anchor="middle" fill="#0f5132">バックアップ</text>
+        <rect x="210" y="90" width="110" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="265" y="125" font-size="12.5" text-anchor="middle" fill="#1f4a68">パイロット<tspan x="265" dy="16">ライト</tspan></text>
+        <rect x="350" y="80" width="110" height="70" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="405" y="120" font-size="12.5" text-anchor="middle" fill="#5b3d80">ウォーム<tspan x="405" dy="16">スタンバイ</tspan></text>
+        <rect x="490" y="60" width="110" height="90" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="545" y="105" font-size="12.5" text-anchor="middle" fill="#b5401f">ホットサイト<tspan x="545" dy="16">(active-active)</tspan></text>
+      </svg>
+      <p class="cap">図: 右へ行くほど RTO / RPO は短くなるが、常時維持するコストは増える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3 ===== -->
+  <section>
+    <h2>3. 書き込みの衝突 ― アクティブアクティブの代償</h2>
+    <p>ホットサイト型のアクティブアクティブは、複数のリージョンが同時に書き込みを受け付けます。ここで同じキーに対する更新が東京とバージニアで同時に発生すると、どちらを正とするかという<b>衝突</b>が起きます。これは第 05 回で見たレプリケーション遅延の問題が、リージョン間という最も遅い経路で起きたものだと考えられます。</p>
+    <p>対処の方向は大きく 3 つあります。1 つは<b>キーごとに書き込みを受け付けるリージョンを固定する</b> (ユーザーごとのホームリージョンを決める、またはキーのパーティション単位でプライマリリージョンを割り振る) ことで、そもそも同じキーへの同時書き込みを起こさない方法です。もう 1 つは <b>LWW (last-write-wins)</b> のように、タイムスタンプが新しい方を残して古い方を捨てる方法で、実装は簡単ですが、どちらのリージョンの更新内容だったかという情報がその場で失われます。最後は、第 27 回で扱う CRDT のように、データ構造自体を「順序に関係なくマージすれば必ず同じ結果になる」設計にして、衝突そのものを後から機械的に解消する方法です。</p>
+    <p>どの方法を選んでも、リージョン間の通信には往復で数十 〜 数百 ms のレイテンシがかかるため、<b>すべての書き込みでリージョン間の同期確認を待つ</b> 設計にすると、アクティブアクティブの「低レイテンシ」という利点そのものが失われます。実務では、多くの書き込みをホームリージョン内の確認だけで確定させ、リージョン間の複製は非同期に後追いさせる設計が一般的です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="2リージョンでの書き込み衝突の図">
+        <rect x="30" y="20" width="200" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="130" y="50" font-size="13" text-anchor="middle" fill="#1f4a68">東京: write(x=2)</text>
+        <rect x="390" y="20" width="200" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="490" y="50" font-size="13" text-anchor="middle" fill="#5b3d80">バージニア: write(x=3)</text>
+        <line x1="230" y1="45" x2="390" y2="45" stroke="#c0492f" stroke-width="2" stroke-dasharray="5 5"/>
+        <text x="310" y="35" font-size="13" text-anchor="middle" fill="#b5401f">同じキー x へ同時書き込み</text>
+        <rect x="190" y="110" width="240" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="310" y="135" font-size="13" text-anchor="middle" fill="#b5401f">衝突: x=2 と x=3 のどちらを残すか</text>
+        <text x="310" y="170" font-size="13" text-anchor="middle" fill="#12211a">固定割り当て / LWW / CRDT のいずれかで解消する</text>
+      </svg>
+      <p class="cap">図: 複数リージョンが同時に書き込みを受けられる代わりに、衝突の解決策が必要になる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. セル型アーキテクチャ ― 壁 1 つ分で被害を止める</h2>
+    <p>マルチリージョンにしても、1 つのリージョンの中身が「全ユーザーを 1 つの巨大なクラスタで処理する」設計のままだと、そのリージョン内で起きた障害 (設定ミス、特定のユーザーの異常なトラフィック、ソフトウェアのバグ) がリージョン全体に広がってしまいます。これに対する考え方が<b>セル型アーキテクチャ (cell-based architecture)</b> です。ユーザーやテナントを複数の独立した「セル」に分割し、各セルは他のセルと共有するリソースを持たずに完結して動作します。</p>
+    <p>セル分割の効果は、障害の<b>影響範囲 (blast radius)</b> を 1 セル分に閉じ込められることです。あるセルで過負荷やバグが起きても、他のセルのユーザーには影響しません。新しいバージョンのデプロイも、全セルに一斉展開するのではなく 1 セルずつ段階的に展開すれば、問題があった場合の被害を 1 セル分に抑えられます。代わりに、セルをまたぐ処理 (全ユーザーを跨いだ検索や集計など) は複雑になり、セルの数だけ運用対象が増えるという代償があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="セル分割で障害の影響範囲を閉じ込める図">
+        <rect x="30" y="30" width="160" height="140" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="110" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">セル A</text>
+        <text x="110" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">障害発生</text>
+        <text x="110" y="110" font-size="12.5" text-anchor="middle" fill="#12211a">(このセルのみ影響)</text>
+        <rect x="230" y="30" width="160" height="140" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="310" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">セル B</text>
+        <text x="310" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">正常稼働</text>
+        <rect x="430" y="30" width="160" height="140" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="510" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">セル C</text>
+        <text x="510" y="95" font-size="12.5" text-anchor="middle" fill="#12211a">正常稼働</text>
+      </svg>
+      <p class="cap">図: セルを分けておけば、1 セルの障害は他のセルのユーザーに広がらない。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. フェイルオーバーの判断主体 ― 誰が、いつ切り替えるか</h2>
+    <p>戦略を決めても、実際に障害が起きた瞬間に「今、切り替えるべきか」を誰が判断するかが残ります。<b>自動フェイルオーバー</b>はヘルスチェックの失敗が一定回数続いたら自動的に切り替える方式で、RTO を短くできますが、一時的な遅延やネットワークの揺らぎを障害と誤判定して不要な切り替え (フラッピング) を起こすリスクがあります。<b>人間の判断を介した切り替え</b>は誤判定を避けやすい一方、担当者が気づいて判断するまでの時間がそのまま RTO に乗ります。</p>
+    <p>もう 1 つの危険が<b>スプリットブレイン</b>です。元のリージョンが実際には生きているのに、ネットワークの問題だけで「死んだ」と誤判定して新しいリージョンに切り替えると、2 つのリージョンが同時に「自分が正だ」と思い込んで書き込みを受け付け続けることがあります。これを避けるには、切り替えの判定に使うヘルスチェックの経路と、実際のデータ複製の経路を分けて多重化し、過半数の合意が取れたときだけ切り替える、といった設計が必要になります (第 26 回のフェンシングトークンの考え方と同じ構図です)。</p>
+  </section>
+
+  <section>
+    <h2>6. 実システムでの例</h2>
+    <p>DynamoDB の Global Tables は、複数リージョンにテーブルを複製し、各リージョンで書き込みを受け付けられるようにした上で、衝突には last-writer-wins に基づく解決を適用します。低いレイテンシでの読み書きを複数リージョンから行える代わりに、同じ項目への同時更新では新しいタイムスタンプの方が残り、古い方の更新内容は失われる設計です。一方、第 35 回で見る Google Cloud Spanner は、TrueTime という仕組みを使って複数リージョンに分散したまま強い一貫性を保つという、より重い代償を払う設計を選んでいます。どちらが正しいということはなく、アプリケーションが衝突をどこまで許容できるかで選択が変わります。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/cloud-disaster-recovery-strategies.md" target="_blank" rel="noopener">ByteByteGo: Cloud Disaster Recovery Strategies</a> ― RPO / RTO の定義と、バックアップ & リストア ・ パイロットライト ・ ウォームスタンバイ ・ ホットサイトの 4 戦略の典型的な RTO / RPO の整理を本文に反映した。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-do-we-design-for-high-availability.md" target="_blank" rel="noopener">ByteByteGo: How to Design for High Availability</a> ― Primary-Backup / Primary-Secondary / Primary-Primary というレプリケーション構成の整理を、アクティブアクティブの衝突の節の背景として使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-observability.html">← 第 31 回 観測性</a><a href="./distsys-index.html">目次</a><a href="./distsys-state-machine-replication.html">第 33 回 決定論的ステートマシン複製と取引所 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    "q": "あるサービスの RPO が 1 時間、RTO が 4 時間と定められているとき、この 2 つの数字が意味することとして最も正確なものはどれか？",
+    "opts": [
+      "障害発生の直前 1 時間分のデータが失われる可能性があり、障害発生から復旧完了までに最大 4 時間かかってもよいという許容範囲を示している",
+      "障害が起きてから最初の 1 時間は無視してよく、4 時間以内にバックアップを取り始めればよいという猶予期間を示している",
+      "復旧には必ず 1 時間かかり、その後さらに 4 時間はデータが古いままになるという保証を示している",
+      "バックアップの保存先を 1 時間ごとに 4 箇所へ分散させる設定の運用ルールを示している",
+      "障害を検知するまでの時間が 1 時間、検知してから対応チームを招集するまでの時間が 4 時間であることを示している"
+    ],
+    "ans": 0,
+    "exps": [
+      "<b>これが正解。</b>RPO 1 時間は障害発生前の直前 1 時間分のデータ損失を許容する範囲、RTO 4 時間は障害発生から復旧完了までにかけてよい時間の上限を示す、別の軸の指標。",
+      "RPO / RTO はいずれも「無視してよい猶予期間」ではなく、許容できる上限を定めた目標値であり、猶予という捉え方自体が指標の意味とずれている。",
+      "RPO は復旧にかかる時間を定めるものではなく、失われるデータの量を定めるものであり、「必ず 1 時間かかる」という保証の説明は指標の向きを取り違えている。",
+      "バックアップの保存先の分散方法は RPO / RTO という時間の指標とは別の、運用上の実装上の話題。",
+      "検知や招集にかかる時間の内訳は RTO の一部を構成する要素ではあるが、RPO / RTO という 2 つの指標そのものの定義の説明ではない。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>RPO は障害発生より前、RTO は障害発生より後を測る、向きが異なる指標です。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"RPOとRTOの向きの違い\"><line x1=\"40\" y1=\"80\" x2=\"520\" y2=\"80\" stroke=\"#9aa\" stroke-width=\"2\"/><circle cx=\"280\" cy=\"80\" r=\"6\" fill=\"#c0492f\"/><text x=\"280\" y=\"60\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\">障害発生</text><rect x=\"170\" y=\"95\" width=\"110\" height=\"30\" rx=\"6\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"225\" y=\"115\" font-size=\"12\" text-anchor=\"middle\" fill=\"#5b3d80\">RPO (前方向)</text><rect x=\"280\" y=\"95\" width=\"200\" height=\"30\" rx=\"6\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"380\" y=\"115\" font-size=\"12\" text-anchor=\"middle\" fill=\"#1f4a68\">RTO (後方向)</text></svg><p class=\"cap\">図: RPO は障害前のデータ損失量、RTO は障害後の復旧時間を指す。</p></div>"
+    }
+  },
+  {
+    "q": "4 つの DR 戦略 (バックアップ & リストア / パイロットライト / ウォームスタンバイ / ホットサイト) の関係について、最も正確な説明はどれか？",
+    "opts": [
+      "どの戦略も常時かかる運用コストは同じであり、唯一の違いは障害発生時に押すボタンの数だけである",
+      "一般に、RTO と RPO を短くしようとするほど常時待機させておく設備の規模が大きくなり、平常時にかかるコストも増えていく",
+      "バックアップ & リストアが最も RTO が短く、ホットサイトが最も RTO が長いという、他の 3 戦略とは逆の関係になっている",
+      "ホットサイトを選べば RTO も RPO も常に完全にゼロになり、障害によるデータ損失は理論上なくなる",
+      "パイロットライトとウォームスタンバイは名前が違うだけで、常時起動させておく構成要素の範囲にまったく差がない"
+    ],
+    "ans": 1,
+    "exps": [
+      "常時起動させておく構成要素の量は戦略ごとに大きく異なり、運用コストも異なる。「唯一の違いがボタンの数」という説明は実態と合わない。",
+      "<b>これが正解。</b>RTO / RPO を短くするほど、普段から動かしておく環境の規模が大きくなり、その分の設備やライセンスのコストが常時かかるようになる、という 1 本のトレードオフの軸で 4 戦略は並ぶ。",
+      "実際の傾向は逆で、バックアップ & リストアは最も RTO が長く (復旧が遅い)、ホットサイトは最も RTO が短い (復旧が速い)。説明が逆転している。",
+      "ホットサイトでも復旧の切り替えやリージョン間の複製遅延はゼロにはできず、「常に完全にゼロ」というのは過大な主張。",
+      "パイロットライトは最小限の構成要素だけを起動し、ウォームスタンバイはそれより広い範囲を縮小版で動かしておくという規模の差があり、まったく差がないというのは誤り。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>4 戦略は「常時待機の規模」と「RTO / RPO の短さ」が同じ方向に動く 1 本の軸の上に並びます。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"4戦略が1本の軸に並ぶ図\"><line x1=\"40\" y1=\"100\" x2=\"520\" y2=\"100\" stroke=\"#9aa\" stroke-width=\"2\"/><text x=\"40\" y=\"125\" font-size=\"12.5\" fill=\"#12211a\">安い ・ 遅い</text><text x=\"520\" y=\"125\" font-size=\"12.5\" text-anchor=\"end\" fill=\"#12211a\">高い ・ 速い</text><circle cx=\"100\" cy=\"100\" r=\"6\" fill=\"#0f5132\"/><circle cx=\"230\" cy=\"100\" r=\"6\" fill=\"#1f4a68\"/><circle cx=\"360\" cy=\"100\" r=\"6\" fill=\"#5b3d80\"/><circle cx=\"480\" cy=\"100\" r=\"6\" fill=\"#b5401f\"/><text x=\"100\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#0f5132\">バックアップ</text><text x=\"230\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#1f4a68\">パイロット</text><text x=\"360\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#5b3d80\">ウォーム</text><text x=\"480\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#b5401f\">ホット</text></svg><p class=\"cap\">図: 右に行くほど常時コストが増え、RTO / RPO が短くなる。</p></div>"
+    }
+  },
+  {
+    "q": "アクティブアクティブ構成で、東京リージョンとバージニアリージョンが同じキー x に対してほぼ同時に異なる値を書き込んだとき、何が起きるか？",
+    "opts": [
+      "リージョン間の通信には下限となる遅延があるとしても、同時書き込みという事態そのものはほぼ起こり得ず、現実には無視できる話になる",
+      "ネットワークの層が書き込みの内容を理解して片方を自動的に事前拒否してくれるため、衝突が実際に発生することは基本的にない",
+      "同じキーへの更新内容が競合する「書き込みの衝突」が発生し、どちらの値を残すか決める仕組み (固定割り当て / LWW / CRDT など) が別途要る",
+      "2 つのリージョンのデータは背後の仕組みによって自動的に平均化され、常に中間的な値へ収束するように設計されている",
+      "衝突が起きた場合、システムは原則として両方の書き込みを失敗として扱い、クライアントには必ずエラーを返す仕組みになっている"
+    ],
+    "ans": 2,
+    "exps": [
+      "リージョン間の通信には往復で数十 〜 数百 ms の遅延があり、その間に両リージョンが独立に書き込みを受け付けられるため、同時書き込みは現実に起こり得る。",
+      "ネットワーク層が書き込みの意味内容を理解して片方を拒否する仕組みは一般的な設計には無く、衝突は実際に起きる前提で対処する必要がある。",
+      "<b>これが正解。</b>同じキーへの同時更新は競合として扱われ、固定割り当てで衝突自体を避ける、LWW で新しい方を残す、CRDT でマージ結果を一致させる、といった仕組みが別途必要になる。",
+      "値を自動で平均化する仕組みは一般的な KVS やデータベースのレプリケーションには無く、数値以外のデータ型では平均化という操作自体が成立しない。",
+      "多くのシステムは衝突が起きても応答自体は成功として返し、裏側で解決ロジックを適用する設計が一般的であり、「常にエラーを返す」という挙動は過大な一般化。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>同じキーへの同時書き込みは、別途の解決策を用意しておかないと衝突がそのまま残ります。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"同時書き込みが衝突として残る図\"><rect x=\"30\" y=\"20\" width=\"200\" height=\"40\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"130\" y=\"45\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#1f4a68\">東京: x=2 を書く</text><rect x=\"330\" y=\"20\" width=\"200\" height=\"40\" rx=\"8\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"430\" y=\"45\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">バージニア: x=3 を書く</text><rect x=\"150\" y=\"90\" width=\"260\" height=\"40\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"280\" y=\"115\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">衝突: 解決策が無ければ不定</text></svg><p class=\"cap\">図: 解決策を用意しなければ、どちらの値が残るかは不定になる。</p></div>"
+    }
+  },
+  {
+    "q": "衝突解決に last-write-wins (LWW、新しいタイムスタンプの方を残す) を採用したアクティブアクティブ構成について、最も正確な指摘はどれか？",
+    "opts": [
+      "LWW を使えば衝突という概念自体が発生しなくなり、どのリージョンも常に同じ値を同時に見られるようになる",
+      "LWW は複数リージョンでの同時書き込みを禁止する仕組みであり、実質的には固定割り当てと完全に同じ挙動になる",
+      "LWW を採用すると、クロックの同期状況に関わらず常に時間的に正しい順序で更新が反映されることが保証される",
+      "実装が比較的簡単である一方、タイムスタンプが古いと判定された側の更新内容はその場で捨てられ、後から元の更新内容を復元する手段が残らない",
+      "LWW は読み取り専用のワークロードにのみ適用可能な方式で、書き込みを伴うワークロードには原理的に使えない"
+    ],
+    "ans": 3,
+    "exps": [
+      "LWW は衝突そのものを無くす仕組みではなく、衝突が起きた後にどちらを残すかを決める解決策の 1 つにすぎない。概念が発生しなくなるという説明は誤り。",
+      "LWW は複数リージョンでの同時書き込み自体は許容した上で事後的に解決する方式であり、同時書き込みを事前に禁止する固定割り当てとは前提が異なる。",
+      "LWW はタイムスタンプの比較に依存するため、クロックの同期がずれていると、実際には後に起きた更新がタイムスタンプ上は先だと判定されてしまう恐れがある。「常に保証される」は誤り。",
+      "<b>これが正解。</b>LWW は実装が簡単な代わりに、古いと判定された側の更新内容 (どのリージョンの変更だったかという情報を含む) がその場で破棄され、後から復元する手段が残らないという代償がある。",
+      "LWW は書き込みの衝突を解決するための方式であり、書き込みを伴うワークロードでこそ意味を持つ。読み取り専用限定という制約は無い。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>LWW は「新しい方だけ残す」仕組みで、捨てられた側の更新内容は戻せません。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"LWWで古い更新が捨てられる図\"><rect x=\"30\" y=\"30\" width=\"200\" height=\"40\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"130\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#1f4a68\">t=10: x=2 (古い)</text><rect x=\"330\" y=\"30\" width=\"200\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"430\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">t=12: x=3 (新しい)</text><text x=\"280\" y=\"100\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\">x=2 は破棄され、復元する手段は残らない</text></svg><p class=\"cap\">図: LWW は新しい方を残し、古い方の更新内容は失われる。</p></div>"
+    }
+  },
+  {
+    "q": "セル型アーキテクチャ (cell-based architecture) の目的として最も適切なものはどれか？",
+    "opts": [
+      "全ユーザーを 1 つの巨大な共有クラスタに集約して処理することで、運用対象を極限まで単純化し管理コストを下げること",
+      "すべてのセルが同じリソースを共有する前提にすることで、セル間のデータ整合性を自動的に保証すること",
+      "新しいバージョンのデプロイを常に全セルへ一斉展開し、展開作業そのものを毎回 1 回で終わらせること",
+      "セルの数を増やせば増やすほど、セルをまたいだ全ユーザーの集計処理がどんどんシンプルになっていくこと",
+      "ユーザーやテナントを独立したセルに分割し、1 セルで起きた障害の影響範囲を他のセルに広げないようにすること"
+    ],
+    "ans": 4,
+    "exps": [
+      "巨大な単一クラスタにまとめる方向はセル分割とは逆の発想であり、1 か所の障害が全ユーザーに広がるリスクを増やしてしまう。",
+      "セル型アーキテクチャはむしろ各セルが他セルと共有リソースを持たないことを前提にしており、「共有リソースが前提」という説明は逆である。",
+      "段階的に 1 セルずつ展開することで問題の被害を抑えるのがセル分割の利点であり、全セルへの一斉展開はその利点を打ち消してしまう。",
+      "セルをまたぐ集計や検索はむしろ複雑になる代償があり、セルの数が増えるほどシンプルになるという説明は実態と逆。",
+      "<b>これが正解。</b>セル分割の目的は、各セルを独立させることで 1 セルの障害や過負荷が他のセルのユーザーに広がらないよう、影響範囲を 1 セル分に閉じ込めること。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>セル分割は「障害を 1 セル分に閉じ込める」ことが目的です。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"セル分割の目的の図\"><rect x=\"30\" y=\"30\" width=\"150\" height=\"80\" rx=\"10\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"105\" y=\"60\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">セル A (障害)</text><rect x=\"210\" y=\"30\" width=\"150\" height=\"80\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"285\" y=\"60\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">セル B (無事)</text><rect x=\"390\" y=\"30\" width=\"150\" height=\"80\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"465\" y=\"60\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">セル C (無事)</text></svg><p class=\"cap\">図: セル A の障害がセル B / C のユーザーに伝わらない。</p></div>"
+    }
+  },
+  {
+    "q": "自動フェイルオーバーのヘルスチェックが、一時的なネットワークの揺らぎを「障害」と誤判定し、正常なリージョンから別のリージョンへ不要な切り替えを繰り返す現象を指す言葉として最も適切なものはどれか？",
+    "opts": [
+      "フラッピング (flapping) ― 誤判定によってアクティブなリージョンが短時間で何度も切り替わってしまう現象",
+      "スプリットブレイン ― 2 つのリージョンが同時に自分が正だと思い込み、両方とも書き込みを受け付け続ける現象",
+      "サーキットブレーカーの誤動作 ― 正常な呼び出しまで遮断してしまう現象",
+      "コールドスタート ― 待機系の起動に時間がかかり復旧が遅れる現象",
+      "バーンレートの急上昇 ― エラーバジェットの消費ペースが速まる現象"
+    ],
+    "ans": 0,
+    "exps": [
+      "<b>これが正解。</b>一時的な揺らぎを障害と誤判定し、アクティブなリージョンが短時間に何度も切り替わってしまう現象はフラッピングと呼ばれる。RTO を縛らず不要な切り替えが続く。",
+      "スプリットブレインは 2 つのリージョンが同時に正だと思い込む別の現象で、フラッピング (切り替えの繰り返し自体) とは指している事象が異なる。",
+      "サーキットブレーカーの誤動作は呼び出しの遮断に関する話題で、リージョンの切り替えが繰り返される現象とは別の概念。",
+      "コールドスタートは待機系の起動の遅さに関する話題であり、誤判定による切り替えの繰り返しという現象そのものを指す言葉ではない。",
+      "バーンレートはエラーバジェットの消費ペースを表す指標であり、フェイルオーバーの誤判定による切り替えの繰り返しとは異なる話題。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>フラッピングは「切り替えが収まらず往復し続ける」現象です。</p><div class=\"fig\"><svg viewBox=\"0 0 560 130\" aria-label=\"フラッピングの図\"><rect x=\"40\" y=\"30\" width=\"180\" height=\"40\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"130\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#1f4a68\">リージョン A へ</text><rect x=\"340\" y=\"30\" width=\"180\" height=\"40\" rx=\"8\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"430\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">リージョン B へ</text><text x=\"280\" y=\"20\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">何度も往復</text><text x=\"280\" y=\"100\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">誤判定のたびに切り替えが繰り返される</text></svg><p class=\"cap\">図: 誤判定が続くと、切り替えが収まらず往復し続ける。</p></div>"
+    }
+  },
+  {
+    "q": "ヘルスチェックの経路とデータ複製の経路を分けて多重化せず、単純なヘルスチェック失敗だけで即座に別リージョンへ切り替える設計にした場合、最も警戒すべき失敗シナリオはどれか？",
+    "opts": [
+      "切り替え先のリージョンの起動が想定より速く進んでしまい、RTO の目標値を大幅に下回る結果になって事前のコスト見積もりが狂ってしまう",
+      "ヘルスチェックの経路だけが切れて元のリージョンは実際には正常なのに、新しいリージョンへ切り替えられ、両方が同時に書き込みを受け付け続けるスプリットブレインが起きる",
+      "ヘルスチェックを実行する頻度が想定より高くなりすぎることで、監視システム自体が出力するログの量が増えすぎてストレージの容量を圧迫してしまう",
+      "新しいリージョンへの切り替えが完了した直後に、古いリージョンに残っていたデータが自動的にすべて暗号化されて読めなくなってしまう",
+      "切り替えが終わった後にアプリケーションのバージョン番号の表示だけが古い値のまま残り、ユーザーの画面にだけ古い表示が見えてしまう"
+    ],
+    "ans": 1,
+    "exps": [
+      "RTO が目標より速く達成されることはコスト面の検討課題になり得るが、「最も警戒すべき失敗シナリオ」として問われている致命的な不整合の話とは種類が異なる。",
+      "<b>これが正解。</b>ヘルスチェックの経路だけが切れて本体は生きている場合、判断の根拠となる経路とデータ複製の経路を分けていなければ、元のリージョンが「死んだ」と誤判定され、新旧両方が正だと思い込んで書き込みを受け付け続けるスプリットブレインが起きる。",
+      "ログ量の増加は監視システムの運用上の課題であり、ヘルスチェックの経路を分けていないことが直接引き起こす最悪のシナリオではない。",
+      "切り替えによってデータが自動的に暗号化される仕組みは一般的な設計には無く、この文脈で警戒すべき挙動として挙げるのは的外れ。",
+      "表示上のバージョン番号の古さはユーザー体験上の軽微な問題であり、ヘルスチェックの経路を分けていないことが引き起こす致命的なリスクとは重みが異なる。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>判定の経路だけが切れて本体が生きていると、2 つのリージョンが同時に正だと思い込みます。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"スプリットブレインが起きる経路の図\"><rect x=\"30\" y=\"20\" width=\"220\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"140\" y=\"45\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">旧リージョン: 実際は正常</text><rect x=\"310\" y=\"20\" width=\"220\" height=\"40\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"420\" y=\"45\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">新リージョン: 切替先</text><text x=\"280\" y=\"90\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">ヘルスチェックの経路だけ切れると、両方が「自分が正」と思い込む</text></svg><p class=\"cap\">図: 判定経路だけが切れると、2 つのリージョンが同時に書き込みを受け付け続ける。</p></div>"
+    }
+  },
+  {
+    "q": "DynamoDB の Global Tables (複数リージョンで書き込みを受け付け、last-writer-wins で衝突を解決) と、Google Cloud Spanner (TrueTime を使い複数リージョンに分散したまま強い一貫性を保つ) の違いとして、最も正確な説明はどれか？",
+    "opts": [
+      "Global Tables も Spanner も内部的にはまったく同じ一貫性レベルを提供する実装であり、製品名が違うだけで動作には実質的な差が無い",
+      "Spanner という製品は複数のリージョンをまたぐ構成をサポートしておらず、常に単一のリージョン内だけで動作する設計になっている",
+      "Global Tables は衝突そのものが一切発生しない設計になっており、同じキーへの同時書き込みが起きることは原理的にありえないとされている",
+      "Global Tables は低レイテンシな複数リージョン書き込みの代わりに衝突時の情報損失を許容し、Spanner はリージョン間の合意にかかる待ち時間という代償を払っている",
+      "Global Tables も Spanner も裏側では衝突を解決する仕組みを一切持たず、常にアプリケーション側で手動の解決処理を書く必要があるとされている"
+    ],
+    "ans": 3,
+    "exps": [
+      "一貫性レベルは明確に異なり、Global Tables は結果整合性寄り、Spanner は外部一貫性という強い保証を目指しており、「実質的な差が無い」は誤り。",
+      "Spanner はマルチリージョン構成をサポートする設計を前提とした製品であり、「常に単一リージョンのみ」という説明は実態と異なる。",
+      "Global Tables も複数リージョンから同じキーへ同時書き込みが起きれば衝突は発生し、LWW によって解決される。「原理的にありえない」は誤り。",
+      "<b>これが正解。</b>Global Tables は複数リージョンから低レイテンシで書き込める代わりに、衝突時には古い方の更新内容が失われる代償を払い、Spanner は強い一貫性を保つ代わりにリージョンをまたぐ合意に待ち時間がかかる代償を払う、という異なる軸の選択をしている。",
+      "Global Tables は LWW という衝突解決の仕組みを製品側に組み込んでおり、「一切持たず常に手動」という説明は実態と異なる。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>どちらも「低レイテンシ」と「強い一貫性」のどちらを優先するかで、支払う代償の種類が違います。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"Global TablesとSpannerの代償の違い\"><rect x=\"30\" y=\"30\" width=\"230\" height=\"70\" rx=\"10\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"145\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1f4a68\">Global Tables</text><text x=\"145\" y=\"80\" font-size=\"12\" text-anchor=\"middle\" fill=\"#12211a\">低遅延だが衝突で情報損失</text><rect x=\"300\" y=\"30\" width=\"230\" height=\"70\" rx=\"10\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"415\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#5b3d80\">Spanner</text><text x=\"415\" y=\"80\" font-size=\"12\" text-anchor=\"middle\" fill=\"#12211a\">強一貫性だが合意待ちが発生</text></svg><p class=\"cap\">図: 低レイテンシか強い一貫性か、優先する軸によって代償の種類が変わる。</p></div>"
+    }
+  },
+  {
+    "q": "ユーザーごとに「ホームリージョン」を固定し、そのユーザーに関する書き込みは必ずホームリージョンで受け付ける設計を採用する、最大の狙いは何か？",
+    "opts": [
+      "すべてのユーザーのデータを 1 つのリージョンだけに集約し、他のリージョンの設備を完全に不要にすること",
+      "ホームリージョンが落ちた場合でも、他のリージョンがそのユーザーの書き込みを即座に肩代わりできるようにすること",
+      "リージョン間のネットワーク帯域をできるだけ多く使い切ることで、専用線のコストを無駄にしないようにすること",
+      "ユーザーの所在地に関わらず、全世界のどのリージョンからでも常に同じ速さで書き込みが完了するようにすること",
+      "同じキーに対する同時書き込みが複数のリージョンから発生する状況そのものを避け、衝突解決の仕組みを別途用意しなくてよくすること"
+    ],
+    "ans": 4,
+    "exps": [
+      "ホームリージョンの固定は書き込み先を 1 つに決める話であり、データそのものの複製や他リージョンの設備を完全に不要にする話ではない。",
+      "ホームリージョンを固定する設計は、むしろそのリージョンが落ちた場合に別リージョンが即座に書き込みを肩代わりすることを難しくする側面があり、フェイルオーバーには別の仕組みが要る。",
+      "帯域の使い切りを目的とするという説明は、この設計が解決しようとしている衝突回避という狙いとは異なる話題。",
+      "ホームリージョンを固定すると、ホームリージョンから離れた場所にいるユーザーの書き込みは往復の距離が伸びるため、常に同じ速さになるという説明は実態と逆になりうる。",
+      "<b>これが正解。</b>同じキーへの書き込みを受け付けるリージョンを 1 つに固定することで、複数リージョンからの同時書き込みという状況自体を起こさず、LWW や CRDT のような事後の衝突解決の仕組みを用意する必要が無くなる。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>書き込み先を 1 つに固定すれば、そもそも衝突が起きる状況自体が発生しません。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"ホームリージョン固定で衝突を避ける図\"><rect x=\"200\" y=\"30\" width=\"180\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"290\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">ユーザー U のホーム: 東京</text><text x=\"290\" y=\"95\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">U の書き込みは常に東京だけで受け付ける</text><text x=\"290\" y=\"118\" font-size=\"13\" text-anchor=\"middle\" fill=\"#4a5d54\">他リージョンから同時書き込みは発生しない</text></svg><p class=\"cap\">図: 書き込み先を 1 つに固定すれば、衝突する状況自体が起きない。</p></div>"
+    }
+  },
+  {
+    "q": "「障害発生から 15 分以内に復旧し、直前 5 分以上のデータは絶対に失ってはならない」という厳しい要件を出された金融系サービスに対して、最も適切な戦略の選び方はどれか？",
+    "opts": [
+      "要件の厳しさに関わらず、コストを抑えるためバックアップ & リストアだけを導入し、復旧は手作業のリストア手順に委ねる",
+      "この要件はウォームスタンバイでは原理的に満たせないため、常にパイロットライトを選ぶべきだと機械的に判断する",
+      "ホットサイト型のアクティブアクティブ構成を基本線としつつ、衝突解決の方針を要件に合わせて選び、RTO / RPO の目標値を実測で検証する",
+      "RTO と RPO はどちらも同じ意味の指標なので、片方だけを満たす設計にすれば自動的にもう片方も満たされると考えてよい",
+      "このような厳しい要件は実在するシステムでは達成不可能なので、要件そのものを提示した側に緩和を求めるべきだと最初に判断する"
+    ],
+    "ans": 2,
+    "exps": [
+      "バックアップ & リストアの RTO は数時間 〜 数日、RPO もバックアップの間隔に依存するため、15 分 / 5 分という要件には到底届かず、コスト優先の判断としては要件を無視してしまっている。",
+      "パイロットライトも起動には一定の時間がかかり、15 分という厳しい RTO を安定して満たせるとは限らない。選択肢を 1 つに決め打ちする前に、要件に対して実測で検証する姿勢が要る。",
+      "<b>これが正解。</b>15 分 / 5 分という厳しい RTO / RPO には、常時フル規模で稼働するホットサイト型が最も適しており、その上で衝突解決の方針を要件に合わせて選び、実際の数値を測って検証するのが適切な進め方。",
+      "RTO (復旧時間) と RPO (データ損失量) は別の軸を測る指標であり、片方を満たしても自動的にもう片方が満たされる関係にはない。",
+      "要件が厳しいからといって実現不可能と決めつけず、まずは適切な戦略 (ホットサイト型など) で実際に満たせるかどうかを検証するのが先であり、最初から緩和を求めるのは早計な判断。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>厳しい RTO / RPO の要件には、常時フル規模で動かすホットサイト型が対応する戦略です。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"厳しい要件とホットサイト型の対応\"><rect x=\"40\" y=\"30\" width=\"220\" height=\"60\" rx=\"10\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"150\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">要件: RTO 15 分 / RPO 5 分</text><text x=\"150\" y=\"75\" font-size=\"12\" text-anchor=\"middle\" fill=\"#12211a\">非常に厳しい</text><rect x=\"300\" y=\"30\" width=\"220\" height=\"60\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"410\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">ホットサイト型</text><text x=\"410\" y=\"75\" font-size=\"12\" text-anchor=\"middle\" fill=\"#12211a\">常時フル規模稼働で対応</text></svg><p class=\"cap\">図: 厳しい要件には、常時待機の規模が最も大きい戦略を当てて実測で検証する。</p></div>"
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

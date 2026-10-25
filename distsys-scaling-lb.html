@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スケーリングとロードバランサ ― 1 台を増やしても倒れない形にする</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 03 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>スケーリングとロードバランサ ― 1 台を増やしても倒れない形にする</h1>
+  <p>台数を増やす前に状態を外へ出さないと、増やした分だけ新しい壊れ方が増えるだけに終わる</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 01 回 <a href="./distsys-fundamentals.html">なぜ分散するのか</a>、第 02 回 <a href="./distsys-sockets.html">ソケットプログラミング入門</a></p>
+  <p class="intro">1 台のサーバで足りなくなったとき、最初に考えるのは「もっと大きい 1 台」(垂直スケーリング) です。しかしこれには物理的な上限があり、やがて「複数台に増やす」(水平スケーリング) に切り替える必要が出てきます。ところが台数を増やすだけでは何も解決しません。各サーバがリクエストの状態 (セッション情報など) を自分のメモリに抱えたままだと、ロードバランサがどのサーバにリクエストを振っても同じ結果にならず、1 台が落ちればそのユーザのデータだけが消えます。この回では、サーバをステートレス (状態を持たない) にしてロードバランサで束ねる仕組みと、ヘルスチェックやスティッキーセッションがどこで壊れるかを具体的に見ていきます。</p>
+
+  <!-- ===== 解説パート 1: C・A・P の正確な定義 ===== -->
+  <section>
+    <h2>1. 垂直スケーリングの限界と水平スケーリングへの切り替え</h2>
+    <p>アクセスが増えてサーバが遅くなったとき、最初に試すのは<b>垂直スケーリング (scale up)</b>、つまり今あるサーバの CPU やメモリ、ディスクをもっと良いものに替えることです。手順が単純でアプリケーションのコードを変える必要がないため、まず試す選択肢として間違いではありません。</p>
+    <p>しかし垂直スケーリングには 2 つの壁があります。1 つは物理的な上限で、1 台に積める CPU コア数やメモリ量には必ず天井があります。もう 1 つはコストで、性能を 2 倍にするための値段は 2 倍では済まず、高性能な専用機ほど単位性能あたりの価格が跳ね上がっていきます。さらに、サーバが 1 台しかない限り、そのサーバが故障すればサービス全体が止まる単一障害点 (single point of failure) のままです。</p>
+    <p>そこで必要になるのが<b>水平スケーリング (scale out)</b>、つまり性能の高い 1 台を目指すのではなく、同じ役割のサーバを何台も並べて負荷を分け合う方法です。水平スケーリングは理論上、台数を増やすだけ処理能力を伸ばせますが、1 つ条件があります。どのサーバにリクエストが届いても同じ結果が返る必要があり、そのためにはサーバが「前回この人が誰で何をしていたか」を自分のメモリだけに持たない設計、つまり次の節で説明する<b>ステートレス化</b>が前提になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 628 230" role="img" aria-label="垂直スケーリングと水平スケーリングの違いを示す図">
+        <rect x="30" y="20" width="220" height="190" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="45" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">垂直スケーリング</text>
+        <rect x="90" y="140" width="100" height="50" rx="6" fill="#8fd6b4" opacity="0.5" stroke="#0f5132"/>
+        <text x="140" y="170" font-size="12.5" text-anchor="middle" fill="#12211a">1 台 (小)</text>
+        <rect x="70" y="60" width="140" height="70" rx="6" fill="#43b581" opacity="0.6" stroke="#0f5132"/>
+        <text x="140" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">1 台 (大) ・ 上限あり</text>
+        <text x="140" y="195" font-size="12.5" text-anchor="middle" fill="#4a5d54">値段は性能に比例しない</text>
+        <rect x="360" y="20" width="230" height="190" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="475" y="45" font-size="14" text-anchor="middle" fill="#1f4a68" font-weight="700">水平スケーリング</text>
+        <rect x="385" y="65" width="60" height="45" rx="6" fill="#2f5f8a" opacity="0.35" stroke="#1f4a68"/>
+        <rect x="450" y="65" width="60" height="45" rx="6" fill="#2f5f8a" opacity="0.35" stroke="#1f4a68"/>
+        <rect x="515" y="65" width="60" height="45" rx="6" fill="#2f5f8a" opacity="0.35" stroke="#1f4a68"/>
+        <rect x="385" y="120" width="60" height="45" rx="6" fill="#2f5f8a" opacity="0.2" stroke="#1f4a68" stroke-dasharray="4 3"/>
+        <text x="415" y="148" font-size="12.5" text-anchor="middle" fill="#1f4a68">+1 台</text>
+        <text x="475" y="188" font-size="12.5" text-anchor="middle" fill="#4a5d54">台数に応じて処理能力が伸びる</text>
+        <text x="475" y="204" font-size="12.5" text-anchor="middle" fill="#4a5d54">(条件: ステートレス)</text>
+      </svg>
+      <p class="cap">図: 垂直スケーリングは 1 台を強くする方法で上限がある。水平スケーリングは台数を増やす方法で、ステートレスな設計が前提になる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. ステートレス化とロードバランサの基本的な仕組み</h2>
+    <p>複数台に増やしたサーバの手前に置き、どのサーバに処理を振るかを決めるのが<b>ロードバランサ (load balancer, LB)</b> です。LB には大きく 2 種類あります。<b>L4 (トランスポート層) LB</b> は IP アドレスとポート番号だけを見て振り分け先を決め、HTTP の内容は一切読みません。パケットをそのまま右から左に流すだけなので処理が軽く、毎秒数百万接続のような超高スループットに向きます。一方<b>L7 (アプリケーション層) LB</b> は HTTP ヘッダや URL パス、クッキーまで読んでから振り分けるため、「/api/ で始まるパスは API サーバへ」「特定のクッキーを持つユーザは同じサーバへ」といった内容に応じた判断ができますが、その分 1 リクエストあたりの処理コストは上がります。</p>
+    <p>振り分けの具体的な方式にも何通りかあります。<b>ラウンドロビン</b> は順番に 1 台ずつ均等に割り当てる最も単純な方式ですが、サーバの性能差やリクエストごとの処理時間の差を考慮しません。<b>重み付きラウンドロビン</b> はサーバごとに重みを設定し、性能が高いサーバに多めに割り振ります。<b>最小接続数 (least connections)</b> は今まさに処理中のリクエスト数が最も少ないサーバへ送るため、処理時間が長いリクエストが混ざっていても偏りにくくなります。</p>
+    <p>ここで前提になるのが、サーバが<b>ステートレス (stateless)</b> であることです。ログイン中のユーザ情報のようなセッション状態をサーバ自身のメモリに持ってしまうと、2 回目以降のリクエストを別のサーバに振ったときにそのユーザの情報が無くなり、ログインが切れたように見えたり処理が失敗したりします。これを避けるには、セッション状態を各サーバのメモリではなく外部の共有ストア (Redis のような分散キャッシュや DB) に置き、どのサーバが応答しても同じ状態を参照できるようにします。</p>
+    <p>この「振り分け先を決める」計算自体は難しくありません。次のコードは最小接続数方式の考え方を Python でそのまま表したものです。</p>
+    <pre><code>def least_connections(conn_counts):
+    return min(conn_counts, key=conn_counts.get)
+
+connections = {'server-a': 3, 'server-b': 1, 'server-c': 5}
+print(least_connections(connections))</code></pre>
+    <p>辞書 <code>conn_counts</code> はサーバ名をキーに現在の接続数を値として持ち、<code>min</code> に <code>key=conn_counts.get</code> を渡すことで接続数が最小のサーバ名を 1 回の走査で選び出しています。この例では <code>server-b</code> が選ばれます。実際の LB はこの選択をリクエストが来るたびに、かつ複数の LB インスタンス間で接続数の数え方をできるだけ揃えて実行します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="L4とL7ロードバランサが参照する情報の違いを示す図">
+        <rect x="30" y="20" width="250" height="190" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="45" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">L4 LB (トランスポート層)</text>
+        <rect x="55" y="65" width="200" height="35" rx="6" fill="#8fd6b4" opacity="0.5" stroke="#0f5132"/>
+        <text x="155" y="88" font-size="12.5" text-anchor="middle" fill="#12211a">宛先 IP ・ ポート番号だけ</text>
+        <text x="155" y="130" font-size="12.5" text-anchor="middle" fill="#12211a">HTTP の内容は読まない</text>
+        <text x="155" y="155" font-size="12.5" text-anchor="middle" fill="#12211a">高速 ・ 超高スループット向き</text>
+        <text x="155" y="190" font-size="12.5" text-anchor="middle" fill="#4a5d54">例: AWS NLB</text>
+        <rect x="340" y="20" width="250" height="190" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="465" y="45" font-size="14" text-anchor="middle" fill="#1f4a68" font-weight="700">L7 LB (アプリケーション層)</text>
+        <rect x="365" y="65" width="200" height="35" rx="6" fill="#2f5f8a" opacity="0.35" stroke="#1f4a68"/>
+        <text x="465" y="88" font-size="12.5" text-anchor="middle" fill="#12211a">URL パス ・ ヘッダ ・ クッキー</text>
+        <text x="465" y="130" font-size="12.5" text-anchor="middle" fill="#12211a">内容に応じた振り分けが可能</text>
+        <text x="465" y="155" font-size="12.5" text-anchor="middle" fill="#12211a">1 リクエストあたりの処理が重い</text>
+        <text x="465" y="190" font-size="12.5" text-anchor="middle" fill="#4a5d54">例: AWS ALB</text>
+      </svg>
+      <p class="cap">図: L4 LB は IP とポートだけで判断して高速、L7 LB は HTTP の内容まで読んで賢く振り分けられる分コストが高い。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. ヘルスチェックの設計 ― 死んでいるサーバをどう見つけるか</h2>
+    <p>LB がリクエストを振り分け続けるには、どのサーバが実際に応答できる状態かを常に知っておく必要があります。これを確認する仕組みが<b>ヘルスチェック (health check)</b> です。方式は大きく 2 つあります。<b>アクティブヘルスチェック</b> は LB が一定間隔で各サーバの専用エンドポイント (例えば <code>/health</code>) に自分から問い合わせ、応答が無いか異常な応答コードが返ってきたサーバをプールから外します。<b>パッシブヘルスチェック</b> は専用の問い合わせをせず、実際の業務リクエストが連続して失敗したサーバを異常とみなして外す方式です。</p>
+    <p>ヘルスチェックの中身にも深さの違いがあります。プロセスが起動していて応答を返せるかだけを見る<b>浅いチェック (basic check)</b> と、そのサーバが依存している DB やキャッシュまで実際に呼び出して確認する<b>深いチェック (deep check)</b> です。深いチェックは「サーバは起きているが依存先の DB が死んでいるので実質使えない」という状態を検出できる一方、LB が何台も同時に深いチェックを打つと、その問い合わせ自体が DB への負荷になってしまう点に注意が必要です。</p>
+    <p>応答コードの意味も区別しておく必要があります。バックエンドが 5xx を返すのは「サーバは応答したが処理に失敗した」という意味で、ヘルスチェック的には異常と判断する根拠になります。これに対し LB 自身が返す 502 (Bad Gateway) や 504 (Gateway Timeout) は「LB がバックエンドに接続できなかった、または応答を待ちきれなかった」ことを示し、バックエンドが本当に死んでいるのか一時的に遅いだけなのかは別途調べる必要があります。404 は「そのパスにルートが無い」という意味で、サーバ自体が死んでいることを示す根拠にはなりません。</p>
+    <p>Kubernetes を使う場合は、LB (または Kubernetes のリーダー自身) の liveness probe / readiness probe と LB のヘルスチェックが二重に存在することもあります。liveness probe はコンテナを再起動すべきかを判断し、readiness probe はそのコンテナにトラフィックを送ってよいかを判断します。デプロイ直後は起動が完了していない Pod にトラフィックが流れないよう、readiness probe が整うまで LB 側のプールにも加えない設定が必要です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 220" role="img" aria-label="ロードバランサがヘルスチェックで異常サーバをプールから外す図">
+        <rect x="20" y="80" width="130" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="115" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">LB</text>
+        <line x1="150" y1="95" x2="260" y2="40" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="150" y1="110" x2="260" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="150" y1="125" x2="260" y2="180" stroke="#c0492f" stroke-width="2" stroke-dasharray="5 4"/>
+        <rect x="260" y="15" width="150" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="335" y="45" font-size="13" text-anchor="middle" fill="#0f5132">サーバ A ・ 正常</text>
+        <rect x="260" y="85" width="150" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="335" y="115" font-size="13" text-anchor="middle" fill="#0f5132">サーバ B ・ 正常</text>
+        <rect x="260" y="155" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="335" y="180" font-size="13" text-anchor="middle" fill="#b5401f">サーバ C ・ 応答無し</text>
+        <text x="335" y="200" font-size="12.5" text-anchor="middle" fill="#4a5d54">プールから除外</text>
+      </svg>
+      <p class="cap">図: アクティブヘルスチェックで応答が無いサーバを検出し、新しいリクエストの振り分け先から外す。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. スティッキーセッションの代償と、どこで壊れるか</h2>
+    <p>ステートレス化が難しい場面では、同じユーザのリクエストを常に同じサーバへ送る<b>スティッキーセッション (sticky session, セッションアフィニティ)</b> で代用することがあります。クッキーや送信元 IP のハッシュ値を使って毎回同じサーバを選ぶ方式です。しかしこれには代償があります。第 1 に、特定のサーバに重い処理をするユーザが偏って割り当たると、他のサーバが暇でもそのサーバだけ過負荷になり、ロードバランシングの本来の目的である負荷の分散が崩れます。第 2 に、割り当てられていたサーバが落ちると、そのユーザのセッション情報は丸ごと失われ、ログインし直しになります。ステートレス化してセッションを共有ストアに置いた場合は、どのサーバが応答しても同じ状態を参照できるため、この問題自体が起きません。</p>
+    <p>ヘルスチェックの運用でも壊れ方があります。深いチェックを多数の LB インスタンスが同時に実行すると、チェック自体が下流の DB やキャッシュへの小さなサンダリングハード (thundering herd, 一斉アクセスの集中) を引き起こすことがあります。また、デプロイ直後にアプリケーションの起動がまだ終わっていないのにヘルスチェックが早すぎるタイミングで始まると、正常に立ち上がる途中のサーバを誤って異常と判定し、プールから外してしまいます。</p>
+    <p>オートスケーリングにも時間差の問題があります。負荷の急増を検知してから新しいサーバを起動し、アプリケーションの起動とウォームアップ (キャッシュが温まっていない状態からの立ち上がり) が終わってヘルスチェックに応答できるようになるまでには数十秒から数分かかります。この間、既存のサーバだけで急増した負荷を受け続けることになり、スケールアウトが「間に合わない」ことがあります。逆にスケールインを急ぎすぎると、次の負荷の波に対応できる余裕を削ってしまいます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="スティッキーセッションでサーバ障害時にセッションが失われる図">
+        <rect x="30" y="20" width="160" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="110" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">ユーザ U → 常にサーバ A</text>
+        <line x1="190" y1="45" x2="280" y2="45" stroke="#1f4a68" stroke-width="2"/>
+        <rect x="280" y="20" width="140" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="350" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">サーバ A 障害</text>
+        <text x="235" y="110" font-size="13.5" text-anchor="middle" fill="#12211a">セッション状態がサーバ A のメモリだけにあった場合</text>
+        <text x="235" y="135" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">ユーザ U のセッションは丸ごと消える</text>
+        <text x="235" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">(共有ストアに置けば他サーバが引き継げる)</text>
+      </svg>
+      <p class="cap">図: セッションを特定サーバのメモリだけに置くと、そのサーバの障害でセッションが完全に失われる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 実システムでの例 ― EC サイトの進化とクラウド LB</h2>
+    <p>典型的な EC サイトが 1 台構成から成長していく過程を順番に見ると、この回で説明してきた要素がどの順番で必要になるかがわかります。まず商品説明と在庫を扱う在庫サービスと、ユーザ登録やログインを扱うユーザサービスがあるとします。最初はアプリケーションサーバと DB を 1 台に同居させ、負荷が増えたらアプリケーションサーバと DB サーバを分離します。さらに増えたら、アプリケーションサーバを複数台に増やして LB で束ねる、これがここまで説明してきたステップです。その後は、読み取り専用の複製 (リードレプリカ) で DB の読み取りを分散させたり、データを複数の DB に分割 (シャーディング) したり、キャッシュ層を挟んだりして、最終的にはサービスごとに独立してスケールできるマイクロサービス構成へ向かいます。つまりロードバランサは「1 台を超える」ための最初の一歩であり、後続の回で扱うレプリケーションやシャーディング、キャッシュはその先に積み上がる層です。</p>
+    <p>クラウドの実装としては、AWS の<b>ALB (Application Load Balancer)</b> が L7 LB の代表で、URL パスやホストヘッダに基づくルーティング、HTTP ヘッダを使ったヘルスチェックの深さの調整ができます。<b>NLB (Network Load Balancer)</b> は L4 LB の代表で、送信元 IP を保持したまま転送でき、毎秒数百万接続規模の高スループットと低レイテンシが必要な場面で使われます。どちらを選ぶかは、振り分けの判断にアプリケーションの内容 (パスやヘッダ) が必要かどうかで決まります。</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin:12px 0">
+      <tr style="background:#eaf5ef"><th style="padding:8px;border:1px solid #d9e5df;text-align:left">観点</th><th style="padding:8px;border:1px solid #d9e5df;text-align:left">L4 (例: NLB)</th><th style="padding:8px;border:1px solid #d9e5df;text-align:left">L7 (例: ALB)</th></tr>
+      <tr><td style="padding:8px;border:1px solid #d9e5df">判断に使う情報</td><td style="padding:8px;border:1px solid #d9e5df">送信元 ・ 宛先 IP とポート</td><td style="padding:8px;border:1px solid #d9e5df">URL パス ・ ヘッダ ・ クッキー</td></tr>
+      <tr><td style="padding:8px;border:1px solid #d9e5df">得意な場面</td><td style="padding:8px;border:1px solid #d9e5df">超高スループット、低レイテンシ</td><td style="padding:8px;border:1px solid #d9e5df">内容に応じた柔軟なルーティング</td></tr>
+      <tr><td style="padding:8px;border:1px solid #d9e5df">送信元 IP</td><td style="padding:8px;border:1px solid #d9e5df">そのまま保持できる</td><td style="padding:8px;border:1px solid #d9e5df">ヘッダ (X-Forwarded-For 等) で伝える</td></tr>
+    </table>
+    <p>どちらの LB を使うにせよ、この回の核心は変わりません。台数を増やす前にサーバをステートレスにし、ヘルスチェックで壊れたサーバを自動的に外す仕組みを用意しておくこと。これが無いまま台数だけを増やすと、増えた台数分だけ「どのサーバに当たるかで挙動が変わる」という新しい不具合の種が増えるだけになります。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/8-must-know-scalability-strategies.md" target="_blank" rel="noopener">ByteByteGo: 8 Must-Know Scalability Strategies</a> ― ステートレス化 ・ 水平スケーリング ・ ロードバランシング ・ オートスケーリングを並べた全体像の参照に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/how-to-scale-a-website-to-support-millions-of-users.md" target="_blank" rel="noopener">ByteByteGo: Scaling Websites for Millions of Users</a> ― 1 台構成から LB 導入、リードレプリカ、シャーディング / キャッシュ、マイクロサービスへ進む 6 段階の進化を第 5 節の具体例に使った。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/cloud-load-balancer-cheat-sheet.md" target="_blank" rel="noopener">ByteByteGo: Cloud Load Balancer Cheat Sheet</a> ― L4 / L7 の使い分けの観点を第 5 節の AWS ALB / NLB の比較に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/health-check-endpoint" target="_blank" rel="noopener">SDFC: Health Check Endpoint Migration</a> ― basicCheck / deepCheck の区別、LB の 502 / 504 と 404 の意味の違い、readiness probe とヘルスチェックの二重構造についての議論を第 3 節に使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-sockets.html">← 第 02 回 ソケットプログラミング入門</a><a href="./distsys-index.html">目次</a><a href="./distsys-caching.html">第 04 回 キャッシュ戦略と落とし穴 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '垂直スケーリングと水平スケーリングの違いについて、最も正確な記述はどれか？',
+    opts: [
+      '水平スケーリングはサーバ 1 台の CPU やメモリを強化する方法であり、垂直スケーリングは台数を増やして負荷を分け合う方法である',
+      '垂直スケーリングにも水平スケーリングにも物理的な上限は存在せず、予算と調達の時間さえあれば両方とも無限に性能を伸ばし続けられる',
+      '垂直スケーリングは 1 台の性能を強化する方法で物理的な上限があり、水平スケーリングは台数を増やす方法でステートレスな設計が前提になりやすい',
+      '垂直スケーリングは単一障害点を自動的かつ完全に解消する方法であり、水平スケーリングはむしろ単一障害点を増やしてしまう方法である',
+      '水平スケーリングは常に垂直スケーリングよりコスト効率が悪いため、大規模なサービスの実務ではほとんど採用されていない'
+    ],
+    ans: 2,
+    exps: [
+      '2 つの用語の定義が入れ替わっている。1 台の性能を上げるのは垂直、台数を増やすのは水平スケーリングという対応が逆になっている。',
+      '垂直スケーリングには 1 台に積める CPU やメモリの物理的な上限があり、無限に伸ばすことはできない。水平スケーリングも台数を増やす以外の制約 (調整のオーバーヘッドなど) が別途生じる。',
+      '<b>これが正解。</b>垂直スケーリングは 1 台を強くする方法で天井があり、水平スケーリングは複数台に増やす方法で、各台が同じ結果を返せるようステートレスな設計が前提になりやすい。',
+      '垂直スケーリングは台数が 1 台のままなので、そのサーバが故障すればサービスが止まる単一障害点は解消されずに残る。',
+      '垂直スケーリングは高性能な専用機ほど単位性能あたりの価格が上がる傾向があり、水平スケーリングの方がコスト効率で優れる場面は多い。断定的に「ほとんど採用されない」は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>垂直スケーリングは「1 台を強くする」軸、水平スケーリングは「台数を増やす」軸という別の方向の対策です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="垂直スケーリングと水平スケーリングの軸の違い"><rect x="30" y="20" width="220" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">垂直スケーリング</text><text x="140" y="75" font-size="13" text-anchor="middle" fill="#12211a">1 台を強くする</text><text x="140" y="100" font-size="13" text-anchor="middle" fill="#12211a">物理的な上限がある</text><rect x="310" y="20" width="220" height="110" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">水平スケーリング</text><text x="420" y="75" font-size="13" text-anchor="middle" fill="#12211a">台数を増やす</text><text x="420" y="100" font-size="13" text-anchor="middle" fill="#12211a">ステートレス設計が前提</text></svg>'
+          + '<p class="cap">図: 2 つのスケーリングは別の軸の対策であり、優劣ではなく前提条件が異なる。</p></div>'
+    }
+  },
+  {
+    q: 'ステートレスなサービスがロードバランサを使った水平スケーリングに適している理由として最も正確なものはどれか？',
+    opts: [
+      'ステートレスなサービスは常に処理速度が自動的に速くなり、ハードウェアのコストも下げられるから',
+      'どのサーバが応答してもリクエストの処理結果が変わらないため、LB が自由にどのサーバへ振り分けても問題が起きないから',
+      'ステートレスなサービスはディスク容量をほとんど消費しないため、サーバの台数をいくらでも増やせるから',
+      'ステートレスなサービスは通信の暗号化そのものが不要になるため、ネットワークのオーバーヘッドが減るから',
+      'ステートレスなサービスは常にキャッシュをあらかじめ内蔵しているため、応答速度が自動的に速くなるから'
+    ],
+    ans: 1,
+    exps: [
+      'ステートレスであることと処理速度や費用の高低は直接結びつかない。速さやコストはアルゴリズムやハードウェア構成など別の要因で決まる。',
+      '<b>これが正解。</b>サーバが自分のメモリにユーザの状態を持たなければ、LB はどのリクエストをどのサーバに送っても同じ結果を期待でき、自由に負荷を分散できる。',
+      'ディスク容量の消費とステートレスかどうかは無関係。状態をディスクに保存していなくても、メモリに状態を持っていればステートフルになる。',
+      '暗号化の必要性はステートレスかどうかとは別の軸の話題であり、この利点とは関係が無い。',
+      'ステートレスであることはキャッシュの有無を意味しない。キャッシュを使うかどうかは別の設計判断である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>状態がサーバの外 (共有ストア) にあれば、どのサーバが応答しても同じ結果が返ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="ステートレスなサーバがどれに振っても同じ結果になる図"><rect x="30" y="20" width="120" height="40" rx="8" fill="#8fd6b4" opacity="0.5" stroke="#0f5132"/><text x="90" y="45" font-size="13" text-anchor="middle" fill="#12211a">サーバ A</text><rect x="220" y="20" width="120" height="40" rx="8" fill="#8fd6b4" opacity="0.5" stroke="#0f5132"/><text x="280" y="45" font-size="13" text-anchor="middle" fill="#12211a">サーバ B</text><rect x="410" y="20" width="120" height="40" rx="8" fill="#8fd6b4" opacity="0.5" stroke="#0f5132"/><text x="470" y="45" font-size="13" text-anchor="middle" fill="#12211a">サーバ C</text><line x1="90" y1="60" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/><line x1="280" y1="60" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/><line x1="470" y1="60" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/><rect x="200" y="110" width="160" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="135" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">共有ストア (状態)</text></svg>'
+          + '<p class="cap">図: 状態を共有ストアに置けば、どのサーバが応答しても同じ状態を参照できる。</p></div>'
+    }
+  },
+  {
+    q: 'ある新規サービスで、1 リクエストあたりの処理時間がリクエストごとに大きく異なる (数十ミリ秒から数秒まで幅がある) ことがわかっている。この状況で振り分けアルゴリズムとして最も適切なものはどれか？',
+    opts: [
+      'ランダムに振り分ける方式。計算のコストが最も低く、処理時間のばらつきとも関係が無いと考えられるから',
+      'IP アドレスのハッシュ値を使って固定的に振り分ける方式。常に同じサーバに固定されるため挙動が予測しやすいから',
+      '送信元のポート番号の偶奇だけを見て 2 台に振り分ける方式。実装が非常に単純で済むから',
+      '単純なラウンドロビンを使う方式。処理時間に関係なく常に均等に割り当てられると期待できるから',
+      '最小接続数方式。処理中のリクエスト数が最も少ないサーバへ送るため、処理時間が長いリクエストが集中したサーバに新たな負荷を重ねずに済む'
+    ],
+    ans: 4,
+    exps: [
+      'ランダム方式は計算コストが低い一方で、処理時間の長いリクエストが偶然同じサーバに集中した場合にそのサーバだけ過負荷になる可能性を考慮していない。',
+      'IP ハッシュで固定するとサーバごとの負荷状況を全く見ないため、処理時間の長いリクエストを多く送るクライアントが偏ったサーバに固定され続け、負荷が偏る。',
+      '偶奇だけで分けるのはラウンドロビンと同様に処理中の負荷状況を見ておらず、この状況の解決にはならない。',
+      'ラウンドロビンは割り当て数こそ均等になるが、処理時間の長いリクエストが集中したサーバに新しいリクエストを追加で割り当ててしまう可能性があり、処理時間のばらつきを考慮していない。',
+      '<b>これが正解。</b>最小接続数方式は今まさに処理中の件数を見て振り分けるため、処理時間の長いリクエストで混み合っているサーバを自然に避けることができる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>処理時間がばらつく状況では、「今何件処理中か」を見る方式の方が偏りに強くなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="最小接続数方式が偏りを避ける図"><rect x="30" y="20" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="105" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">サーバ A: 処理中 5 件</text><rect x="210" y="20" width="150" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="285" y="50" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">サーバ B: 処理中 1 件</text><rect x="390" y="20" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="465" y="50" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">サーバ C: 処理中 4 件</text><text x="280" y="100" font-size="13.5" text-anchor="middle" fill="#12211a">最小接続数方式は処理中 1 件の B へ新規リクエストを送る</text><text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#4a5d54">ラウンドロビンは負荷を見ずに順番で A に送ってしまう場合がある</text></svg>'
+          + '<p class="cap">図: 処理中の件数を見る方式は、処理時間がばらつく負荷に対して偏りに強い。</p></div>'
+    }
+  },
+  {
+    q: 'L4 ロードバランサと L7 ロードバランサの違いについて、最も正確な記述はどれか？',
+    opts: [
+      'L4 LB は HTTP ヘッダや URL パスを見て振り分け先を決め、L7 LB は IP アドレスとポート番号だけを見て振り分け先を決める',
+      'L4 LB と L7 LB はどちらも同じ情報を参照するが、対応するプロトコルの数だけが異なる',
+      'L4 LB は必ずオンプレミス専用であり、L7 LB は必ずクラウド専用の実装である',
+      'L4 LB は IP アドレスとポート番号だけを見て振り分け先を決め、L7 LB は HTTP ヘッダや URL パス、クッキーまで見て振り分け先を決められる',
+      'L4 LB は常に L7 LB より新しい技術であり、L7 LB は旧世代の方式である'
+    ],
+    ans: 3,
+    exps: [
+      '参照する情報が逆になっている。HTTP の内容まで読むのは L7 LB であり、L4 LB は IP とポートしか見ない。',
+      'L4 と L7 は参照する情報の層そのものが異なり、対応プロトコル数の違いという説明では本質を捉えていない。',
+      'L4 LB も L7 LB もオンプレミスとクラウドの両方に実装があり、どちらかに限定される技術ではない。',
+      '<b>これが正解。</b>L4 (トランスポート層) LB は IP アドレスとポート番号だけで判断して高速に転送し、L7 (アプリケーション層) LB は HTTP の内容まで読んで内容に応じた振り分けができる。',
+      '新旧の技術という関係ではなく、どちらも現在のクラウド環境で並行して提供されている別の目的のための仕組みである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図を思い出してください。L4 は IP とポートだけ、L7 は HTTP の内容まで見ます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="L4とL7が参照する情報の違い"><rect x="30" y="20" width="220" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">L4 LB</text><text x="140" y="80" font-size="13" text-anchor="middle" fill="#12211a">IP ・ ポート番号のみ</text><rect x="310" y="20" width="220" height="110" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">L7 LB</text><text x="420" y="80" font-size="13" text-anchor="middle" fill="#12211a">URL パス ・ ヘッダ ・ クッキー</text></svg>'
+          + '<p class="cap">図: L4 は参照する情報が少ない分高速、L7 は多くの情報を見る分柔軟。</p></div>'
+    }
+  },
+  {
+    q: 'ある API サービスで、スティッキーセッション (セッションアフィニティ) を導入してユーザごとに同じサーバへ固定していたところ、特定のサーバだけ CPU 使用率が高くなる現象が起きた。最も妥当な説明はどれか？',
+    opts: [
+      'たまたまそのサーバのハードウェアだけ性能が低い個体だったことが唯一の原因である',
+      '処理が重いユーザのリクエストが偶然そのサーバに固定され続けたことで、他のサーバが空いていても負荷が移動できないから',
+      'スティッキーセッションは常に全サーバへ均等に負荷を分散する仕組みなので、この現象は原理的に起こり得ない',
+      'ヘルスチェックの間隔を長くすれば、この現象は確実に解消する',
+      'LB の種類を L4 から L7 に変更しさえすれば、スティッキーセッションの偏りの問題は自動的に解消される'
+    ],
+    ans: 1,
+    exps: [
+      'ハードウェアの個体差も理論上はあり得るが、スティッキーセッション特有の問題として一般的に起きるのは別の理由であり、唯一の原因と決め付けるのは不正確。',
+      '<b>これが正解。</b>スティッキーセッションは同じユーザを常に同じサーバへ固定するため、処理の重いユーザがたまたま同じサーバに集中すると、他のサーバが空いていてもその負荷を動かせない。',
+      'スティッキーセッションはユーザ単位で固定する仕組みであり、固定した結果として負荷が均等になることは保証されない。「原理的に起こり得ない」は誤り。',
+      'ヘルスチェックの間隔は障害検知の速さに関わる設定であり、スティッキーセッションによる負荷の偏り自体を解消するものではない。',
+      'LB の種類 (L4 か L7 か) を変えること自体はスティッキーセッションの仕組みを変えないため、固定による偏りの問題は自動的には解消しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じユーザを固定し続けるため、処理の重いユーザが集まったサーバだけ過負荷になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="スティッキーセッションの偏りの図"><rect x="30" y="20" width="185" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="122" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">サーバ A: 重いユーザ 3 人固定</text><rect x="245" y="20" width="160" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="325" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">サーバ B: 軽いユーザのみ</text><text x="280" y="100" font-size="13.5" text-anchor="middle" fill="#12211a">サーバ B が空いていても A の負荷を移せない</text></svg>'
+          + '<p class="cap">図: 固定された割り当てのため、空いているサーバへ負荷を動かせない。</p></div>'
+    }
+  },
+  {
+    q: 'LB のアクティブヘルスチェックに対してバックエンドサーバが連続して 502 (Bad Gateway) を返し続けている。この事実だけから最も妥当に言えることはどれか？',
+    opts: [
+      'バックエンドのプロセスは正常に起動しており、単にルーティング先のパスが見つからないだけの状態である',
+      'バックエンドは過負荷の状態でも正常に処理を継続できており、意図的に 502 を返して LB に警告を送っている',
+      'LB がバックエンドに接続できない、または応答が無いことを示すだけで、死んでいるのか遅いだけなのかは判別できない',
+      'クライアント側の認証情報に誤りがあるときに発生するエラーであり、再送すれば次回は必ず成功する',
+      'この状況は TLS 証明書の期限切れが起きたときにのみ発生する現象である'
+    ],
+    ans: 2,
+    exps: [
+      'パスが見つからない場合に返るのは 404 であり、502 はそれとは異なる意味を持つ。パスの問題だけで 502 が出ることはない。',
+      '502 はバックエンドが能動的に返すエラーコードではなく、LB がバックエンドに接続できなかったり応答を得られなかったりしたときに LB 自身が生成する応答である。',
+      '<b>これが正解。</b>502 は LB がバックエンドに接続できない、または応答を得られないことを示す。これだけでは、バックエンドが完全に死んでいるのか一時的に遅いだけなのかは区別できず、追加の調査が必要。',
+      '502 はクライアントの認証情報とは無関係のエラーであり、4xx 系の認証エラーとは区別される。再送すれば必ず成功するという保証も無い。',
+      'TLS 証明書の期限切れは別の種類のエラー (接続確立時のハンドシェイク失敗など) を引き起こすことが多く、502 の唯一の原因と決め付けるのは不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>502 は「LB から見てバックエンドに届かなかった、または応答が得られなかった」ことだけを示すコードです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="502の意味を示す図"><rect x="30" y="50" width="130" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="95" y="80" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">LB</text><rect x="390" y="50" width="140" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="460" y="80" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">バックエンド (応答無し)</text><line x1="160" y1="75" x2="390" y2="75" stroke="#c0492f" stroke-width="2" stroke-dasharray="6 6"/><text x="275" y="60" font-size="13" text-anchor="middle" fill="#c0492f" font-weight="700">接続できない / 応答無し</text><text x="275" y="125" font-size="13" text-anchor="middle" fill="#12211a">LB はクライアントに 502 を返す ― 原因 (死んでいる / 遅い) は不明</text></svg>'
+          + '<p class="cap">図: 502 は LB からの視点のエラーで、バックエンドの正確な状態までは特定できない。</p></div>'
+    }
+  },
+  {
+    q: 'あるサービスで、深いヘルスチェック (バックエンド DB まで実際に問い合わせる方式) を複数台の LB インスタンスが短い間隔で同時に実行するようにした。この構成で起きやすい問題として最も妥当なものはどれか？',
+    opts: [
+      'ヘルスチェック自体がトラフィックとして DB に負荷をかけ、ヘルスチェックの一斉実行が小さなサンダリングハードを引き起こす可能性がある',
+      '深いヘルスチェックは DB に一切アクセスしないため、この構成では何の問題も起きない',
+      'LB を複数台にした時点で、ヘルスチェックの深さは自動的に浅いチェックへ切り替わる仕組みが標準で備わっている',
+      'ヘルスチェックの間隔を短くすることは、常に DB の負荷を減らす効果しか持たない',
+      '深いヘルスチェックは必ずキャッシュ層だけを確認し、DB への問い合わせは発生しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>深いヘルスチェックは下流の DB まで実際に呼び出すため、複数の LB インスタンスが同時に頻繁に実行すると、そのチェック自体が DB への一斉アクセス (サンダリングハード) を引き起こす可能性がある。',
+      '深いヘルスチェックの定義そのものが「依存先の DB やキャッシュまで実際に呼び出して確認する」ことであり、DB にアクセスしないなら深いチェックとは呼べない。',
+      'そのような自動切り替えの仕組みは標準では備わっていない。チェックの深さは設定で明示的に選ぶものである。',
+      'ヘルスチェックの間隔を短くするほどチェックの頻度が増え、DB への問い合わせ回数も増えるため、負荷を減らす効果しか持たないという説明は逆である。',
+      '深いヘルスチェックは依存先全般 (DB を含む) を確認する目的で設計されるのが一般的であり、キャッシュ層だけに限定されるという説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>複数の LB が同時に深いチェックを実行すると、そのチェック自体が DB への一斉アクセスになります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="深いヘルスチェックが一斉アクセスを引き起こす図"><rect x="30" y="20" width="100" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="80" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">LB 1</text><rect x="150" y="20" width="100" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="200" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">LB 2</text><rect x="270" y="20" width="100" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="320" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">LB 3</text><line x1="80" y1="60" x2="250" y2="110" stroke="#c0492f" stroke-width="1.5"/><line x1="200" y1="60" x2="250" y2="110" stroke="#c0492f" stroke-width="1.5"/><line x1="320" y1="60" x2="250" y2="110" stroke="#c0492f" stroke-width="1.5"/><rect x="170" y="110" width="160" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="250" y="135" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">DB に同時アクセス集中</text></svg>'
+          + '<p class="cap">図: 複数 LB からの深いヘルスチェックが重なると、チェック自体が DB への負荷になる。</p></div>'
+    }
+  },
+  {
+    q: '新しいサーバをオートスケーリングで追加する場合、負荷が急増してから実際にそのサーバがリクエストを受け始めるまでに時間差が生じる理由として最も妥当なものはどれか？',
+    opts: [
+      'サーバの起動、アプリケーションの初期化、ウォームアップ、ヘルスチェックに応答できる状態になるまでの一連の過程に時間がかかるから',
+      'オートスケーリングは常に負荷の増加より先に新しいサーバを用意しておくため、実際には時間差は一切発生しない',
+      'クラウド事業者が意図的にオートスケーリングの反映を遅らせる契約になっているから',
+      '新しいサーバは起動した瞬間から常に最大の処理能力を発揮できるため、時間差が生じるとすれば LB の設定ミスだけが原因である',
+      'ヘルスチェックを無効化すれば、新しいサーバの起動とトラフィック受信の時間差は原理的に消える'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>サーバの起動 (ブート)、アプリケーションの初期化、キャッシュが温まっていない状態からのウォームアップ、ヘルスチェックに応答できるようになるまでの過程にはそれぞれ時間がかかり、その合計がスケールアウトの遅れとして現れる。',
+      '負荷の予測に基づいて先行してスケールアウトする構成もあり得るが、それは特別な予測的スケーリングの話であり、オートスケーリング全般が「時間差が一切発生しない」という前提にはならない。',
+      'クラウド事業者が意図的に遅らせているという説明は事実に基づかない。遅れの原因は起動とウォームアップの物理的な過程である。',
+      '新しいサーバはキャッシュが温まっていない状態 (コールドスタート) から始まるため、起動直後から最大性能を発揮できるという前提は誤り。',
+      'ヘルスチェックを無効化すると、むしろ起動が終わっていない未完成なサーバにもトラフィックが流れてしまい、別の障害を引き起こす。起動とウォームアップにかかる時間そのものは消えない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>新しいサーバが使えるようになるまでには、複数の段階を経る必要があります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 580 150" aria-label="オートスケーリングの時間差の図"><rect x="20" y="55" width="100" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="70" y="80" font-size="12.5" text-anchor="middle" fill="#0f5132">起動</text><rect x="150" y="55" width="110" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="205" y="80" font-size="12.5" text-anchor="middle" fill="#1f4a68">初期化</text><rect x="290" y="55" width="110" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="345" y="80" font-size="12.5" text-anchor="middle" fill="#5b3d80">ウォームアップ</text><rect x="430" y="55" width="130" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="495" y="80" font-size="12.5" text-anchor="middle" fill="#0f5132">ヘルスチェック通過</text><line x1="120" y1="75" x2="150" y2="75" stroke="#9aa" stroke-width="1.5"/><line x1="260" y1="75" x2="290" y2="75" stroke="#9aa" stroke-width="1.5"/><line x1="400" y1="75" x2="430" y2="75" stroke="#9aa" stroke-width="1.5"/><text x="290" y="125" font-size="13" text-anchor="middle" fill="#12211a">この一連の過程がスケールアウトの遅れになる</text></svg>'
+          + '<p class="cap">図: 新しいサーバがトラフィックを受け始めるまでには複数の段階がある。</p></div>'
+    }
+  },
+  {
+    q: 'あるオンラインゲームのマッチング待機画面で、ユーザの接続中にサーバ側がプレイヤーの対戦相手候補リストをメモリ上に保持する設計になっている。この状態のままサーバを複数台に水平スケーリングし、LB で単純なラウンドロビンに切り替えたところ、マッチングが頻繁に失敗するようになった。最も妥当な原因はどれか？',
+    opts: [
+      'ラウンドロビン方式そのものに技術的な欠陥があり、常にリクエストを取り逃がすバグを含んでいるから',
+      'LB が TCP の 3 ウェイハンドシェイクを省略する設定になっており、接続そのものが確立できていないから',
+      'マッチング処理に使われているポート番号が衝突しており、全リクエストが同じエフェメラルポートに集中しているから',
+      '対戦相手候補リストというセッション状態が各サーバのメモリに閉じたままで、リクエストが別サーバに振られるとその状態を参照できなくなるから',
+      'サーバの台数が増えたことで、サーバ間の時刻同期のずれがマッチング判定に影響しているから'
+    ],
+    ans: 3,
+    exps: [
+      'ラウンドロビン自体は単純な割り当てアルゴリズムであり、取り逃としを起こすような欠陥は無い。問題の原因は別のところにある。',
+      'ハンドシェイクの省略設定が原因であれば接続自体が確立できず、別の種類のエラー (接続失敗) になるはずで、この症状の説明にはならない。',
+      'ポート番号の衝突はクライアント側の問題として起こり得るが、このシナリオの「マッチングが失敗する」症状の典型的な原因ではない。',
+      '<b>これが正解。</b>対戦相手候補リストという状態が各サーバのメモリだけに保持されたままになっており、ステートレス化 (状態を共有ストアへ出す) を行わずに水平スケーリングしたため、リクエストが別サーバに振られると直前の状態を参照できなくなる。',
+      '時刻同期のずれは分散システムの別の問題領域であり、この設計 (状態をメモリに保持したまま水平スケーリングした) の直接的な結果の説明にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>セッション状態が各サーバの中に閉じ込められている場合、別のサーバに振られた瞬間に状態が見えなくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="状態がメモリに閉じたままの図"><rect x="30" y="20" width="160" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="110" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">1 回目: サーバ A</text><text x="110" y="62" font-size="12.5" text-anchor="middle" fill="#12211a">候補リストを保持</text><rect x="360" y="20" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="440" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">2 回目: サーバ B</text><text x="440" y="62" font-size="12.5" text-anchor="middle" fill="#12211a">候補リストが無い</text><line x1="190" y1="45" x2="360" y2="45" stroke="#c0492f" stroke-width="2" stroke-dasharray="6 6"/><text x="275" y="110" font-size="13.5" text-anchor="middle" fill="#12211a">ラウンドロビンで振られた先に状態が無い</text></svg>'
+          + '<p class="cap">図: 状態を共有ストアに出さずに水平スケーリングすると、ラウンドロビンで振られた先に前回の状態が無い。</p></div>'
+    }
+  },
+  {
+    q: 'クラウドの LB を選定する場面で、「送信元 IP アドレスを保持したまま毎秒数百万接続規模のトラフィックを転送したい。URL パスに応じた振り分けは不要」という要件が与えられた。最も適した選択はどれか？',
+    opts: [
+      'URL パスに基づくルーティングを主な機能とする L7 LB を選び、ヘルスチェックの深さも最大に設定する',
+      'L7 LB を導入したうえで、すべてのリクエストを同一のバックエンドサーバへ常に固定するスティッキーセッションの設定にする',
+      'ロードバランサをあえて使わず、DNS ラウンドロビンだけでこの要件全体を満たそうとする',
+      'アプリケーションサーバ自身にヘルスチェック機能を実装させてしまい、LB 自体を撤廃する構成にする',
+      'L4 LB (例: AWS NLB のようなネットワークロードバランサ) を選び、送信元 IP を保持したまま高スループットで転送する構成にする'
+    ],
+    ans: 4,
+    exps: [
+      '要件は「URL パスに応じた振り分けは不要」であり、L7 LB の強みであるパスベースルーティングは使わない。L7 LB は 1 リクエストあたりの処理コストも高く、この要件には合わない。',
+      'スティッキーセッションで全リクエストを 1 台に固定すると、残りのサーバが使われなくなり、要件である高スループットの実現と矛盾する。',
+      'DNS ラウンドロビンは名前解決の結果を分散させるだけで、サーバの健全性に応じた動的な振り分けやヘルスチェックによる自動除外ができず、要件の信頼性を満たせない。',
+      'LB 自体を撤廃すると、障害のあるサーバを自動的に切り離す仕組みが失われ、可用性が大きく下がる。',
+      '<b>これが正解。</b>送信元 IP の保持と超高スループットが要件であり、IP アドレスとポート番号だけで高速に転送できる L4 LB (ネットワークロードバランサ) が適している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>要件 (IP 保持 + 超高スループット、内容に応じた振り分け不要) は L4 LB の強みと一致します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="要件からL4 LBを選ぶ図"><rect x="30" y="20" width="240" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="50" font-size="13" text-anchor="middle" fill="#12211a">要件: IP 保持 + 超高スループット</text><line x1="270" y1="45" x2="340" y2="45" stroke="#0f5132" stroke-width="2"/><rect x="340" y="20" width="190" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="435" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">L4 LB を選ぶ</text><text x="280" y="110" font-size="13" text-anchor="middle" fill="#4a5d54">パスベースルーティングが必要なら L7 LB を選ぶ</text></svg>'
+          + '<p class="cap">図: 要件が内容に応じた振り分けを含まないなら、L4 LB の高速さが活きる。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

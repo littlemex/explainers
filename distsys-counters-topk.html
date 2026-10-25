@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分散カウンタと Top-K ― 正確さとコストを交換する</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 23 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>分散カウンタと Top-K ― 正確さとコストを交換する</h1>
+  <p>「何回あったか」を数えるだけの処理が、数え方を変えるだけでコストを千倍変える</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 22 回 <a href="./distsys-rate-limiter.html">分散レートリミッタ</a>、第 06 回 <a href="./distsys-sharding.html">パーティショニングとシャーディング</a></p>
+  <p class="intro">「いいね数を表示する」「再生回数の多い曲 10 件を出す」「広告が何回クリックされたか数える」― これらはすべて「数える」という同じ操作の応用です。ところが対象が 1 秒に数十万件のイベントになると、1 つの行を更新し続けるだけの素朴な実装はその行自体がボトルネックになって壊れます。この回では、書き込みを分散させる正確なカウンタの作り方と、正確さそのものを諦めて驚くほど小さなメモリで数える近似アルゴリズム (Count-Min Sketch, HyperLogLog) を見ます。結論を先に言うと、「1 件単位まで正確に数える必要があるか」を最初に決めることが、設計全体のコストを決めます。</p>
+
+  <!-- ===== 解説パート 1: なぜ分散カウンタの設計が要るのか ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 1 行を数えるだけでは壊れる</h2>
+    <p>「いいね数」や「商品ページの閲覧数」を 1 つの行 (row) に <code>UPDATE counter SET value = value + 1</code> として実装するのは自然な発想です。ところが、人気のある 1 件の商品や 1 件の投稿に書き込みが集中すると、その 1 行だけが更新の奪い合いになります。これはシャーディング (第 6 回) で分散したつもりでも、キー単位で見ればまったく分散していない<b>ホットキー (hot key)</b> の問題です。読み取りの多さより書き込みの集中こそが、分散カウンタの設計を難しくしている本質です。</p>
+    <p>設計を始める前に決めるべき変数が 3 つあります。1 つ目は<b>正確さの要求</b>で、1 件単位まで厳密に正しい値が必要か、それとも近い値で構わないかです。2 つ目は<b>冪等性 (idempotency, 同じ操作を 2 回行っても結果が変わらない性質)</b> で、同じイベントを 2 回数えてしまう二重カウントを防ぐ必要があるかです。3 つ目は<b>集計の範囲</b>で、「直近 24 時間」のような移動する範囲 (rolling window) なのか、「開設以来の合計」のような全期間の集計なのかです。この 3 つの答えの組み合わせで、取れる設計は大きく変わります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="ホットキーに書き込みが集中する図">
+        <text x="300" y="20" font-size="13" text-anchor="middle" fill="#4a5d54">同じ投稿への「いいね」が同時に多数届く</text>
+        <rect x="20" y="40" width="70" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="55" y="60" font-size="12" text-anchor="middle" fill="#0f5132">クライアント</text>
+        <rect x="115" y="40" width="70" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="60" font-size="12" text-anchor="middle" fill="#0f5132">クライアント</text>
+        <rect x="210" y="40" width="70" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="245" y="60" font-size="12" text-anchor="middle" fill="#0f5132">クライアント</text>
+        <line x1="55" y1="70" x2="300" y2="115" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="150" y1="70" x2="300" y2="115" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="245" y1="70" x2="300" y2="115" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="230" y="110" width="140" height="44" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="136" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">1 行の counter 値</text>
+        <text x="300" y="175" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">全員が同じ 1 行をロックし合い、更新が直列化される</text>
+      </svg>
+      <p class="cap">図: キー単位で分散しても、1 件の人気コンテンツへの書き込みはその 1 行に集中する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: シャード化カウンタと事前集約 ===== -->
+  <section>
+    <h2>2. 書き込みを割って正確に数える ― シャード化カウンタ</h2>
+    <p><b>シャード化カウンタ (sharded counter)</b> は、1 つのホットキーを N 個の小さな行 (シャード) に分割し、書き込みのたびにランダムに選んだ 1 つのシャードだけを増やす方式です。読み取り時には N 個のシャードをすべて合計します。「全員が同じ 1 行を奪い合う」状態から「各書き込みは N 行のどれか 1 行だけを奪い合う」状態に変わり、1 行あたりの競合が約 1/N に減ります。読み取りは N 行を足し算する分だけ重くなりますが、人気コンテンツでは書き込みが読み取りを大幅に上回ることが多く、この交換は見合います。</p>
+    <p>ただしシャード化カウンタ単体は<b>冪等 (idempotent) ではありません</b>。クライアントがネットワークタイムアウトで「増えたかどうか分からない」状態になり、安全のためリクエストを再送すると、同じイベントを 2 回数えてしまいます。これを防ぐには、各イベントに一意な ID を振り、その ID を記録する<b>リクエストテーブル</b>を用意し、「この ID をまだ処理していなければシャードを増やす」という判定を行います。この判定自体も、複数のアプリケーションサーバーから同時に来ることを考えると、第 22 回で見た確認と加算の不可分性と同じ問題を抱えます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="シャード化カウンタの図">
+        <text x="300" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">書き込みはランダムに 1 つのシャードへ分散</text>
+        <rect x="40" y="35" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="85" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">shard 0</text>
+        <rect x="150" y="35" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="195" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">shard 1</text>
+        <rect x="260" y="35" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="305" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">shard 2</text>
+        <rect x="370" y="35" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="415" y="57" font-size="12.5" text-anchor="middle" fill="#0f5132">shard 3</text>
+        <line x1="85" y1="69" x2="250" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="195" y1="69" x2="250" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="305" y1="69" x2="250" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="415" y1="69" x2="250" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="150" y="105" width="200" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="250" y="130" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">読み取り時に全シャードを合計</text>
+        <text x="300" y="170" font-size="13.5" text-anchor="middle" fill="#12211a">競合は 1/N に減るが、読み取りは N 倍の作業になる</text>
+      </svg>
+      <p class="cap">図: 書き込みを N 個のシャードに分散し、読み取り時にまとめて足す。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: Count-Min Sketch ===== -->
+  <section>
+    <h2>3. 正確さを諦めて最大限安く数える ― Count-Min Sketch</h2>
+    <p>Spotify の再生曲ランキングのように、数百万の曲それぞれの再生数を厳密に数えようとすると、曲 1 つにつき 1 つのカウンタが必要になり、メモリがアイテム数に比例して増えます。<b>Count-Min Sketch</b> は、幅 w ・ 深さ d の 2 次元配列という固定サイズのメモリだけで、個々のアイテムの出現回数を近似的に数える手法です。配列のサイズはアイテムの種類数に関係なく一定です。</p>
+    <p>仕組みはこうです。<b>加算</b>のとき、アイテム x に対して d 個の独立したハッシュ関数 $h_1, ..., h_d$ を適用し、各行 i で列 $h_i(x) \bmod w$ のセルを 1 増やします (1 回の加算で d 個のセルが増える)。<b>問い合わせ</b>のときは、同じ d 個のセルを読み、その<b>最小値</b>を推定値として返します。他のアイテムとハッシュ値が衝突 (collision) したセルは実際より大きな値になりますが、衝突は決して値を減らさないため、どのセルも真の値以上にしかなりません。最小値を取ることで、複数の行のうち衝突が少なかった行の値に近づけます。</p>
+    <p>この性質から、Count-Min Sketch の推定値は<b>真の値を下回ることは絶対になく (過大評価のみ)</b>、確率 $1-\delta$ で誤差が $\varepsilon N$ 以下に収まります。ここで $N$ は挿入した総イベント数、$\delta$ は失敗を許す確率です。誤差はアイテムの種類数ではなく<b>総イベント数に比例</b>する点が重要で、再生数が少ない曲ほど誤差の影響を相対的に大きく受けます。だからこそ Count-Min Sketch は、再生数が多い上位の曲を探す<b>heavy hitters (大口を占めるアイテム) ・ Top-K 問題</b>に向いています。上位の曲は真の値自体が大きいため、ほぼ一定の絶対誤差が相対的に小さく済むからです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 210" role="img" aria-label="Count-Min Sketchの構造の図">
+        <text x="300" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">アイテム x を 3 個のハッシュ関数で 3 つのセルに加算</text>
+        <text x="60" y="45" font-size="12" text-anchor="middle" fill="#0f5132">h1 行</text>
+        <rect x="90" y="32" width="40" height="28" fill="#fff" stroke="#d9e5df"/>
+        <rect x="130" y="32" width="40" height="28" fill="#8fd6b4" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="51" font-size="12.5" text-anchor="middle" fill="#0f5132">5</text>
+        <rect x="170" y="32" width="40" height="28" fill="#fff" stroke="#d9e5df"/>
+        <text x="60" y="80" font-size="12" text-anchor="middle" fill="#0f5132">h2 行</text>
+        <rect x="90" y="67" width="40" height="28" fill="#fff" stroke="#d9e5df"/>
+        <rect x="130" y="67" width="40" height="28" fill="#fff" stroke="#d9e5df"/>
+        <rect x="170" y="67" width="40" height="28" fill="#8fd6b4" stroke="#0f5132" stroke-width="2"/>
+        <text x="190" y="86" font-size="12.5" text-anchor="middle" fill="#0f5132">3</text>
+        <text x="60" y="115" font-size="12" text-anchor="middle" fill="#0f5132">h3 行</text>
+        <rect x="90" y="102" width="40" height="28" fill="#8fd6b4" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="121" font-size="12.5" text-anchor="middle" fill="#0f5132">8</text>
+        <rect x="130" y="102" width="40" height="28" fill="#fff" stroke="#d9e5df"/>
+        <rect x="170" y="102" width="40" height="28" fill="#fff" stroke="#d9e5df"/>
+        <text x="320" y="55" font-size="13" text-anchor="middle" fill="#12211a">3 セルの値: 5, 3, 8</text>
+        <text x="320" y="80" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">推定値 = min(5, 3, 8) = 3</text>
+        <text x="320" y="105" font-size="12.5" text-anchor="middle" fill="#4a5d54">5 と 8 は他アイテムとの衝突で膨らんだ値</text>
+        <text x="300" y="165" font-size="13.5" text-anchor="middle" fill="#12211a">推定値は常に真の値以上 (過大評価のみ)、最小値を取ることで誤差を抑える</text>
+      </svg>
+      <p class="cap">図: 複数の行の最小値を取ることで、衝突による過大評価の影響を抑える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: HyperLogLog ===== -->
+  <section>
+    <h2>4. 種類の数だけを諸めて最大限安く数える ― HyperLogLog</h2>
+    <p>「ユニークビジター数」や「投票したユニークな人数」のように<b>重複を除いた種類の数</b>を数えるには、本来 1 人ずつを記憶する集合 (set) が必要で、メモリは種類数に比例します。<b>HyperLogLog (HLL)</b> は、ごく小さな固定メモリだけでこの種類数を近似する手法です。</p>
+    <p>仕組みの直感はこうです。各アイテムをハッシュ化すると、0 と 1 がランダムに並んだビット列になります。このビット列の先頭に 0 が連続する長さ (先行ゼロ数) は、確率的には $k$ 個連続する確率が $1/2^k$ です。つまり、たくさんのアイテムをハッシュ化していく中で観測される先行ゼロ数の最大値は、見てきたアイテムの種類数のおおよその目安になります。HLL はハッシュ値の一部で m 個の<b>バケツ (register)</b> のどれかを選び、残りの部分の先行ゼロ数の最大値をそのバケツに記録します。m 個のバケツの値を調和平均でまとめることで、1 つのバケツだけに頼る場合よりブレを抑えます。</p>
+    <p>HLL の標準誤差は $1.04/\sqrt{m}$ で近似できます。例えば $m=16384$ (バケツ 1 つを 1 バイト程度で持つとしても数 KB) なら、誤差はおよそ 0.8% です。Google の実装では、10 億を超える規模の種類数を標準誤差 2% ・ メモリ約 1.5KB で推定できることが報告されています。重要な代償は、HLL は「種類数が何個か」しか答えられず、「この特定のアイテムを見たかどうか」という<b>所属判定 (membership test)</b> には使えないという点です。また、複数台のバケツ配列は要素ごとの最大値を取るだけで単純に<b>合流 (merge)</b> できるため、データセンターごとに集計した後で合算するような分散カウントに向いています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="HyperLogLogのバケツ合流の図">
+        <text x="150" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">データセンター A</text>
+        <rect x="30" y="30" width="50" height="30" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="55" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132">3</text>
+        <rect x="85" y="30" width="50" height="30" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132">7</text>
+        <rect x="140" y="30" width="50" height="30" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="165" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132">2</text>
+        <text x="450" y="18" font-size="13" text-anchor="middle" fill="#4a5d54">データセンター B</text>
+        <rect x="330" y="30" width="50" height="30" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="355" y="50" font-size="12.5" text-anchor="middle" fill="#5b3d80">5</text>
+        <rect x="385" y="30" width="50" height="30" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="410" y="50" font-size="12.5" text-anchor="middle" fill="#5b3d80">4</text>
+        <rect x="440" y="30" width="50" height="30" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="465" y="50" font-size="12.5" text-anchor="middle" fill="#5b3d80">9</text>
+        <line x1="155" y1="65" x2="280" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="400" y1="65" x2="320" y2="110" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="220" y="105" width="160" height="34" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="300" y="127" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">要素ごとの最大値: 5,7,9</text>
+        <text x="300" y="165" font-size="13.5" text-anchor="middle" fill="#12211a">バケツ配列は要素ごとの max を取るだけで合流できる</text>
+      </svg>
+      <p class="cap">図: HyperLogLog のバケツは、複数台のものを要素ごとの最大値だけで合流できる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: 実システムでの設計への当てはめ ===== -->
+  <section>
+    <h2>5. 実システムでの設計への当てはめ</h2>
+    <p>SDFC (System Design Fight Club) で検討されている<b>広告クリックカウンタ (ad-click-counter)</b> は、1 日 10 億クリック (平均 10,000 TPS、ピークは 5 倍の 50,000 TPS) を扱いますが、1 クリックあたり最大 1,000 ドルを課金する広告もあるため、<b>二重課金は絶対に避けたい</b>という要件があります。この回で見た近似手法は誤差を許容する代わりに安さを得る仕組みなので、課金に直結するこのカウンタには向きません。実際の設計は、各クリックイベントを記録するリクエストテーブル (イベントソーシング的な構成) と、CDC (Change Data Capture) で分析用の読み取り最適化ビューへ反映する構成を使い、正確さを最優先しています。</p>
+    <p>対照的に、<b>Spotify の再生曲ランキング (spotify-top-K)</b> の要件は「過去 24 時間で再生数の多い上位 K 曲を、ほぼリアルタイムに示す」ことで、設計の前提として「上位曲の正確な再生数は不要」と明言されています。これはまさに Count-Min Sketch のような heavy hitters 向けの近似手法が活きる場面です。</p>
+    <p><b>スーパーボウルの視聴者投票 (superbowl-voting-service)</b> では、視聴者 1 億人のうち 10% が投票に参加すると仮定すると 1,000 万票、コマーシャルブレイク (約 300 秒) の間にこれが集中すると平均 33,000 TPS、ピークはその 5 倍で約 165,000 TPS という見積もりが検討されています。ログインなしで重複投票をどう扱うか、速報値をリアルタイムに見せつつ最終結果は正確に締めるかという要件から、速い近似パイプラインと遅い正確な集計パイプラインを並走させる設計が検討されています。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/distributed-counter" target="_blank" rel="noopener">SDFC: distributed-counter</a> ― ホットキー問題、シャード化カウンタ、冪等性のためのリクエストテーブル、全期間集計とローリングウィンドウの違いという設計の軸を本文の第 1 ・ 2 節に反映した。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/spotify-top-K" target="_blank" rel="noopener">SDFC: spotify-top-K</a> ― 「上位曲の正確な再生数は不要」という要件そのものを第 5 節の heavy hitters の例に使った。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/superbowl-voting-service" target="_blank" rel="noopener">SDFC: superbowl-voting-service</a> ― 視聴者 1 億人 ・ 投票率 10% ・ ピーク 165,000 TPS という見積もりと、速い近似パイプライン / 遅い正確なパイプラインの並走という設計を第 5 節に反映した。</li>
+      <li><a href="https://github.com/systemdesignfightclub/SDFC/tree/3140dfa1dd3a0c0ccba2feb336ed4cc8eebd0c66/system-design/ad-click-counter" target="_blank" rel="noopener">SDFC: ad-click-counter</a> ― 1 クリック最大 1,000 ドルの課金という要件から二重課金を避けるため正確さを優先する判断を第 5 節に反映した。</li>
+      <li><a href="http://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf" target="_blank" rel="noopener">Flajolet, Fusy, Gandouet, Meunier, "HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm" (2007)</a> ― HyperLogLog の先行ゼロ数によるカーディナリティ推定と標準誤差 $1.04/\sqrt{m}$ の一次情報。</li>
+      <li>Cormode, Muthukrishnan, "An Improved Data Stream Summary: The Count-Min Sketch and its Applications" (2005) ― Count-Min Sketch の原論文 (確認できる安定した URL が見つからなかったため論文名のみ記載)。</li>
+      <li><a href="https://en.wikipedia.org/wiki/Count%E2%80%93min_sketch" target="_blank" rel="noopener">Wikipedia: Count–min sketch</a> ― 幅 $w=\lceil e/\varepsilon\rceil$ ・ 深さ $d=\lceil\ln(1/\delta)\rceil$ の設定と、誤差が総イベント数 $N$ に比例し過大評価のみになるという性質の確認に使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-rate-limiter.html">← 第 22 回 分散レートリミッタ</a><a href="./distsys-index.html">目次</a><a href="./distsys-resilience.html">第 24 回 回復性パターン →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '人気の高い1つの投稿への「いいね」を、素朴に1つの行(row)のcounter列をUPDATEで加算して実装すると、何が起きやすいか？',
+    opts: [
+      '複数ノードにデータを分散していても、1件の人気コンテンツへの書き込みは結局その1行に集中し、その行自体が更新の奪い合いになるホットキー問題が起きる',
+      'データベースがその行を検知すると自動的に複数の物理サーバーへ瞬時に複製し、書き込みの競合が完全に消える仕組みが標準で備わっている',
+      '読み取りの性能だけが落ち、書き込みの処理速度にはまったく影響が出ない',
+      'UPDATE文を使っている限り、書き込み量が増えても常に一定の速さで処理され続ける',
+      'シャーディングでテーブルを複数台に分けるだけで、キー単位の分散方式を変えずに自動的にこの問題が解消する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>シャーディングで複数のテーブルやノードに分散していても、1件の人気コンテンツに対する更新は結局「その1件の行」に集中するため、その行自体が更新の奪い合いになるホットキー問題が残る。',
+      'データベースが書き込み競合を検知して自動的に解消してくれる標準機能は一般的には存在せず、競合への対処は設計側で用意する必要がある。',
+      '同じ行への書き込みが集中すればロック待ちや直列化が発生し、書き込みの性能こそ直接的に悪化する。読み取りだけに影響が限定されるわけではない。',
+      '書き込みが1行に集中すればロック競合が増え、処理速度は書き込み量の増加にともなって低下する。',
+      'シャーディングのキーの切り方を変えない限り、同じ1件の人気コンテンツは依然として同じ1行を指すため、この問題は自動的には解消しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、キー単位で分散しても人気の1件への書き込みは1行に集中します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ホットキー問題の図"><rect x="10" y="20" width="110" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="65" y="40" font-size="11.5" text-anchor="middle" fill="#0f5132">クライアント多数</text><line x1="120" y1="35" x2="260" y2="80" stroke="#9aa" stroke-width="1.5"/><rect x="230" y="75" width="110" height="34" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="285" y="97" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">1行のcounter</text><text x="280" y="135" font-size="13.5" text-anchor="middle" fill="#12211a">全員が同じ1行を奪い合い、更新が直列化される</text></svg>'
+          + '<p class="cap">図: 人気の1件への書き込みは、分散構成の有無に関係なく1行に集中する。</p></div>'
+    }
+  },
+  {
+    q: 'シャード化カウンタ (sharded counter) で書き込みをN個のシャードに分散させたとき、代わりに何を支払うことになるか？',
+    opts: [
+      '書き込みの正確さが失われ、カウンタの値そのものが近似値に変わってしまう',
+      '読み取り時にN個すべてのシャードを合計する必要があり、読み取りの処理量がN倍近くに増える',
+      'シャードの数が増えるたびに、1回の書き込みが複数のシャードへ同時に書き込まれるようになる',
+      'シャードごとに異なるプログラミング言語で実装し直さなければならなくなる',
+      '書き込みの競合は、シャード化によってむしろシャード化する前より増加してしまう'
+    ],
+    ans: 1,
+    exps: [
+      'シャード化カウンタ自体は各シャードに正確な整数値を加算する仕組みであり、値そのものが近似値になるわけではない。近似を導入するのは後の節で見るCount-Min SketchやHyperLogLogである。',
+      '<b>これが正解。</b>書き込みはどれか1つのシャードだけを更新するが、読み取り時には全シャードを合計する必要があり、シャード数Nに応じて読み取りの作業量が増える。書き込みが読み取りを大幅に上回る人気コンテンツでは、この交換が見合う。',
+      '1回の書き込みは通常ランダムに選ばれた1つのシャードだけを更新する設計であり、複数シャードへ同時に書き込むわけではない。',
+      'シャードの実装言語はアプリケーション側の選択であり、シャード数を増やすことと実装言語を変える必要性は無関係。',
+      'シャード化は競合を複数の行に分散させる手法であり、1行あたりの競合は減る。競合が増えるという説明は逆である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、書き込みは1シャードだけ、読み取りは全シャードの合計です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="シャード化カウンタの読み書きコストの図"><rect x="20" y="20" width="130" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="85" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132">書き込み: 1シャード</text><rect x="20" y="80" width="130" height="34" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="85" y="102" font-size="12.5" text-anchor="middle" fill="#5b3d80">読み取り: N個合計</text><text x="330" y="40" font-size="13" text-anchor="middle" fill="#12211a">軽い (競合は1/N)</text><text x="330" y="100" font-size="13" text-anchor="middle" fill="#12211a">重い (作業量がN倍)</text></svg>'
+          + '<p class="cap">図: シャード化は書き込みを軽くする代わりに、読み取りを重くする。</p></div>'
+    }
+  },
+  {
+    q: 'シャード化カウンタに、イベントごとの一意なIDを記録する「リクエストテーブル」を組み合わせる主な目的は？',
+    opts: [
+      '書き込みの速度をさらに上げるために、本来のカウンタの代わりとして使う',
+      'シャードの数を実行時に動的に増減させるための管理情報を保持する',
+      'ネットワークタイムアウトなどで再送されたリクエストを検知し、同じイベントを二重に数えてしまうことを防ぐ',
+      'どのシャードへ書き込むかを決めるハッシュ関数の計算結果を保存しておく',
+      '読み取り時にN個のシャードを合計する処理そのものを不要にする'
+    ],
+    ans: 2,
+    exps: [
+      'リクエストテーブルはカウンタの代替ではなく、カウンタと組み合わせて使う補助的な仕組みである。',
+      'シャード数の動的な増減(再シャーディング)は別の運用上の課題であり、リクエストテーブルの主目的ではない。',
+      '<b>これが正解。</b>クライアントがタイムアウトなどで成否不明のまま同じリクエストを再送したとき、そのイベントIDが既に記録済みなら処理済みと判断して二重カウントを防ぐ。これにより冪等性を確保する。',
+      'ハッシュ関数の計算結果自体を保存する必要はなく、どのシャードに書き込むかはその都度計算すればよい。',
+      'リクエストテーブルを導入しても、読み取り時に全シャードを合計する必要性は変わらない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じイベントIDが既に記録されていれば、カウンタへの加算をスキップします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="リクエストテーブルによる二重カウント防止の図"><rect x="30" y="20" width="140" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132">再送リクエスト(同じID)</text><line x1="100" y1="54" x2="100" y2="90" stroke="#9aa" stroke-width="1.5"/><rect x="15" y="90" width="170" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="100" y="112" font-size="12" text-anchor="middle" fill="#b5401f">ID記録済み→加算をスキップ</text><text x="380" y="60" font-size="13.5" text-anchor="middle" fill="#12211a">二重カウントを防ぐ</text></svg>'
+          + '<p class="cap">図: 既に処理済みのイベントIDを記録しておくことで、再送による二重カウントを防ぐ。</p></div>'
+    }
+  },
+  {
+    q: 'Count-Min Sketch で、問い合わせたいアイテム x の出現回数を推定するとき、d個のハッシュ関数に対応するd個のセルの値から、最終的な推定値をどう決めるか？',
+    opts: [
+      'd個のセルの値をすべて単純に加算した合計を推定値とする',
+      'd個のセルのうち、最後に加算されたセル1つだけの値を推定値とする',
+      'd個のセルの値の中央値(メディアン)を推定値とする',
+      'd個のセルの値のうち最小値を推定値として採用する',
+      'd個のセルの値をランダムに1つだけ選んで推定値とする'
+    ],
+    ans: 3,
+    exps: [
+      'd個のセルを単純に加算すると、他アイテムとの衝突による過大評価がそのまま積み重なり、誤差がむしろ拡大してしまう。',
+      '「最後に加算されたセル」という概念はCount-Min Sketchの仕組みには存在せず、d個のセルはどれも対等に扱われる。',
+      '中央値を使う近似アルゴリズムも存在するが、Count-Min Sketchの標準的な定義では最小値を用いる。',
+      '<b>これが正解。</b>衝突はどのセルの値も真の値以上にしか増やさないため、d個のセルのうち最も衝突の影響が少なかったセル、つまり最小値が真の値に最も近い。',
+      'ランダムに1つを選ぶと、衝突で大きく膨らんだセルを選んでしまう可能性が残り、d個の行を持つ意味が失われる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文の図と同じく、複数行の最小値を取ることで衝突による過大評価を抑えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="Count-Min Sketchの最小値を取る理由の図"><rect x="30" y="20" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132">行1: 5</text><rect x="140" y="20" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="185" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132">行2: 3</text><rect x="250" y="20" width="90" height="34" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="295" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132">行3: 8</text><text x="300" y="90" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">min(5,3,8) = 3 を推定値とする</text><text x="300" y="115" font-size="13" text-anchor="middle" fill="#4a5d54">5と8は衝突で膨らんだ値、3が最も真の値に近い</text></svg>'
+          + '<p class="cap">図: 衝突の影響が最も少なかった行の値を推定値として採用する。</p></div>'
+    }
+  },
+  {
+    q: 'Count-Min Sketch の誤差の性質として正しいものは？',
+    opts: [
+      '推定値は真の値より小さくなることも大きくなることも同じ確率で起こる',
+      '誤差の大きさは、ストリームに含まれるアイテムの種類数(distinct数)に比例して増える',
+      '推定値は常に真の値より小さくなる(過小評価のみ)という保証がある',
+      '誤差はパラメータの設定に関係なく、常にゼロになるよう調整できる',
+      '推定値は常に真の値以上になり(過大評価のみ)、誤差は挿入した総イベント数に比例する'
+    ],
+    ans: 4,
+    exps: [
+      '衝突は必ずセルの値を増やす方向にしか働かないため、推定値が真の値より小さくなることは起こらない。過大評価と過小評価が同程度に起こるという説明は誤り。',
+      '誤差はアイテムの種類数ではなく、挿入した総イベント数(すべてのアイテムの出現回数の合計)に比例する。種類数が多くても総イベント数が同じなら誤差の大きさは変わらない。',
+      'ハッシュの衝突は値を増やす方向にしか作用しないため、推定値が真の値を下回ることはない。過小評価のみという説明は逆である。',
+      '誤差をゼロにするには配列のサイズを無限に大きくする必要があり、現実的な固定サイズの配列では誤差はゼロにならない。',
+      '<b>これが正解。</b>衝突は値を増やす方向にしか働かないため推定値は常に真の値以上になり(過大評価のみ)、確率 $1-\\delta$ で誤差は総イベント数 $N$ に $\\varepsilon$ を掛けた範囲に収まる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>衝突は常に値を増やす方向にしか働かないため、推定値は真の値以上になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="Count-Min Sketchの過大評価のみの図"><line x1="60" y1="100" x2="500" y2="100" stroke="#9aa" stroke-width="2"/><circle cx="200" cy="100" r="6" fill="#0f5132"/><text x="200" y="85" font-size="13" text-anchor="middle" fill="#0f5132">真の値</text><rect x="200" y="55" width="260" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="330" y="75" font-size="13" text-anchor="middle" fill="#5b3d80">推定値はこの範囲 (真の値以上)</text><text x="280" y="125" font-size="13.5" text-anchor="middle" fill="#12211a">衝突は値を増やすだけなので、推定値が真の値を下回ることは無い</text></svg>'
+          + '<p class="cap">図: 推定値は常に真の値以上になる(過大評価のみ)。</p></div>'
+    }
+  },
+  {
+    q: 'Count-Min Sketch が「heavy hitters(大口のアイテム)」や Top-K の検出に向いている理由として適切なものは？',
+    opts: [
+      '上位アイテムは真の出現回数自体が大きいため、ほぼ一定の絶対誤差が相対的に小さく済み、順位への影響が小さいから',
+      '上位アイテムだけを選んでハッシュ関数に通すことができる専用の仕組みがあるから',
+      '出現回数が少ないアイテムほど、Count-Min Sketchでは誤差が小さくなるという性質があるから',
+      '上位アイテムについては、Count-Min Sketchが自動的に厳密な正確な値を返すよう切り替わるから',
+      'Count-Min Sketchは上位アイテムの順位を直接保持するデータ構造であり、順位の計算が不要だから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>誤差の絶対的な大きさは総イベント数に比例してほぼ一定になるが、出現回数が多い上位アイテムでは真の値自体が大きいため、同じ絶対誤差でも相対誤差は小さく済み、順位がひっくり返りにくい。',
+      'Count-Min Sketchには「上位アイテムだけを選別してハッシュする」という専用の仕組みは無く、すべてのアイテムを同じ手順で処理する。',
+      '誤差の絶対量は出現回数の多さに関係なくほぼ一定であり、出現回数が少ないアイテムほど誤差が小さくなるという性質は無い。むしろ出現回数が少ないアイテムは相対誤差が大きくなりやすい。',
+      'Count-Min Sketchは常に同じ近似の仕組みで動作し、特定のアイテムに対してだけ厳密な値に切り替わるような機能は持たない。',
+      '順位の計算(どのアイテムが上位かを決める処理)は、Count-Min Sketchで推定した出現回数を使って別途行う必要があり、構造自体が順位を保持しているわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ絶対誤差でも、真の値が大きいアイテムほど相対誤差は小さくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="heavy hittersで誤差が相対的に小さい理由の図"><rect x="30" y="20" width="200" height="34" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="130" y="42" font-size="12.5" text-anchor="middle" fill="#0f5132">上位曲: 真の値10000 + 誤差50</text><rect x="30" y="70" width="200" height="34" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="92" font-size="12.5" text-anchor="middle" fill="#b5401f">下位曲: 真の値20 + 誤差50</text><text x="320" y="40" font-size="13" text-anchor="middle" fill="#0f5132">相対誤差0.5%</text><text x="320" y="90" font-size="13" text-anchor="middle" fill="#b5401f">相対誤差250%</text><text x="280" y="130" font-size="13.5" text-anchor="middle" fill="#12211a">同じ絶対誤差でも、真の値が大きい上位ほど影響が小さい</text></svg>'
+          + '<p class="cap">図: 絶対誤差がほぼ一定でも、真の値が大きい上位アイテムほど相対誤差は小さい。</p></div>'
+    }
+  },
+  {
+    q: 'HyperLogLog がユニークな(重複を除いた)種類数を推定する仕組みの直感として正しいものは？',
+    opts: [
+      '見てきたすべてのアイテムの値そのものを圧縮した形で配列に保存しておく',
+      'ハッシュ化した値の先行ゼロ数(0が連続する長さ)の最大値が、見てきた種類数のおおよその目安になるという統計的性質を利用する',
+      'アイテムを見るたびに、既知のすべてのアイテムと1件ずつ値を比較して重複を判定する',
+      '種類数が一定数を超えた時点で、それ以降のアイテムをすべて無視するという仕組みで近似する',
+      'バケツの数を種類数に応じて動的に増やし続けることで、常に正確な値を保持する'
+    ],
+    ans: 1,
+    exps: [
+      'HyperLogLogはアイテムの値そのものを保存せず、ハッシュ値から得た先行ゼロ数という小さな整数だけをバケツに記録する。これが固定メモリで済む理由である。',
+      '<b>これが正解。</b>先行ゼロ数が $k$ 個連続する確率は $1/2^k$ であるため、観測された先行ゼロ数の最大値は、見てきたアイテムの種類数のおおよその目安(対数スケールの指標)になる。これを複数バケツで平均することで推定の安定性を高める。',
+      '1件ずつ既知のアイテムと比較する方法は、集合(set)をそのまま保持する素朴な厳密手法であり、種類数に比例したメモリが必要になる。HyperLogLogが避けているのはまさにこの方法である。',
+      '一定数を超えたアイテムを無視する仕組みではなく、すべてのアイテムをハッシュ化してバケツの更新に使う。',
+      'バケツの数mは事前に固定されたパラメータであり、種類数に応じて動的に増え続けるものではない。固定サイズであることがHyperLogLogの利点である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>先行ゼロ数が長いほど珍しい事象で、それが観測されたということは多くのアイテムを見てきた証拠になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="先行ゼロ数と種類数の関係の図"><text x="280" y="20" font-size="13" text-anchor="middle" fill="#4a5d54">ハッシュ値の例 (先頭の0の並び)</text><rect x="40" y="35" width="150" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="115" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">001...(先行ゼロ2個)</text><rect x="210" y="35" width="150" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="285" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80">00001...(先行ゼロ4個)</text><text x="280" y="100" font-size="13.5" text-anchor="middle" fill="#12211a">先行ゼロが長い値ほど珍しく、観測されれば多数を見た証拠になる</text></svg>'
+          + '<p class="cap">図: 先行ゼロ数が長い観測値は珍しいため、それが出た事実が種類数の目安になる。</p></div>'
+    }
+  },
+  {
+    q: 'HyperLogLog の標準誤差はおよそ $1.04/\\sqrt{m}$ ($m$ はバケツの数) で近似できる。$m=16384$ のとき、誤差はおよそどの程度になるか？',
+    opts: [
+      'およそ 50%',
+      'およそ 10%',
+      'およそ 0.8%',
+      'およそ 0.008%',
+      '誤差はバケツの数に関係なく常に一定である'
+    ],
+    ans: 2,
+    exps: [
+      'この誤差は実際の値よりかなり過大であり、$1.04/\\sqrt{16384}$ を計算すると50%には遠く及ばない。',
+      '10%もまだ過大な見積もりであり、$\\sqrt{16384}=128$ であることを使えばもっと小さい値になる。',
+      '<b>これが正解。</b>$\\sqrt{16384}=128$ なので $1.04/128 \\approx 0.008$、つまりおよそ0.8%の標準誤差になる。',
+      '0.008%は実際の計算結果より2桁小さい値であり、小数点の位置を取り違えた見積もりである。',
+      'バケツの数 $m$ が式の分母に入っているため、$m$ を増やすほど誤差は小さくなる。バケツ数に無関係という説明は式の形と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>$\\sqrt{16384}=128$ を使って $1.04/128$ を計算します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="HyperLogLogの誤差計算の図"><text x="280" y="30" font-size="15" text-anchor="middle" fill="#12211a">誤差 ≈ 1.04 / √16384 = 1.04 / 128</text><rect x="180" y="55" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="80" font-size="15" text-anchor="middle" fill="#0f5132" font-weight="700">≈ 0.0081 (約0.8%)</text></svg>'
+          + '<p class="cap">図: m=16384 のとき、標準誤差はおよそ0.8%になる。</p></div>'
+    }
+  },
+  {
+    q: '広告クリックの集計 (ad-click-counter) のように、1クリックあたり最大1,000ドルを課金する場合がある広告システムで、クリック数の集計に Count-Min Sketch や HyperLogLog のような近似手法を安易に使うべきでない理由は？',
+    opts: [
+      '近似手法は読み取りの速度がどのような場合でも正確な手法より遅くなるから',
+      '近似手法は複数台のマシンに分散して集計することが原理的にできないから',
+      '近似手法は実装にかかるコードの行数が正確な手法より常に多くなるから',
+      '過大評価や過小評価の誤差が課金額の過不足に直結し、二重課金や取りこぼしという実害を生みかねないから',
+      '近似手法は読み取り専用の用途にしか使えず、書き込み(加算)を行う処理には対応していないから'
+    ],
+    ans: 3,
+    exps: [
+      '近似手法は一般に正確な手法よりメモリも計算量も小さく済むよう設計されており、速度が常に遅くなるという説明は近似手法の利点そのものと矛盾する。',
+      'Count-Min SketchやHyperLogLogはいずれも複数台の構造を要素ごとに合算(マージ)できる設計になっており、分散集計が原理的にできないという説明は誤り。',
+      'コード行数の多寡は実装の工夫次第であり、近似か正確かという分類そのものから直接決まるものではない。',
+      '<b>これが正解。</b>近似手法は誤差を許容する代わりに安さを得る仕組みであり、誤差がそのまま課金額の過不足になる場合、二重課金や取りこぼしという実害に直結するため、正確さが最優先される課金系の集計には向かない。',
+      'HyperLogLogやCount-Min Sketchはいずれも新しいイベントが来るたびに値を更新(加算)していく構造であり、書き込みに対応していないという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>何を数えるかによって、誤差を許容できるかどうかが変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="課金系の集計で近似手法を避ける理由の図"><rect x="30" y="30" width="220" height="70" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">広告クリック課金</text><text x="140" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">誤差 = 課金額の過不足</text><rect x="310" y="30" width="220" height="70" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Spotify再生数ランキング</text><text x="420" y="78" font-size="12.5" text-anchor="middle" fill="#12211a">誤差 = 許容できる範囲</text></svg>'
+          + '<p class="cap">図: 誤差が実害(課金)に直結するかどうかで、近似手法を使えるかが決まる。</p></div>'
+    }
+  },
+  {
+    q: 'スーパーボウルの視聴者投票サービスで、「速報値をリアルタイムに表示しつつ、最終結果は正確に締めたい」という要件に対して考えられる設計として適切なものは？',
+    opts: [
+      'リアルタイム表示は一切行わず、投票終了後に1回だけ集計結果を表示する',
+      'すべての集計を正確な手法だけで行い、近似手法は一切使わない',
+      '最終結果も速報値と同じ近似手法の出力をそのまま採用し、再集計は行わない',
+      '速報用には近似的で速い集計パイプラインを、最終結果用には正確さを優先する遅い集計パイプラインを並走させ、表示するタイミングに応じて使い分ける',
+      '投票を受け付けるサーバーの台数を1台に減らし、集計そのものを不要にする'
+    ],
+    ans: 4,
+    exps: [
+      'リアルタイム表示を行わないのでは、「速報値をリアルタイムに表示したい」という要件そのものを満たせない。',
+      '正確な手法だけで集計しようとすると、コマーシャルブレイクの短い時間内に求められる速報性を満たすのが難しくなる場合がある。',
+      '近似手法の出力をそのまま最終結果として採用すると、「最終結果は正確に締めたい」という要件を満たせなくなる。',
+      '不正解の選択肢が続いたが、この並走構成こそが2つの異なる要件(速報性と正確さ)を両方満たす設計である。',
+      '<b>これが正解。</b>速報用には近似的で速い集計パイプラインを使い、最終結果用には時間をかけて正確に集計する遅いパイプラインを並走させることで、速報性と正確さという両立しにくい2つの要件をそれぞれ別の仕組みで満たせる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>速報性と正確さという、トレードオフの関係にある2つの要件を、2本のパイプラインに分けて両方満たします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="速い近似パイプラインと遅い正確なパイプラインの並走の図"><rect x="30" y="25" width="220" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="50" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">速いパイプライン: 速報値(近似)</text><rect x="30" y="85" width="220" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="140" y="110" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">遅いパイプライン: 最終結果(正確)</text><text x="400" y="50" font-size="13" text-anchor="middle" fill="#12211a">投票中に表示</text><text x="400" y="110" font-size="13" text-anchor="middle" fill="#12211a">投票終了後に確定</text></svg>'
+          + '<p class="cap">図: 2本のパイプラインを並走させることで、速報性と正確さの両方を満たす。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

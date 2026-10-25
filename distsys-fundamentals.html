@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>なぜ分散するのか ― 1 台を超えた瞬間に何が変わるか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 01 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>なぜ分散するのか ― 1 台を超えた瞬間に何が変わるか</h1>
+  <p>分散システムの難しさは機能の追加ではなく、ネットワークという新しい失敗の経路が増えることにある</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 不要 (このシリーズの第 1 回です)</p>
+  <p class="intro">1 台のサーバーで動くプログラムには無い問題が、2 台以上のコンピュータが協調する瞬間に生まれます。それは「どちらかが故障するかもしれない」「メッセージが届くとは限らない」「届く順番も保証されない」という、ネットワークそのものが持つ不確実性です。この回では、なぜ分散するのかという動機、分散システムに関わる誰もが一度は踏む「8 つの誤謬」、体に入れておくべきレイテンシ (応答までの待ち時間) の桁、そして分散システムの良さを測る 4 つの指標を順に見ていきます。これらは以降の回すべてで使う共通言語です。</p>
+
+  <!-- ===== 解説パート 1: なぜ分散するのか ===== -->
+  <section>
+    <h2>1. なぜ 1 台を超えるのか</h2>
+    <p>結論を先に言うと、複数台にする理由は 2 つしかありません。<b>1 台の性能では足りない</b>こと (容量の限界) と、<b>1 台が壊れたらサービス全体が止まる</b>こと (単一障害点) です。どちらも「1 台を増強する (垂直スケーリング)」では根本的に解決しません。CPU やメモリには物理的な上限があり、最速の 1 台を買っても次の年にはアクセスがそれを超えます。さらに、1 台しかなければそのマシンの故障・再起動・ネットワークケーブルの抜線がそのままサービス停止になります。</p>
+    <p>そこで「同じ役割のマシンを複数台並べる (水平スケーリング)」という発想が生まれます。しかし台数を増やすことは無料ではありません。1 台の中で起きる処理は、同じメモリ空間の中で関数を呼び合うだけで済み、呼び出しは基本的に失敗しません。複数台になった瞬間、呼び出しの経路にネットワークが入ります。ネットワークはケーブルが切れ、パケットが失われ、応答が遅れ、相手が落ちていても見分けがつきません。この「ネットワークという新しい失敗の経路」をどう扱うかが、分散システムという分野そのものです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 230" role="img" aria-label="1台と複数台でのローカル呼び出しとネットワーク呼び出しの違い">
+        <text x="150" y="26" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">1 台 (ローカル呼び出し)</text>
+        <rect x="40" y="40" width="220" height="90" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <rect x="60" y="60" width="70" height="50" rx="6" fill="#ffffff" stroke="#198754" stroke-width="1.5"/>
+        <text x="95" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">関数 A</text>
+        <rect x="170" y="60" width="70" height="50" rx="6" fill="#ffffff" stroke="#198754" stroke-width="1.5"/>
+        <text x="205" y="90" font-size="12.5" text-anchor="middle" fill="#12211a">関数 B</text>
+        <line x1="130" y1="85" x2="170" y2="85" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f1)"/>
+        <text x="150" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">呼び出しは同じメモリ内。基本的に失敗しない</text>
+        <text x="470" y="26" font-size="14" text-anchor="middle" fill="#b5401f" font-weight="700">複数台 (ネットワーク呼び出し)</text>
+        <rect x="360" y="40" width="100" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="410" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">サーバー 1</text>
+        <rect x="480" y="40" width="100" height="70" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="530" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">サーバー 2</text>
+        <line x1="460" y1="75" x2="480" y2="75" stroke="#c0492f" stroke-width="3" stroke-dasharray="5 5"/>
+        <text x="470" y="130" font-size="12.5" text-anchor="middle" fill="#b5401f">この間だけ: 遅延・パケット損失・</text>
+        <text x="470" y="148" font-size="12.5" text-anchor="middle" fill="#b5401f">相手の故障と無応答が区別できない</text>
+        <text x="470" y="196" font-size="12.5" text-anchor="middle" fill="#4a5d54">分散システムが扱う問題の源はこの一本の線</text>
+        <defs><marker id="arr-f1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: ローカルの関数呼び出しとネットワーク越しの呼び出しの違いは、途中に「切れる・遅れる・無応答になる」線が入ること。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2: 分散コンピューティングの8つの誤謬 ===== -->
+  <section>
+    <h2>2. 分散コンピューティングの 8 つの誤謬</h2>
+    <p>ネットワークを初めて跨いだプログラマは、ほぼ全員が同じ間違った前提を置きます。これを整理したのが「分散コンピューティングの誤謬 (fallacies of distributed computing)」です。1994 年に L. Peter Deutsch が 7 つを (Bill Joy と Dave Lyon が先に挙げていた 4 つを含めて) まとめ、1997 年頃に James Gosling が 8 つ目を加えました。</p>
+    <ol>
+      <li>ネットワークは信頼できる</li>
+      <li>レイテンシ (応答までの待ち時間) はゼロである</li>
+      <li>帯域幅は無限である</li>
+      <li>ネットワークは安全である</li>
+      <li>トポロジー (接続構成) は変化しない</li>
+      <li>管理者は 1 人しかいない</li>
+      <li>転送コストはゼロである</li>
+      <li>ネットワークは均質である (同じ機器・同じ設定である)</li>
+    </ol>
+    <p>この 8 つに共通するのは「ローカルで成り立っていたことを、ネットワークの先でも無意識に仮定してしまう」という構造です。例えば 1 つ目を信じたプログラムは、応答が返らない状況に対するリトライやタイムアウトの処理を書き忘れます。すると障害が起きたとき、スレッドが応答を待ち続けてメモリを食い尽くしたり、障害が直ったあとも再接続を自動で試さず人の手で再起動が必要になったりします。2 つ目を信じたプログラムは、同じ処理をローカル関数のように何度も呼び出すコードを書き、本番でそれぞれが数十ミリ秒かかって全体が遅くなって初めて問題に気づきます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="ローカルでは成り立つがネットワーク越しでは崩れる前提の図">
+        <rect x="30" y="30" width="250" height="140" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="55" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">ローカルでは常に成立</text>
+        <text x="155" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">・呼び出しは失敗しない</text>
+        <text x="155" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">・応答はほぼ即座</text>
+        <text x="155" y="120" font-size="12.5" text-anchor="middle" fill="#12211a">・帯域はメモリ帯域並み</text>
+        <text x="155" y="140" font-size="12.5" text-anchor="middle" fill="#12211a">・構成は自分だけが知っている</text>
+        <line x1="280" y1="100" x2="340" y2="100" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-f2)"/>
+        <rect x="340" y="30" width="250" height="140" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="465" y="55" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">ネットワーク越しでは崩れる</text>
+        <text x="465" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">・パケットは失われる</text>
+        <text x="465" y="100" font-size="12.5" text-anchor="middle" fill="#12211a">・応答に数十 ms 以上かかる</text>
+        <text x="465" y="120" font-size="12.5" text-anchor="middle" fill="#12211a">・帯域は有限で競合する</text>
+        <text x="465" y="140" font-size="12.5" text-anchor="middle" fill="#12211a">・構成は他チームも変更する</text>
+        <defs><marker id="arr-f2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs>
+      </svg>
+      <p class="cap">図: 8 つの誤謬はどれも「ローカルの常識をネットワークの先に持ち込んでしまう」という同じ構造を持つ。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3: レイテンシの桁 ===== -->
+  <section>
+    <h2>3. 知っておくべきレイテンシの桁</h2>
+    <p>分散システムの設計判断の多くは「どこにデータを置くと何マイクロ秒かかるか」という感覚に基づきます。この感覚が無いと、設計図の上では同じ 1 本の矢印でも、実際には 1000 倍以上遅いという事故が起きます。以下はよく引用される概算値 (Jeff Dean 由来の数値を元にした目安であり、実機では CPU 世代やネットワーク構成で変わります) です。</p>
+    <ul>
+      <li>L1 / L2 キャッシュ参照: 1 ns 〜 10 ns</li>
+      <li>メイン RAM へのアクセス: 約 100 ns</li>
+      <li>1 Gbps のネットワークで 1 KB を送る: 約 10 マイクロ秒</li>
+      <li>SSD からの読み取り: 約 100 マイクロ秒</li>
+      <li>データベースへの 1 回の書き込み (ログの flush を含む): 約 1 ミリ秒</li>
+      <li>同一データセンター内のラウンドトリップ: 数百マイクロ秒 〜 1 ミリ秒程度</li>
+      <li>大陸をまたぐラウンドトリップ (例: 米国西海岸 ― オランダ): 約 100 ミリ秒</li>
+    </ul>
+    <p>重要なのは絶対値ではなく桁の差です。RAM へのアクセスと比べて、同一データセンター内のネットワーク往復はおよそ 1000 倍、大陸をまたぐ往復はさらに 100 倍以上遅くなります。この桁を知っていれば、「ループの中でリモート呼び出しを 1000 回する」設計が RAM の中で済ませられる処理と比べてどれほど不利かが、計算しなくても直感で分かるようになります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 260" role="img" aria-label="レイテンシの桁を対数的に並べた図">
+        <text x="20" y="22" font-size="12.5" fill="#4a5d54">短い (速い)</text>
+        <text x="560" y="22" font-size="12.5" fill="#4a5d54" text-anchor="end">長い (遅い)</text>
+        <line x1="20" y1="34" x2="600" y2="34" stroke="#9aa" stroke-width="2"/>
+        <line x1="60" y1="28" x2="60" y2="40" stroke="#0f5132" stroke-width="2"/>
+        <text x="60" y="56" font-size="12" text-anchor="middle" fill="#12211a">RAM</text>
+        <text x="60" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">100 ns</text>
+        <line x1="180" y1="28" x2="180" y2="40" stroke="#0f5132" stroke-width="2"/>
+        <text x="180" y="56" font-size="12" text-anchor="middle" fill="#12211a">1KB 送信</text>
+        <text x="180" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">10 us</text>
+        <line x1="300" y1="28" x2="300" y2="40" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="56" font-size="12" text-anchor="middle" fill="#12211a">SSD 読取</text>
+        <text x="300" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">100 us</text>
+        <line x1="400" y1="28" x2="400" y2="40" stroke="#0f5132" stroke-width="2"/>
+        <text x="400" y="56" font-size="12" text-anchor="middle" fill="#12211a">DB 書込</text>
+        <text x="400" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">1 ms</text>
+        <line x1="520" y1="28" x2="520" y2="40" stroke="#b5401f" stroke-width="2.5"/>
+        <text x="520" y="56" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">大陸間往復</text>
+        <text x="520" y="72" font-size="11.5" text-anchor="middle" fill="#b5401f">100 ms</text>
+        <rect x="20" y="100" width="600" height="140" rx="10" fill="#f3f9f6" stroke="#8fd6b4" stroke-width="1.5"/>
+        <text x="320" y="128" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">目盛り 1 つごとにおよそ 10 〜 1000 倍遅くなる</text>
+        <text x="320" y="156" font-size="12.5" text-anchor="middle" fill="#12211a">RAM を 1 回触る代わりにネットワーク往復を 1 回挟むと、</text>
+        <text x="320" y="178" font-size="12.5" text-anchor="middle" fill="#12211a">同一データセンター内でも約 1000 倍、大陸間ではさらに 100 倍以上遅くなる</text>
+        <text x="320" y="210" font-size="12.5" text-anchor="middle" fill="#4a5d54">ループの中でリモート呼び出しを繰り返す設計はこの桁差を見落としやすい</text>
+      </svg>
+      <p class="cap">図: レイテンシは軸の目盛りごとに桁が変わる。数字そのものより「何桁違うか」を体に入れることが重要。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 4: 分散システムを支える4つの柱 ===== -->
+  <section>
+    <h2>4. 良さを測る 4 つの柱</h2>
+    <p>分散システムを設計するとき、良し悪しを議論する軸は主に 4 つに整理できます。この 4 つは独立した軸であり、どれかを満たせば他が自動的に満たされるわけではありません。</p>
+    <p><b>Scalability (拡張性)</b> ― 負荷が増えたときに、性能を落とさずに処理量を増やせること。<b>Availability (可用性)</b> ― 利用者から見て、サービスが使える状態をどれだけ維持できるか (ダウンタイムの少なさ)。<b>Reliability (信頼性)</b> ― 結果が一貫して正しいこと (壊れたデータや間違った答えを返さない)。<b>Performance (性能)</b> ― 想定した負荷の下で、実際にどれだけ速く処理を終えられるか。</p>
+    <p>可用性と信頼性はよく混同されますが別の軸です。サービスが応答を返し続けていれば可用性は高いですが、その応答の内容が間違っていれば信頼性は低い、という状況がありえます (逆に、正しい答えしか返さないが頻繁に応答が止まるシステムは信頼性が高くても可用性が低い)。この先の回で出てくるキャッシュ、ロードバランサ、シャーディング、レプリケーション、メッセージキューといった構成要素は、すべてこの 4 つの柱のどれかを改善するために存在します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="拡張性・可用性・信頼性・性能の4つの柱の図">
+        <rect x="10" y="20" width="140" height="120" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="80" y="60" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">Scalability</text>
+        <text x="80" y="82" font-size="12" text-anchor="middle" fill="#12211a">負荷が増えても</text>
+        <text x="80" y="100" font-size="12" text-anchor="middle" fill="#12211a">性能を保てるか</text>
+        <rect x="165" y="20" width="140" height="120" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="235" y="60" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">Availability</text>
+        <text x="235" y="82" font-size="12" text-anchor="middle" fill="#12211a">使える状態を</text>
+        <text x="235" y="100" font-size="12" text-anchor="middle" fill="#12211a">保てているか</text>
+        <rect x="320" y="20" width="140" height="120" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="390" y="60" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Reliability</text>
+        <text x="390" y="82" font-size="12" text-anchor="middle" fill="#12211a">結果はいつも</text>
+        <text x="390" y="100" font-size="12" text-anchor="middle" fill="#12211a">正しいか</text>
+        <rect x="475" y="20" width="140" height="120" rx="10" fill="#fbeeea" stroke="#b5401f" stroke-width="2"/>
+        <text x="545" y="60" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">Performance</text>
+        <text x="545" y="82" font-size="12" text-anchor="middle" fill="#12211a">決めた負荷の下で</text>
+        <text x="545" y="100" font-size="12" text-anchor="middle" fill="#12211a">どれだけ速いか</text>
+      </svg>
+      <p class="cap">図: 4 つの柱は互いに独立。可用性が高くても信頼性が低い (間違った答えを速く返す) システムはありえる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 5: まとめ ===== -->
+  <section>
+    <h2>5. まとめ ― 1 台を超えた瞬間に何が変わるか</h2>
+    <p>1 台を複数台に増やした瞬間、呼び出しの経路にネットワークが入り込み、ローカルでは当たり前だった「必ず届く」「すぐ返る」「無限に送れる」という前提がすべて崩れます。これが 8 つの誤謬の正体であり、その崩れ方を数字で捉えたのがレイテンシの桁です。そして、崩れた前提を抱えながらも Scalability ・ Availability ・ Reliability ・ Performance の 4 つをどう確保するかが、分散システムの設計そのものです。</p>
+    <p>次回 (第 02 回) では、この「ネットワークという経路」を実際にプログラムから操作する最初の一歩として、ソケット (socket) という最も低レベルな API を手で動かします。TCP が「バイトの流れ」でしかなく、1 回の送信が 1 回の受信に対応するとは限らないという事実は、以降のすべての回で前提になる基礎知識です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/which-latency-numbers-should-you-know.md" target="_blank" rel="noopener">ByteByteGo: Which Latency Numbers Should You Know?</a> ― L1/L2 キャッシュ ・ RAM ・ SSD ・ データベース書き込み ・ 大陸間往復の概算レイテンシ値の出典。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/must-know-system-design-building-blocks.md" target="_blank" rel="noopener">ByteByteGo: Must Know System Design Building Blocks</a> ― メッセージキュー・キャッシュ・ロードバランサ・シャーディング・レプリケーションなど、以降の回で扱う構成要素の全体地図の出典。</li>
+      <li><a href="https://github.com/ByteByteGoHq/system-design-101/blob/b28380a4710c5ec9638ec037d4168e288f334cba/data/guides/who-are-the-fantastic-four-of-system-design.md" target="_blank" rel="noopener">ByteByteGo: Who Are the Fantastic Four of System Design?</a> ― Scalability ・ Availability ・ Reliability ・ Performance の 4 つの柱の定義の出典。</li>
+      <li><a href="https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing" target="_blank" rel="noopener">Wikipedia: Fallacies of distributed computing</a> ― 8 つの誤謬の正確な文言と、1994 年 L. Peter Deutsch (Bill Joy ・ Dave Lyon の先行 4 項目を含む) ・ 1997 年頃 James Gosling による追加という成立史の確認に使用。</li>
+    </ul>
+  </section>
+  <div class="nav"><span></span><a href="./distsys-index.html">目次</a><a href="./distsys-sockets.html">第 02 回 ソケットプログラミング入門 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'あるサービスが、ユーザー数の増加に合わせて同じ 1 台のサーバーの CPU とメモリを毎年増強してきたが、ある時点から増強してもアクセスの増加に追いつけなくなった。最も正確な説明はどれか？',
+    opts: [
+      'CPU やメモリには物理的な上限があり、垂直スケーリング (1 台の増強) だけでは需要の増加にいつか追いつけなくなる',
+      'クラウドでは課金額を増やせば性能は理論上無限に伸ばせるため、垂直スケーリングだけで永久に対応できる',
+      'アクセスが増えてもネットワーク帯域だけを増強すれば、CPU やメモリの限界は関係なく解決する',
+      '垂直スケーリングで足りなくなった場合は、必ずデータベースをシャーディングすれば解決する',
+      'この問題は分散システムの話ではなく、単にソフトウェアの実装が遅いことが原因で起きている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>1 台のマシンの CPU コア数やメモリ容量には物理的な上限があり、最新最速の 1 台を導入しても、翌年のアクセス増加がそれを超えることはよくある。垂直スケーリングはいつか必ず壁に当たる。',
+      'クラウドでも実際に借りられるインスタンスサイズには上限があり、課金額を増やせば性能が無限に伸びるわけではない。よくある誤解。',
+      'ネットワーク帯域はボトルネックの一つでしかなく、CPU やメモリの処理能力の限界とは別の資源。帯域だけ増強しても CPU 側の限界は解消しない。',
+      'シャーディング (データの水平分割) は有効な対策の一つだが「必ず」それだけで解決するとは限らず、他の対策 (キャッシュ ・ 水平スケーリングなど) と組み合わせて考えるべき問題であり、唯一の解と決めつけるのは誤り。',
+      '実装の遅さが原因の場合もあるが、ここで問われているのは実装の良し悪しとは独立した「1 台の物理的な上限」という構造的な問題であり、実装を直せば必ず解決するとは言えない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 台を増強するグラフはいつか水平に近づき (上限に近づき)、需要の線と交差します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 568 170" aria-label="垂直スケーリングの限界の図"><line x1="40" y1="140" x2="520" y2="140" stroke="#9aa" stroke-width="2"/><line x1="40" y1="140" x2="40" y2="20" stroke="#9aa" stroke-width="2"/><path d="M40,130 C150,100 300,40 500,30" stroke="#198754" stroke-width="3" fill="none"/><text x="500" y="20" font-size="12.5" fill="#0f5132">1 台の限界</text><path d="M40,130 C200,110 350,70 500,15" stroke="#c0492f" stroke-width="3" stroke-dasharray="6 6" fill="none"/><text x="420" y="55" font-size="12.5" fill="#b5401f">需要の増加</text><text x="280" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">需要の線が 1 台の限界を超えた点で増強だけでは追いつかなくなる</text></svg>'
+          + '<p class="cap">図: 需要の増加は 1 台の性能向上より速く進み、いつか上限に当たる。</p></div>'
+    }
+  },
+  {
+    q: '「分散コンピューティングの誤謬」の 1 つ目「ネットワークは信頼できる」を無条件に信じたプログラムで、現場で実際に起きやすい問題はどれか？',
+    opts: [
+      'ログファイルの出力量が想定より早く増えてディスクが満杯になり、アプリケーションのログ書き込みが失敗するようになる',
+      '応答が返らない状況に対するタイムアウトやリトライの処理が書かれておらず、障害時にスレッドが無応答の相手を待ち続けてリソースを消費し続ける',
+      'コンパイル時に型エラーが検出されず、デプロイ後に初めて型不一致が判明し、呼び出し側の処理が例外で停止する',
+      '暗号化鍵の有効期限が切れて TLS 接続が確立できなくなり、クライアントから見た接続エラーの件数が増える',
+      '複数の開発者が同じファイルを同時に編集し、マージコンフリクトが発生してレビューの手間が増える'
+    ],
+    ans: 1,
+    exps: [
+      'ディスク容量の管理はログ設計や運用の問題であり、「ネットワークは信頼できる」という誤謬とは直接関係しない。',
+      '<b>これが正解。</b>ネットワークが常に信頼できると信じたプログラムは、通信が切れて応答が返らない場合の処理 (タイムアウト・リトライ) を書き忘れる。結果として、障害発生時にスレッドが無応答の相手をいつまでも待ち続け、メモリやコネクションなどのリソースを食い尽くす。',
+      '型エラーの検出はプログラミング言語や静的解析の話であり、ネットワークの信頼性とは別の軸の問題。',
+      '証明書や鍵の期限管理は運用上重要だが、「ネットワークは信頼できる」という誤謬が直接引き起こす問題ではない。',
+      'マージコンフリクトは開発プロセス上の問題であり、ランタイムで動くプログラムがネットワークの不確実性を無視した結果とは関係ない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>タイムアウトが無いプログラムは、相手が落ちていても「まだ応答が来るかもしれない」と待ち続けます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="タイムアウト無しで待ち続ける図"><rect x="40" y="30" width="180" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="60" font-size="13" text-anchor="middle" fill="#12211a">呼び出し元: 応答待ち</text><rect x="340" y="30" width="180" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="430" y="60" font-size="13" text-anchor="middle" fill="#b5401f">相手: 応答不能 (落ちている)</text><line x1="220" y1="55" x2="340" y2="55" stroke="#c0492f" stroke-width="2.5" stroke-dasharray="6 6"/><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">タイムアウトが無いと「いつか届く」前提のまま永久に待ち続ける</text><text x="280" y="122" font-size="12.5" text-anchor="middle" fill="#4a5d54">待っているスレッドやコネクションのリソースが消費され続ける</text></svg>'
+          + '<p class="cap">図: タイムアウト無しでは、応答不能な相手を永久に待ち続けてリソースを消費する。</p></div>'
+    }
+  },
+  {
+    q: '分散コンピューティングの 8 つの誤謬の成立史として正しいものはどれか？',
+    opts: [
+      'James Gosling が最初に 8 つ全部を 1 度に発表し、その後 Peter Deutsch が内容を検証して項目の順番を整理した',
+      'Peter Deutsch が 1994 年に 7 つを (Bill Joy と Dave Lyon の先行項目を含めて) まとめ、1997 年頃に James Gosling が 8 つ目を加えた',
+      '8 つの誤謬は ISO の標準化委員会によって国際標準として最初から 8 項目で策定され、後から Sun Microsystems が解説記事を書いた',
+      'この誤謬のリストは Google の Jeff Dean がレイテンシの数値表と合わせて社内教育用に作成し、後に Sun Microsystems が公開した',
+      'リストは Amazon の分散システム部門が最初に作成し、後に Sun Microsystems が自社の研修資料に引用して広まった'
+    ],
+    ans: 1,
+    exps: [
+      'Gosling が最初に 8 つ全部を発表したという順序は誤り。最初にリストをまとめたのは Deutsch であり、Gosling が後から 1 項目を加えた側。',
+      '<b>これが正解。</b>L. Peter Deutsch が 1994 年に (Bill Joy と Dave Lyon が先に挙げていた 4 項目を含めて) 7 つの誤謬をまとめ、1997 年頃に James Gosling が「ネットワークは均質である」という 8 つ目を追加した。',
+      'ISO による標準化という事実はなく、このリストは Sun Microsystems の社内の経験的な知見から生まれたもの。',
+      'Jeff Dean はレイテンシの数値 (この回で紹介した概算値) で知られる人物であり、8 つの誤謬のリストの作成者ではない。混同しやすい点。',
+      'このリストの起源は Sun Microsystems であり、Amazon が最初に作成したという事実はない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>リストは 1 度にできたのではなく、複数人の手を経て段階的に積み重なりました。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="8つの誤謬の成立史の図"><rect x="20" y="50" width="150" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="95" y="80" font-size="12.5" text-anchor="middle" fill="#12211a">Joy/Lyon: 4 項目</text><line x1="170" y1="75" x2="220" y2="75" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q3)"/><rect x="220" y="50" width="150" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="295" y="75" font-size="12.5" text-anchor="middle" fill="#1f4a68">Deutsch 1994</text><text x="295" y="92" font-size="11.5" text-anchor="middle" fill="#12211a">7 項目に整理</text><line x1="370" y1="75" x2="420" y2="75" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q3)"/><rect x="420" y="50" width="130" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="485" y="75" font-size="12.5" text-anchor="middle" fill="#5b3d80">Gosling 1997</text><text x="485" y="92" font-size="11" text-anchor="middle" fill="#12211a">8 項目目を追加</text><defs><marker id="arr-q3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: 誤謬のリストは Joy/Lyon → Deutsch → Gosling と段階的に積み重なった。</p></div>'
+    }
+  },
+  {
+    q: '「帯域幅は無限である」という誤謬を信じて設計されたバッチ処理が、本番環境で遅延する典型的な原因はどれか？',
+    opts: [
+      'サーバーの CPU クロック数が不足しており、計算そのものに時間がかかって処理全体が遅くなっている',
+      '大量のデータを一度に転送する設計にしたため、他の通信と帯域を奪い合い、想定より転送に時間がかかる',
+      'ディスクの空き容量が不足して書き込みがエラーになり、処理が途中で異常終了してしまっている',
+      'プログラムの変数名が長く読みにくいため、ソースコードの可読性とレビューの効率が下がっている',
+      'テストコードのカバレッジが低くデプロイ前にバグを検出できず、本番で初めて不整合が見つかっている'
+    ],
+    ans: 1,
+    exps: [
+      'CPU の計算速度の問題は帯域幅の誤謬とは別軸。帯域が無限だと思い込んだ設計が引き起こす問題ではない。',
+      '<b>これが正解。</b>帯域幅には実際には上限があり、他のトラフィックと共有している。大量データを無制限に送る設計にすると、ネットワークが混雑する時間帯に転送が想定より大幅に遅くなる。',
+      'ディスク容量不足は帯域幅とは別の資源の問題であり、この誤謬が直接の原因になるものではない。',
+      '可読性の問題はコーディング規約の話であり、帯域幅の誤謬とは関係しない。',
+      'テストカバレッジの不足は品質保証プロセスの問題であり、帯域幅が無限だと信じたことの直接的な結果ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>帯域は共有される資源であり、複数の通信が同時に流れると 1 本あたりの速さが落ちます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="帯域幅の共有の図"><rect x="30" y="30" width="500" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="55" font-size="13" text-anchor="middle" fill="#12211a">共有された帯域 (有限)</text><rect x="30" y="90" width="150" height="30" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="105" y="110" font-size="11.5" text-anchor="middle" fill="#12211a">バッチ転送</text><rect x="200" y="90" width="150" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="1.5"/><text x="275" y="110" font-size="11.5" text-anchor="middle" fill="#12211a">他サービスの通信</text><rect x="370" y="90" width="150" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/><text x="445" y="110" font-size="11.5" text-anchor="middle" fill="#12211a">ユーザーの通常アクセス</text><text x="280" y="140" font-size="12" text-anchor="middle" fill="#4a5d54">3 つが同じ帯域を奪い合うと、それぞれの速度は見積もりより落ちる</text></svg>'
+          + '<p class="cap">図: 帯域幅は他の通信と共有される有限な資源であり、無限ではない。</p></div>'
+    }
+  },
+  {
+    q: 'ある開発チームが「構成がシンプルだから管理者は自分たちだけだろう」と仮定してファイアウォールの設定を変更したところ、別チームが運用する監視システムの通信が止まった。これはどの誤謬に最も近いか？',
+    opts: [
+      'ネットワークは信頼できる',
+      'レイテンシはゼロである',
+      '管理者は 1 人しかいない',
+      '転送コストはゼロである',
+      'ネットワークは均質である'
+    ],
+    ans: 2,
+    exps: [
+      'この事故は通信の失敗や遅延が原因ではなく、設定変更が他チームの管理範囲と衝突したことが原因であり、「信頼できる」という誤謬とは異なる。',
+      '待ち時間の見積もりの誤りが原因ではないため、この誤謬には当てはまらない。',
+      '<b>これが正解。</b>「管理者は 1 人しかいない」という誤謬は、自分たちの変更がネットワーク全体に及ぼす影響を見落とす原因になる。実際には複数のチームが同じネットワークの別の部分を管理しており、調整なしの変更が他チームの通信を止めることがある。',
+      '帯域や CPU などの転送コストの話ではなく、管理範囲の衝突の話なので、この誤謬には当てはまらない。',
+      '機器やプロトコルの種類が揃っているかどうかの話ではなく、管理者が複数いることを見落とした話なので、この誤謬とは異なる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じネットワークを複数のチームがそれぞれ別の目的で触っていることがあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="複数管理者の図"><rect x="180" y="55" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="80" font-size="13" text-anchor="middle" fill="#12211a">共有ネットワーク</text><rect x="30" y="20" width="130" height="35" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/><text x="95" y="42" font-size="11.5" text-anchor="middle" fill="#12211a">チーム A (変更者)</text><rect x="400" y="20" width="130" height="35" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/><text x="465" y="42" font-size="11.5" text-anchor="middle" fill="#b5401f">チーム B (監視)</text><line x1="160" y1="38" x2="280" y2="55" stroke="#9aa" stroke-width="1.5"/><line x1="400" y1="38" x2="280" y2="55" stroke="#9aa" stroke-width="1.5"/><text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#4a5d54">チーム A の変更がチーム B の通信を意図せず止める</text></svg>'
+          + '<p class="cap">図: 「自分たちだけが管理者」という仮定は、同じ資源を他チームも使っている現実と衝突する。</p></div>'
+    }
+  },
+  {
+    q: '次の 4 つのうち、レイテンシの桁が小さい (速い) 順に正しく並んでいるものはどれか？',
+    opts: [
+      'RAM へのアクセス < SSD からの読み取り < 同一データセンター内の往復 < 大陸をまたぐ往復',
+      '大陸をまたぐ往復 < 同一データセンター内の往復 < SSD からの読み取り < RAM へのアクセス',
+      'SSD からの読み取り < RAM へのアクセス < 大陸をまたぐ往復 < 同一データセンター内の往復',
+      '同一データセンター内の往復 < RAM へのアクセス < SSD からの読み取り < 大陸をまたぐ往復',
+      '全て同程度の桁であり、有意な差は無い'
+    ],
+    ans: 3,
+    exps: [
+      '順序の組み合わせとしては正しい方向 (RAM が最速、大陸間が最も遅い) だが、選択肢の並びそのものがこの設問の正解の並びではない。本文の概算値では RAM (約 100 ns) が最速である点は合っているが、他の選択肢との比較が必要。',
+      '全く逆の順序。大陸間往復が最も速いという記述は、本文の概算値 (大陸間は約 100 ms で最も遅い) と正反対。',
+      'SSD 読み取りが RAM より速いという記述は誤り。RAM (約 100 ns) は SSD (約 100 マイクロ秒) よりおよそ 1000 倍速い。',
+      '<b>これが正解。</b>本文の概算値で小さい順に並べると、RAM (約 100 ns) < SSD 読み取り (約 100 マイクロ秒) < 同一データセンター内往復 (数百マイクロ秒〜1 ミリ秒程度) < 大陸間往復 (約 100 ミリ秒) となる。',
+      '桁は全く異なり、RAM と大陸間往復の間には 100 万倍以上の差がある。「有意な差は無い」は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本文のレイテンシの梯子を思い出してください。目盛りが進むごとに桁が変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="レイテンシの正しい順序の図"><line x1="30" y1="100" x2="530" y2="100" stroke="#9aa" stroke-width="2"/><circle cx="60" cy="100" r="6" fill="#0f5132"/><text x="60" y="80" font-size="12" text-anchor="middle" fill="#12211a">RAM</text><circle cx="220" cy="100" r="6" fill="#198754"/><text x="220" y="80" font-size="12" text-anchor="middle" fill="#12211a">SSD</text><circle cx="360" cy="100" r="6" fill="#3d7dca"/><text x="360" y="80" font-size="12" text-anchor="middle" fill="#12211a">同DC往復</text><circle cx="500" cy="100" r="6" fill="#b5401f"/><text x="500" y="80" font-size="12" text-anchor="middle" fill="#b5401f">大陸間往復</text><text x="280" y="125" font-size="12.5" text-anchor="middle" fill="#4a5d54">左から右に向かって桁が大きくなっていく (速い → 遅い)</text></svg>'
+          + '<p class="cap">図: RAM・SSD・同一データセンター内往復・大陸間往復の順で、桁が大きくなっていく。</p></div>'
+    }
+  },
+  {
+    q: 'ある開発者が、ループの中で外部 API を 1000 回呼び出すコードを書いた。1 回の呼び出しが同一データセンター内で約 1 ミリ秒かかるとすると、この設計の最も正確な評価はどれか？',
+    opts: [
+      '1000 回の呼び出しを合計すると約 1 秒かかり、RAM だけで済む処理と比べて数百万倍遅くなりうる設計であり、まとめて 1 回で済ませる (バッチ化する) 方が望ましい',
+      'API 呼び出しは RAM アクセスとほぼ同じ速さで完了するため、1000 回呼び出しても利用者が気づく程度の遅延は発生しない',
+      'ネットワーク呼び出しの回数は結果の正しさにしか影響せず、速度面の問題は発生しないので設計を変える必要は無い',
+      '呼び出しごとに新しい TCP 接続さえ張らなければ、呼び出し回数に関係なく常に十分高速な応答が得られる',
+      '1000 回という回数自体には問題はなく、サーバーの CPU 性能を上げれば回数の多さは必ず解決される'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>1 回約 1 ミリ秒の呼び出しを 1000 回繰り返すと合計約 1 秒かかる。RAM アクセス (約 100 ns) だけで済む処理と比べると桁違いに遅く、可能であれば複数件をまとめて 1 回の呼び出しで送る (バッチ化) 設計に変える方が望ましい。',
+      '本文のレイテンシの桁から分かる通り、ネットワーク越しの呼び出しは RAM アクセスよりおよそ 1000 倍以上遅い。「ほぼ同じ速さ」は明確な誤り。',
+      '速度の問題と結果の正しさの問題は別軸。ここで問われているのは速度面の設計判断であり、正しさには影響しないという主張は論点をすり替えている。',
+      '新しい接続を張るかどうかは影響する要素の一つだが、「回数に関係なく常に高速」という主張は、呼び出し回数そのものが積算されるという本質を無視している。',
+      'CPU 性能はサーバー側の処理速度に関係するが、ここでの遅延の主因はネットワーク往復の回数であり、CPU を上げても往復の回数そのものは減らない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 回あたりの時間が小さくても、繰り返す回数をかけ合わせると合計は大きくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="呼び出し回数と合計時間の図"><rect x="30" y="30" width="200" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="55" font-size="13" text-anchor="middle" fill="#12211a">1 回: 約 1 ms</text><text x="280" y="55" font-size="18" text-anchor="middle" fill="#4a5d54">×</text><rect x="320" y="30" width="200" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="55" font-size="13" text-anchor="middle" fill="#1f4a68">1000 回</text><rect x="150" y="100" width="260" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="125" font-size="13.5" text-anchor="middle" fill="#b5401f" font-weight="700">合計 約 1 秒</text></svg>'
+          + '<p class="cap">図: 小さな待ち時間でも回数をかけ合わせると、利用者が気づく規模の遅延になる。</p></div>'
+    }
+  },
+  {
+    q: '可用性 (Availability) と信頼性 (Reliability) の違いを最も正確に表しているものはどれか？',
+    opts: [
+      '可用性は「サービスが使える状態をどれだけ維持できるか」、信頼性は「返す結果がいつも正しいか」を測る、別の軸である',
+      '可用性と信頼性は同じ意味の言葉であり、片方を測れば他方も自動的に同じ数値になって分かる',
+      '信頼性はネットワークの帯域幅の広さだけを指す言葉であり、可用性とは完全に無関係な性能上の概念である',
+      '可用性が高いシステムは、必ず信頼性も高くなることが数学的に保証されていると一般に言われている',
+      '信頼性はハードウェアの故障率のみを指す言葉であり、ソフトウェアが返す答えの正しさとは関係しない概念である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>可用性は「サービスが使える状態をどれだけ維持できるか (ダウンタイムの少なさ)」、信頼性は「返す結果がいつも正しいか」を測る別の軸。応答を返し続けていても、その内容が間違っていれば信頼性は低いという状況がありうる。',
+      '両者は別の軸であり、片方が高くても他方が低い状況 (例: 常に応答するが間違った答えを返す) がありえるため、同じ意味だと見なすのは誤り。',
+      '帯域幅は性能 (Performance) に関わる話題であり、信頼性 (結果の正しさ) の定義とは異なる。',
+      '可用性と信頼性は独立した軸なので、片方が高ければ他方も自動的に高くなるという保証は存在しない。',
+      '信頼性はハードウェアの故障率だけでなく、ソフトウェアが返す結果の正しさ全般を含む概念であり、範囲を狭めすぎている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「応答するか」と「その答えが正しいか」は別の問いです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="可用性と信頼性の違いの図"><rect x="30" y="30" width="230" height="80" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="145" y="60" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">Availability</text><text x="145" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">使える状態を保つか</text><rect x="300" y="30" width="230" height="80" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/><text x="415" y="60" font-size="13.5" text-anchor="middle" fill="#5b3d80" font-weight="700">Reliability</text><text x="415" y="85" font-size="12.5" text-anchor="middle" fill="#12211a">結果が正しいか</text><text x="280" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">片方が高くても他方が低い組み合わせがありうる</text></svg>'
+          + '<p class="cap">図: 可用性と信頼性は互いに独立した別の軸。</p></div>'
+    }
+  },
+  {
+    q: 'あるオンライン注文サービスが「アクセスが集中する時間帯でも注文ボタンへの応答を絶対に止めたくない」という要件を出した。この要件が主に関係する柱はどれか？',
+    opts: [
+      'Performance (性能) のみであり、他の柱とは無関係である',
+      'Reliability (信頼性) のみであり、Availability (可用性) とは無関係である',
+      'Availability (可用性) が主な軸であり、応答を維持し続ける設計 (冗長化・負荷分散など) が必要になる',
+      'Scalability (拡張性) とは完全に独立しており、台数を増やしても解決しない',
+      'このような要件は 4 つの柱のいずれにも当てはまらない特殊な要求である'
+    ],
+    ans: 2,
+    exps: [
+      '性能だけの問題ではない。「応答を止めたくない」という要件は、速さよりも「止まらないこと」自体を問うものであり、可用性の軸が主になる。',
+      '信頼性 (結果の正しさ) ではなく、応答を止めないことが要件の核心であるため、主軸は可用性である。信頼性が無関係というのも言い過ぎ。',
+      '<b>これが正解。</b>「応答を止めたくない」という要件は可用性 (Availability) の軸そのものであり、冗長化や負荷分散、単一障害点の排除といった設計で対応する。',
+      'アクセス集中時に応答を維持するには、負荷に応じて処理能力を増やす拡張性の仕組み (水平スケーリングなど) もしばしば必要になり、「完全に独立」というのは誤り。',
+      '4 つの柱のいずれかに当てはまる典型的な要件であり、特殊で分類不能という扱いは誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「止めたくない」という要件は、4 つの柱の中でも可用性に直接対応します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="要件と可用性の対応の図"><rect x="30" y="20" width="230" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="50" font-size="13" text-anchor="middle" fill="#12211a">要件: 応答を止めたくない</text><line x1="260" y1="45" x2="320" y2="45" stroke="#0f5132" stroke-width="2" marker-end="url(#arr-q10)"/><rect x="320" y="20" width="210" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="425" y="50" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">Availability (可用性)</text><text x="280" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">対応策の例: 冗長化・負荷分散・単一障害点の排除</text><defs><marker id="arr-q10" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0f5132"/></marker></defs></svg>'
+          + '<p class="cap">図: ビジネス要件を 4 つの柱のどれに対応するか整理すると、設計の優先順位が見えてくる。</p></div>'
+    }
+  },
+  {
+    q: '決済サービスの応答処理で「タイムアウトを設けず、応答が返るまで待ち続ける」という実装に変更した。この変更が最も直接的に悪化させる柱と、その理由の組み合わせとして正しいものはどれか？',
+    opts: [
+      'Reliability (信頼性)。待ち続けることで計算結果そのものの正しさが変わってしまい、間違った金額が記録されるようになる',
+      'Performance (性能)。1 件あたりの処理時間が単純に延びるため、全体のスループットだけが落ちて遅くなる',
+      'Scalability (拡張性)。待ち続ける処理の割合が増えるほど、台数を増やしても処理能力が線形に伸びなくなる',
+      'このような実装変更は 4 つの柱のいずれにも当てはまらない、ログ出力上の些末な問題にすぎない',
+      'Availability (可用性)。障害が起きた相手を待ち続けるリクエストが積み重なり、新しい利用者からの要求に応答できなくなる'
+    ],
+    ans: 4,
+    exps: [
+      '計算結果の正しさ自体は待ち時間の長さによって変わるものではなく、信頼性の低下として説明するのは論点がずれている。',
+      '性能の低下も起こりうるが、「最も直接的に悪化する」ものとしては、待ち続けるリクエストがリソースを占有し続けて新規リクエストを拒否するようになる、より深刻な影響の方が先に表面化する。',
+      '拡張性への影響も間接的にはあるが、ここで最初に表面化するのは台数の問題ではなく、1 台の中でリソースが使い果たされて新規リクエストを受け付けられなくなる現象である。',
+      '4 つの柱のどれかに明確に対応する典型的な問題であり、「些末な問題」として片付けるのは誤り。',
+      '<b>これが正解。</b>タイムアウトが無いと、応答不能な相手を待ち続けるリクエストがスレッドやコネクションを占有し続け、やがて新しい利用者からの要求を受け付けられなくなる。これは可用性 (Availability) の低下そのものである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>待ち続けるリクエストが積み重なると、新しいリクエストの入る余地が無くなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="タイムアウト無しで資源が枯渇する図"><rect x="30" y="30" width="500" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="60" font-size="13" text-anchor="middle" fill="#12211a">有限個のスレッド / コネクション</text><rect x="40" y="95" width="90" height="25" rx="5" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/><text x="85" y="112" font-size="10.5" text-anchor="middle" fill="#b5401f">待機中</text><rect x="140" y="95" width="90" height="25" rx="5" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/><text x="185" y="112" font-size="10.5" text-anchor="middle" fill="#b5401f">待機中</text><rect x="240" y="95" width="90" height="25" rx="5" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/><text x="285" y="112" font-size="10.5" text-anchor="middle" fill="#b5401f">待機中</text><text x="420" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">新規リクエストの枠が無い</text></svg>'
+          + '<p class="cap">図: 応答不能な相手を待ち続けるリクエストが資源を占有し、新規リクエストが入れなくなる。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

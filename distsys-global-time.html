@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>グローバル時刻と外部一貫性 ― TrueTime ・ HLC ・ Calvin が「順序」をどう作るか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">DISTRIBUTED SYSTEMS ・ 第 35 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>グローバル時刻と外部一貫性 ― TrueTime ・ HLC ・ Calvin が「順序」をどう作るか</h1>
+  <p>物理時計のズレをゼロにはできない以上、3 つの実在システムがそれぞれ別の代償を払って「正しい順序」を作っている</p>
+</header>
+<main>
+  <a class="back" href="./distsys-index.html">← 分散システム シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 13 回 <a href="./distsys-consistency-models.html">一貫性モデル</a>、第 15 回 <a href="./distsys-lamport-clock.html">時間と順序</a>、第 25 回 <a href="./distsys-raft-paxos.html">合意 Paxos / Raft</a>、第 34 回 <a href="./distsys-flp-byzantine.html">不可能性とビザンチン障害</a></p>
+  <p class="intro">異なる機械の物理時計は、どれだけ NTP で合わせても必ず数 ms 〜 数十 ms のズレを残す。そのズレがある限り、「どちらの出来事が先に確定したか」という外部一貫性 (external consistency, 実世界の時間の前後関係とシステムが記録する順序が一致すること) を素朴な方法では保証できない。Google の Spanner はズレの範囲を明示してその分だけ待つ (TrueTime と commit wait) ことで解決し、HLC (Hybrid Logical Clock) は論理時計と物理時計を 1 つの値に融合して待たずに因果関係を保ち、Calvin は時計そのものに頼らず実行前に全員で順序を決め切ってしまう。この回では、3 つの実在するシステムが同じ問題にどう異なる代償を払って答えたかを、一次文献の記述に基づいて確認する。</p>
+
+  <!-- ===== 解説パート 1: C・A・P の正確な定義 ===== -->
+  <section>
+    <h2>1. 外部一貫性とは何か、なぜ物理時計だけでは作れないのか</h2>
+    <p>第 13 回で見た線形化可能性は「どのノードで読んでも最新の書き込みが見える」ことを保証しますが、複数のトランザクションに割り振る順序そのものが、実世界の時間の流れと一致している保証まではしません。<b>外部一貫性 (external consistency)</b> は、トランザクション $T_1$ が実世界の時間として $T_2$ の開始より前に完了していたなら、システムが記録する順序 (コミットタイムスタンプ) も必ず $T_1 < T_2$ になることを要求する、より強い性質です。</p>
+    <p>素朴には「各サーバーのローカル時計を読んでタイムスタンプにすればよい」と考えたくなりますが、これは成立しません。NTP (Network Time Protocol) で同期していても、サーバー間の時計には数 ms 〜 数十 ms のズレが残ります。$T_1$ が時計の進んだサーバーで確定し、$T_2$ が時計の遅れたサーバーで開始されると、実世界では $T_1$ が先でも、記録されたタイムスタンプ上は $T_2$ の方が小さい値になってしまうことがあります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="時計のズレで実世界の順序とタイムスタンプが逆転する図">
+        <line x1="40" y1="60" x2="580" y2="60" stroke="#9aa" stroke-width="2"/>
+        <text x="40" y="45" font-size="12.5" fill="#12211a">実世界の時間 →</text>
+        <circle cx="200" cy="60" r="7" fill="#198754"/>
+        <text x="200" y="85" font-size="13" text-anchor="middle" fill="#0f5132">T1 完了</text>
+        <circle cx="320" cy="60" r="7" fill="#c0492f"/>
+        <text x="320" y="85" font-size="13" text-anchor="middle" fill="#b5401f">T2 開始</text>
+        <line x1="40" y1="150" x2="580" y2="150" stroke="#9aa" stroke-width="2"/>
+        <text x="40" y="135" font-size="12.5" fill="#12211a">各ノードのローカル時計の値 →</text>
+        <circle cx="400" cy="150" r="7" fill="#198754"/>
+        <text x="400" y="175" font-size="13" text-anchor="middle" fill="#0f5132">T1 のタイムスタンプ</text>
+        <circle cx="220" cy="150" r="7" fill="#c0492f"/>
+        <text x="220" y="185" font-size="13" text-anchor="middle" fill="#b5401f">T2 のタイムスタンプ</text>
+      </svg>
+      <p class="cap">図: 実世界では T1 が先でも、ノード間の時計のズレでタイムスタンプの大小が逆転しうる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 2 ===== -->
+  <section>
+    <h2>2. TrueTime と commit wait ― ズレの範囲を認めてその分だけ待つ</h2>
+    <p>Google の Spanner (OSDI 2012 論文) は、時計のズレをゼロにしようとするのではなく、<b>ズレの範囲そのものを API で明示する</b>という逆転の発想を取りました。<b>TrueTime</b> API の中心は <code>TT.now()</code> で、これは単一の時刻ではなく区間 <code>[earliest, latest]</code> を返します。この区間は、呼び出しが実際に起きた絶対時刻を必ず含むことが保証されます。区間の半幅を $\epsilon$ (エプシロン、不確かさの大きさ) と呼び、論文の実運用環境では GPS クロックとセシウム原子時計を各データセンターに設置し、$\epsilon$ は 1 ms から 7 ms の間をのこぎり波状に変動し、平均すると概ね 4 ms 程度に収まると報告されています。</p>
+    <p>この区間を使って、Spanner は 2 つのルールで外部一貫性を作ります。<b>Start ルール</b>: 書き込みトランザクションのコミットタイムスタンプ $s$ は、コミット要求を受け取った時点の <code>TT.now().latest</code> 以上の値に決める。<b>Commit Wait ルール</b>: コミットレコードを確定させて他のノードに見せる前に、<code>TT.after(s)</code> が真になるまで待つ。つまり「このタイムスタンプ $s$ は確実に過去になった」と言える時刻まで、結果を外部に公開しない。これにより $s$ は必ずトランザクションの実際のコミット完了時刻よりも小さくなり、後から始まる別のトランザクションは必ずより大きいタイムスタンプを得ます。論文は、この待ち時間が平均で $2\epsilon$ 程度になると報告しています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 210" role="img" aria-label="commit waitでタイムスタンプが過去になるまで待つ図">
+        <line x1="40" y1="110" x2="580" y2="110" stroke="#9aa" stroke-width="2"/>
+        <rect x="220" y="60" width="140" height="30" rx="6" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="290" y="80" font-size="12.5" text-anchor="middle" fill="#5b3d80">s = TT.now().latest</text>
+        <line x1="290" y1="90" x2="290" y2="110" stroke="#7a5a9e" stroke-width="2"/>
+        <rect x="290" y="120" width="160" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="370" y="140" font-size="12.5" text-anchor="middle" fill="#b5401f">commit wait (約 2ε)</text>
+        <circle cx="450" cy="110" r="7" fill="#198754"/>
+        <text x="450" y="185" font-size="13" text-anchor="middle" fill="#0f5132">TT.after(s) が真 → 公開</text>
+        <text x="310" y="20" font-size="13.5" text-anchor="middle" fill="#12211a">s は公開される頃には確実に「過去」になっている</text>
+      </svg>
+      <p class="cap">図: s を latest から取り、公開前に待つことで、s は必ず実際のコミット時刻より小さくなる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 解説パート 3 ===== -->
+  <section>
+    <h2>3. HLC ― 待たずに因果関係を保つ</h2>
+    <p>TrueTime は専用の GPS / 原子時計というハードウェアと、commit wait という待ち時間のコストを払います。Kulkarni, Demirbas らの HLC (Hybrid Logical Clock) 論文は、特別なハードウェアも待ち時間も無しに、第 15 回で見た Lamport の論理時計の利点 (因果関係 $e \to f \Rightarrow hlc(e) < hlc(f)$ を保つ) と、物理時計の利点 (値が実時間に近く、人間にも扱いやすい) を両方得ようとしました。</p>
+    <p>素朴に「ローカル時刻と論理時計の大きい方を取る」だけでは、物理時計の値と論理カウンタの値が混ざってしまい、ズレが無限に蓄積するという反例が論文で示されています。HLC はこれを避けるため、値を $(l, c)$ の組で持ちます。$l$ は「これまでに見た物理時刻の最大値」を表し、$c$ はその $l$ が変化しなかったときだけ増える因果関係用のカウンタです。イベントごとに $l$ を自分のローカル時刻と相手から受け取った $l$ の大きい方に更新し、$l$ が変わらなかった場合だけ $c$ を増やします。この結果、$l$ は常に物理時刻に近い値を保ちながら ($O(1)$ の整数 2 つで表現でき)、因果関係の順序も壊れません。</p>
+    <p>ただし HLC は TrueTime と同じ保証を与えるわけではありません。$hlc(e) < hlc(f)$ が成り立っても、$e$ と $f$ が本当に因果関係にあるとは限らず (一方向の含意しか成り立たない)、Spanner のように「必ず過去になるまで待つ」commit wait の代わりはできません。CockroachDB は HLC を採用しつつ、読み取り時に生じうる不確実性区間に対しては、トランザクションの再試行で対処する設計を取っています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 200" role="img" aria-label="HLCのlとcの更新ルールの図">
+        <rect x="30" y="30" width="170" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="115" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68">自分の l, c</text>
+        <text x="115" y="72" font-size="12" text-anchor="middle" fill="#12211a">(物理時刻に近い値)</text>
+        <rect x="420" y="30" width="170" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="505" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80">受信メッセージの l, c</text>
+        <line x1="200" y1="55" x2="300" y2="55" stroke="#4a5d54" stroke-width="2"/>
+        <line x1="420" y1="55" x2="320" y2="55" stroke="#4a5d54" stroke-width="2"/>
+        <rect x="230" y="110" width="160" height="60" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="310" y="135" font-size="12.5" text-anchor="middle" fill="#0f5132">l は大きい方を採用</text>
+        <text x="310" y="155" font-size="12.5" text-anchor="middle" fill="#0f5132">l 不変なら c を +1</text>
+      </svg>
+      <p class="cap">図: l は物理時刻に近い値を保ち、c は l が変わらない間だけ因果の順序を記録する。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Calvin ― 時計を使わず、実行前に順序を決め切る</h2>
+    <p>TrueTime も HLC も「時計を使って順序を作る」という前提を共有していますが、Yale 大学の Calvin (SIGMOD 2012 論文) はこの前提自体を外しました。Calvin はシステムを <b>sequencer (シーケンサ)</b> ・ <b>scheduler (スケジューラ)</b> ・ storage の 3 層に分けます。sequencer は 10 ミリ秒ごとの epoch (エポック) 単位でクライアントからのトランザクション要求を集め、そのバッチを (非同期または ZooKeeper を使った Paxos ベースの同期で) 全レプリカに複製します。この時点で、どのトランザクションをどの順序で実行するかという<b>グローバルな実行順序がすでに全レプリカで一致</b>しています。</p>
+    <p>scheduler 層はこの確定した順序に従って<b>決定論的ロック</b>を取ります。通常の 2 相ロックとの違いは、ロックを要求する順序そのものを sequencer が決めた順序と一致させ、ロックの許可も要求された順序を守って与える、という 2 つの制約が追加されている点です。これにより、全レプリカが同じ入力を同じ順序で実行すれば、ネットワークの遅延や障害のタイミングが多少ずれても、最終的な状態は必ず一致します。<b>順序の合意は実行前に 1 回で済んでいる</b>ため、トランザクションのコミット時に参加者間で合意を取り直す 2 相コミットが不要になります。</p>
+    <p>代償は、各トランザクションが読み書きする対象 (read/write set) を実行前にあらかじめ宣言しておく必要があることです。何を読むかが実行結果に依存するようなトランザクションは、この前提と相性が悪く、別の工夫が必要になります。また 10 ミリ秒という epoch の単位は、どのトランザクションも少なくともそのバッチ分の待ち時間を前払いすることを意味します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="Calvinの3層構造とepochバッチの図">
+        <rect x="30" y="20" width="160" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="110" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">sequencer</text>
+        <text x="110" y="62" font-size="11.5" text-anchor="middle" fill="#12211a">10ms epoch で集約</text>
+        <rect x="230" y="20" width="160" height="50" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="310" y="45" font-size="12.5" text-anchor="middle" fill="#5b3d80">scheduler</text>
+        <text x="310" y="62" font-size="11.5" text-anchor="middle" fill="#12211a">決定論的ロック</text>
+        <rect x="430" y="20" width="160" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="510" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">storage</text>
+        <text x="510" y="62" font-size="11.5" text-anchor="middle" fill="#12211a">CRUD インタフェース</text>
+        <line x1="190" y1="45" x2="230" y2="45" stroke="#4a5d54" stroke-width="2"/>
+        <line x1="390" y1="45" x2="430" y2="45" stroke="#4a5d54" stroke-width="2"/>
+        <text x="310" y="120" font-size="13" text-anchor="middle" fill="#12211a">全レプリカが同じ順序を実行後に合意しているため</text>
+        <text x="310" y="142" font-size="13" text-anchor="middle" fill="#12211a">コミット時の 2 相コミットが不要になる</text>
+      </svg>
+      <p class="cap">図: 順序の合意を実行前に 1 回済ませることで、コミット時の合意が要らなくなる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 3 つを並べる ― 何に代償を払っているか</h2>
+    <p>TrueTime、HLC、Calvin はいずれも「物理時計はズレる」という同じ事実から出発していますが、代償を払う場所がそれぞれ異なります。TrueTime は GPS / 原子時計という専用ハードウェアと、commit wait という<b>コミット後の待ち時間</b>を払います。HLC は特別なハードウェアも待ち時間も不要ですが、保証できるのは一方向の因果関係のみで、Spanner ほど強い外部一貫性の保証は単独では作れません。Calvin は時計への依存そのものを無くす代わりに、各トランザクションの読み書き対象を実行前に宣言する制約と、epoch 単位の<b>実行前の待ち時間</b>を払います。</p>
+    <p>「どれが優れているか」という問いには意味がありません。アプリケーションがどの制約を飲めるか (専用ハードウェアを置けるデータセンターかどうか、読み書き対象を事前に宣言できる設計かどうか) によって、選ぶべきものが変わります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="TrueTime HLC Calvinの代償の比較図">
+        <rect x="20" y="20" width="190" height="90" rx="10" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="115" y="45" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">TrueTime</text>
+        <text x="115" y="68" font-size="12" text-anchor="middle" fill="#12211a">専用時計 + commit wait</text>
+        <text x="115" y="88" font-size="12" text-anchor="middle" fill="#12211a">(コミット後に待つ)</text>
+        <rect x="225" y="20" width="190" height="90" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="320" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">HLC</text>
+        <text x="320" y="68" font-size="12" text-anchor="middle" fill="#12211a">待ち時間なし</text>
+        <text x="320" y="88" font-size="12" text-anchor="middle" fill="#12211a">(一方向の因果関係のみ)</text>
+        <rect x="430" y="20" width="190" height="90" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="525" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">Calvin</text>
+        <text x="525" y="68" font-size="12" text-anchor="middle" fill="#12211a">RW-set 宣言 + epoch 待ち</text>
+        <text x="525" y="88" font-size="12" text-anchor="middle" fill="#12211a">(実行前に待つ)</text>
+      </svg>
+      <p class="cap">図: 同じ問題に対して、代償を払う場所と種類がそれぞれ異なる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 実システムでの使われ方</h2>
+    <p>Cloud Spanner は TrueTime と commit wait を基盤に、複数リージョンに分散したまま外部一貫性のある読み書きトランザクションを提供します。CockroachDB は専用ハードウェアを前提にできない一般的なクラウド環境向けに HLC を採用し、クロックの不確実性区間に関わる読み取りについてはトランザクションの透過的な再試行で対処する設計を公式に説明しています。Calvin は商用データベースそのものではありませんが、決定論的な実行順序の事前合意によって 2 相コミットを避けるという設計思想は、後続の分散データベース研究に広く影響を与えました。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://static.googleusercontent.com/media/research.google.com/en//archive/spanner-osdi2012.pdf" target="_blank" rel="noopener">Corbett et al., "Spanner: Google's Globally-Distributed Database" (OSDI 2012)</a> ― TrueTime API (<code>TT.now()</code> / <code>TT.after()</code> / <code>TT.before()</code>)、$\epsilon$ がのこぎり波状に 1 〜 7 ms で変動すること、Start ルールと Commit Wait ルール、平均待ち時間が約 $2\epsilon$ になるという実測の一次情報。</li>
+      <li><a href="https://cloud.google.com/spanner/docs/true-time-external-consistency" target="_blank" rel="noopener">Google Cloud, "TrueTime and external consistency"</a> ― Cloud Spanner が TrueTime と commit wait によって複数リージョンで外部一貫性を提供するという説明の参照に使った。</li>
+      <li><a href="https://cse.buffalo.edu/tech-reports/2014-04.pdf" target="_blank" rel="noopener">Kulkarni, Demirbas, Madeppa, Avva, Leone, "Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases"</a> ― HLC の問題設定、素朴なアルゴリズムが $|l-pt|$ を無限に増大させる反例、$(l,c)$ の更新規則、一方向の因果関係の保証という一次情報。</li>
+      <li><a href="https://www.cockroachlabs.com/docs/stable/architecture/transaction-layer" target="_blank" rel="noopener">CockroachDB Docs, "Transaction Layer"</a> ― HLC を採用し、クロックの不確実性区間に関わる読み取りをトランザクションの再試行で補う設計の参照に使った。</li>
+      <li><a href="https://cs.yale.edu/homes/thomson/publications/calvin-sigmod12.pdf" target="_blank" rel="noopener">Thomson, Diamond, Weng, Ren, Shao, Abadi, "Calvin: Fast Distributed Transactions for Partitioned Database Systems" (SIGMOD 2012)</a> ― sequencer / scheduler / storage の 3 層構造、10 ms の epoch、決定論的ロックの 2 つの制約、read/write set の事前宣言という前提の一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./distsys-flp-byzantine.html">← 第 34 回 不可能性とビザンチン障害</a><a href="./distsys-index.html">目次</a><a href="./distsys-metastable-tail.html">第 36 回 メタ安定障害とテールレイテンシ →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    "q": "「外部一貫性 (external consistency)」が、第 13 回で扱った「線形化可能性」に対して追加で要求している性質として最も正確なものはどれか？",
+    "opts": [
+      "実世界の時間として先に完了したトランザクションには、記録される順序でも必ず先行する値が割り振られること",
+      "すべてのレプリカが同一のハードウェア構成を持ち、処理速度が完全に等しくなるよう揃えられていること",
+      "トランザクションが常に単一のスレッドで逐次実行され、並行な実行が一切発生しないようにすること",
+      "クライアントが送信するすべてのリクエストが、暗号化された通信経路のみを経由するようにすること",
+      "すべてのノードの物理時計が、NTP によって完全に一致する値まで同期されるようにすること"
+    ],
+    "ans": 0,
+    "exps": [
+      "<b>これが正解。</b>外部一貫性は、実世界の時間として先に完了した出来事には、システムが割り振るタイムスタンプの大小関係でも先行する値を与えることを要求する、線形化可能性より強い性質。",
+      "ハードウェア構成の均一性は外部一貫性の定義とは無関係な話題で、処理速度が異なるノードが混在していても外部一貫性は成立しうる。",
+      "並行実行を禁止することは外部一貫性の定義ではなく、分離レベルの話題に近い。外部一貫性は並行実行を許した上で順序の整合性を問う性質。",
+      "通信経路の暗号化はセキュリティ上の要件であり、時間的な順序の整合性を問う外部一貫性の定義とは別の軸の話題。",
+      "物理時計が完全に一致することは現実には達成できず、外部一貫性はむしろ時計が完全には一致しない前提の下で、順序の整合性をどう保証するかを問う性質。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>外部一貫性は「実世界の前後関係」と「システムが記録する順序」を一致させる性質です。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"外部一貫性の定義\"><line x1=\"40\" y1=\"50\" x2=\"520\" y2=\"50\" stroke=\"#9aa\" stroke-width=\"2\"/><text x=\"40\" y=\"35\" font-size=\"12.5\" fill=\"#12211a\">実世界の時間</text><circle cx=\"200\" cy=\"50\" r=\"6\" fill=\"#198754\"/><text x=\"200\" y=\"70\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">T1 完了</text><circle cx=\"360\" cy=\"50\" r=\"6\" fill=\"#c0492f\"/><text x=\"360\" y=\"70\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">T2 開始</text><text x=\"280\" y=\"120\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#12211a\">記録される順序も必ず T1 &lt; T2 になることを要求する</text></svg><p class=\"cap\">図: 実世界で先に完了した方が、記録上も必ず先になる。</p></div>"
+    }
+  },
+  {
+    "q": "Spanner の TrueTime API における <code>TT.now()</code> の返り値と、$\\epsilon$ (エプシロン) の意味として最も正確なものはどれか？",
+    "opts": [
+      "<code>TT.now()</code> は常に 1 つの確定した整数値を返し、$\\epsilon$ はその整数の小数部分の桁数を表す",
+      "<code>TT.now()</code> は呼び出し時の絶対時刻を必ず含む区間 <code>[earliest, latest]</code> を返し、$\\epsilon$ はその区間の半幅 (不確かさの大きさ) を表す",
+      "<code>TT.now()</code> は過去 1 時間分のすべてのタイムスタンプの履歴を配列として返し、$\\epsilon$ はその配列の要素数を表す",
+      "<code>TT.now()</code> はネットワーク越しに他のノードへ問い合わせて初めて値が決まり、$\\epsilon$ はその往復のネットワーク遅延そのものを表す",
+      "<code>TT.now()</code> は常にうるう秒を無視した値を返し、$\\epsilon$ はうるう秒によって生じるずれの合計時間を表す"
+    ],
+    "ans": 1,
+    "exps": [
+      "確定した整数 1 個を返すのではなく、不確かさを含む区間を返すのが TrueTime の核心的な設計であり、小数部の桁数という説明は定義とずれている。",
+      "<b>これが正解。</b>TrueTime の <code>TT.now()</code> は、呼び出しが実際に起きた絶対時刻を必ず含むことが保証された区間 <code>[earliest, latest]</code> を返し、その半幅を $\\epsilon$ と呼ぶ。実運用では概ね 1 〜 7 ms の範囲で変動する。",
+      "過去の履歴の配列を返す仕組みではなく、呼び出し時点の現在の不確かさの区間を返す設計であり、配列という説明は実態と異なる。",
+      "TrueTime は各ノードにローカルなデーモンが時刻を提供する設計であり、呼び出しごとに毎回ネットワーク越しの問い合わせが必要という説明は実態と異なる。",
+      "TrueTime の時刻表現はうるう秒のならし (leap-second smearing) を考慮した UNIX 時刻に類する形式であり、$\\epsilon$ はうるう秒のずれそのものではなく、クロックの不確かさの大きさを表す。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>TT.now() は「幅のある区間」を返し、$\\epsilon$ はその区間の半分の幅です。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"TT.nowが区間を返す図\"><line x1=\"40\" y1=\"70\" x2=\"520\" y2=\"70\" stroke=\"#9aa\" stroke-width=\"2\"/><rect x=\"220\" y=\"50\" width=\"120\" height=\"40\" rx=\"8\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"280\" y=\"75\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">[earliest, latest]</text><text x=\"280\" y=\"30\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">幅 = 2ε (不確かさの大きさ)</text></svg><p class=\"cap\">図: TT.now() は単一の値ではなく、幅 2ε の区間を返す。</p></div>"
+    }
+  },
+  {
+    "q": "Spanner の commit wait ルール (コミットタイムスタンプ $s$ を公開する前に <code>TT.after(s)</code> が真になるまで待つ) を、何らかの理由で省略してしまった場合、最も直接的に失われる保証はどれか？",
+    "opts": [
+      "レプリカ間のネットワーク接続そのものが即座に切断され、分断耐性そのものが丸ごと失われてしまう",
+      "ストレージに保存されるデータの圧縮率が全体的に低下し、ディスクの使用量がじわじわ増えていってしまう",
+      "s がまだ実コミット完了時刻より未来の値である可能性が残り、後続のトランザクションのタイムスタンプとの大小が逆転しうる",
+      "クライアントから送られてくるすべてのリクエストが、認証エラーとして一律に拒否されるようになってしまう",
+      "Paxos によるログ複製の処理そのものが完全に停止し、新しい書き込みが一切受け付けられなくなってしまう"
+    ],
+    "ans": 2,
+    "exps": [
+      "commit wait はタイムスタンプの意味に関するルールであり、ネットワーク接続そのものの切断とは無関係の話題。",
+      "データの圧縮率やディスク使用量はストレージ実装の話題であり、commit wait の有無とは無関係。",
+      "<b>これが正解。</b>commit wait を省略すると、$s$ が <code>TT.now().latest</code> から取られているだけで実際に過去になったことを確認せずに公開されるため、$s$ が実コミット時刻より未来になっている可能性が残り、後続のトランザクションのタイムスタンプとの大小関係が逆転しうる。",
+      "認証の成否は commit wait のルールとは別の層の話題であり、省略したからといって認証エラーが生じるわけではない。",
+      "Paxos によるログ複製の継続自体は commit wait の有無に直接依存しておらず、「完全に停止する」という説明は過大な一般化。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>commit wait を省略すると、s が「まだ未来」の可能性を残したまま公開されてしまいます。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"commit wait省略で逆転が起きる図\"><line x1=\"40\" y1=\"90\" x2=\"520\" y2=\"90\" stroke=\"#9aa\" stroke-width=\"2\"/><circle cx=\"200\" cy=\"90\" r=\"6\" fill=\"#7a5a9e\"/><text x=\"200\" y=\"70\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">s (latest 由来)</text><circle cx=\"320\" cy=\"90\" r=\"6\" fill=\"#c0492f\"/><text x=\"320\" y=\"70\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">実際のコミット完了</text><text x=\"280\" y=\"130\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">待たずに公開すると s がまだ未来の時点で外部に見える</text></svg><p class=\"cap\">図: 待たずに公開すると、s が実コミット時刻を追い越している可能性が残る。</p></div>"
+    }
+  },
+  {
+    "q": "HLC (Hybrid Logical Clock) において、ノード j がメッセージ m を受信したときの更新規則 (l はこれまでに見た物理時刻の最大値、c は l が変化しない間だけ増える因果カウンタ) として最も正確なものはどれか？",
+    "opts": [
+      "l はローカルの物理時刻と受信した m の l のうち小さい方を常に採用し、c の方は受信するたびに必ず 1 増やしていく",
+      "l はローカルの物理時刻 ・ 自分の前回の l ・ 受信した m の l のうち最大のものを採用し、値が前回と変わらないときだけ c を増やす",
+      "l は常にローカルの物理時刻だけをそのまま採用し、受信した m が持つ l の値はいかなる場合であっても完全に無視する",
+      "c の値は受信するたびに必ずゼロへリセットされ、l という 1 つの値だけで因果関係のすべてを表現しようとする",
+      "l と c はどちらも単に受信したメッセージの総数を数える単純なカウンタにすぎず、物理時刻の値そのものは一切参照しない"
+    ],
+    "ans": 1,
+    "exps": [
+      "小さい方を採用すると、物理時刻に近い値を保つという HLC の目的に反し、因果関係を捉える上でも都合が悪い。最大値を採用するのが正しい規則。",
+      "<b>これが正解。</b>l はローカルの物理時刻 ・ 前回の自分の l ・ 受信した m の l のうち最大のものを採用し、その値が更新前と変わらなかった (物理時刻からの新しい情報が無かった) ときだけ c を増やして因果関係の順序を記録する。",
+      "m の l を完全に無視すると、別のノードから受け取った情報による因果関係の更新ができず、第 15 回で見た happens-before の関係を捉えられなくなる。",
+      "c を毎回リセットしてしまうと、同じ l の値を持つ複数のイベントの間の因果関係の順序が区別できなくなる。c が担う役割を l だけでは代替できない。",
+      "l は物理時刻に近い値を保つことが HLC の目的の 1 つであり、物理時刻を一切参照しないという説明は定義と矛盾する。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>l は最大値を採用し、c は l が動かなかったときだけ増えます。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"HLCの更新規則の図\"><rect x=\"30\" y=\"30\" width=\"150\" height=\"40\" rx=\"8\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"105\" y=\"55\" font-size=\"12\" text-anchor=\"middle\" fill=\"#1f4a68\">ローカル物理時刻</text><rect x=\"210\" y=\"30\" width=\"150\" height=\"40\" rx=\"8\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"285\" y=\"55\" font-size=\"12\" text-anchor=\"middle\" fill=\"#5b3d80\">前回の l</text><rect x=\"390\" y=\"30\" width=\"150\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"465\" y=\"55\" font-size=\"12\" text-anchor=\"middle\" fill=\"#0f5132\">受信した m の l</text><text x=\"280\" y=\"110\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">3 つの最大値を新しい l に採用する</text><text x=\"280\" y=\"132\" font-size=\"13\" text-anchor=\"middle\" fill=\"#4a5d54\">変化が無ければ c を +1 する</text></svg><p class=\"cap\">図: l は 3 つの値の最大値、c は l が変わらなかったときだけ進む。</p></div>"
+    }
+  },
+  {
+    "q": "HLC が与える保証 ($e \\to f \\Rightarrow hlc(e) < hlc(f)$、すなわち一方向の含意のみ) について、最も正確な指摘はどれか？",
+    "opts": [
+      "HLC が与えるのは一方向の含意のみであり、$hlc(e) < hlc(f)$ から $e \\to f$ を逆に結論付けることはできず、Spanner の commit wait のような「確実に過去になるまで待つ」役割の代わりにはならない",
+      "HLC のタイムスタンプが $hlc(e) < hlc(f)$ であれば、そこから必ず $e \\to f$ (e が f の因果的な原因である) という関係が逆に導けるので、どちらの方向でも使ってよい",
+      "HLC は TrueTime と完全に同じ保証を、ハードウェアも待ち時間も無しに提供できる上位互換の仕組みである",
+      "HLC は因果関係を一切捉えられず、常にローカルの物理時刻だけをそのまま使うのと同じ結果になる",
+      "HLC は 1 台のノード内でしか使えず、複数ノードをまたぐ分散システムには原理的に適用できない"
+    ],
+    "ans": 0,
+    "exps": [
+      "<b>これが正解。</b>HLC が保証するのは一方向の含意のみで、タイムスタンプの大小だけから因果関係を逆に確定させることはできず、「確実に過去になったことを確認してから待つ」という Spanner の commit wait の役割の代わりにはならない。",
+      "保証されているのは $e \\to f \\Rightarrow hlc(e) < hlc(f)$ という一方向のみであり、逆方向 ($hlc(e)<hlc(f)$ から $e\\to f$ を結論付けること) は保証されていない。並行な出来事でも $hlc$ の大小が付くことがある。",
+      "HLC は専用ハードウェアも待ち時間も不要である代わりに、TrueTime が持つ「確実に過去になった」という強い保証までは単独では提供できない。上位互換という説明は過大な一般化。",
+      "HLC は因果関係を捉えるために設計された仕組みであり、因果関係を一切捉えられないという説明は定義と矛盾する。",
+      "HLC はノード間でメッセージに値を乗せて伝播させる設計を前提にしており、複数ノードをまたぐ分散システムでの利用こそが本来の用途である。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>HLC の矢印は一方向だけが保証され、逆方向には進めません。</p><div class=\"fig\"><svg viewBox=\"0 0 560 130\" aria-label=\"HLCの一方向の含意の図\"><rect x=\"40\" y=\"40\" width=\"180\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"130\" y=\"65\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">e → f (因果関係)</text><line x1=\"220\" y1=\"60\" x2=\"330\" y2=\"60\" stroke=\"#4a5d54\" stroke-width=\"2\" marker-end=\"url(#arr-q5a)\"/><rect x=\"330\" y=\"40\" width=\"190\" height=\"40\" rx=\"8\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"425\" y=\"65\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">hlc(e) &lt; hlc(f)</text><text x=\"280\" y=\"110\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\">逆方向には進めない (矢印は 1 方向のみ)</text><defs><marker id=\"arr-q5a\" markerWidth=\"8\" markerHeight=\"8\" refX=\"4\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L8,4 L0,8 z\" fill=\"#4a5d54\"/></marker></defs></svg><p class=\"cap\">図: 因果関係からタイムスタンプの大小は言えるが、逆は言えない。</p></div>"
+    }
+  },
+  {
+    "q": "HLC の論文が「素朴な方法」として最初に示す、l の値をローカル物理時刻と受信した l の最大値だけで単純に更新するアルゴリズムには、メッセージが循環するループの中で何が起きると報告されているか？",
+    "opts": [
+      "l と物理時刻の差 $|l - pt|$ が、ループを繰り返すたびに無限に拡大していき、l が物理時刻から大きく外れていく",
+      "l の値が毎回ゼロにリセットされ、因果関係の情報がすべて失われてしまう",
+      "メッセージの送受信そのものが自動的に停止し、ループが成立しなくなる",
+      "l の値が物理時刻に完全に一致したまま、永久に変化しなくなる",
+      "ノードの数が増えるたびに l の桁数が増えていくが、値自体は物理時刻の近傍に収まり続ける"
+    ],
+    "ans": 0,
+    "exps": [
+      "<b>これが正解。</b>素朴な方法では l が「物理時刻の最大値」と「因果関係の増分」の両方の役割を同時に担ってしまうため、ループを繰り返すたびに l と物理時刻の差が無限に拡大していくという反例が示されている。",
+      "l がゼロにリセットされるという挙動は報告されておらず、むしろリセットする適切な場所が無いことが問題として指摘されている。",
+      "メッセージの送受信が自動的に停止する仕組みは無く、ループはそのまま繰り返され続ける前提で問題が生じる。",
+      "l が物理時刻に一致したまま変化しなくなるという報告ではなく、逆に l と物理時刻のずれがどんどん拡大していくことが問題として示されている。",
+      "ノード数と桁数を結びつける説明は論文の反例の内容とは異なり、問題の核心は値がどんどん物理時刻から離れていくこと。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>素朴な方法では l と物理時刻のずれが、ループのたびに蓄積していきます。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"素朴な方法でlと物理時刻のずれが拡大する図\"><line x1=\"40\" y1=\"100\" x2=\"520\" y2=\"100\" stroke=\"#9aa\" stroke-width=\"2\"/><text x=\"40\" y=\"85\" font-size=\"12.5\" fill=\"#12211a\">ループの繰り返し →</text><path d=\"M60,95 Q200,30 340,70 Q440,100 500,50\" stroke=\"#c0492f\" stroke-width=\"2.5\" fill=\"none\"/><text x=\"340\" y=\"30\" font-size=\"13\" text-anchor=\"middle\" fill=\"#b5401f\">|l − pt| が拡大していく</text></svg><p class=\"cap\">図: ループを繰り返すたびに l が物理時刻からどんどん離れていく。</p></div>"
+    }
+  },
+  {
+    "q": "Calvin が、トランザクションのコミット時に 2 相コミット (2PC) のような参加者間の合意プロトコルを必要としない理由として最も正確なものはどれか？",
+    "opts": [
+      "Calvin はトランザクションを複数ノードに分散させず、常に単一のノード内だけで完結させる設計を基本としているから",
+      "Calvin はすべてのトランザクションを読み取り専用として扱い、書き込みを伴うトランザクション自体が発生しない前提になっているから",
+      "Calvin のストレージ層はすべてのデータを常にメモリ上だけに保持し、ディスクへの書き込みという概念自体が存在しないから",
+      "sequencer が epoch 単位で全レプリカへ順序を複製した時点で合意が済み、あとは同じ順序で決定論的ロックを実行するだけで結果が一致するから",
+      "Calvin のネットワーク層は常に遅延ゼロで通信できることを前提に設計されており、合意にかかる時間そのものが問題にならないから"
+    ],
+    "ans": 3,
+    "exps": [
+      "Calvin はむしろ複数ノードに分散したパーティション間をまたぐトランザクションを主な対象としており、「単一ノード内だけで完結」という前提は実態と異なる。",
+      "Calvin は読み書きを伴うトランザクションを主な対象としており、「すべて読み取り専用」という説明は論文の前提と矛盾する。",
+      "Calvin は disk-based storage をサポートする設計として説明されており、「メモリ上にのみ保持」という説明は論文の主張と異なる。",
+      "<b>これが正解。</b>sequencer が epoch ごとにバッチを全レプリカへ複製した時点で、どの順序で実行するかという合意がすでに完了しており、各レプリカが決定論的ロックで同じ順序を守って実行するだけで状態が一致するため、コミット時に改めて合意を取る 2PC が不要になる。",
+      "ネットワーク遅延がゼロであることを前提にしているわけではなく、epoch 単位の待ち時間を含めて遅延の存在を前提とした設計になっている。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>順序の合意を実行前に 1 回で済ませているので、コミット時の合意が不要になります。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"Calvinの実行前合意の図\"><rect x=\"40\" y=\"30\" width=\"200\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"140\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">実行前: 順序を全レプリカで合意</text><rect x=\"320\" y=\"30\" width=\"200\" height=\"40\" rx=\"8\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"420\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">実行後: コミット合意は不要</text><text x=\"280\" y=\"110\" font-size=\"13\" text-anchor=\"middle\" fill=\"#12211a\">同じ順序で実行すれば結果は自動的に一致する</text></svg><p class=\"cap\">図: 合意のタイミングを実行前に前倒しすることで、コミット時の合意を省ける。</p></div>"
+    }
+  },
+  {
+    "q": "Calvin が各トランザクションに事前の read/write set (読み書きする対象) の宣言を要求することの代償として、最も適切な指摘はどれか？",
+    "opts": [
+      "read/write set を宣言すると、Calvin はその分だけストレージのディスク使用量を常に追加で消費する設計になっている",
+      "read/write set を宣言すればするほど、sequencer の epoch の長さが自動的に短縮され、レイテンシが改善する",
+      "read/write set の宣言は読み取り専用のトランザクションにのみ要求され、書き込みを伴うトランザクションには一切要求されない",
+      "read/write set を宣言することで、Calvin は決定論的ロックという仕組みそのものを完全に不要にできる",
+      "何を読むかが別の読み取り結果に依存して初めて決まるようなトランザクションは、実行前に対象を確定できず、この前提とは相性が悪くなる"
+    ],
+    "ans": 4,
+    "exps": [
+      "read/write set の宣言は実行計画に関する情報であり、ディスク使用量を常に追加で消費するという説明は論文が述べる代償とは異なる。",
+      "epoch の長さは sequencer が一律に定める時間の単位であり、read/write set の宣言量によって自動的に短縮されるという関係は説明されていない。",
+      "read/write set の宣言は書き込みを伴うトランザクションにも要求されるものであり、「読み取り専用にのみ要求」という説明は実態と異なる。",
+      "決定論的ロックは read/write set の宣言を前提として機能する仕組みであり、宣言によってロックの仕組み自体が不要になるわけではない。",
+      "<b>これが正解。</b>何を読むかが別の読み取り結果に応じて初めて決まるようなトランザクションは、実行前にすべての対象を確定できないため、事前宣言を前提とする Calvin の設計とは相性が悪くなるという限界がある。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>対象が実行結果に依存して決まる場合、事前宣言という前提そのものが崩れます。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"read/write set事前宣言の限界の図\"><rect x=\"40\" y=\"30\" width=\"220\" height=\"40\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"150\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">対象が事前に分かる場合: 相性が良い</text><rect x=\"300\" y=\"30\" width=\"220\" height=\"40\" rx=\"8\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"410\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">結果依存で決まる場合: 相性が悪い</text></svg><p class=\"cap\">図: 読み取り結果に応じて対象が変わる設計は、事前宣言の前提と衝突する。</p></div>"
+    }
+  },
+  {
+    "q": "TrueTime ・ HLC ・ Calvin の 3 つを、それぞれが払う代償の種類で比較したとき、最も正確な整理はどれか？",
+    "opts": [
+      "3 つとも代償の種類はまったく同じで、どれも専用の GPS / 原子時計というハードウェアを前提としている",
+      "TrueTime は専用ハードウェアとコミット後の待ち時間、HLC は一方向の因果関係しか保証できない制約、Calvin は事前の read/write set 宣言と epoch 単位の実行前の待ち時間、という異なる種類の代償をそれぞれ払っている",
+      "HLC は 3 つの中で唯一、代償を一切払わずに Spanner と完全に同じ保証を実現できる上位互換の仕組みである",
+      "Calvin はネットワーク遅延そのものを物理的にゼロへ縮める技術であり、他の 2 つとは異なる次元で問題を解決している",
+      "3 つはいずれも同じ論文グループによって同時期に発表された、本質的には同一の 1 つの仕組みのバリエーションにすぎない"
+    ],
+    "ans": 2,
+    "exps": [
+      "HLC も Calvin も専用の GPS / 原子時計というハードウェアを前提とはしておらず、「3 つとも同じ代償」という説明は実態と異なる。",
+      "TrueTime は専用ハードウェアと commit wait、HLC は一方向の因果関係のみという制約、Calvin は事前宣言と epoch 待ちという、異なる種類の代償を払っている。この選択肢の説明こそが正確な整理。",
+      "<b>これが正解。</b>HLC は特別なハードウェアも待ち時間も不要である代わりに、一方向の因果関係しか保証できないという制約を抱え、Spanner と完全に同じ強さの保証を単独で実現できる上位互換ではない。",
+      "Calvin はネットワーク遅延そのものを物理的に縮める技術ではなく、時計への依存を外して実行前に順序を合意するという設計上の工夫によって問題に対処している。",
+      "TrueTime (Spanner 論文) ・ HLC (Kulkarni らの論文) ・ Calvin (Thomson らの論文) はそれぞれ別の研究グループによる別の論文であり、「同一の 1 つの仕組みのバリエーション」という説明は実態と異なる。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>3 つは同じ問題に対して、代償を払う場所と種類がそれぞれ違います。</p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"3つの代償の違いのまとめ図\"><rect x=\"20\" y=\"30\" width=\"160\" height=\"80\" rx=\"10\" fill=\"#efe8f7\" stroke=\"#7a5a9e\" stroke-width=\"2\"/><text x=\"100\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#5b3d80\">TrueTime</text><text x=\"100\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#12211a\">専用時計+待ち</text><rect x=\"200\" y=\"30\" width=\"160\" height=\"80\" rx=\"10\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"280\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#1f4a68\">HLC</text><text x=\"280\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#12211a\">一方向保証のみ</text><rect x=\"380\" y=\"30\" width=\"160\" height=\"80\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"460\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">Calvin</text><text x=\"460\" y=\"80\" font-size=\"11.5\" text-anchor=\"middle\" fill=\"#12211a\">事前宣言+epoch待ち</text></svg><p class=\"cap\">図: 代償の種類は 3 つとも異なり、優劣ではなく前提の違いで選ぶ。</p></div>"
+    }
+  },
+  {
+    "q": "地理的に分散した複数リージョンで、専用の GPS / 原子時計を各データセンターに設置することも、トランザクションの読み書き対象を実行前に宣言し直すことも難しい、既存のクラウド環境向けの汎用データベースを設計するとき、時刻の仕組みとして最も現実的な選択はどれか？",
+    "opts": [
+      "TrueTime と同じ commit wait の仕組みをそのまま採用し、専用ハードウェアが無い前提のまま $\\epsilon$ を極端に小さく見積もって運用する",
+      "HLC を採用し、クロックの不確実性に関わる読み取りについては、トランザクションの再試行などソフトウェア側の対処で補う",
+      "Calvin のように read/write set の事前宣言を必須にし、宣言できないトランザクションの受け付けを完全に拒否する",
+      "時刻の仕組みを一切使わず、すべてのトランザクションを 1 台のサーバーに集約して処理することで問題そのものを回避する",
+      "うるう秒を無視した NTP 同期だけに頼り、ノード間の時計のズレは存在しないものとして扱う"
+    ],
+    "ans": 4,
+    "exps": [
+      "専用ハードウェアが無い環境で $\\epsilon$ を小さく見積もると、実際の不確かさより小さい値を信じて commit wait を行うことになり、外部一貫性の保証が崩れる危険がある。",
+      "HLC は専用ハードウェアも事前宣言も前提とせず、クロックの不確実性に起因する読み取りの曖昧さはソフトウェア側の再試行で補うという設計が CockroachDB で採用されている、現実的な選択。",
+      "事前宣言できないトランザクションを完全に拒否すると、何を読むかが実行結果に依存するような一般的なアプリケーションの大半が使えなくなり、汎用データベースとしての要件を満たせない。",
+      "1 台に集約すれば時刻の問題は確かに起きなくなるが、それは「地理的に分散した複数リージョン」という前提そのものを放棄することになり、要求されている設計の条件を満たさない。",
+      "<b>これが正解。</b>ノード間の時計のズレが存在しないものとして扱うのは、この回で確認してきた「物理時計は必ずズレる」という前提そのものを無視する判断であり、外部一貫性を危険にさらす。"
+    ],
+    "why": {
+      "html": "<h4>図で理解する</h4><p>専用ハードウェアも事前宣言も前提にできないなら、HLC + ソフトウェア側の再試行という組み合わせが現実的な落とし所になります。</p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"制約下でHLCを選ぶ判断の図\"><rect x=\"30\" y=\"30\" width=\"230\" height=\"60\" rx=\"10\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"145\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#b5401f\">専用ハード無し ・ 事前宣言不可</text><text x=\"145\" y=\"75\" font-size=\"12\" text-anchor=\"middle\" fill=\"#12211a\">制約の多い環境</text><rect x=\"300\" y=\"30\" width=\"230\" height=\"60\" rx=\"10\" fill=\"#e3edf5\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"415\" y=\"55\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#1f4a68\">HLC + 再試行</text><text x=\"415\" y=\"75\" font-size=\"12\" text-anchor=\"middle\" fill=\"#12211a\">現実的な落とし所</text></svg><p class=\"cap\">図: 制約が多い環境では、HLC とソフトウェア側の再試行を組み合わせるのが現実的。</p></div>"
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
