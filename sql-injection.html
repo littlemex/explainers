@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL インジェクション ― 文字列連結で SQL を組む</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 21 回</p>
+  <span class="level lv-b">Beginner</span>
+  <h1>SQL インジェクション ― 文字列連結で SQL を組む</h1>
+  <p>ユーザーが入力した文字列を SQL 文にそのまま貼り合わせると、入力そのものが SQL の一部として実行されてしまう</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 20 回 <a href="./sql-readable-passwords.html">リーダブルパスワード</a> (SQL 文がログや監視ツールにそのまま残ることがあるという考え方)</p>
+  <p class="intro">この回が答える問いは「ユーザーが入力した文字列を使って検索条件を作るとき、どう書けば安全か」です。結論を先に言うと、入力された文字列を SQL 文の文字列としてそのまま貼り合わせてはいけません。入力は必ず「値」として SQL エンジンに渡し、SQL の構文そのものとは混ざらないようにします。この回では、実際に文字列連結で組んだ関数が入力ひとつで全件取得や別の文の実行まで許してしまうことを実機で確認し、プレースホルダ ($1) や <code>format()</code> を使った正しい防ぎ方を見ます。</p>
+
+  <!-- ===== 1. 目的 ===== -->
+  <section>
+    <h2>1. 目的 ― 何をしたかったのか</h2>
+    <p>検索ボックスやログインフォームでは、ユーザーが入力した文字列を使って「この値に一致する行を探す」という SQL を実行する必要があります。SQL 文はもともと固定の文字列として書きますが、そこにユーザーの入力という「毎回変わる部分」をどう組み込むかが問題になります。一番素直な発想は、SQL 文の文字列の中に入力値をそのまま文字列として差し込んでしまうことです。これなら実装は数行で済み、動作も直感的に理解できます。</p>
+  </section>
+
+  <!-- ===== 2. アンチパターン ===== -->
+  <section>
+    <h2>2. アンチパターン ― どう書いてしまい、何が壊れるか</h2>
+    <h3>2.1 文字列連結で動的 SQL を組む</h3>
+    <p>サンプル DB の <code>accounts</code> テーブルから、名前で検索する関数を文字列連結で作ってみます。</p>
+    <pre><code>CREATE OR REPLACE FUNCTION vulnerable_find_account(p_name text)
+RETURNS SETOF accounts AS $$
+BEGIN
+  RETURN QUERY EXECUTE 'SELECT * FROM accounts WHERE account_name = ''' || p_name || '''';
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT account_id, account_name FROM vulnerable_find_account('alice');
+ account_id | account_name
+------------+--------------
+          1 | alice</code></pre>
+    <p>普通の入力ではこれで問題なく動きます。しかし、入力の中に SQL の構文として意味を持つ文字 (シングルクォート) が含まれていると、組み立てられる SQL 文の構造自体が変わってしまいます。<code>x' OR '1'='1</code> という文字列を渡すと、組み立てられる SQL は <code>... WHERE account_name = 'x' OR '1'='1'</code> になり、<code>'1'='1'</code> は常に真なので WHERE 条件全体が常に真になります。</p>
+    <pre><code>SELECT account_id, account_name FROM vulnerable_find_account('x'' OR ''1''=''1');
+ account_id | account_name
+------------+--------------
+          1 | alice
+          2 | bob
+          3 | carol
+          4 | dave</code></pre>
+    <p>本来 1 件しか返らないはずの検索が、1 つの入力だけで全 4 件を返してしまいました。ログイン確認であれば「パスワードを知らない相手がログインに成功してしまう」ことに直結します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 190" role="img" aria-label="引用符を閉じてWHERE条件を常に真にする攻撃の図">
+        <rect x="20" y="20" width="580" height="46" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="310" y="48" font-size="12.5" text-anchor="middle" fill="#0f5132" font-family="monospace">... WHERE account_name = '[入力]'</text>
+        <rect x="20" y="90" width="580" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="310" y="118" font-size="12" text-anchor="middle" fill="#b5401f" font-family="monospace">... WHERE account_name = 'x' OR '1'='1'</text>
+        <text x="310" y="160" font-size="13" text-anchor="middle" fill="#4a5d54">入力の中のクォートが文字列を閉じ、続きが SQL の構文として実行される</text>
+      </svg>
+      <p class="cap">図: 入力の中の引用符が文字列リテラルを閉じてしまい、続きの文字が SQL の構文として解釈される。</p>
+    </div>
+
+    <h3>2.2 セミコロンで別の文そのものを注入する (文のスタッキング)</h3>
+    <p>さらに危険なのは、セミコロンを使って「もう 1 つの SQL 文」自体を注入するケースです。PL/pgSQL の <code>EXECUTE</code> はセミコロンで区切られた複数の文をまとめて実行できてしまいます。</p>
+    <pre><code>SELECT count(*) AS tags_before FROM tags;
+ tags_before
+-------------
+           6
+
+DO $$
+BEGIN
+  EXECUTE 'SELECT 1; DELETE FROM tags';
+END;
+$$;
+
+SELECT count(*) AS tags_after_injection FROM tags;
+ tags_after_injection
+----------------------
+                    0</code></pre>
+    <p>最初の文は <code>SELECT 1</code> という無害な文ですが、セミコロンに続く <code>DELETE FROM tags</code> も実際に実行され、<code>tags</code> テーブルの 6 件が 0 件になりました。検索条件のつもりで渡した入力が、丸ごと別の破壊的な SQL 文として実行されてしまう、という典型的な攻撃です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="セミコロンで別の文を注入し実行させる図">
+        <rect x="20" y="20" width="280" height="46" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="48" font-size="12" text-anchor="middle" fill="#0f5132" font-family="monospace">SELECT 1</text>
+        <text x="320" y="48" font-size="18" text-anchor="middle" fill="#4a5d54">;</text>
+        <rect x="340" y="20" width="260" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="470" y="48" font-size="12" text-anchor="middle" fill="#b5401f" font-family="monospace">DELETE FROM tags</text>
+        <text x="310" y="110" font-size="13" text-anchor="middle" fill="#4a5d54">想定していた 1 つの文のつもりが、2 つ目の文も実際に実行される</text>
+        <text x="310" y="140" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">tags テーブル: 6 件 → 0 件 (実機で確認)</text>
+      </svg>
+      <p class="cap">図: セミコロンで区切った 2 つ目の文も実際に実行され、無関係なテーブルのデータが削除される。</p>
+    </div>
+  </section>
+
+  <!-- ===== 3. 見つけ方 ===== -->
+  <section>
+    <h2>3. 見つけ方 ― どんな兆候で気づくか</h2>
+    <p>PL/pgSQL の関数の定義は <code>pg_proc.prosrc</code> に文字列として保存されています。ここに「文字列連結 (<code>||</code>) と <code>EXECUTE</code> が近くに出てくる」という単純な正規表現をかけるだけで、文字列連結で動的 SQL を組んでいる疑いのある関数を機械的に洗い出せます。</p>
+    <pre><code>SELECT p.proname,
+       (p.prosrc ~ 'EXECUTE') AS uses_execute,
+       (p.prosrc ~ '\|\|.*EXECUTE|EXECUTE.*\|\|') AS looks_like_concat_sql
+FROM pg_proc p
+JOIN pg_language l ON l.oid = p.prolang
+WHERE l.lanname = 'plpgsql' AND p.pronamespace = 'public'::regnamespace
+ORDER BY p.proname;
+
+         proname         | uses_execute | looks_like_concat_sql
+-------------------------+--------------+-----------------------
+ safe_find_account       | t            | f
+ safe_order              | t            | f
+ safer_find_account      | f            | f
+ vulnerable_find_account | t            | t
+ vulnerable_order        | t            | t</code></pre>
+    <p>この回で作った 5 つの関数のうち、文字列連結で <code>EXECUTE</code> している <code>vulnerable_find_account</code> と <code>vulnerable_order</code> だけが <code>looks_like_concat_sql</code> で true になりました。プレースホルダや <code>format()</code> を使っている関数は false です。この検査はあくまで疑いのある箇所を絞り込むためのヒントであり、最終的には関数の定義を実際に読んで確認する必要があります。あわせて、アプリケーションのコードレビューでは「ユーザー入力を受け取る変数が、SQL の文字列の中で <code>+</code> や文字列結合で繋がれていないか」を確認するのが実務上の基本的なチェック項目です。</p>
+  </section>
+
+  <!-- ===== 4. 使ってよい場合 ===== -->
+  <section>
+    <h2>4. 使ってよい場合</h2>
+    <p>「ユーザー入力をそのまま文字列連結で SQL に貼り合わせる」ことが許される場面はありません。しかし、動的 SQL (実行時に文字列として SQL を組み立てる仕組み) 自体は、正しく使えば便利な手段です。例えば「ORDER BY に使う列名をユーザーが選べるようにしたい」というケースでは、列名は値ではなく識別子なので、プレースホルダ ($1) には渡せません。この場合は動的 SQL を使う必要がありますが、組み込む文字列を <b>許可リストで検証</b>し、<b>識別子として安全にエスケープ</b> してから組み立てれば安全に実現できます (次の節で実機で確認します)。つまり「動的 SQL を使うかどうか」ではなく、「組み込む文字列をどう検証し、どう組み立てるか」が安全かどうかを決めます。</p>
+  </section>
+
+  <!-- ===== 5. 解決策 ===== -->
+  <section>
+    <h2>5. 解決策 ― PostgreSQL での正しい書き方</h2>
+    <h3>5.1 値はプレースホルダ ($1) で渡す</h3>
+    <p>最も基本的な対策は、入力を SQL の文字列の中に貼り合わせず、プレースホルダとして渡すことです。PL/pgSQL では <code>EXECUTE ... USING</code> を使います。</p>
+    <pre><code>CREATE OR REPLACE FUNCTION safe_find_account(p_name text)
+RETURNS SETOF accounts AS $$
+BEGIN
+  RETURN QUERY EXECUTE 'SELECT * FROM accounts WHERE account_name = $1' USING p_name;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT account_id, account_name FROM safe_find_account('alice');
+ account_id | account_name
+------------+--------------
+          1 | alice
+
+-- 同じ攻撃文字列を渡しても、ただの 1 つの値として扱われるので 0 件
+SELECT account_id, account_name FROM safe_find_account('x'' OR ''1''=''1');
+ account_id | account_name
+------------+--------------
+(0 rows)</code></pre>
+    <p>さらに、動的 SQL そのものが不要であれば <code>EXECUTE</code> を使わず、普通のクエリとして書くのが一番安全です。PL/pgSQL 内の通常の SQL 文に書いた変数は、もともとプレースホルダとして扱われます。</p>
+    <pre><code>CREATE OR REPLACE FUNCTION safer_find_account(p_name text)
+RETURNS SETOF accounts AS $$
+BEGIN
+  RETURN QUERY SELECT * FROM accounts WHERE account_name = p_name;
+END;
+$$ LANGUAGE plpgsql;
+SELECT account_id, account_name FROM safer_find_account('x'' OR ''1''=''1');
+ account_id | account_name
+------------+--------------
+(0 rows)</code></pre>
+    <p>psql から直接 <code>PREPARE</code>/<code>EXECUTE</code> を使っても同じ仕組みを確認できます。</p>
+    <pre><code>PREPARE find_by_name (text) AS SELECT account_id, account_name FROM accounts WHERE account_name = $1;
+EXECUTE find_by_name('bob');
+ account_id | account_name
+------------+--------------
+          2 | bob
+
+EXECUTE find_by_name('x'' OR ''1''=''1');
+ account_id | account_name
+------------+--------------
+(0 rows)</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="プレースホルダが値と構文を分離する図">
+        <rect x="20" y="20" width="280" height="46" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="160" y="48" font-size="12" text-anchor="middle" fill="#0f5132" font-family="monospace">WHERE account_name = $1</text>
+        <text x="320" y="48" font-size="13" text-anchor="middle" fill="#4a5d54">+</text>
+        <rect x="340" y="20" width="260" height="46" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="470" y="48" font-size="11.5" text-anchor="middle" fill="#1f4a68" font-family="monospace">USING: "x' OR '1'='1"</text>
+        <text x="310" y="110" font-size="13" text-anchor="middle" fill="#4a5d54">構文 ($1 の位置) と値 (USING の内容) が最初から分かれている</text>
+        <text x="310" y="140" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">値の中の引用符が構文として解釈されることはない</text>
+      </svg>
+      <p class="cap">図: プレースホルダでは SQL の構文と渡す値が最初から分離されており、値の中身が構文に影響しない。</p>
+    </div>
+
+    <h3>5.2 識別子は format('%I')/quote_ident で、許可リストと組み合わせる</h3>
+    <p>列名のように「値ではなく識別子」を動的に組み込む必要がある場合は、プレースホルダが使えません。この場合は <code>format('%I', ...)</code> や <code>quote_ident()</code> で識別子として安全にエスケープし、さらに許可リストでその値自体が期待通りかを確認します。</p>
+    <pre><code>SELECT quote_ident('normal_col') AS q1, quote_ident('weird col; DROP') AS q2;
+     q1     |        q2
+------------+-------------------
+ normal_col | "weird col; DROP"
+
+SELECT format('%I', 'weird col; DROP') AS fmt_i;
+       fmt_i
+-------------------
+ "weird col; DROP"</code></pre>
+    <p><code>quote_ident()</code> や <code>%I</code> は、渡された文字列全体をダブルクォートで囲んだ「1 つの識別子」として扱うようにエスケープします。<code>weird col; DROP</code> はセミコロンを含んでいますが、ダブルクォートで囲まれた 1 つの識別子名として解釈されるため、実行時には「そんな列は存在しない」というエラーになり、別の文として実行されることはありません。ただし、そもそも存在しない列名を許可してしまうのは使い勝手の面でも良くないため、実務では許可リストでの事前検証と併用します。</p>
+    <pre><code>CREATE OR REPLACE FUNCTION safe_order(p_col text)
+RETURNS SETOF accounts AS $$
+BEGIN
+  IF p_col NOT IN ('account_id', 'account_name', 'email') THEN
+    RAISE EXCEPTION 'invalid sort column: %', p_col;
+  END IF;
+  RETURN QUERY EXECUTE format('SELECT * FROM accounts ORDER BY %I', p_col);
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT account_id, account_name FROM safe_order('account_name') LIMIT 2;
+ account_id | account_name
+------------+--------------
+          1 | alice
+          2 | bob
+
+-- 許可リストに無い値 (注入文字列を含む) は実行前に拒否される
+-- NOTICE:  rejected as expected: invalid sort column: account_id; DELETE FROM tags</code></pre>
+    <p>値を文字列として埋め込む場合は <code>format('%L', ...)</code> を使います。<code>%L</code> は値の中のシングルクォートを正しく二重化してエスケープするため、攻撃文字列を渡しても組み立てられる SQL 文の構造は壊れません。</p>
+    <pre><code>SELECT format('SELECT * FROM accounts WHERE account_name = %L', 'x'' OR ''1''=''1') AS built_sql;
+                           built_sql
+----------------------------------------------------------------
+ SELECT * FROM accounts WHERE account_name = 'x'' OR ''1''=''1'</code></pre>
+    <p>出力を見ると、攻撃文字列全体が 1 つのリテラル (<code>'x'' OR ''1''=''1'</code>) として組み立てられており、文字列を閉じて条件を割り込ませることができていません。とはいえ、値に対しては基本的にプレースホルダを使うべきで、<code>%L</code> は「どうしても動的に文字列を組み立てる必要がある」場合の最終手段として使います。</p>
+    <div class="fig">
+      <svg viewBox="0 0 620 170" role="img" aria-label="許可リストとformat(%I)を組み合わせた防御の図">
+        <rect x="20" y="20" width="200" height="46" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="48" font-size="12" text-anchor="middle" fill="#0f5132">入力: p_col</text>
+        <line x1="220" y1="43" x2="280" y2="43" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr21a)"/>
+        <defs><marker id="arr21a" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs>
+        <rect x="280" y="20" width="160" height="46" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="360" y="48" font-size="11.5" text-anchor="middle" fill="#1f4a68">許可リストで検証</text>
+        <line x1="440" y1="43" x2="500" y2="43" stroke="#9aa" stroke-width="1.5" marker-end="url(#arr21b)"/>
+        <defs><marker id="arr21b" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs>
+        <rect x="500" y="20" width="100" height="46" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="550" y="48" font-size="11.5" text-anchor="middle" fill="#0f5132">format %I</text>
+        <text x="310" y="120" font-size="13" text-anchor="middle" fill="#4a5d54">許可リストに無い値はここで拒否され、%I まで到達しない</text>
+        <text x="310" y="145" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">2 段階の防御 (検証 + エスケープ) で安全性を確保する</text>
+      </svg>
+      <p class="cap">図: 許可リストでの事前検証と format('%I') によるエスケープを組み合わせて、動的な識別子を安全に扱う。</p>
+    </div>
+  </section>
+
+  <!-- ===== 6. PostgreSQLエンジンで考慮しておくこと ===== -->
+  <section>
+    <h2>6. PostgreSQL エンジンで考慮しておくこと</h2>
+    <p>プレースホルダや許可リストは「SQL が注入されても実行されない」ようにする対策ですが、もう 1 つの層として「仮に注入が成功しても被害を小さくする」ための権限設計があります。アプリケーションが接続するロールには、そのアプリケーションが本当に必要な権限だけを与えます。</p>
+    <pre><code>CREATE ROLE sql21_readonly LOGIN PASSWORD 'readonly-pass';
+GRANT CONNECT ON DATABASE sql_21 TO sql21_readonly;
+GRANT USAGE ON SCHEMA public TO sql21_readonly;
+GRANT SELECT ON accounts TO sql21_readonly;</code></pre>
+    <p>検索機能にしか使わないロールであれば <code>SELECT</code> だけを許可し、<code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> の権限は与えません。実際にこのロールで書き込みを試すと拒否されます。</p>
+    <pre><code>-- SET ROLE で sql21_readonly に切り替えてから実行 (実際のアプリでは専用の接続文字列を使う)
+SET ROLE sql21_readonly;
+INSERT INTO accounts (account_name, email) VALUES ('mallory','mallory@example.com');
+ERROR:  permission denied for table accounts
+
+SELECT account_name FROM accounts LIMIT 2;
+ account_name
+--------------
+ alice
+ bob
+
+RESET ROLE;</code></pre>
+    <p>この権限は PostgreSQL のロールベースの権限システムが SQL の実行時に必ず確認するため、アプリケーションのコードにバグがあっても、データベース側の権限という独立した層で被害を抑えられます。仮にどこかで対策が漏れて注入が成立しても、このロールでは <code>DELETE FROM tags</code> のような書き込み文は実行できません。プレースホルダ・許可リスト・最小権限は互いを補い合う層であり、どれか 1 つで十分と考えないことが大切です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( <a href="https://www.oreilly.co.jp/books/9784814400744/" target="_blank" rel="noopener">https://www.oreilly.co.jp/books/9784814400744/</a> ) ― この回の章立ての参考に使った。中身の記述は本書に基づかず、実機確認と公式ドキュメントのみで書いている。</li>
+      <li><a href="https://www.postgresql.org/docs/current/plpgsql-statements.html#PLPGSQL-STATEMENTS-EXECUTING-DYN" target="_blank" rel="noopener">PostgreSQL: 43.5.4. Executing Dynamic Commands</a> ― EXECUTE ... USING によるプレースホルダ渡しの仕様の根拠に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/functions-string.html" target="_blank" rel="noopener">PostgreSQL: 9.4. String Functions and Operators</a> ― format() の %I (識別子) と %L (リテラル) のエスケープ仕様の根拠に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-prepare.html" target="_blank" rel="noopener">PostgreSQL: PREPARE</a> ― PREPARE/EXECUTE によるプレースホルダ ($1) の仕様の根拠に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-grant.html" target="_blank" rel="noopener">PostgreSQL: GRANT</a> ― 最小権限のロールに SELECT のみを付与する GRANT/REVOKE の仕様の根拠に使った。</li>
+      <li><a href="https://owasp.org/www-community/attacks/SQL_Injection" target="_blank" rel="noopener">OWASP: SQL Injection</a> ― SQL インジェクションの一般的な定義と分類の参考に使った。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-readable-passwords.html">← 第 20 回 リーダブルパスワード</a><a href="./sql-index.html">目次</a><a href="./sql-pseudokey-neat-freak.html">第 22 回 シュードキー・ニートフリーク →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '文字列連結でユーザー入力を SQL 文に直接組み込むことの最大の問題として最も適切なものは？',
+    opts: [
+      '入力の中の記号によって、実行される SQL の構文そのものが変わってしまう',
+      '実行速度が遅くなり、タイムアウトしやすくなる',
+      '文字コードが自動的に変換され、文字化けが起きる',
+      'テーブルのインデックスが無効化され、全件走査になる',
+      'ディスク使用量が増え、バックアップに時間がかかる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文で確認したとおり、入力の中の引用符やセミコロンによって、本来 1 つの値のつもりだった部分が SQL の構文の一部として解釈され、WHERE 条件や実行される文そのものが変わってしまう。',
+      '速度の問題ではなく、実行される SQL の意味が変わってしまうという正しさの問題である。',
+      '文字コードの変換とは無関係の問題であり、注入による構文の変化とは別の話である。',
+      'インデックスの有効/無効とは別の問題であり、注入の本質的な危険はクエリの意味が変わることにある。',
+      'ディスク使用量やバックアップ時間とは無関係の問題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>入力の記号が SQL の構文として解釈されてしまうことが核心です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="入力が構文として解釈される図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="11.5" text-anchor="middle" fill="#0f5132" font-family="monospace">WHERE col = \'入力\'</text><rect x="30" y="80" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="105" font-size="11" text-anchor="middle" fill="#b5401f" font-family="monospace">WHERE col = \'\' OR 1=1 --</text><text x="300" y="70" font-size="12.5" text-anchor="middle" fill="#4a5d54">入力の記号が構文を変える</text></svg>'
+          + '<p class="cap">図: 入力に含まれる記号が SQL の構文の境界を動かし、意図しない条件が成立してしまう。</p></div>'
+    }
+  },
+  {
+    q: 'vulnerable_find_account に x\' OR \'1\'=\'1 を渡すと全件が返ってしまった理由として最も適切なものは？',
+    opts: [
+      'PostgreSQL のバグにより、WHERE 句が常に無視される',
+      'account_name 列にインデックスが無いため、全件走査にフォールバックする',
+      '組み立てられた SQL が WHERE account_name = \'x\' OR \'1\'=\'1\' となり、\'1\'=\'1\' が常に真になるため',
+      'accounts テーブルの行数が少ないため、PostgreSQL が自動的に全件返す最適化をする',
+      'account_name 列の型が text であり、数値と比較すると常に真になる'
+    ],
+    ans: 2,
+    exps: [
+      'PostgreSQL 自体のバグではなく、組み立てられた SQL 文の構造が変わったことによる正しい (しかし意図しない) 動作である。',
+      'インデックスの有無とは無関係で、WHERE 条件自体が常に真になることが原因。',
+      '<b>これが正解。</b>入力の引用符が文字列を早く閉じ、続く OR \'1\'=\'1\' が WHERE 句に追加される。\'1\'=\'1\' は常に真なので、OR でつながった全体も常に真になり、全行が条件を満たしてしまう。',
+      '行数の多寡で挙動が変わる最適化ではなく、WHERE 条件そのものが変わったことによる動作。',
+      '型の比較とは無関係で、文字列どうしの比較が常に真になる構造上の問題。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>OR でつながった \'1\'=\'1\' が常に真になるため、条件全体も常に真になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="OR 1=1が常に真になる図"><rect x="30" y="40" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="110" y="65" font-size="11.5" text-anchor="middle" fill="#0f5132">account_name = \'x\'</text><text x="210" y="65" font-size="13" text-anchor="middle" fill="#4a5d54">OR</text><rect x="240" y="40" width="160" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="320" y="65" font-size="11.5" text-anchor="middle" fill="#b5401f">\'1\'=\'1\' (常に真)</text><text x="300" y="110" font-size="13" text-anchor="middle" fill="#4a5d54">OR の片方が常に真なので、条件全体も常に真になる</text></svg>'
+          + '<p class="cap">図: OR でつながった常に真の条件が、WHERE 句全体を常に真にしてしまう。</p></div>'
+    }
+  },
+  {
+    q: '本文でセミコロンを使った注入によって DO $$ ブロック内の EXECUTE が tags テーブルの行を削除できた理由として最も適切なものは？',
+    opts: [
+      'DELETE FROM tags が自動的にロールバックされるため、実害はない',
+      'EXECUTE は渡された文字列の先頭にある文しか実行しない仕様のため、2 つ目の DELETE はトリガーなど別の経路から実行されたはずである',
+      'tags テーブルへの外部キーに ON DELETE CASCADE が設定されており、関連行の削除が連鎖した結果である',
+      'account_name 列が NULL を許可しているため',
+      'EXECUTE に渡した文字列がセミコロンで区切られた複数の文として扱われ、2 つ目の文も実際に実行されたため'
+    ],
+    ans: 4,
+    exps: [
+      '本文の実行結果では DELETE は実際に反映され、tags の件数が 6 件から 0 件に変わっており、ロールバックされてはいない。',
+      '誤り。EXECUTE は渡された文字列をそのまま実行するだけで、先頭の 1 文だけに限定する仕様ではない。セミコロンで区切られた 2 つ目の文もそのまま実行されており、トリガーなど別の経路を経由したわけではない。',
+      '誤り。本文の例に tags テーブルへの外部キーや CASCADE 設定は出てこない。削除は EXECUTE に渡された文字列に含まれていた 2 つ目の DELETE 文が、そのまま実行されたことによるものである。',
+      'account_name 列の NULL 許可とは無関係の話。',
+      '<b>これが正解。</b>EXECUTE に渡された文字列 \'SELECT 1; DELETE FROM tags\' がセミコロンで区切られた 2 つの文として実行され、1 つ目が無害な SELECT でも 2 つ目の DELETE が実際に実行されてしまった。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>セミコロンの後ろの文も、実際に実行される 1 つの SQL 文です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="セミコロンで区切った文が両方実行される図"><rect x="30" y="30" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="55" font-size="12" text-anchor="middle" fill="#0f5132" font-family="monospace">SELECT 1</text><rect x="240" y="30" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="340" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f" font-family="monospace">DELETE FROM tags</text><text x="300" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらも「実行された 1 つの SQL 文」として処理される</text></svg>'
+          + '<p class="cap">図: セミコロンの後ろの文も実際に実行され、無関係なテーブルが変更されてしまう。</p></div>'
+    }
+  },
+  {
+    q: 'safe_find_account 関数で使った EXECUTE ... USING p_name の役割として最も適切なものは？',
+    opts: [
+      'SQL 文の実行計画をキャッシュして再利用するためのものであり、値を安全に渡す目的ではない',
+      '入力された文字列を 1 つの値として渡し、SQL の構文とは混ざらないようにする',
+      '入力文字列の文字コードを自動的に変換する',
+      '入力された文字列を暗号化してから渡す',
+      'USING で渡す値も、format(\'%L\', ...) のようにシングルクォートで囲むエスケープを自分で行う必要がある'
+    ],
+    ans: 1,
+    exps: [
+      '誤り。EXECUTE ... USING に実行計画の再利用という利点があり得たとしても、ここで重要なのは値が SQL の構文と分離されて渡されることであり、安全性こそが主旨である。実行計画の話に置き換えるのは論点のすり替えになる。',
+      '<b>これが正解。</b>USING で渡した値は SQL の構文の一部としては解釈されず、プレースホルダの位置にそのまま 1 つの値として渡されるため、値の中の引用符やセミコロンが構文に影響しない。',
+      '文字コードの変換は行わず、渡した文字列をそのまま 1 つの値として扱うだけである。',
+      '暗号化する機能ではなく、値を SQL の構文と分離して渡すだけの仕組みである。',
+      '誤り。USING で渡した値はプレースホルダの位置に直接バインドされ、SQL 文字列の構文の一部として解釈されない。%L のようなエスケープを自分で行う必要があるのは、文字列連結で値を組み込む場合である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>USING で渡した値は、構文の外側にある「値」として扱われます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="USINGが値を構文の外に保つ図"><rect x="30" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132" font-family="monospace">... WHERE name = $1</text><rect x="300" y="30" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="410" y="55" font-size="11" text-anchor="middle" fill="#1f4a68">USING: 入力文字列そのまま</text><text x="300" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">構文 ($1) と値 (USING) が最初から分離されている</text></svg>'
+          + '<p class="cap">図: USING で渡した値は構文の外側の「値」として扱われ、構文に影響しない。</p></div>'
+    }
+  },
+  {
+    q: 'ORDER BY に使う列名をユーザーに選ばせたい場合、$1 のようなプレースホルダをそのまま使えない理由として最も適切なものは？',
+    opts: [
+      'PostgreSQL の ORDER BY はプレースホルダに対応していない構文上の制約がある関数だから',
+      '列名はディスク上に保存されていないから',
+      'プレースホルダは英数字の列名しか受け付けないから',
+      'ORDER BY の後ろには必ず数値しか書けないから',
+      'プレースホルダは「値」を渡す仕組みであり、列名は値ではなく「識別子」だから'
+    ],
+    ans: 4,
+    exps: [
+      'ORDER BY 自体がプレースホルダに対応していないという説明ではなく、渡すものの種類 (値か識別子か) が問題。',
+      '列名はテーブル定義としてカタログに保存されており、ディスクに保存されていないという説明は誤り。',
+      '英数字以外の列名も実際には存在し得るため、文字種の制約という説明は誤り。',
+      'ORDER BY の後ろには列名や式を書くのが通常であり、数値しか書けないという説明は誤り。',
+      '<b>これが正解。</b>プレースホルダは「この位置に 1 つの値を入れる」という仕組みであり、列名のような識別子をプレースホルダで渡すことは SQL の構文上できない。識別子を動的に扱うには format(\'%I\') のような別の仕組みが必要。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>プレースホルダは値の位置専用で、識別子の位置には使えません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="プレースホルダが値専用で識別子には使えない図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="11" text-anchor="middle" fill="#0f5132" font-family="monospace">WHERE col = $1 (OK)</text><rect x="30" y="80" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="105" font-size="11" text-anchor="middle" fill="#b5401f" font-family="monospace">ORDER BY $1 (不可)</text><text x="400" y="60" font-size="12.5" text-anchor="middle" fill="#4a5d54">識別子には format(%I) が必要</text></svg>'
+          + '<p class="cap">図: プレースホルダは値の位置にしか使えず、列名のような識別子には別の仕組みが必要。</p></div>'
+    }
+  },
+  {
+    q: 'quote_ident() や format(\'%I\', ...) が識別子に対して行っていることとして最も適切なものは？',
+    opts: [
+      '渡された文字列全体を 1 つの識別子として扱えるように、必要に応じてダブルクォートで囲んでエスケープする',
+      '渡された文字列を暗号化してから識別子にする',
+      '渡された文字列の文字数を自動的に短く切り詰める',
+      '渡された文字列をすべて大文字に変換する',
+      '渡された文字列をそのままの形で SQL 文の末尾に追加する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文で確認したとおり、quote_ident(\'weird col; DROP\') は "weird col; DROP" のようにダブルクォートで囲まれた 1 つの識別子名として出力され、セミコロンを含んでいても別の文として分離されない。',
+      '暗号化する機能ではなく、識別子として安全に解釈できるようにエスケープするだけである。',
+      '文字数を切り詰める機能ではなく、ダブルクォートで囲んで 1 つの識別子にする機能である。',
+      'PostgreSQL の識別子は既定で小文字に正規化されるのが通常の挙動であり、自動的に大文字化するわけではない。',
+      'そのまま追加するのではなく、必要なエスケープ (ダブルクォートでの囲み) を行う点が重要。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>危険な文字を含む文字列も、1 つの識別子として囲まれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="quote_identが識別子を囲む図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="55" font-size="11" text-anchor="middle" fill="#0f5132" font-family="monospace">weird col; DROP</text><line x1="230" y1="50" x2="300" y2="50" stroke="#9aa" stroke-width="1.5" marker-end="url(#arrq21f)"/><defs><marker id="arrq21f" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs><rect x="300" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#1f4a68" font-family="monospace">"weird col; DROP"</text></svg>'
+          + '<p class="cap">図: 危険な文字を含む文字列も、ダブルクォートで囲まれた 1 つの識別子として扱われる。</p></div>'
+    }
+  },
+  {
+    q: 'safe_order 関数で format(\'%I\') によるエスケープに加えて、許可リストによる検証も行っている理由として最も適切なものは？',
+    opts: [
+      'format(\'%I\') だけでは文字コードの変換ができないから',
+      'エスケープだけでは、存在しない列名や想定外の列名が渡されたときにエラーになるだけで、意味のある制御にならないため',
+      '許可リストを使うと処理速度が自動的に上がるから',
+      'PostgreSQL では format(\'%I\') を 2 回連続で呼べない制約があるから',
+      'エスケープすると列名が必ず大文字に変換されてしまうため'
+    ],
+    ans: 1,
+    exps: [
+      '文字コードの変換とは無関係の理由であり、注入を防ぐ仕組みそのものとは別の話である。',
+      '<b>これが正解。</b>format(\'%I\') は注入 (別の文として解釈されること) を防ぐが、存在しない列名や意図しない列名が渡されること自体は防がない。許可リストで「期待する値のどれかであること」を先に確認することで、安全性だけでなく挙動の正しさも保証できる。',
+      '処理速度の向上を目的とした仕組みではなく、値そのものが期待どおりかを確認する仕組みである。',
+      'format(\'%I\') を複数回呼ぶことに技術的な制約はない。',
+      '列名の大文字化は format(\'%I\') の挙動ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>エスケープと許可リストは防ぐ対象が違います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="エスケープと許可リストの役割の違いの図"><rect x="30" y="20" width="230" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">format(%I)</text><text x="145" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">別の文として</text><text x="145" y="88" font-size="11.5" text-anchor="middle" fill="#12211a">解釈されるのを防ぐ</text><rect x="300" y="20" width="230" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">許可リスト</text><text x="415" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">意図した値であることを</text><text x="415" y="88" font-size="11.5" text-anchor="middle" fill="#12211a">保証する</text></svg>'
+          + '<p class="cap">図: エスケープは構文の安全性、許可リストは値そのものの正しさを担保する。両方が必要。</p></div>'
+    }
+  },
+  {
+    q: 'format(\'SELECT ... WHERE col = %L\', 入力) の %L が行っていることとして最も適切なものは？',
+    opts: [
+      '入力をそのまま SQL に貼り付け、何も変更しない',
+      '入力を列名として扱い、ダブルクォートで囲む',
+      '入力の文字数を自動的に制限する',
+      '入力を暗号化する',
+      '入力の中のシングルクォートを正しく二重化し、1 つの文字列リテラルとして組み立てる'
+    ],
+    ans: 4,
+    exps: [
+      '何も変更せずそのまま貼り付けると、本文の文字列連結の例と同じ危険が再現してしまう。%L はそれを避けるための処理を行う。',
+      '%I (識別子用) の説明であり、%L (リテラル用) の説明ではない。',
+      '文字数の制限は行わず、値の中の引用符を正しくエスケープするだけの機能である。',
+      '暗号化は行わず、値を 1 つの文字列リテラルとして安全に組み立てるだけの機能である。',
+      '<b>これが正解。</b>%L は入力の中のシングルクォートを二重化するなど必要なエスケープを行い、結果全体を 1 つの文字列リテラルとして組み立てる。本文の例でも攻撃文字列全体が 1 つのリテラルになっていた。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>%L は値を 1 つのリテラルとして安全に組み立てます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="%Lがリテラルを安全に組み立てる図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="55" font-size="10.5" text-anchor="middle" fill="#0f5132" font-family="monospace">x\' OR \'1\'=\'1</text><line x1="230" y1="50" x2="300" y2="50" stroke="#9aa" stroke-width="1.5" marker-end="url(#arrq21g)"/><defs><marker id="arrq21g" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs><rect x="300" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="9.5" text-anchor="middle" fill="#1f4a68" font-family="monospace">\'x\'\' OR \'\'1\'\'=\'\'1\'</text></svg>'
+          + '<p class="cap">図: %L は入力全体を 1 つの文字列リテラルとして組み立て直し、構文を壊さないようにする。</p></div>'
+    }
+  },
+  {
+    q: '本文で pg_proc.prosrc に対して行った正規表現検査 (looks_like_concat_sql) が見つけているものとして最も適切なものは？',
+    opts: [
+      '実行に時間がかかりすぎる関数',
+      'EXECUTE と文字列連結 (||) が近くに出てくる、文字列連結で動的 SQL を組んでいる疑いのある関数定義',
+      '権限が過剰に付与されているロール',
+      'インデックスが使われていないテーブル',
+      '文字コードの設定が UTF-8 以外になっているデータベース'
+    ],
+    ans: 1,
+    exps: [
+      '実行時間を計測する検査ではなく、関数定義の文字列を調べる検査である。',
+      '<b>これが正解。</b>pg_proc.prosrc に保存された関数定義の文字列に対し、EXECUTE と || が近くに出てくるという正規表現をかけることで、文字列連結で動的 SQL を組んでいる疑いのある関数を機械的に絞り込める。',
+      'ロールの権限を調べる検査ではなく、関数定義の文字列を調べる検査である。',
+      'インデックスの使用状況とは無関係の検査であり、関数定義の文字列を調べる検査とは別の話である。',
+      '文字コードの設定とは無関係の検査であり、関数定義の文字列を調べる検査とは別の話である。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>関数定義の文字列そのものを正規表現で検査しています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="prosrcの正規表現検査の図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11" text-anchor="middle" fill="#0f5132">pg_proc.prosrc (関数定義の文字列)</text><line x1="260" y1="50" x2="330" y2="50" stroke="#9aa" stroke-width="1.5" marker-end="url(#arrq21h)"/><defs><marker id="arrq21h" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs><rect x="330" y="30" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="430" y="55" font-size="11" text-anchor="middle" fill="#b5401f">|| と EXECUTE が近接 → 疑いあり</text></svg>'
+          + '<p class="cap">図: 関数定義の文字列を正規表現で検査し、怪しい実装パターンを機械的に絞り込む。</p></div>'
+    }
+  },
+  {
+    q: '最小権限のロール (SELECT のみ付与) で接続していた場合、プレースホルダの対策が漏れて注入が成立してしまったとしても防げることとして最も適切なものは？',
+    opts: [
+      '注入された SQL の構文エラーをすべて自動的に修正してくれる',
+      'SELECT 以外の操作 (INSERT/UPDATE/DELETE など) が実行されることを、権限の層で拒否できる',
+      'パスワードの強度を自動的に強くしてくれる',
+      'ネットワークの盗聴を自動的に防いでくれる',
+      '注入された文字列を自動的に無害な文字列に書き換えてくれる'
+    ],
+    ans: 1,
+    exps: [
+      '構文エラーを自動修正する機能ではなく、権限の有無を確認して拒否するだけの仕組みである。',
+      '<b>これが正解。</b>本文の実験で sql21_readonly ロールは SELECT しか許可されておらず、INSERT を試すと permission denied for table accounts として拒否された。これはアプリの対策が漏れても、権限という別の層で書き込み被害を防げることを示している。',
+      'パスワード強度とは無関係の対策であり、ロールに与える権限の範囲を絞るという別の対策である。',
+      '誤り。ロールの権限を SELECT のみに絞ることと、通信経路の暗号化は別の対策である。ネットワークの盗聴を防ぐのは SSL/TLS 接続の設定であり、権限を最小化しても通信そのものが自動的に暗号化されるわけではない。',
+      '文字列を書き換える機能ではなく、権限が無い操作をそのまま拒否するだけの仕組みである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>権限は、SQL の対策が漏れた場合の最後の防波堤になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="最小権限が最後の防波堤になる図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="11.5" text-anchor="middle" fill="#0f5132">プレースホルダ/許可リスト</text><rect x="30" y="80" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="105" font-size="11.5" text-anchor="middle" fill="#1f4a68">最小権限ロール (SELECT のみ)</text><text x="400" y="60" font-size="12.5" text-anchor="middle" fill="#4a5d54">対策が漏れても、権限の層が書き込みを拒否</text></svg>'
+          + '<p class="cap">図: SQL レベルの対策が漏れても、権限という別の層が書き込み被害を防ぐ最後の防波堤になる。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

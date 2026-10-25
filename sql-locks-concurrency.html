@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ロックと分離レベル ― 待たせるか、中止するか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  table.tbl th{text-align:left;padding:8px 10px;border:1px solid #d9e5df;background:#eaf5ef}
+  table.tbl td{padding:8px 10px;border:1px solid #d9e5df}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 36 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>ロックと分離レベル ― 待たせるか、中止するか</h1>
+  <p>並行実行の衝突は、ロックで待たせるか、分離レベルでコミット時にエラーを返すかのどちらかで解決される。どちらを選ぶかで、待ち時間とリトライの責任の持ち方が変わる</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 35 回 <a href="./sql-mvcc-vacuum.html">MVCC と VACUUM</a> (xmin/xmax、FOR KEY SHARE が FK 参照で使われること)</p>
+  <p class="intro">複数のトランザクションが同じ行や同じ表に同時に触るとき、PostgreSQL が取る手段は 2 種類あります。1 つは<b>ロックで待たせる</b>こと、もう 1 つは<b>分離レベルの保証に反する操作をコミット時にエラーで止める</b>ことです。この回では、PostgreSQL 18.6 の実機で 2 本の psql セッションを実際に動かし、行ロックの 4 つのモードの衝突、表レベルのロックの段階、ロック待ちの行列の正体、Read Committed の文ごとの再評価、Repeatable Read の直列化エラー、Serializable (SSI) による write skew の検出、デッドロックの自動検出、そして SKIP LOCKED とアドバイザリロックによる実務的な回避策を、実測のタイミングと実際のエラー文面で確認します。</p>
+
+  <!-- ===== 1. この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 衝突を「待たせる」か「中止する」か</h2>
+    <p>第 35 回で見た MVCC は、読み取りと書き込みが互いを待たないようにする仕組みでした。しかし書き込みと書き込みが同じ行に競合する場面では、誰かが待つか、誰かが諫められる必要があります。PostgreSQL はこれを 2 つの層で扱います。</p>
+    <p><b>ロック</b>は「今すぐ衝突が起きないように、片方を待たせる」という層です。<code>SELECT ... FOR UPDATE</code> や通常の <code>UPDATE</code> は、対象の行に印をつけ、同じ行に触ろうとする他のトランザクションを待ち行列に入れます。<b>分離レベル</b>は「待たせてもなお防げない矛盾を、コミットの瞬間にエラーとして検出する」という層です。Repeatable Read や Serializable では、一度は処理が進んでも、コミット時に「この順序では成り立たない」と判定されればエラーが返ります。</p>
+    <p>この 2 つの層を正しく使い分けるには、どちらが「待つ」という代償を払い、どちらが「リトライする」という代償を払うのかを理解する必要があります。ロックは待ち時間を増やしますが処理は 1 回で済みます。分離レベルによるエラーはリトライが必要になりますが、ロックを持ち続ける時間は短く済みます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="ロックと分離レベルの2つの層を示す図">
+        <rect x="20" y="20" width="260" height="120" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ロック (待たせる)</text>
+        <text x="150" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">FOR UPDATE, UPDATE, DDL</text>
+        <text x="150" y="90" font-size="11.5" text-anchor="middle" fill="#12211a">衝突する操作を待ち行列に</text>
+        <text x="150" y="112" font-size="11" text-anchor="middle" fill="#4a5d54">代償: 待ち時間</text>
+        <rect x="320" y="20" width="260" height="120" rx="10" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/>
+        <text x="450" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">分離レベル (中止する)</text>
+        <text x="450" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">Repeatable Read, Serializable</text>
+        <text x="450" y="90" font-size="11.5" text-anchor="middle" fill="#12211a">矛盾をコミット時にエラーで検出</text>
+        <text x="450" y="112" font-size="11" text-anchor="middle" fill="#b5401f">代償: リトライ</text>
+      </svg>
+      <p class="cap">図: 衝突への対処は「待たせる」ロックと「コミット時に中止する」分離レベルの 2 層に分かれる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 2. 行ロックの4モード ===== -->
+  <section>
+    <h2>2. 仕組み ― 行ロックの 4 モードを実測で衝突させる</h2>
+    <p>PostgreSQL の行ロックには <code>FOR UPDATE</code>、<code>FOR NO KEY UPDATE</code>、<code>FOR SHARE</code>、<code>FOR KEY SHARE</code> の 4 段階があります。第 35 回で見た「FK 参照が親行を <code>FOR KEY SHARE</code> でロックする」という挙動の意味が、ここでようやく繋がります。まず <code>FOR UPDATE</code> と <code>FOR UPDATE</code> を衝突させます。</p>
+    <pre><code>-- セッション A: 6 秒間 FOR UPDATE を保持
+BEGIN; SELECT bug_id FROM bugs WHERE bug_id=1 FOR UPDATE; SELECT pg_sleep(6); COMMIT;
+
+-- セッション B: 1 秒後に同じ行へ FOR UPDATE
+BEGIN;
+SELECT clock_timestamp() AS b_start;              -- 09:59:54.073
+SELECT bug_id FROM bugs WHERE bug_id=1 FOR UPDATE; -- ここで待たされる
+SELECT clock_timestamp() AS b_acquired;            -- 09:59:59.028 (約 4.96 秒後)
+COMMIT;</code></pre>
+    <p>B は約 <b>4.96 秒</b>待たされました。これは A が 1 秒の時点でロックを取り、そこから 6 秒間保持したうちの残り約 5 秒にほぼ一致します。次に <code>FOR SHARE</code> と <code>FOR SHARE</code> を同じ行に対して試します。</p>
+    <pre><code>-- セッション C: 4 秒間 FOR SHARE を保持 (B と同じ構造)
+-- セッション D: 1 秒後に同じ行へ FOR SHARE
+--  d_start:    10:00:02.232438
+--  d_acquired: 10:00:02.233808   (約 1.4 ミリ秒)</code></pre>
+    <p>D はほとんど待たされません。<code>FOR SHARE</code> は複数の読み手が同時に持てる読み取りロックで、互いに衝突しないからです。最後に、第 35 回で見た FK 参照の <code>FOR KEY SHARE</code> と、通常の列更新 (<code>NO KEY UPDATE</code> として扱われる) ・ <code>FOR UPDATE</code> の関係を確かめます。</p>
+    <pre><code>-- A: FOR KEY SHARE を 3 秒保持 (FK 参照を模している)
+-- B: 非キー列 (priority) を UPDATE する → NO KEY UPDATE として扱われる
+--    start: 10:03:30.344242, done: 10:03:30.344756  (約 0.5 ミリ秒、ブロックされない)
+
+-- 同じ状況で、こちらは FOR UPDATE を試す
+--    start: 10:03:32.434944, done: 10:03:34.414582  (約 1.98 秒、ブロックされる)</code></pre>
+    <p>非キー列への通常の UPDATE は内部的に <code>NO KEY UPDATE</code> という行ロックを取り、これは <code>FOR KEY SHARE</code> と衝突しません。だからこそ、FK 参照で親行が <code>FOR KEY SHARE</code> されている間も、その行の他の列を自由に更新できます。しかし <code>FOR UPDATE</code> は <code>FOR KEY SHARE</code> と衝突するため、約 2 秒 (A の残り保持時間) 待たされました。</p>
+    <table class="tbl">
+      <thead><tr><th></th><th>FOR KEY SHARE</th><th>FOR SHARE</th><th>FOR NO KEY UPDATE</th><th>FOR UPDATE</th></tr></thead>
+      <tbody>
+        <tr><td>FOR KEY SHARE</td><td>両立</td><td>両立</td><td>両立</td><td>衝突</td></tr>
+        <tr><td>FOR SHARE</td><td>両立</td><td>両立</td><td>衝突</td><td>衝突</td></tr>
+        <tr><td>FOR NO KEY UPDATE</td><td>両立</td><td>衝突</td><td>衝突</td><td>衝突</td></tr>
+        <tr><td>FOR UPDATE</td><td>衝突</td><td>衝突</td><td>衝突</td><td>衝突</td></tr>
+      </tbody>
+    </table>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="行ロック4モードの強さの順序を示す図">
+        <line x1="40" y1="80" x2="560" y2="80" stroke="#9aa" stroke-width="2"/>
+        <circle cx="90" cy="80" r="7" fill="#198754"/>
+        <text x="90" y="55" font-size="12" text-anchor="middle" fill="#0f5132">FOR KEY SHARE</text>
+        <circle cx="240" cy="80" r="7" fill="#43b581"/>
+        <text x="240" y="55" font-size="12" text-anchor="middle" fill="#0f5132">FOR SHARE</text>
+        <circle cx="390" cy="80" r="7" fill="#b5401f"/>
+        <text x="390" y="55" font-size="12" text-anchor="middle" fill="#b5401f">FOR NO KEY UPDATE</text>
+        <circle cx="540" cy="80" r="7" fill="#c0492f"/>
+        <text x="540" y="55" font-size="12" text-anchor="middle" fill="#b5401f">FOR UPDATE</text>
+        <text x="300" y="120" font-size="12.5" text-anchor="middle" fill="#4a5d54">右に行くほど強く、左にあるモードほど多くの操作と両立する</text>
+      </svg>
+      <p class="cap">図: 4 つの行ロックは強さの順に並び、FK 参照に使われる KEY SHARE が最も弱く多くの操作と共存できる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 3. 表レベルロックの段階 ===== -->
+  <section>
+    <h2>3. 仕組み ― 表レベルのロックも段階になっている</h2>
+    <p>行ロックとは別に、どの文も実行時に表レベルのロックを取ります。これも強さの段階があり、<code>pg_locks</code> で実際に確認できます。</p>
+    <pre><code>BEGIN; SELECT * FROM bugs LIMIT 1;
+SELECT locktype, mode, granted FROM pg_locks WHERE pid=pg_backend_pid() AND relation='bugs'::regclass;
+--  locktype |      mode       | granted
+-- ----------+-----------------+---------
+--  relation | AccessShareLock | t
+ROLLBACK;
+
+BEGIN; UPDATE bugs SET hours = hours WHERE bug_id = 1;
+SELECT locktype, mode, granted FROM pg_locks WHERE pid=pg_backend_pid() AND relation='bugs'::regclass;
+--  locktype |       mode       | granted
+-- ----------+------------------+---------
+--  relation | RowExclusiveLock | t
+ROLLBACK;
+
+BEGIN; CREATE INDEX tmp_idx_test ON bugs (summary);
+SELECT locktype, mode, granted FROM pg_locks WHERE pid=pg_backend_pid() AND relation='bugs'::regclass;
+--  locktype |   mode    | granted
+-- ----------+-----------+---------
+--  relation | ShareLock | t
+ROLLBACK;</code></pre>
+    <p>単純な <code>SELECT</code> は最も弱い <code>AccessShareLock</code> を取り、これは他のほぼ全ての操作と共存できます。通常の <code>UPDATE</code> は <code>RowExclusiveLock</code> を取り、これも他の DML とは共存できますが、<code>ALTER TABLE</code> のような構造変更とは衝突します。<code>CREATE INDEX</code> (非 <code>CONCURRENTLY</code>) は <code>ShareLock</code> を取り、この間はテーブルへの書き込みができなくなります。この強さの階段の頂点にあるのが <code>ACCESS EXCLUSIVE</code> で、<code>ALTER TABLE</code> の多くの操作や <code>VACUUM FULL</code> (第 35 回) が使います。表ロックの全段階と衝突表は、第 37 回で DDL のロック待ちを扱うときに詳しく見ます。</p>
+  </section>
+
+  <!-- ===== 4. 待ち行列の正体 ===== -->
+  <section>
+    <h2>4. 仕組み ― ロック待ちの行列は「トランザクション ID 待ち」として実装されている</h2>
+    <p>第 2 節の <code>FOR UPDATE</code> 対 <code>FOR UPDATE</code> の衝突の最中に、<code>pg_locks</code> を覗くと、待っている側 (session_B) が何を待っているのかが分かります。</p>
+    <pre><code>SELECT a.application_name, l.locktype, l.mode, l.granted
+FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid
+WHERE a.application_name IN ('session_A','session_B')
+  AND l.locktype IN ('transactionid','tuple')  -- relation の RowShareLock など共通の行は省いて絞る
+ORDER BY a.application_name, l.locktype;
+
+--  application_name |   locktype    |        mode          | granted
+-- ------------------+---------------+----------------------+---------
+--  session_A        | transactionid | ExclusiveLock        | t   ← A は自分の XID を排他的に保持
+--  session_B        | transactionid | ShareLock            | f   ← B は A の XID への共有ロックを待っている
+--  session_B        | tuple         | AccessExclusiveLock  | t</code></pre>
+    <p>これは PostgreSQL の行ロックの実装上の特徴です。どのトランザクションも、自分の XID (トランザクション ID) に対する <code>ExclusiveLock</code> を、開始してから終了する (COMMIT/ROLLBACK) まで保持し続けます。ある行をロックしようとして、既に別のトランザクションがロックしていることが分かると、PostgreSQL は「その行をロックしているトランザクションの XID に対する <code>ShareLock</code>」を要求します。この要求は、相手のトランザクションが終了して XID の <code>ExclusiveLock</code> を解放するまで <code>granted=f</code> のまま待ちます。つまり「行の待ち行列」は、実装としては「相手のトランザクション ID が終わるのを待つ」という形で表現されています。</p>
+    <p>この仕組みはデッドロックの検出にも直結しています。第 7 節で見るデッドロックのエラーメッセージが <code>waits for ShareLock on transaction ...</code> という文面になっているのは、まさにこの XID 待ちの構造が表に出てきているためです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="ロック待ちがトランザクションID待ちとして実装されていることを示す図">
+        <rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="50" font-size="12" text-anchor="middle" fill="#0f5132">A: 自分の XID に ExclusiveLock</text>
+        <text x="140" y="68" font-size="11" text-anchor="middle" fill="#4a5d54">COMMIT まで保持</text>
+        <rect x="350" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="460" y="50" font-size="12" text-anchor="middle" fill="#b5401f">B: A の XID に ShareLock を要求</text>
+        <text x="460" y="68" font-size="11" text-anchor="middle" fill="#b5401f">granted = f (待機)</text>
+        <line x1="250" y1="55" x2="350" y2="55" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="300" y="120" font-size="12.5" text-anchor="middle" fill="#4a5d54">A が COMMIT/ROLLBACK すると XID の ExclusiveLock が外れ、B の要求が granted になる</text>
+      </svg>
+      <p class="cap">図: 行ロックの待ちは、内部的には相手のトランザクション ID への ShareLock 要求として表現される。</p>
+    </div>
+  </section>
+
+  <!-- ===== 5. Read Committedの再評価 ===== -->
+  <section>
+    <h2>5. 仕組み ― Read Committed は待った後に WHERE 句を再評価する</h2>
+    <p>PostgreSQL の既定の分離レベルである Read Committed では、1 つの文が実行される中でブロックされて待たされた場合、再開した時点の最新のコミット済みデータに対して条件を再評価します。<code>bug_id=4</code> (<code>priority='HIGH'</code>) に対して、この再評価を実機で確かめます。</p>
+    <pre><code>-- セッション B: 先に priority を 'LOW' に変更して 3 秒保持
+BEGIN; UPDATE bugs SET priority='LOW' WHERE bug_id=4; SELECT pg_sleep(3); COMMIT;
+
+-- セッション A: 1 秒後、まだ 'HIGH' だと思って同じ行を更新しようとする
+BEGIN;
+UPDATE bugs SET hours=5 WHERE bug_id=4 AND priority='HIGH'; -- B の行ロックで待たされる
+SELECT bug_id, priority, hours FROM bugs WHERE bug_id=4;
+COMMIT;
+
+-- 実行結果
+-- UPDATE 0                              ← 0 行が更新された
+--  bug_id | priority | hours
+-- --------+----------+-------
+--       4 | LOW      |  8.00                ← hours は変わっていない</code></pre>
+    <p>A の UPDATE 文は、B が行ロックを解放するまで待たされます。B が <code>priority='LOW'</code> にコミットした後、A の UPDATE は再開しますが、そこで WHERE 句 <code>priority='HIGH'</code> を<b>最新のコミット済みの値で再評価</b>します。もう <code>priority</code> は <code>'LOW'</code> になっているため、この行はもう条件に一致せず、<code>UPDATE 0</code> という結果になります。もし PostgreSQL が再評価をせず、A が待たされる前に確認した古い条件のまま書き込んでいたら、B の更新が消える「lost update (更新の消失)」が起きていたはずです。この再評価こそが、Read Committed のもとでも lost update を防いでいる仕組みです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="Read Committedの再評価を示す図">
+        <rect x="30" y="20" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="140" y="40" font-size="12" text-anchor="middle" fill="#1f4a68">B: priority を LOW にして COMMIT</text>
+        <rect x="320" y="90" width="250" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="445" y="112" font-size="12" text-anchor="middle" fill="#b5401f">A: 待機後に WHERE priority='HIGH' を</text>
+        <text x="445" y="130" font-size="12" text-anchor="middle" fill="#b5401f">最新の値 (LOW) で再評価 → 0 件</text>
+        <line x1="140" y1="70" x2="320" y2="100" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="300" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">再評価が無ければ A は古い条件のまま書き込み、B の更新を消してしまう</text>
+      </svg>
+      <p class="cap">図: Read Committed は待たされた後、WHERE 句を最新のコミット済みデータで再評価してから書き込む。</p>
+    </div>
+  </section>
+
+  <!-- ===== 6. どこで壊れるか: 直列化エラーとwrite skew ===== -->
+  <section>
+    <h2>6. どこで壊れるか ― Repeatable Read の直列化エラーと Serializable の write skew</h2>
+    <p>Read Committed は文ごとに再評価することで衝突に対処しますが、<b>Repeatable Read</b> はトランザクション開始時点のスナップショットを最後まで保つため、再評価ができません。代わりに、コミット時に矛盾を検出してエラーにします。<code>bug_id=2</code> の <code>hours</code> を 2 つの Repeatable Read トランザクションが更新する場面です。</p>
+    <pre><code>-- B: 先に hours を +1 して 3 秒後に COMMIT
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT bug_id, hours FROM bugs WHERE bug_id=2;  -- hours=3.50 を読む
+UPDATE bugs SET hours=hours+1 WHERE bug_id=2;
+SELECT pg_sleep(3); COMMIT;
+
+-- A: 1 秒後、同じスナップショット (hours=3.50) を見て +10 しようとする
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT bug_id, hours FROM bugs WHERE bug_id=2;  -- hours=3.50 (A のスナップショット)
+UPDATE bugs SET hours=hours+10 WHERE bug_id=2;  -- B の行ロックで待たされた後...
+COMMIT;
+
+-- 実際のエラー文面 (VERBOSITY=verbose)
+-- ERROR:  40001: could not serialize access due to concurrent update
+-- LOCATION:  ExecUpdate, nodeModifyTable.c:2602</code></pre>
+    <p>A は B の行ロックが解放されるまで待たされますが、Repeatable Read は自分のスナップショット (<code>hours=3.50</code>) を最後まで使い続けるため、Read Committed のように「最新の値で再評価する」ことができません。そこで PostgreSQL は、A のスナップショットより後に同じ行がコミットで変更されたことを検知し、<code>SQLSTATE 40001</code> (<code>serialization_failure</code>) のエラーで A を止めます。A はロールバックされ、呼び出し側が最初から<b>リトライ</b>する必要があります。</p>
+    <p>さらに深刻なのが <b>write skew</b> です。分散システムシリーズ第 18 回 <a href="./distsys-isolation-concurrency.html" target="_blank" rel="noopener">分離レベルと並行制御</a> でも触れた「オンコール医師」の例を、PostgreSQL の実機で再現します。2 人の医師 (alice, bob) が両方 on-call (<code>on_duty=true</code>) の状態から始め、それぞれが「自分以外にも on-call がいるなら、自分は外れてよい」という規則で同時に外れようとします。</p>
+    <pre><code>CREATE TABLE oncall (doctor text PRIMARY KEY, on_duty boolean NOT NULL);
+INSERT INTO oncall VALUES ('alice', true), ('bob', true);
+
+-- A と B が同時に SERIALIZABLE で実行
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT count(*) FROM oncall WHERE on_duty;  -- 両方とも 2 を見る (まだ安全だと判断)
+-- A: UPDATE oncall SET on_duty=false WHERE doctor='alice'; COMMIT;  → 成功
+-- B: UPDATE oncall SET on_duty=false WHERE doctor='bob';   COMMIT;  → 失敗
+
+-- B が実際に受け取ったエラー
+-- ERROR:  40001: could not serialize access due to read/write dependencies among transactions
+-- DETAIL:  Reason code: Canceled on identification as a pivot, during write.
+-- HINT:  The transaction might succeed if retried.
+
+SELECT * FROM oncall ORDER BY doctor;
+--  doctor | on_duty
+-- --------+---------
+--  alice  | f
+--  bob    | t          ← 不変条件 (最低 1 人は on-call) が保たれた</code></pre>
+    <p>どちらの行も別々の行 (alice と bob) を更新しているため、行ロックだけでは衝突を検出できません。これが write skew です。<b>Serializable</b> (PostgreSQL では SSI, Serializable Snapshot Isolation という実装) は、述語ロック (predicate lock, 「どの行を読んだか」ではなく「どういう条件で読んだか」を記録するロックで、行をロックしないためブロックも起こさない) を使って、2 つのトランザクションの読み取りと書き込みの依存関係を追跡し、両方がコミットすると「1 本の順序で実行したことにできない」と判断して、どちらか一方 (この実行では B) を <code>40001</code> のエラーで中止しました。結果として <code>alice=f, bob=t</code> となり、「最低 1 人は on-call」という不変条件が保たれています。同じ実験を <b>Repeatable Read</b> で行うと、この検出は働かず、両方が成功して <code>alice=f, bob=f</code> という、誰も on-call でない状態になってしまいました。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="write skewをSerializableが検出する様子を示す図">
+        <line x1="40" y1="50" x2="560" y2="50" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="54" font-size="12" fill="#12211a">A</text>
+        <line x1="40" y1="130" x2="560" y2="130" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="134" font-size="12" fill="#12211a">B</text>
+        <rect x="70" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="170" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">read: 2 人 on-call → alice を off</text>
+        <rect x="70" y="110" width="200" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="170" y="135" font-size="11.5" text-anchor="middle" fill="#1f4a68">read: 2 人 on-call → bob を off</text>
+        <rect x="320" y="30" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="395" y="55" font-size="12" text-anchor="middle" fill="#0f5132">A: COMMIT 成功</text>
+        <rect x="320" y="110" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="430" y="135" font-size="11.5" text-anchor="middle" fill="#b5401f">B: 40001 で中止 (SSI が検出)</text>
+        <text x="300" y="170" font-size="12.5" text-anchor="middle" fill="#4a5d54">片方だけ通すことで「最低 1 人は on-call」の不変条件が守られる</text>
+      </svg>
+      <p class="cap">図: 別々の行を更新する write skew を、SSI が読み書きの依存関係から検出して片方を中止する。</p>
+    </div>
+  </section>
+
+  <!-- ===== 7. デッドロック ===== -->
+  <section>
+    <h2>7. どこで壊れるか ― 2 つのトランザクションが互いを待つデッドロック</h2>
+    <p>2 つのトランザクションが、2 つの行を<b>逆の順序</b>で更新しようとすると、どちらも相手の持つロックを待ち続け、永久に進めなくなります。これを実機で発生させます。</p>
+    <pre><code>-- A: bug_id=1 → bug_id=2 の順でロックを取ろうとする
+BEGIN; UPDATE bugs SET hours=1 WHERE bug_id=1; SELECT pg_sleep(2); UPDATE bugs SET hours=2 WHERE bug_id=2; COMMIT;
+
+-- B: bug_id=2 → bug_id=1 の順でロックを取ろうとする (逆順)
+BEGIN; UPDATE bugs SET hours=3 WHERE bug_id=2; SELECT pg_sleep(2); UPDATE bugs SET hours=4 WHERE bug_id=1; COMMIT;
+
+-- 実際に発生したエラー (どちらか一方)
+-- ERROR:  40P01: deadlock detected
+-- DETAIL:  Process 3398 waits for ShareLock on transaction 5021; blocked by process 3399.
+--          Process 3399 waits for ShareLock on transaction 5020; blocked by process 3398.
+-- HINT:  See server log for query details.
+-- LOCATION:  DeadLockReport, deadlock.c:1133
+
+-- もう一方は正常に COMMIT する</code></pre>
+    <p>A は <code>bug_id=1</code> を先にロックしてから <code>bug_id=2</code> を待ち、B は <code>bug_id=2</code> を先にロックしてから <code>bug_id=1</code> を待ちます。第 4 節で見た「XID への ShareLock 待ち」の構造がここで輪になり、A は B の XID を待ち、B は A の XID を待つという循環が生まれます。PostgreSQL は <code>deadlock_timeout</code> (既定 1 秒) ごとに待ち行列を検査し、この循環を検出すると、どちらか一方を <code>SQLSTATE 40P01</code> (<code>deadlock_detected</code>) のエラーで強制的に中止します。中止された側はロールバックされ、もう一方はロックが外れて処理を続けられます。実務では、複数行を更新する処理の中で行をロックする順序をテーブル間 ・ 処理間で統一することが、デッドロックそのものを起こさないための基本的な対策になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="デッドロックの循環を示す図">
+        <rect x="60" y="30" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="55" font-size="12" text-anchor="middle" fill="#0f5132">A: bug_id=1 を保持</text>
+        <rect x="360" y="30" width="180" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="450" y="55" font-size="12" text-anchor="middle" fill="#1f4a68">B: bug_id=2 を保持</text>
+        <rect x="60" y="110" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="150" y="135" font-size="11.5" text-anchor="middle" fill="#b5401f">A: bug_id=2 を要求 (待機)</text>
+        <rect x="360" y="110" width="180" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="135" font-size="11.5" text-anchor="middle" fill="#b5401f">B: bug_id=1 を要求 (待機)</text>
+        <line x1="240" y1="50" x2="360" y2="130" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <line x1="360" y1="50" x2="240" y2="130" stroke="#9aa" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="300" y="20" font-size="12.5" text-anchor="middle" fill="#4a5d54">循環待ちをサーバーが検出し、片方を強制的に中止する</text>
+      </svg>
+      <p class="cap">図: A と B が逆順でロックを要求すると循環が生まれ、deadlock_timeout 後に検出されて片方が中止される。</p>
+    </div>
+  </section>
+
+  <!-- ===== 8. シニアの書き方 ===== -->
+  <section>
+    <h2>8. シニアの書き方 ― ロック待ちを避ける設計とリトライすべき SQLSTATE</h2>
+    <p>ジョブキューのように「複数のワーカーが同じテーブルから未処理の行を 1 件ずつ取る」場面では、単純な <code>FOR UPDATE</code> はワーカーを数珠つなぎに待たせてしまいます。ここで使うのが <b>SKIP LOCKED</b> です。</p>
+    <pre><code>-- A: bug_id=1 の行を取って 3 秒間保持
+BEGIN; SELECT bug_id FROM bugs ORDER BY bug_id FOR UPDATE SKIP LOCKED LIMIT 1; SELECT pg_sleep(3); COMMIT;
+-- → bug_id=1 を取得
+
+-- B: 1 秒後、同じ問い合わせを実行
+BEGIN;
+SELECT clock_timestamp() AS b_start;                                         -- 10:00:12.520655
+SELECT bug_id FROM bugs ORDER BY bug_id FOR UPDATE SKIP LOCKED LIMIT 1;      -- bug_id=2 を取得
+SELECT clock_timestamp() AS b_got_row;                                       -- 10:00:12.521338 (約 0.68 ミリ秒後)
+COMMIT;</code></pre>
+    <p>B は A がロックした <code>bug_id=1</code> を待たず、ロックされていない次の行 <code>bug_id=2</code> を <b>0.68 ミリ秒</b>で取得しました。<code>SKIP LOCKED</code> はロック済みの行をスキップするため、ワーカーの数を増やしても互いを待たせずにキューを消化できます。順序を保証したい処理には使えませんが、ジョブキューのような「どれが先に処理されても構わない」場面では効果的です。</p>
+    <p>テーブルの行とは無関係に、アプリケーションが独自の単位でロックを取りたい場合には <b>アドバイザリロック (advisory lock)</b> を使います。バッチ処理の多重起動防止などによく使われます。</p>
+    <pre><code>-- A: 整数 42 番のアドバイザリロックを取り、3 秒間保持
+SELECT pg_try_advisory_lock(42) AS a_got_lock;   -- t
+SELECT pg_sleep(3);
+SELECT pg_advisory_unlock(42) AS a_released;      -- t
+
+-- B: 1 秒後、同じ番号をロックしようとする (待たない版)
+SELECT pg_try_advisory_lock(42) AS b_got_lock_while_a_holds;  -- f</code></pre>
+    <p><code>pg_try_advisory_lock</code> はロックが取れなければ即座に <code>false</code> を返し、待ちません。これにより「既に誰かが同じバッチを実行中なら、今回は何もせず終了する」という多重起動防止を、テーブルの行を汚さずに実現できます。待ってもよい場合は <code>pg_advisory_lock</code> を使います。</p>
+    <p>最後に、この回で見た 2 つのエラーの SQLSTATE をまとめます。<code>40001</code> (<code>serialization_failure</code>, 第 6 節) と <code>40P01</code> (<code>deadlock_detected</code>, 第 7 節) は、どちらもトランザクション全体をロールバックするエラーで、アプリケーション側が<b>同じ処理をもう一度やり直す (リトライする)</b> ことを前提にした設計です。シニアの判断は、これらの SQLSTATE を補足して自動でリトライする層をアプリケーションに用意するか、あるいは Repeatable Read / Serializable を使う範囲を、本当に複数行の不変条件を守る必要がある処理だけに絞り、それ以外は Read Committed のままにしておくかのどちらかです。全てのトランザクションを Serializable にすると、リトライの実装が無い限りエラーが利用者に直接届いてしまいます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="SKIP LOCKEDとアドバイザリロックの使い分けを示す図">
+        <rect x="30" y="20" width="250" height="100" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">SKIP LOCKED</text>
+        <text x="155" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">テーブルの行が対象</text>
+        <text x="155" y="88" font-size="11.5" text-anchor="middle" fill="#12211a">ジョブキューの分散処理</text>
+        <rect x="320" y="20" width="250" height="100" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="445" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">アドバイザリロック</text>
+        <text x="445" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">行とは無関係な任意の番号</text>
+        <text x="445" y="88" font-size="11.5" text-anchor="middle" fill="#12211a">バッチの多重起動防止</text>
+      </svg>
+      <p class="cap">図: SKIP LOCKED はテーブルの行の分配に、アドバイザリロックは行に紐付かない排他制御に使う。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/explicit-locking.html" target="_blank" rel="noopener">PostgreSQL: 13.3. Explicit Locking</a> ― 行ロック 4 モード (FOR UPDATE/NO KEY UPDATE/SHARE/KEY SHARE) と表レベルロックの衝突表、アドバイザリロックの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/transaction-iso.html" target="_blank" rel="noopener">PostgreSQL: 13.2. Transaction Isolation</a> ― Read Committed の文ごとの再評価、Repeatable Read が write skew を防げないこと、Serializable (SSI) の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/view-pg-locks.html" target="_blank" rel="noopener">PostgreSQL: 54.13. pg_locks</a> ― locktype, mode, granted 列と、transactionid 待ちの構造の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/errcodes-appendix.html" target="_blank" rel="noopener">PostgreSQL: Appendix A. PostgreSQL Error Codes</a> ― 40001 (serialization_failure) と 40P01 (deadlock_detected) が Class 40 (Transaction Rollback) に属し、リトライを前提とするエラーであることの一次情報。</li>
+      <li>Berenson, Bernstein, Gray, Melton, O'Neil, O'Neil, "A Critique of ANSI SQL Isolation Levels" (1995) ― write skew という異常の定義の出典 (安定したリンクを確認できなかったため著者 ・ 年のみ記載)。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( https://www.oreilly.co.jp/books/9784814400744/ ) ― 章立てのみ参考 (本回は書籍の対象外のシニア編)。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-mvcc-vacuum.html">← 第 35 回 MVCC と VACUUM</a><a href="./sql-index.html">目次</a><a href="./sql-zero-downtime-migrations.html">第 37 回 止めずにスキーマを変える →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '同じ行に 2 つのトランザクションが FOR UPDATE を要求したとき、実機で測定した結果として最も正確なものは？',
+    opts: [
+      '後から要求した側は、先に取得した側が保持していた残りの時間とほぼ一致する約 4.96 秒待たされた',
+      'FOR UPDATE は同じ行への別の FOR UPDATE と衝突せず、両方が即座に成功する',
+      '待ち時間は常に 0.1 ミリ秒未満で、実質的に無視できる',
+      'FOR UPDATE はテーブル全体を排他ロックし、無関係な行も含めて全ての行をブロックする',
+      '待たされたのはネットワーク遅延が原因であり、行ロックの仕組みとは無関係である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で b_start と b_acquired の差を測ったところ約 4.96 秒で、これは A が 1 秒後にロックを取得し、そこから 6 秒間保持したうちの残り時間とほぼ一致した。',
+      'FOR UPDATE は同じ行への別の FOR UPDATE と明確に衝突する。実測でも約 5 秒待たされており、即座に成功するという主張は誤り。',
+      '実測は約 4.96 秒であり、0.1 ミリ秒未満という主張とは大きく異なる。',
+      'FOR UPDATE でロックされるのは対象の行だけで、無関係な他の行には影響しない。テーブル全体という主張は誤り。',
+      'ネットワーク遅延ではなく、A が保持する行ロックが解放されるのを待っていたことが、タイミングの一致から明確に分かる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>B の待ち時間は A の残り保持時間とほぼ一致します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="FOR UPDATEの待ち時間を示す図"><rect x="30" y="30" width="300" height="30" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="180" y="50" font-size="11.5" text-anchor="middle" fill="#0f5132">A: 1秒後にロック取得 → 6秒間保持</text><rect x="100" y="70" width="230" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="215" y="90" font-size="11.5" text-anchor="middle" fill="#b5401f">B: 約 4.96 秒待機</text></svg>'
+          + '<p class="cap">図: B の待ち時間は A がロックを保持していた残り時間に対応する。</p></div>'
+    }
+  },
+  {
+    q: '同じ行に 2 つのトランザクションが FOR SHARE を要求したとき、実機で測定した結果として最も正確なものは？',
+    opts: [
+      'FOR SHARE は FOR UPDATE と同じ強さのロックで、常に衝突する',
+      'FOR SHARE は複数の読み手が同時に持てるため、実機でも約 1.4 ミリ秒とほぼ待たされずに取得できた',
+      'FOR SHARE は 1 つのトランザクションにつき 1 度しか使用できない',
+      'FOR SHARE を使うと、そのテーブルへの書き込みそのものが禁止される',
+      'FOR SHARE は SELECT 文にしか使えず、UPDATE 文の中では使えない'
+    ],
+    ans: 1,
+    exps: [
+      'FOR SHARE は FOR UPDATE より弱いロックで、同じ FOR SHARE とは衝突しない。実測でもほぼ待たずに取得できている。',
+      '<b>これが正解。</b>実機で d_start から d_acquired までの差を測ると約 1.4 ミリ秒で、ほとんど待たされていない。FOR SHARE は複数の読み手が同時に持てる読み取りロックであることが分かる。',
+      '同じトランザクション内で複数回 FOR SHARE を使うことに制限は無い。',
+      'FOR SHARE は行の読み取りロックであり、テーブルへの書き込みそのものを禁止するものではない。',
+      'FOR SHARE は SELECT 文の末尾に付ける句であり、UPDATE 文自体とは独立した機能。UPDATE 文の中で直接使う構文ではないが、禁止されているという説明は不正確。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>FOR SHARE は複数のトランザクションが同時に持てます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="FOR SHAREの両立を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="12" text-anchor="middle" fill="#0f5132">C: FOR SHARE 保持中</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="12" text-anchor="middle" fill="#0f5132">D: FOR SHARE も即座に成功</text></svg>'
+          + '<p class="cap">図: FOR SHARE は複数の読み手が同時に持てるため、待たずに両方成功する。</p></div>'
+    }
+  },
+  {
+    q: 'FOR KEY SHARE と、通常の非キー列への UPDATE (NO KEY UPDATE)、FOR UPDATE の関係として最も正確なものは？',
+    opts: [
+      'FOR KEY SHARE はどの操作とも一切衝突しない',
+      'FOR KEY SHARE は FOR UPDATE とは衝突しないが、通常の UPDATE とは衝突する',
+      'FOR KEY SHARE は非キー列への UPDATE (NO KEY UPDATE) とは衝突しないが、FOR UPDATE とは衝突する。実機でも約 0.5 ミリ秒 (衝突なし) と約 1.98 秒 (衝突あり) という差を確認した',
+      'FOR KEY SHARE は FOR SHARE よりも強いロックである',
+      'FOR KEY SHARE は行を削除するためだけに使う特殊なロックである'
+    ],
+    ans: 2,
+    exps: [
+      '実機で確認した通り、FOR KEY SHARE は FOR UPDATE とは衝突する。一切衝突しないという主張は誤り。',
+      '実測はその逆で、FOR KEY SHARE は通常の非キー列の UPDATE とは衝突せず、FOR UPDATE とだけ衝突した。',
+      '<b>これが正解。</b>実機で、非キー列の UPDATE は約 0.5 ミリ秒で完了 (衝突なし)、FOR UPDATE は約 1.98 秒待たされた (衝突あり) ことを確認した。これにより FK 参照が FOR KEY SHARE で親行をロックしても、通常の列更新を妨げない理由が分かる。',
+      'FOR KEY SHARE は 4 つの行ロックの中で最も弱い。FOR SHARE より強いという主張は誤り。',
+      '削除専用のロックという説明は誤りで、FOR KEY SHARE は FK 参照による整合性チェックのためにも使われる、読み取り目的のロック。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>FOR KEY SHARE は弱いロックなので、多くの操作と共存できます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="FOR KEY SHAREの衝突範囲を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">NO KEY UPDATE: 0.5ms (衝突なし)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">FOR UPDATE: 1.98秒 (衝突あり)</text></svg>'
+          + '<p class="cap">図: FOR KEY SHARE は非キー列の更新とは共存するが、FOR UPDATE とは衝突する。</p></div>'
+    }
+  },
+  {
+    q: 'PostgreSQL の行ロックの「待ち行列」が内部的にどう実装されているか、実機の pg_locks から最も正確に言えるものは？',
+    opts: [
+      'ロック待ちは常にテーブル全体のファイルロックとして実装される',
+      'ロック待ちはディスク I/O の完了を待つだけで、他のトランザクションの状態とは無関係である',
+      'ロック待ちはランダムな時間だけ sleep してから再試行する仕組みである',
+      'ロック待ちは、相手のトランザクション ID への ShareLock 要求として実装され、相手が COMMIT/ROLLBACK するまで granted=f のまま残る',
+      'ロック待ちはクライアント側のアプリケーションコードでのみ実装され、サーバーは一切関与しない'
+    ],
+    ans: 3,
+    exps: [
+      'ファイル全体のロックではなく、pg_locks で確認した通り、relation (表) ・ tuple (行) ・ transactionid という複数の粒度のロックが使われている。',
+      '実機の pg_locks で session_B の transactionid ロックが granted=f のまま残っていたことから、他のトランザクションの状態 (A が終了したかどうか) に直接依存していることが分かる。',
+      'sleep によるポーリングではなく、pg_locks に granted=f のロック要求として登録され、該当のロックが解放されると通知されて再開する仕組み。',
+      '<b>これが正解。</b>実機の pg_locks で、session_B が session_A の transactionid に対する ShareLock を要求し granted=f のままだったことを確認した。A が COMMIT/ROLLBACK してトランザクション ID のロックを解放するまで、この要求は保留される。',
+      'サーバー側 (ロックマネージャ) が管理する仕組みであり、アプリケーションコードだけで実装されているものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>待ち行列は、相手のトランザクション ID へのロック要求として表現されます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="トランザクションID待ちの図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">A: 自分の XID に ExclusiveLock</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">B: A の XID に ShareLock (granted=f)</text></svg>'
+          + '<p class="cap">図: B の待ちは、A のトランザクション ID へのロック要求として pg_locks に現れる。</p></div>'
+    }
+  },
+  {
+    q: 'Read Committed における UPDATE 文の「再評価」について、実機で bug_id=4 (priority) を使って確認した結果として最も正確なものは？',
+    opts: [
+      'Read Committed は UPDATE 文の実行前に一度評価した WHERE 句を、その後は変更しない',
+      '再評価という仕組みは存在せず、PostgreSQL は常に lost update を許容する',
+      '再評価が起きるのは Serializable のときだけであり、Read Committed では起きない',
+      '再評価によって、常に元の WHERE 句より多くの行が対象になる',
+      '待たされた後、最新のコミット済みデータで WHERE 句を再評価し、実機でも priority が変わった結果 UPDATE 0 件という結果を確認した'
+    ],
+    ans: 4,
+    exps: [
+      '実機では、A が待たされた後に priority の最新の値 (LOW) で WHERE 句が再評価され、結果が変わった。変更しないという主張は実測と矛盾する。',
+      '実機で UPDATE 0 件という結果が確認できており、これは再評価の仕組みがあることの直接の証拠。lost update を常に許容するという主張は誤り。',
+      'この再評価は PostgreSQL の既定の分離レベルである Read Committed でも起きる。Serializable 限定という主張は誤り。',
+      '実機の結果は逆で、再評価によって対象の行が 0 件になった (条件に一致しなくなった)。常に増えるという主張は誤り。',
+      '<b>これが正解。</b>B が priority を LOW に変更してコミットした後、A の UPDATE は再開時に WHERE priority=\'HIGH\' を最新の値で再評価し、もう一致しないため UPDATE 0 件になった。これが Read Committed のもとで lost update を防ぐ仕組み。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>再評価によって、古い条件のままの書き込みが防がれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="再評価によるUPDATE 0件の図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">B: priority を LOW に COMMIT</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">A: 再評価 → 0 件 (条件不一致)</text></svg>'
+          + '<p class="cap">図: 再評価が無ければ A は古い条件のまま書き込み、B の更新を消してしまっていた。</p></div>'
+    }
+  },
+  {
+    q: 'Repeatable Read のもとで、2 つのトランザクションが同じ行を更新した実機の結果として最も正確なものは？',
+    opts: [
+      'Repeatable Read はスナップショットを再評価できないため、後からコミットしようとした側がコミット時に 40001 のエラーで中止される',
+      'Repeatable Read も Read Committed と同じように、待った後に再評価してエラーを出さない',
+      '40001 はディスク容量不足を示すエラーコードである',
+      'Repeatable Read のエラーは、再試行しても必ず同じ理由で失敗する',
+      'Repeatable Read は常に UPDATE をブロックしたままで、エラーを返すことはない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機の VERBOSITY=verbose の出力で "ERROR: 40001: could not serialize access due to concurrent update" を確認した。Repeatable Read は開始時点のスナップショットを使い続けるため、Read Committed のような再評価ができず、コミット時にエラーで検出する。',
+      '実機ではエラーが発生しており、再評価をしてエラーを出さないという主張は実測と矛盾する。Read Committed と同じ挙動にはならない。',
+      '40001 は serialization_failure (直列化エラー) を表すコードで、ディスク容量とは無関係。',
+      'このエラーは一時的な衝突によるもので、HINT にもある通り、再試行すれば (競合するトランザクションが終わっていれば) 成功する可能性がある。',
+      '実機ではブロック後にエラーで中止されており、ブロックされ続けたままという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>再評価できない代わりに、コミット時にエラーで中止します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="Repeatable Readの直列化エラーの図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">B: hours+1 して先に COMMIT</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#b5401f">A: 40001 serialization_failure</text></svg>'
+          + '<p class="cap">図: スナップショットを再評価できない Repeatable Read は、コミット時のエラーで矛盾を検出する。</p></div>'
+    }
+  },
+  {
+    q: 'write skew が「行ロックだけでは検出できない」とされる理由と、SSI (Serializable Snapshot Isolation) が検出する方法として最も正確なものは？',
+    opts: [
+      'write skew は同じ行を 2 つのトランザクションが更新するために起きる',
+      'write skew は別々の行を更新するため行ロックだけでは検出できず、Serializable の SSI が 2 つのトランザクション間の読み書きの依存関係を追跡して検出する',
+      'write skew はディスク障害が原因で発生する異常である',
+      'Serializable を使わなくても、行ロックだけで常に write skew を防ぐことができる',
+      'write skew は SELECT 文だけで発生し、UPDATE とは無関係である'
+    ],
+    ans: 1,
+    exps: [
+      'oncall の例では alice と bob という別々の行が更新されており、同じ行の更新ではない。',
+      '<b>これが正解。</b>alice と bob は別の行なので、行ロックでは衝突が見つからない。SSI は各トランザクションの読み取りと書き込みの依存関係を追跡し、両方がコミットすると矛盾する組み合わせを検出して、どちらか一方を中止する。',
+      'ディスク障害とは無関係で、正常に動作しているトランザクション同士の間で起きる論理的な異常。',
+      '実機で確認した通り、Repeatable Read (行ロックやスナップショットだけ) では write skew を防げず、両方が成功して不変条件が破られた。',
+      '読み取りだけでは更新が発生しないため write skew には至らない。実際には両方が UPDATE を実行して初めて問題になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>別々の行の更新なので、行単位のロックでは衝突が見えません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="write skewが行ロックで見えない理由の図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">alice 行だけ見れば正常</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">bob 行だけ見れば正常</text></svg>'
+          + '<p class="cap">図: 行ごとに見れば正常でも、2 つの行をまたいだ不変条件は破られうる。SSI はこの依存関係を追跡する。</p></div>'
+    }
+  },
+  {
+    q: 'oncall (在席医師) の実験を Repeatable Read と Serializable それぞれで実行した実機の結果の対比として最も正確なものは？',
+    opts: [
+      'Repeatable Read でも Serializable でも、両方の UPDATE が必ず失敗する',
+      'Repeatable Read でも Serializable と同じく SSI が働き、不変条件が保たれる',
+      'Repeatable Read では両方の UPDATE が成功し alice=f, bob=f (誰も on-call でない状態) になったが、Serializable では片方が 40001 で中止され alice=f, bob=t という不変条件を保つ結果になった',
+      'Serializable は Repeatable Read より弱い分離レベルであり、より多くの異常を許す',
+      'oncall のような複数行をまたぐ不変条件の実験は PostgreSQL では実行できない'
+    ],
+    ans: 2,
+    exps: [
+      'Repeatable Read では両方とも成功している。両方失敗するという主張は実測と矛盾する。',
+      'SSI は Serializable のときだけ働く。Repeatable Read では write skew の検出は行われず、両方成功してしまった。',
+      '<b>これが正解。</b>実機で確認した通り、Repeatable Read では両方成功して不変条件が破られたが、Serializable では片方が 40001 で中止され、最低 1 人は on-call という不変条件が保たれた。',
+      'Serializable は 4 段階の分離レベルの中で最も強く、Repeatable Read より多くの異常 (write skew を含む) を防ぐ。弱いという主張は誤り。',
+      '実機で CREATE TABLE から UPDATE、エラーの確認まで一通り実行でき、実際に再現できている。実行できないという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>同じ実験でも、分離レベルによって結果が変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="分離レベルによる結果の違いを示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="11" text-anchor="middle" fill="#b5401f">Repeatable Read: alice=f, bob=f</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#0f5132">Serializable: alice=f, bob=t</text></svg>'
+          + '<p class="cap">図: Serializable だけが write skew を検出し、不変条件を保つ結果になった。</p></div>'
+    }
+  },
+  {
+    q: '実機で A (bug_id=1→2) と B (bug_id=2→1) を逆順で更新させたときの実際の挙動として最も正確なものは？',
+    opts: [
+      'デッドロックは発生しても自動では検出されず、サーバーは無限に待ち続ける',
+      'デッドロックのエラーコードは 40001 で、serialization_failure と同じコードが使われる',
+      'デッドロックは同じ行を同じ順序で更新した場合にのみ発生する',
+      '逆順で複数行をロックしたときに循環待ちが生まれ、deadlock_timeout (既定 1 秒) 後に検出され、40P01 のエラーで片方が強制的に中止される',
+      'デッドロックが起きると、関係する両方のトランザクションが常に中止される'
+    ],
+    ans: 3,
+    exps: [
+      '実機で約数秒後にエラーが発生しており、無限に待ち続けるという主張は誤り。PostgreSQL は deadlock_timeout ごとに循環を検査している。',
+      '実機の VERBOSITY=verbose の出力で確認した通り、デッドロックのエラーコードは 40P01 であり、40001 (serialization_failure) とは異なるコード。',
+      '同じ順序で更新する場合は循環が生まれず、デッドロックは発生しない。逆順で更新するからこそ循環が生まれる。',
+      '<b>これが正解。</b>実機で "ERROR: 40P01: deadlock detected" と、2 つのプロセスが互いの transactionid を待つ循環の DETAIL を確認した。片方だけが中止され、もう片方は正常に COMMIT できた。',
+      '実機では片方だけが中止され、もう片方は正常にコミットできている。両方が常に中止されるという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>循環待ちが検出されると、片方だけが中止されます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="デッドロック検出後の結果を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">片方: 40P01 で ROLLBACK</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">もう片方: 正常に COMMIT</text></svg>'
+          + '<p class="cap">図: デッドロック検出では片方だけが犠牲者として選ばれ、もう片方は処理を継続できる。</p></div>'
+    }
+  },
+  {
+    q: 'SKIP LOCKED とアドバイザリロックの使い分けについて、実機の結果を踏まえた最も適切なまとめは？',
+    opts: [
+      'SKIP LOCKED はロックされた行が見つかるまで待ち続ける機能である',
+      'アドバイザリロックは必ずテーブルの行に紐付けて使う機能である',
+      'SKIP LOCKED とアドバイザリロックは常に同じ目的で使われ、互換性がある',
+      'pg_try_advisory_lock は、ロックが取れない場合でも常に待ち続ける',
+      'SKIP LOCKED はロック済みの行を飛ばしてジョブキューを分散処理するのに向き、アドバイザリロックは行に紐付かない独自の排他制御としてバッチの多重起動防止などに使う'
+    ],
+    ans: 4,
+    exps: [
+      '実機で確認した通り、SKIP LOCKED はロックされた行をスキップして次の行を即座に取得する機能であり、待ち続ける機能ではない (約 0.68 ミリ秒で取得できた)。',
+      'アドバイザリロックはテーブルの行とは無関係な任意の整数番号に対して取るロックであり、行に紐付ける必要はない。',
+      '目的が異なり、SKIP LOCKED はテーブルの行の分配に、アドバイザリロックは行に紐付かない排他制御に使う。互換的に使えるという主張は誤り。',
+      '実機で確認した通り、pg_try_advisory_lock はロックが取れない場合は即座に false を返し、待たない。待ち続けるのは pg_advisory_lock の方。',
+      '<b>これが正解。</b>実機で、SKIP LOCKED はロック済みの行をスキップして次の行を即座に取得でき (ジョブキューの分散処理に向く)、アドバイザリロックはテーブルの行とは無関係な番号に対するロックで、バッチの多重起動防止などに使えることを確認した。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>目的が異なる 2 つの道具です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="SKIP LOCKEDとadvisory lockの使い分けの図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">SKIP LOCKED: ジョブキュー分散</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">advisory lock: 多重起動防止</text></svg>'
+          + '<p class="cap">図: SKIP LOCKED は行の分配、アドバイザリロックは行に紐付かない排他制御という別の役割を持つ。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL シリーズ ― シニアの書き方とアンチパターン 全 38 回</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:64px 24px 52px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:36px;letter-spacing:.04em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:1040px;margin:0 auto;padding:36px 20px 80px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 22px}
+  .filters{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 30px}
+  .filters button{font-family:inherit;font-size:14px;font-weight:700;border:1.5px solid var(--line);background:#fff;
+    color:var(--sub);border-radius:999px;padding:6px 18px;cursor:pointer;transition:.15s}
+  .filters button.on{background:var(--g1);border-color:var(--g1);color:#fff}
+  .lvsec{margin:0 0 40px}
+  .lvh{font-size:17px;color:var(--sub);font-weight:500;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;
+    box-shadow:0 2px 14px rgba(15,81,50,.05);transition:.18s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 26px rgba(15,81,50,.14);border-color:var(--g3)}
+  .card .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .card .num{font-size:12.5px;color:#7d918a;font-weight:700}
+  .card h2{margin:0 0 8px;font-size:19px;color:var(--g1);line-height:1.45}
+  .card p{margin:0 0 14px;font-size:14.5px;color:var(--sub);flex:1}
+  .card .meta{font-size:12.5px;color:#9aa;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .card .go{color:var(--g2);font-weight:700;white-space:nowrap}
+  .src{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:0 7px;margin:0 4px 0 0;color:#6b7f77;font-size:11.5px}
+  .level{display:inline-block;border-radius:999px;padding:2px 12px;font-size:12.5px;font-weight:700;letter-spacing:.06em}
+  .lv-b{background:#e7f6ee;color:#0f5132} .lv-m{background:#e3edf5;color:#1f4a68}
+  .lv-s{background:#efe8f7;color:#5b3d80} .lv-e{background:#fbeeea;color:#b5401f}
+  .hidden{display:none}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a,.intro a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 22px;color:var(--g2);text-decoration:none;font-size:14px}
+  .ptitle{font-weight:700;color:var(--g1);font-size:18px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ シリーズ</p>
+  <h1>SQL シリーズ</h1>
+  <p>全 38 回。なぜその書き方は壊れるのか、シニアはどう書くのかを、PostgreSQL の中で確かめる</p>
+</header>
+<main>
+  <a class="back" href="./index.html">← explainers トップへ戻る</a>
+  <p class="intro">各回は図解の解説と 5 択 10 問のクイズでできています。選択肢を押すと、すべての選択肢について「なぜ正しいか・なぜ違うか」が開きます。第 I〜V 部は、Bill Karwin『<a href="https://www.oreilly.co.jp/books/9784814400744/" target="_blank" rel="noopener">SQLアンチパターン 第2版</a>』(オライリー・ジャパン, 2024) の章立てに沿って、よくある失敗を「目的 → アンチパターン → 見つけ方 → 使ってよい場合 → 解決策」の順に読み解きます。中身は書籍の要約ではなく、PostgreSQL の公式ドキュメントと論文をもとに書き下ろしたものです。第 VI 部は、アンチパターンを避けたその先で、実行計画・並行実行・運用まで含めて判断するためのシニア向けの書き方です。SQL はすべて PostgreSQL の記法で、載せている実行結果と実行計画は PostgreSQL 18 で実際に実行した出力です。カード下の札は、その回の主な出典の種類です。</p>
+  <div class="filters">
+    <button class="on" data-f="all">すべて</button>
+    <button data-f="b">Beginner</button><button data-f="m">Mid</button><button data-f="s">Senior</button><button data-f="e">Expert</button>
+  </div>
+  <section class="lvsec" data-part="0">
+    <h2 class="lvh"><span class="ptitle">はじめに</span>この先を読むための地図。アンチパターンの型と共通のサンプル DB</h2>
+    <div class="grid">
+    <a class="card" data-lv="b" href="./sql-antipattern-intro.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 01 回</span></div>
+      <h2>アンチパターンとは何か</h2>
+      <p>4 つの分類と、各回に共通する読み方。シリーズ全体で使うバグ管理のサンプル DB を ER 図で一望する。</p>
+      <div class="meta"><span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-part="1">
+    <h2 class="lvh"><span class="ptitle">第 I 部 論理設計のアンチパターン</span>何をテーブルと列で表すか。ここを誤ると、後からどんな SQL を書いても取り返せない</h2>
+    <div class="grid">
+    <a class="card" data-lv="b" href="./sql-jaywalking.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 02 回</span></div>
+      <h2>ジェイウォーク</h2>
+      <p>1 つの列にカンマ区切りで ID を詰めると、結合も集計も整合性も失う。交差テーブルと、配列型を使ってよい場面。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-naive-tree.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 03 回</span></div>
+      <h2>ナイーブツリー</h2>
+      <p>親 ID だけの木は深さが決まらない問い合わせに弱い。WITH RECURSIVE・経路列挙 (ltree)・入れ子集合・閉包テーブルを比べる。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-id-required.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 04 回</span></div>
+      <h2>IDリクワイアド</h2>
+      <p>どのテーブルにも意味のない id を付けると重複を防げない。自然キー・複合キー・identity 列・uuidv7 の選び方。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-keyless-entry.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 05 回</span></div>
+      <h2>キーレスエントリ</h2>
+      <p>参照の正しさをアプリで守るのは並行実行で破れる。孤児行の探し方、ON DELETE、遅延制約。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-eav.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 06 回</span></div>
+      <h2>EAV</h2>
+      <p>属性名を行として持つ汎用テーブルは型も必須も守れない。サブタイプの 3 つの表し方と jsonb の位置づけ。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-polymorphic-associations.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 07 回</span></div>
+      <h2>ポリモーフィック関連</h2>
+      <p>種類の列と ID の列の組で複数の親を指すと外部キーが張れない。共通の親、交差テーブル、排他的な列と CHECK。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-multicolumn-attributes.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 08 回</span></div>
+      <h2>マルチカラムアトリビュート</h2>
+      <p>tag1, tag2, tag3 のように列を並べると検索も追加も一意性も崩れる。従属テーブルに分ける。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-metadata-tribbles.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 09 回</span></div>
+      <h2>メタデータトリブル</h2>
+      <p>年ごとのテーブルや列の増殖をやめ、宣言的パーティショニングとプルーニングに任せる。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-part="2">
+    <h2 class="lvh"><span class="ptitle">第 II 部 物理設計のアンチパターン</span>型・値の候補・ファイル・インデックス。保存の仕方の選択が正しさと速さを決める</h2>
+    <div class="grid">
+    <a class="card" data-lv="b" href="./sql-rounding-errors.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 10 回</span></div>
+      <h2>ラウンディングエラー</h2>
+      <p>float の 0.1 は 0.1 ではない。お金と数量は numeric で持つ理由を、誤差を実際に表示して確かめる。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-31-flavors.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 11 回</span></div>
+      <h2>サーティワンフレーバー</h2>
+      <p>値の候補を CHECK や enum 型に埋め込むと変更が DDL になる。参照テーブルと外部キーで持つ。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-phantom-files.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 12 回</span></div>
+      <h2>ファントムファイル</h2>
+      <p>画像をファイルに置きパスだけ持つと、削除・トランザクション・バックアップが揃わない。bytea・TOAST・外部ストレージの比べ方。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-index-shotgun.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 13 回</span></div>
+      <h2>インデックスショットガン</h2>
+      <p>インデックスは作らなくても作りすぎても効かない書き方でも失敗する。計測から始める手順と PostgreSQL のインデックスの種類。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-part="3">
+    <h2 class="lvh"><span class="ptitle">第 III 部 クエリのアンチパターン</span>NULL、グループ化、ランダム、全文検索、巨大な 1 本の SQL。結果が静かに間違う書き方</h2>
+    <div class="grid">
+    <a class="card" data-lv="b" href="./sql-fear-of-the-unknown.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 14 回</span></div>
+      <h2>フィア・オブ・ジ・アンノウン</h2>
+      <p>NULL は値ではなく「不明」。三値論理、NOT IN の罠、IS DISTINCT FROM、一意制約と NULL。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-ambiguous-groups.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 15 回</span></div>
+      <h2>アンビギュアスグループ</h2>
+      <p>グループの外の列を取り出すと、どの行の値かが決まらない。各グループの最大の行を正しく取る 4 つの書き方。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-random-selection.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 16 回</span></div>
+      <h2>ランダムセレクション</h2>
+      <p>ORDER BY random() は全件を並べ替える。TABLESAMPLE などの代替と、それぞれの偏り。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-poor-mans-search-engine.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 17 回</span></div>
+      <h2>プアマンズ・サーチエンジン</h2>
+      <p>LIKE &#x27;%語%&#x27; は全件を読む。tsvector と GIN、日本語の限界、pg_trgm による部分一致の高速化。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-spaghetti-query.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 18 回</span></div>
+      <h2>スパゲッティクエリ</h2>
+      <p>1 本の SQL で全部やろうとすると結合が行を掛け算して集計が膨らむ。分けて書く・先に集計する・CTE で名付ける。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-implicit-columns.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 19 回</span></div>
+      <h2>インプリシットカラム</h2>
+      <p>SELECT * と列名なしの INSERT は、列の追加や並べ替えで静かに壊れる。ビューの * が作成時に固定される挙動。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-part="4">
+    <h2 class="lvh"><span class="ptitle">第 IV 部 アプリケーション開発のアンチパターン</span>パスワード、インジェクション、欠番、エラー処理、SQL の規律。アプリと DB の境目で起きる失敗</h2>
+    <div class="grid">
+    <a class="card" data-lv="m" href="./sql-readable-passwords.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 20 回</span></div>
+      <h2>リーダブルパスワード</h2>
+      <p>パスワードを読める形で残さない。ソルトと遅いハッシュ、SQL ログに平文を残さない書き方、ロールの SCRAM。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-injection.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 21 回</span></div>
+      <h2>SQL インジェクション</h2>
+      <p>文字列連結で SQL を組まない。プレースホルダ、識別子と値の正しい引用、PL/pgSQL の動的 SQL、許可リスト。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./sql-pseudokey-neat-freak.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 22 回</span></div>
+      <h2>シュードキー・ニートフリーク</h2>
+      <p>シーケンスの欠番は仕様。番号を詰める危険と、行番号が欲しいときの row_number()。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-see-no-evil.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 23 回</span></div>
+      <h2>シー・ノー・エビル</h2>
+      <p>エラーを見ない書き方は、失敗を後で高くつく形に変える。SQLSTATE、中断状態のトランザクション、例外処理。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-diplomatic-immunity.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 24 回</span></div>
+      <h2>ディプロマティック・イミュニティ</h2>
+      <p>SQL だけを規律の外に置かない。COMMENT ON、マイグレーションの版管理、ロールバックで包むテスト。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-standard-operating-procedures.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 25 回</span></div>
+      <h2>スタンダード・オペレーティング・プロシージャ</h2>
+      <p>「何でもストアドに」も「何も DB に置かない」も慣習で決めない。FUNCTION と PROCEDURE、volatility、SECURITY DEFINER。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">PG 公式</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-part="5">
+    <h2 class="lvh"><span class="ptitle">第 V 部 外部キーと正規化</span>外部キーそのものの誤用と、正規化のルールを 1 つの例で通して</h2>
+    <div class="grid">
+    <a class="card" data-lv="s" href="./sql-foreign-key-mistakes.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 26 回</span></div>
+      <h2>外部キーのミニ・アンチパターン</h2>
+      <p>外部キーそのものの誤用。参照側インデックスの欠落、型の不一致、CASCADE の連鎖、NOT VALID からの検証。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./sql-normalization.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 27 回</span></div>
+      <h2>正規化のルール</h2>
+      <p>1NF から 5NF までを同じ例で順に。関数従属とは何か、正規化と性能の誤解、非正規化してよい条件。</p>
+      <div class="meta"><span><span class="src">章立て参考</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-part="6">
+    <h2 class="lvh"><span class="ptitle">第 VI 部 シニアの書き方 (PostgreSQL)</span>実行計画・ウィンドウ関数・冪等な書き込み・制約・MVCC・ロック・無停止の変更・運用。PostgreSQL の内部を前提に判断する</h2>
+    <div class="grid">
+    <a class="card" data-lv="s" href="./sql-explain-plans.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 28 回</span></div>
+      <h2>実行計画を読む</h2>
+      <p>EXPLAIN (ANALYZE, BUFFERS) の各行を読む。推定行数のずれが計画を誤らせる仕組みと、統計で直す方法。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-window-functions.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 29 回</span></div>
+      <h2>ウィンドウ関数で集合として考える</h2>
+      <p>1 行ずつのループや自己結合をウィンドウ関数に置き換える。フレーム、累計、順位、gaps-and-islands。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-cte-lateral-recursive.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 30 回</span></div>
+      <h2>CTE・LATERAL・再帰を使い分ける</h2>
+      <p>CTE のインライン化と MATERIALIZED、LATERAL で各グループの上位 N 件、再帰の止め方。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-upsert-merge.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 31 回</span></div>
+      <h2>UPSERT と MERGE</h2>
+      <p>読んでから書くと並行実行で壊れる。ON CONFLICT と MERGE の違いを、2 本のセッションで確かめる。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-pagination.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 32 回</span></div>
+      <h2>ページネーション</h2>
+      <p>OFFSET は深いページほど遅く、結果もずれる。行値比較によるキーセット方式とインデックス。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-constraints-as-correctness.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 33 回</span></div>
+      <h2>制約で正しさを守る</h2>
+      <p>正しさはアプリの検証より制約で守る。CHECK・DOMAIN・生成列・範囲型と EXCLUDE で予約の重なりを防ぐ。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./sql-jsonb.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 34 回</span></div>
+      <h2>JSONB の使い所と使わない所</h2>
+      <p>jsonb の演算子とインデックス、JSON_TABLE。正規化すべき兆候を見分ける。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="e" href="./sql-mvcc-vacuum.html">
+      <div class="top"><span class="level lv-e">Expert</span><span class="num">第 35 回</span></div>
+      <h2>MVCC と VACUUM</h2>
+      <p>行は上書きされず新しい版が増える。xmin/xmax、HOT、bloat、autovacuum、XID 周回と凍結。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="e" href="./sql-locks-concurrency.html">
+      <div class="top"><span class="level lv-e">Expert</span><span class="num">第 36 回</span></div>
+      <h2>ロックと分離レベル</h2>
+      <p>行ロックの 4 段階、表ロック、分離レベルごとの異常と直列化エラー、デッドロック、SKIP LOCKED のジョブキュー。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="e" href="./sql-zero-downtime-migrations.html">
+      <div class="top"><span class="level lv-e">Expert</span><span class="num">第 37 回</span></div>
+      <h2>止めずにスキーマを変える</h2>
+      <p>DDL のロック待ちの後ろに全員が並ぶ。lock_timeout、CREATE INDEX CONCURRENTLY、NOT VALID、expand/contract。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="e" href="./sql-operations-connections.html">
+      <div class="top"><span class="level lv-e">Expert</span><span class="num">第 38 回</span></div>
+      <h2>接続・タイムアウト・本番運用</h2>
+      <p>接続はプロセス。プーリング、各種タイムアウト、pg_stat_activity と待機イベントで本番を見る。</p>
+      <div class="meta"><span><span class="src">PG 公式</span><span class="src">一次文献</span></span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+document.querySelector('.filters').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('.filters button').forEach(x => x.classList.toggle('on', x === b));
+  const f = b.dataset.f;
+  document.querySelectorAll('.lvsec').forEach(s => {
+    let shown = 0;
+    s.querySelectorAll('.card').forEach(c => { const on = f === 'all' || c.dataset.lv === f; c.classList.toggle('hidden', !on); if (on) shown++; });
+    s.classList.toggle('hidden', shown === 0);
+  });
+});
+</script>
+</body>
+</html>

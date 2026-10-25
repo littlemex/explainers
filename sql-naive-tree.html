@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ナイーブツリー ― 親 ID だけで木を表す</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  th,td{text-align:left;padding:8px 10px;border:1px solid var(--line)}
+  thead tr{background:#eaf5ef}
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 03 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>ナイーブツリー ― 親 ID だけで木を表す</h1>
+  <p>親 ID だけの隣接リストは木を表せるが、固定の深さで結合するクエリは想定より深い枝を取り逃がす</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 01 回 <a href="./sql-antipattern-intro.html">アンチパターンとは何か</a> (サンプル DB の comments テーブル)、第 02 回 <a href="./sql-jaywalking.html">ジェイウォーク</a> (1 列に複数の意味を詰め込む問題の考え方)</p>
+  <p class="intro">コメントへの返信のように「親子関係が何階層にもなる」データを表すとき、最も素朴な方法は <code>parent_id</code> 列を 1 つ持たせることです。これを <b>隣接リスト (adjacency list)</b> と呼び、PostgreSQL でも標準的に使われる正しい設計です。問題は、この隣接リストを「固定の深さで結合する」クエリで読もうとしたときに起こります。結論を先に言うと、隣接リストそのものは悪くありませんが、深さを決め打ちした結合では想定より深い木を取り逃がし、<code>WITH RECURSIVE</code> を使わない限り任意の深さを安全には扱えません。この回では、その失敗を実機で再現し、見つけ方、<code>WITH RECURSIVE</code> による正しい読み方、そして木の持ち方そのものを変える 3 つの代替案 (path enumeration、入れ子集合、閉包テーブル) を比較します。</p>
+
+  <section>
+    <h2>1. 目的 ― 何をしたかったのか</h2>
+    <p>バグ管理システムのコメント欄に「返信」機能を付けたいとします。あるコメントに対して、別のユーザーが返信を付け、その返信にさらに返信が付く、という構造です。これは親子関係が何段にもなる木構造 (tree) で、1 件のコメントが 0 件以上の「子コメント」を持つという関係を表現する必要があります。最も自然な実装は、<code>comments</code> テーブルに「どのコメントへの返信か」を示す <code>parent_comment_id</code> 列を 1 つ追加することです。</p>
+  </section>
+
+  <section>
+    <h2>2. アンチパターン ― どう書いてしまい、何が壊れるか</h2>
+    <p>実際に <code>parent_comment_id</code> を追加し、bug_id=1 のコメントにスレッドを作ります。</p>
+    <pre><code>ALTER TABLE comments ADD COLUMN parent_comment_id bigint REFERENCES comments (comment_id);
+
+INSERT INTO comments (bug_id, author, comment, parent_comment_id) VALUES
+  (1, 3, 'can you share your repro steps?', 1),  -- id 5, 1 への返信
+  (1, 1, 'sure, steps attached',           5),  -- id 6, 5 への返信
+  (1, 2, 'confirmed, same here',           6),  -- id 7, 6 への返信
+  (2, 1, 'which report exactly?',          3);  -- id 8, 3 への返信</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="bug1のコメントスレッドの木構造を示す図">
+        <rect x="220" y="20" width="120" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="280" y="45" font-size="13" text-anchor="middle" fill="#0f5132">id=1 (根)</text>
+        <rect x="220" y="90" width="120" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="280" y="115" font-size="13" text-anchor="middle" fill="#1f4a68">id=5</text>
+        <rect x="220" y="160" width="120" height="40" rx="8" fill="#efe8f7" stroke="#7a5a9e" stroke-width="2"/>
+        <text x="280" y="185" font-size="13" text-anchor="middle" fill="#5b3d80">id=6</text>
+        <rect x="400" y="160" width="120" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="460" y="185" font-size="13" text-anchor="middle" fill="#b5401f">id=7 (4階層目)</text>
+        <line x1="280" y1="60" x2="280" y2="90" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="280" y1="130" x2="280" y2="160" stroke="#9aa" stroke-width="1.5"/>
+        <line x1="340" y1="180" x2="400" y2="180" stroke="#9aa" stroke-width="1.5"/>
+        <text x="40" y="45" font-size="12" fill="#4a5d54">1 階層目</text>
+        <text x="40" y="115" font-size="12" fill="#4a5d54">2 階層目</text>
+        <text x="40" y="185" font-size="12" fill="#4a5d54">3 階層目</text>
+      </svg>
+      <p class="cap">図: bug_id=1 のコメントスレッド。id=1 を根として、id=5 ・ id=6 ・ id=7 が順に深くなる返信の木を作る。id=7 は根から数えて 4 階層目にある。</p>
+    </div>
+    <p>ここで「スレッドを根からすべて表示する」という、ごく普通の要件を固定の深さの自己結合 (self-join) で書いてみます。</p>
+    <pre><code>SELECT c1.comment_id AS lvl1, c2.comment_id AS lvl2, c3.comment_id AS lvl3
+FROM comments c1
+LEFT JOIN comments c2 ON c2.parent_comment_id = c1.comment_id
+LEFT JOIN comments c3 ON c3.parent_comment_id = c2.comment_id
+WHERE c1.parent_comment_id IS NULL
+ORDER BY lvl1, lvl2, lvl3;
+
+ lvl1 | lvl2 | lvl3
+------+------+------
+    1 |    5 |    6
+    2 |      |
+    3 |    8 |
+    4 |      |</code></pre>
+    <p>この結果には <b>id=7 が出てきません。</b> id=6 の子である id=7 は根 (id=1) から数えて 4 階層目にあり、3 段しか結合していないこの SQL では構造的に届かないのです。深さが分からないデータに対して、あらかじめ結合の段数を決め打ちすることはできません。段数を増やしても「もっと深いスレッドが来たら」という不安は消えず、これが隣接リストを素朴な結合だけで読もうとしたときの核心的な限界です。</p>
+  </section>
+  <section>
+    <h2>3. 見つけ方 ― どんな兆候で気づくか</h2>
+    <p>既存のデータベースの中から、隣接リストで木を表している列を探すには、<b>自己参照の外部キー</b> (参照元と参照先が同じテーブルである外部キー) を information_schema から探します。</p>
+    <pre><code>SELECT
+  tc.table_name, kcu.column_name,
+  ccu.table_name AS foreign_table, ccu.column_name AS foreign_column
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+JOIN information_schema.constraint_column_usage ccu
+  ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+  AND tc.table_name = ccu.table_name
+ORDER BY tc.table_name;
+
+ table_name |    column_name    | foreign_table | foreign_column
+------------+--------------------+---------------+----------------
+ comments   | parent_comment_id | comments      | comment_id</code></pre>
+    <p>この結果が返ってきたら、その列は木構造 (あるいは少なくとも階層構造) を表している可能性が高いという兆候です。見つけたら、そのテーブルを読んでいる既存のクエリの中に、この回で見たような固定段数の自己結合が無いか、あるいは最大深さを仮定したアプリケーション側のループが無いかを確認します。</p>
+  </section>
+
+  <section>
+    <h2>4. 使ってよい場合</h2>
+    <p>隣接リストという持ち方自体は、PostgreSQL においても標準的で正しい選択です。使ってよい、というより<b>多くの場合はまずこれを選ぶべき</b>です。1 行の追加・削除・1 つの親の付け替えが、常に 1 行の更新で済むという書き込みの単純さは、他のどの持ち方にも無い利点です。問題になるのは「固定段数の結合で読む」という読み方だけであり、読み方を直せば隣接リストのまま解決できます。</p>
+    <p>PostgreSQL は <code>WITH RECURSIVE</code> という再帰共通テーブル式 (recursive CTE) を使えます。基本の形は「起点の行 (base case)」と「そこから 1 段先の子を取る規則 (recursive case)」を <code>UNION ALL</code> で結びます。</p>
+    <pre><code>WITH RECURSIVE thread AS (
+  SELECT comment_id, bug_id, parent_comment_id, comment, 1 AS depth
+  FROM comments
+  WHERE parent_comment_id IS NULL AND bug_id = 1          -- base case: 根
+  UNION ALL
+  SELECT c.comment_id, c.bug_id, c.parent_comment_id, c.comment, t.depth + 1
+  FROM comments c
+  JOIN thread t ON c.parent_comment_id = t.comment_id     -- recursive case: 1 段先の子
+)
+SEARCH DEPTH FIRST BY comment_id SET ordercol
+SELECT comment_id, parent_comment_id, depth, comment
+FROM thread
+ORDER BY ordercol;
+
+ comment_id | parent_comment_id | depth |             comment
+------------+--------------------+-------+----------------------------------
+          1 |                    |     1 | reproduced on 2.1
+          5 |                  1 |     2 | can you share your repro steps?
+          6 |                  5 |     3 | sure, steps attached
+          7 |                  6 |     4 | confirmed, same here
+          2 |                    |     1 | also on 2.0</code></pre>
+    <p>今度は 4 階層目の id=7 も正しく出てきます。<code>SEARCH DEPTH FIRST BY ... SET ordercol</code> は、結果を深さ優先 (親のすぐ下に子をまとめる) の順序で並べるための列を自動的に作る構文で、ツリー表示のような「親子をまとめて見せたい」場面で役立ちます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="WITH RECURSIVEのbase caseとrecursive caseを示す図">
+        <rect x="30" y="60" width="160" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="85" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">base case</text>
+        <text x="110" y="103" font-size="11.5" text-anchor="middle" fill="#4a5d54">parent_comment_id IS NULL</text>
+        <rect x="260" y="60" width="200" height="60" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="360" y="85" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">recursive case</text>
+        <text x="360" y="103" font-size="11.5" text-anchor="middle" fill="#4a5d54">1 段先の子を JOIN</text>
+        <path d="M 460 90 C 520 90 520 150 400 150 C 320 150 300 130 280 120" fill="none" stroke="#9aa" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa"/></marker></defs>
+        <line x1="190" y1="90" x2="260" y2="90" stroke="#9aa" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="360" y="30" font-size="12" text-anchor="middle" fill="#4a5d54">結果が空になるまで recursive case を繰り返す (UNION ALL)</text>
+      </svg>
+      <p class="cap">図: WITH RECURSIVE は根を取る base case から始め、1 段ずつ子を取る recursive case を、新しい行が出なくなるまで繰り返す。</p>
+    </div>
+    <p>隣接リストの唯一の実務的な危険は、親子関係に<b>循環</b>ができてしまうと <code>WITH RECURSIVE</code> が無限に繰り返されることです。PostgreSQL 14 以降は <code>CYCLE</code> 句で、同じ行が再び現れたらそこで安全に止めることができます。</p>
+    <pre><code>-- 1 -> 3 -> 2 -> 1 という循環を作った状態で
+WITH RECURSIVE t AS (
+  SELECT node_id, parent_id, 1 AS depth FROM scratch_nodes WHERE node_id = 1
+  UNION ALL
+  SELECT n.node_id, n.parent_id, t.depth + 1
+  FROM scratch_nodes n JOIN t ON n.node_id = t.parent_id
+)
+CYCLE node_id SET is_cycle USING path
+SELECT node_id, parent_id, depth, is_cycle FROM t ORDER BY depth;
+
+ node_id | parent_id | depth | is_cycle
+---------+-----------+-------+----------
+       1 |         3 |     1 | f
+       3 |         2 |     2 | f
+       2 |         1 |     3 | f
+       1 |         3 |     4 | t</code></pre>
+    <p>4 回目に node_id=1 が再び現れた時点で <code>is_cycle</code> が <code>t</code> (true) になり、そこで展開が止まります。<code>CYCLE</code> 句を付けなければ、この問い合わせは行を無限に生成し続けようとします (深さの上限を自分で <code>WHERE depth &lt; N</code> のように入れない限り、永久に終わりません)。循環を業務上許さないデータ (親子関係が絶対にループしてはいけない組織図など) では、<code>CYCLE</code> 句を使うか、アプリケーション側で循環を作る更新自体を拒否する仕組みが必要です。</p>
+  </section>
+  <section>
+    <h2>5. 解決策 ― それでも足りないときの 3 つの持ち方</h2>
+    <p><code>WITH RECURSIVE</code> は隣接リストの読み取りを正しくしますが、「部分木をまたいだ検索を高頻度で行う」「木全体を 1 回の問い合わせで取り出したい」といった場面では、再帰そのもののコストが気になることがあります。ここでは、木の<b>持ち方自体</b>を変える 3 つの代替案を、同じ bug_id=1 のスレッドで確認します。</p>
+    <h3>解決策 B: path enumeration (経路列挙、ltree 拡張)</h3>
+    <p>各行に「根からそのノードまでの経路」をそのまま保存する方法です。PostgreSQL では contrib の <code>ltree</code> 拡張がこれを型として提供します。</p>
+    <pre><code>CREATE EXTENSION IF NOT EXISTS ltree;
+ALTER TABLE comments ADD COLUMN thread_path ltree;
+-- 根は自分の id だけ、子は親の経路に自分の id を連結する
+UPDATE comments SET thread_path = comment_id::text::ltree WHERE parent_comment_id IS NULL;
+-- (子ノードも同様に親の thread_path || comment_id で埋める)
+
+SELECT comment_id, parent_comment_id, thread_path FROM comments ORDER BY comment_id;
+
+ comment_id | parent_comment_id | thread_path
+------------+--------------------+-------------
+          1 |                    | 1
+          5 |                  1 | 1.5
+          6 |                  5 | 1.5.6
+          7 |                  6 | 1.5.6.7
+          8 |                  3 | 3.8
+
+CREATE INDEX comments_thread_path_gist ON comments USING gist (thread_path);
+SELECT comment_id FROM comments WHERE thread_path <@ '1'::ltree;      -- id=1 の子孫すべて
+SELECT comment_id FROM comments
+  WHERE thread_path @> (SELECT thread_path FROM comments WHERE comment_id = 7); -- id=7 の祖先すべて</code></pre>
+    <p>経路がそのまま列に入っているため、子孫を取るのも祖先を取るのも再帰を書かずに済み、<code>gist</code> インデックスを使った高速な検索ができます。代償は、ノードを別の親の下に<b>移動</b>させるときに、そのノード以下の経路をすべて書き換える必要があることです。</p>
+    <h3>解決策 C: 入れ子集合 (nested sets)</h3>
+    <p>各ノードに「自分の部分木がカバーする区間」を <code>lft</code>・<code>rgt</code> という 2 つの数値で持たせる方法です。</p>
+    <pre><code>CREATE TABLE comment_nested (comment_id bigint PRIMARY KEY, lft int NOT NULL, rgt int NOT NULL);
+INSERT INTO comment_nested VALUES
+  (1, 1, 8), (5, 2, 7), (6, 3, 6), (7, 4, 5), (2, 9, 10), (3, 11, 14), (8, 12, 13), (4, 15, 16);
+
+-- id=1 の子孫すべて (1つの BETWEEN で済む)
+SELECT comment_id FROM comment_nested
+WHERE lft BETWEEN (SELECT lft FROM comment_nested WHERE comment_id = 1)
+              AND (SELECT rgt FROM comment_nested WHERE comment_id = 1)
+ORDER BY lft;
+-- → 1, 5, 6, 7</code></pre>
+    <p>子孫の取得も祖先の取得も、再帰もインデックス型拡張も使わずに単純な数値比較で済むのが利点です。代償はその逆で、ツリーのどこかにノードを 1 つ挿入するだけで、挿入位置より右側にあるすべての <code>lft</code>・<code>rgt</code> を更新しなければならず、書き込みが重く複雑になります。</p>
+    <h3>解決策 D: 閉包テーブル (closure table)</h3>
+    <p>「祖先・子孫のすべての組」を 1 行ずつ別のテーブルに持つ方法です。</p>
+    <pre><code>CREATE TABLE comment_closure (ancestor_id bigint, descendant_id bigint, depth int, PRIMARY KEY (ancestor_id, descendant_id));
+INSERT INTO comment_closure VALUES
+  (1,1,0),(5,5,0),(6,6,0),(7,7,0), (1,5,1),(1,6,2),(1,7,3),(5,6,1),(5,7,2),(6,7,1);
+
+SELECT descendant_id FROM comment_closure WHERE ancestor_id = 1 ORDER BY descendant_id; -- 1,5,6,7
+SELECT ancestor_id   FROM comment_closure WHERE descendant_id = 7 ORDER BY ancestor_id; -- 1,5,6,7</code></pre>
+    <p>子孫も祖先も、普通の <code>WHERE</code> と索引だけで取れ、ノードの挿入・移動も「そのノードに関係する行を入れ替えるだけ」で済むため、入れ子集合より書き込みが素直です。代償は、ノード数が N、深さが D のとき、関係の行数が最大で N × D 程度まで増えることで、テーブルが大きくなりやすい点です。</p>
+    <table>
+      <thead><tr><th>操作</th><th>隣接リスト+WITH RECURSIVE</th><th>path enumeration (ltree)</th><th>入れ子集合</th><th>閉包テーブル</th></tr></thead>
+      <tbody>
+        <tr><td>子孫をすべて取る</td><td>再帰 (段数ぶん繰り返す)</td><td>索引で 1 回</td><td>BETWEEN で 1 回</td><td>索引で 1 回</td></tr>
+        <tr><td>祖先をすべて取る</td><td>親を順に辿る再帰</td><td>索引で 1 回</td><td>BETWEEN で 1 回</td><td>索引で 1 回</td></tr>
+        <tr><td>ノードを 1 つ追加</td><td>1 行 INSERT</td><td>1 行 INSERT</td><td>右側全体を更新</td><td>祖先の数だけ INSERT</td></tr>
+        <tr><td>部分木を別の親へ移動</td><td>1 行 UPDATE</td><td>配下の経路を再計算</td><td>区間全体を再計算</td><td>関係する行を入れ替え</td></tr>
+        <tr><td>必要な追加の仕組み</td><td>無し (標準 SQL)</td><td>ltree 拡張 + GiST</td><td>無し (数値列のみ)</td><td>追加テーブル 1 つ</td></tr>
+      </tbody>
+    </table>
+    <p>どれを選ぶかは「読み取りと書き込みのどちらが多いか」「木がどれくらい深く・大きくなるか」で決まります。読み取りが多く木があまり動かないなら path enumeration か閉包テーブル、書き込み (特にノードの移動) が多いなら隣接リスト + <code>WITH RECURSIVE</code> が素直です。入れ子集合は読み取りの単純さでは優れますが、書き込みの重さから実務での採用は限定的です。</p>
+  </section>
+  <section>
+    <h2>6. PostgreSQL エンジンで考慮しておくこと</h2>
+    <p>13 万 1,071 行 (深さ約 17 のバランス 2 分木) を <code>generate_series</code> で作り、葉に近いノード (自身を含む部分木が 127 件、子孫は 126 件) の部分木を取得する速さを、隣接リスト + <code>WITH RECURSIVE</code> と path enumeration (ltree + GiST インデックス) で比較しました。</p>
+    <pre><code>-- WITH RECURSIVE (隣接リスト)
+EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) WITH RECURSIVE d AS ( ... ) SELECT count(*) FROM d;
+ Recursive Union ...
+ Execution Time: 0.252 ms
+
+-- ltree の GiST インデックス (path enumeration)
+EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) SELECT count(*) FROM big_tree WHERE path <@ (...);
+ Bitmap Heap Scan on big_tree
+   ->  Bitmap Index Scan on big_tree_path_gist
+ Execution Time: 0.103 ms</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 400 150" role="img" aria-label="再帰CTEとltreeの実行時間比較の図">
+        <text x="200" y="20" font-size="12.5" text-anchor="middle" fill="#4a5d54">部分木 (自身含め 127 件) の取得にかかった時間</text>
+        <rect x="70" y="45" width="60" height="70" fill="#2f5f8a"/>
+        <text x="100" y="40" font-size="12" text-anchor="middle" fill="#1f4a68">0.252 ms</text>
+        <text x="100" y="130" font-size="11.5" text-anchor="middle" fill="#4a5d54">WITH RECURSIVE</text>
+        <rect x="230" y="86" width="60" height="29" fill="#198754"/>
+        <text x="260" y="81" font-size="12" text-anchor="middle" fill="#0f5132">0.103 ms</text>
+        <text x="260" y="130" font-size="11.5" text-anchor="middle" fill="#4a5d54">ltree + GiST</text>
+        <line x1="40" y1="115" x2="340" y2="115" stroke="#9aa"/>
+      </svg>
+      <p class="cap">図: 13 万行の木で自身を含め 127 件の部分木を取得した実行時間。ltree の GiST インデックスは約 2.4 倍速い。どちらも実機の EXPLAIN (ANALYZE, BUFFERS) で確認した値。</p>
+    </div>
+    <p>この差が生まれる理由は、<code>WITH RECURSIVE</code> が「1 段ごとに自己結合を繰り返す」処理であるのに対し、<code>path <@ ...</code> は 1 回のインデックス探索で完了する点にあります。深さが増えるほど、再帰の繰り返し回数も増えるため、この差は木が深くなるほど広がりやすくなります。ただし、対象の部分木が木全体の大部分 (この検証では半分) を占めるような、選択性の低い条件では、PostgreSQL のプランナは GiST インデックスではなく並列シーケンシャルスキャンを選ぶこともあり、インデックスが常に有利とは限りません。</p>
+    <p>なお、<code>CYCLE</code> 句や <code>SEARCH</code> 句は PostgreSQL 14 で追加された構文です。それより古いバージョンでは、同じ結果を <code>array_append</code> で経路を手動で積み上げ、<code>IS NOT NULL</code> や <code>=</code> で循環を自分で検出するという、より長いクエリを書く必要があります。また、<code>ltree</code> は contrib に同梱されている拡張であり、<code>CREATE EXTENSION ltree;</code> を 1 回実行するだけで有効になりますが、スーパーユーザーまたは適切な権限が必要です。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQL アンチパターン 第 2 版』オライリー・ジャパン, 2024 ( <a href="https://www.oreilly.co.jp/books/9784814400744/" target="_blank" rel="noopener">https://www.oreilly.co.jp/books/9784814400744/</a> ) ― 「ナイーブツリー」という名前と、隣接リスト・経路列挙・入れ子集合・閉包テーブルという代替案の章立てだけの参考に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/queries-with.html" target="_blank" rel="noopener">PostgreSQL: WITH Queries (Common Table Expressions)</a> ― WITH RECURSIVE の基本構文、SEARCH 句と CYCLE 句 (PostgreSQL 14 以降) の定義の根拠に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/ltree.html" target="_blank" rel="noopener">PostgreSQL: ltree</a> ― ltree 型の構文、<code>@&gt;</code> / <code>&lt;@</code> 演算子、GiST インデックスのサポートの根拠に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/gist.html" target="_blank" rel="noopener">PostgreSQL: GiST Indexes</a> ― ltree に GiST インデックスを使う一般的な性質の根拠に使った。</li>
+      <li>Celko, J., "Trees and Hierarchies in SQL for Smarties" (Morgan Kaufmann, 2004 年刊の書籍) ― 入れ子集合モデルの出典 (安定したリンクを確認できなかったため著者・年・題名のみ記載)。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-jaywalking.html">← 第 02 回 ジェイウォーク ― カンマ区切りで複数の値を持たせる</a><a href="./sql-index.html">目次</a><a href="./sql-id-required.html">第 04 回 ID リクワイアド ― とりあえず id 列を付ける →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+const QUIZ = [
+  {
+    q: '隣接リスト (adjacency list, parent_id だけで木を表す持ち方) 自体についての説明として最も正確なものは？',
+    opts: [
+      '書き込み (1 行の追加・削除・親の付け替え) が単純な、PostgreSQL でも標準的で正しい持ち方であり、問題になるのは固定段数の結合で読もうとする読み方の方である',
+      '隣接リストという持ち方自体が常に間違っており、使うべきではない',
+      '隣接リストは循環を自動的に禁止する',
+      '隣接リストは深さが 3 階層までのデータにしか使えない',
+      '隣接リストを使うと外部キー制約を付けられない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>隣接リストは1行の追加・削除・親の付け替えが常に1行の更新で済む、書き込みが単純な正しい持ち方。問題は「固定段数の自己結合で読む」という読み方のほうにある。',
+      '違う。隣接リストそのものは問題ではなく、多くの場合はまずこれを選ぶべき標準的な持ち方。',
+      '違う。この回で実際に node_id=1 の循環を作ったが、隣接リストの定義自体に循環を防ぐ機能は無い。CYCLE 句のような仕組みを別途使う必要がある。',
+      '違う。隣接リストは深さに制限が無く、何階層でも表せる。制限があるのは固定段数で結合しようとする読み方の方。',
+      '違う。実際にこの回で parent_comment_id に comments.comment_id への外部キー制約を付けている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>隣接リストは持ち方として正しく、問題は読み方にあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="隣接リストの持ち方と読み方の違いの図"><rect x="30" y="30" width="220" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">持ち方: 隣接リスト</text><text x="140" y="75" font-size="11" text-anchor="middle" fill="#4a5d54">正しい ・ 書き込みが単純</text><rect x="310" y="30" width="220" height="60" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">読み方: 固定段数の結合</text><text x="420" y="75" font-size="11" text-anchor="middle" fill="#4a5d54">ここが問題</text></svg>'
+          + '<p class="cap">図: 隣接リストという持ち方と、固定段数で読む読み方は別の話。</p></div>'
+    }
+  },
+  {
+    q: '3 段の自己結合 (lvl1, lvl2, lvl3) で bug_id=1 のスレッドを読んだ実機の結果から分かることとして最も適切なものは？',
+    opts: [
+      'すべてのコメントが正しく表示された',
+      'comment_id=7 (根から4階層目) が結果に現れず、固定段数の結合では想定より深い枝を取り逃がす',
+      'comment_id=1 が結果から消えた',
+      'エラーになり何も返らなかった',
+      '結合の順序が逆になって表示された'
+    ],
+    ans: 1,
+    exps: [
+      '違う。実際には4階層目の comment_id=7 が結果に含まれておらず、正しく表示されたとは言えない。',
+      '<b>これが正解。</b>3段しか結合していないため、4階層目にある comment_id=7 は構造的にこの問い合わせの結果に現れない。段数を増やしても、より深い枝が来れば同じ問題が再発する。',
+      '違う。comment_id=1 はlvl1として結果に含まれている。',
+      '違う。このSQLは文法的に正しく実行でき、エラーにはならない。',
+      '違う。結合の順序の問題ではなく、結合の段数が足りないために深い行が現れないという問題。'
+    ],
+    why: { html: '<h4>根拠 (実機の出力)</h4><div class="fig"><pre style="margin:0"> lvl1 | lvl2 | lvl3\n------+------+------\n    1 |    5 |    6\n    3 |    8 |</pre><p class="cap">図: comment_id=7 (id=6 の子) がどの行にも現れない。</p></div>' }
+  },
+  {
+    q: '既存のデータベースから隣接リストで木を表している列を見つけるための、この回で実際に使った問い合わせの考え方として正しいものは？',
+    opts: [
+      '列名が id で終わる列をすべて列挙する',
+      'テーブルの行数が最も多い列を探す',
+      'information_schema で、参照元のテーブルと参照先のテーブルが同じ外部キー (自己参照の外部キー) を探す',
+      '文字列を含む列をすべて列挙する',
+      'NULL が 1 つも無い列を探す'
+    ],
+    ans: 2,
+    exps: [
+      '違う。id で終わる列名は多くのテーブルに存在し、木構造かどうかの判断基準にはならない。',
+      '違う。行数の多さと木構造を表しているかどうかは無関係。',
+      '<b>これが正解。</b>tc.table_name = ccu.table_name という条件で、参照元と参照先が同じテーブルである外部キーを information_schema から探すことで、隣接リストになっている列を特定できる。',
+      '違う。文字列を含む列という条件は木構造とは無関係で、第 02 回の見つけ方とも混同している。',
+      '違う。NULL の有無と木構造を表しているかどうかは無関係 (根のノードは parent_id が NULL になることが多いくらいの関係しかない)。'
+    ],
+    why: { html: '<h4>根拠 (実機の出力)</h4><div class="fig"><pre style="margin:0"> table_name |    column_name     | foreign_table\n------------+--------------------+---------------\n comments   | parent_comment_id  | comments</pre><p class="cap">図: comments テーブルが自分自身を参照する外部キーを持つことが分かる。</p></div>' }
+  },
+  {
+    q: '「使ってよい場合」の節で説明した、隣接リストを選ぶべき場面の説明として最も適切なものは？',
+    opts: [
+      '木が絶対に循環しないことが保証されている場合だけ使ってよい',
+      '読み取りが全く発生しない場合だけ使ってよい',
+      'ltree 拡張がインストールされていない場合の次善の策としてのみ使う',
+      '多くの場合はまず隣接リストを選び、固定段数の結合ではなく WITH RECURSIVE で読むようにすればよい',
+      '木の深さが事前に分かっている場合だけ使ってよい'
+    ],
+    ans: 3,
+    exps: [
+      '違う。循環の可能性は CYCLE 句で安全に扱えるため、循環しないことの保証が前提条件ではない。',
+      '違う。読み取りが発生しないデータというのは通常考えにくく、本文にそのような条件は無い。',
+      '違う。隣接リストは次善の策ではなく、多くの場合に最初に選ぶべき標準的な持ち方として説明した。',
+      '<b>これが正解。</b>本文で説明した通り、隣接リストは書き込みの単純さで優れており、多くの場合はまずこれを選び、読み方を WITH RECURSIVE にすることで深さの問題を解決できる。',
+      '違う。WITH RECURSIVE は深さが事前に分からなくても、結果が空になるまで繰り返すため、深さを事前に知る必要はない。'
+    ],
+    why: { html: '<h4>根拠</h4><p>本文で「多くの場合はまずこれを選ぶべき」と明記した通り、隣接リストは既定の選択肢であり、WITH RECURSIVE で読むことが前提になる。</p>' }
+  },
+  {
+    q: 'WITH RECURSIVE の base case と recursive case の役割として最も正確なものは？',
+    opts: [
+      'base case は木全体を一度に取得し、recursive case は使われない',
+      'base case も recursive case も同じ処理をするため、区別する意味は無い',
+      'base case は起点となる行 (この回では根のコメント) を取り、recursive case はそこから 1 段先の子を取る規則を、新しい行が出なくなるまで繰り返す',
+      'recursive case は親を削除する処理である',
+      'base case は結果を並べ替える処理である'
+    ],
+    ans: 2,
+    exps: [
+      '違う。base case が木全体を一度に取ることはなく、recursive case は実際に繰り返し使われる。',
+      '違う。base case (起点) と recursive case (1段先に進む規則) は明確に役割が異なる。',
+      '<b>これが正解。</b>base case で根 (parent_comment_id IS NULL の行) を取り、recursive case で1段先の子を JOIN で取る規則を、新しい行が出なくなるまで UNION ALL で繰り返す。',
+      '違う。recursive case は削除の処理ではなく、子を取得して木を1段ずつ広げる処理。',
+      '違う。並べ替えは SEARCH DEPTH FIRST BY ... SET ordercol の役割であり、base case の役割ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 400 110" aria-label="base caseとrecursive caseの繰り返しの図"><rect x="20" y="30" width="110" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="75" y="60" font-size="11" text-anchor="middle" fill="#0f5132">base case</text><rect x="180" y="30" width="150" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="255" y="55" font-size="11" text-anchor="middle" fill="#1f4a68">recursive case</text><text x="255" y="72" font-size="10" text-anchor="middle" fill="#4a5d54">(繰り返す)</text><line x1="130" y1="55" x2="180" y2="55" stroke="#9aa"/></svg><p class="cap">図: base caseから始め、recursive caseを繰り返す。</p></div>'
+    }
+  },
+  {
+    q: 'わざと node_id=1 → 3 → 2 → 1 という循環を作った scratch_nodes に対して CYCLE 句付きの WITH RECURSIVE を実行した実機の結果として正しいものは？',
+    opts: [
+      '無限に行を生成し続け、問い合わせが終わらない',
+      'エラーになり、問い合わせ自体が実行できない',
+      '循環する前の3行だけが返り、4行目以降は一切表示されない',
+      '4回目に node_id=1 が再び現れた時点で is_cycle が true になり、そこで展開が止まる',
+      '循環があることに気づかず、誤った結果を返す'
+    ],
+    ans: 3,
+    exps: [
+      '違う。CYCLE 句を付けたことで、無限に行を生成し続けることなく安全に止まった。',
+      '違う。CYCLE 句付きのクエリはエラーにならず、正常に完了した。',
+      '違う。実機の結果では4行が返り、4行目 (2回目のnode_id=1) まで表示されている。',
+      '<b>これが正解。</b>実機の出力では、4回目にnode_id=1が再び現れた行で is_cycle が t (true) になり、そこで展開が止まっている。',
+      '違う。is_cycle 列によって循環が検出されたことが明示されており、気づかず誤った結果を返したわけではない。'
+    ],
+    why: { html: '<h4>根拠 (実機の出力)</h4><div class="fig"><pre style="margin:0"> node_id | parent_id | depth | is_cycle\n---------+-----------+-------+----------\n       1 |         3 |     1 | f\n       3 |         2 |     2 | f\n       2 |         1 |     3 | f\n       1 |         3 |     4 | t</pre><p class="cap">図: 4行目でis_cycleがtになり展開が止まる。</p></div>' }
+  },
+  {
+    q: 'path enumeration (ltree 拡張) で各行に根からの経路を保存する方法の、利点と代償の説明として最も正確なものは？',
+    opts: [
+      '利点も代償も無く、隣接リストと完全に同じ性質を持つ',
+      '利点: 子孫・祖先を再帰無しに索引で取得できる。代償: ノードを別の親へ移動すると配下の経路をすべて書き換える必要がある',
+      '利点: 書き込みが常に最速になる。代償: 読み取りができなくなる',
+      '利点: 循環を自動的に防げる。代償: ディスク容量が倍になる',
+      '利点: 外部キー制約が自動的に強化される。代償: GiST インデックスが使えなくなる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。この回で確認した通り、ltree は子孫・祖先の取得を索引で1回で済ませられる点で隣接リストと異なる性質を持つ。',
+      '<b>これが正解。</b>経路がそのまま列にあるため再帰無しに検索でき、GiST インデックスで高速化できる一方、ノードを移動すると配下すべての経路を再計算する代償がある。',
+      '違う。読み取りができなくなるという説明は誤り。むしろ読み取り (子孫・祖先の検索) が速くなる方法として紹介した。',
+      '違う。循環を自動的に防ぐ機能についてはこの方式の説明に含まれていない。',
+      '違う。GiST インデックスが使えなくなるという説明は誤り。実際にこの回で gist インデックスを作成し、検索で使われることを確認した。'
+    ],
+    why: { html: '<h4>根拠 (実機の出力)</h4><div class="fig"><pre style="margin:0"> comment_id | thread_path\n------------+-------------\n          1 | 1\n          5 | 1.5\n          6 | 1.5.6\n          7 | 1.5.6.7</pre><p class="cap">図: 経路がそのまま列に入っているため、&lt;@ や @&gt; で再帰無しに検索できる。</p></div>' }
+  },
+  {
+    q: '入れ子集合 (nested sets, lft/rgt で部分木を区間として表す方法) の利点と代償の説明として最も正確なものは？',
+    opts: [
+      '利点: 子孫をBETWEENだけで取れる。代償: ノードを1つ挿入するだけで、挿入位置より右側のlft・rgtをすべて更新する必要がある',
+      '利点: 書き込みが隣接リストより常に単純になる',
+      '利点: 外部キー制約を自動的に強化できる',
+      '利点: 循環が理論的に発生し得なくなる唯一の方法である',
+      '利点: ltree拡張が無くても常にGiSTインデックスが使える'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>lft と rgt の区間比較 (BETWEEN) だけで子孫を取れる単純さが利点だが、ノードを1つ挿入するだけで右側全体のlft・rgtを更新する必要があり、書き込みが重くなる代償がある。',
+      '違う。本文で説明した通り、入れ子集合の書き込みは隣接リストより重くなる代償があり、常に単純になるという説明は誤り。',
+      '違う。外部キー制約の強化とは無関係の性質。入れ子集合は lft と rgt という 2 つの数値列だけで部分木を表す方式であり、参照整合性の仕組みとは別の話。',
+      '違う。循環が発生しないことは隣接リストに CYCLE 句を使った場合でも確保できるため、入れ子集合だけの性質ではない。',
+      '違う。入れ子集合は数値列 (lft, rgt) だけで実現でき、GiST インデックスや ltree 拡張を前提にしていない。'
+    ],
+    why: { html: '<h4>根拠 (実機のクエリ)</h4><p>この回で実行した子孫取得のクエリは <code>lft BETWEEN ... AND ...</code> という単純な区間比較だけで済んだが、この区間を維持するための挿入・移動のコストは説明の通り重くなる。</p>' }
+  },
+  {
+    q: '閉包テーブル (closure table, 祖先・子孫のすべての組を別テーブルに持つ方法) の利点と代償の説明として最も正確なものは？',
+    opts: [
+      '利点: 子孫・祖先が普通のWHEREと索引だけで取れ、ノードの追加・移動も関係する行の入れ替えだけで済む。代償: ノード数×深さの分だけ行数が増えやすい',
+      '利点: テーブルを1つも追加せずに実現できる',
+      '利点: 常に入れ子集合よりディスク容量が少ない',
+      '利点: 外部キー制約が不要になる',
+      '利点: 再帰も索引も使わずに常に最速になる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>祖先・子孫の組を別テーブルに持つことで、普通のWHEREと索引だけで取得でき、挿入・移動も関係する行の入れ替えだけで済む一方、行数がノード数×深さの程度まで増えやすい代償がある。',
+      '違う。閉包テーブルはその名前の通り、comment_closureのような新しいテーブルを1つ追加して実現する方法。',
+      '違う。ディスク容量の比較は行数やデータの形に依存し、常に入れ子集合より少ないとは言えない。',
+      '違う。外部キー制約の必要性とは無関係の性質。閉包テーブルは祖先・子孫の組を保存する追加のテーブルであり、comments.bug_id のような既存の外部キーとは別の仕組み。',
+      '違う。「常に最速」という無条件の主張は誇張であり、この回ではそこまでの比較は行っていない。'
+    ],
+    why: { html: '<h4>根拠 (実機のクエリ)</h4><p>この回で実行した <code>SELECT descendant_id FROM comment_closure WHERE ancestor_id = 1</code> は、再帰もBETWEENも使わない単純なWHERE条件だけで子孫を取得できた。</p>' }
+  },
+  {
+    q: '13 万行の木で、自身を含め 127 件の部分木を取得する速さを比較した実機の結果 (WITH RECURSIVE: 0.252 ms、ltree + GiST: 0.103 ms) の解釈として最も適切なものは？',
+    opts: [
+      'ltree の方が常に100倍以上速い',
+      '両者の速さに意味のある差は無い',
+      'WITH RECURSIVEは1段ごとに自己結合を繰り返すのに対し、path <@ ...は1回のインデックス探索で済むため、この条件ではltreeの方が速かった。ただし選択性が低い条件では結果が変わりうる',
+      'WITH RECURSIVEは常にエラーになるため比較できない',
+      'ltreeは常にシーケンシャルスキャンを使うため遅い'
+    ],
+    ans: 2,
+    exps: [
+      '違う。実測では約2.4倍の差であり、100倍以上という数値は実測と合わない。',
+      '違う。0.252 msと0.103 msという具体的な差が実機で確認されており、差が無いという説明は誤り。',
+      '<b>これが正解。</b>再帰的な自己結合の繰り返しと、1回のインデックス探索という処理の違いがこの差を生む。ただし本文で述べた通り、選択性の低い (対象が木の大部分を占める) 条件ではプランナがシーケンシャルスキャンを選ぶこともあり、結果が変わりうる。',
+      '違う。WITH RECURSIVEは実機で正常に実行され、Execution Time 0.252 msという結果を返している。エラーにはなっていない。',
+      '違う。この回の 127 件 (自身を含む) のケースでは、ltreeはGiSTインデックス (Bitmap Index Scan) を使っており、常にシーケンシャルスキャンを使うという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 400 110" aria-label="実行方式の違いの図"><rect x="20" y="20" width="160" height="70" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="100" y="50" font-size="11" text-anchor="middle" fill="#1f4a68">再帰: 1段ずつ繰り返す</text><rect x="220" y="20" width="160" height="70" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="300" y="50" font-size="11" text-anchor="middle" fill="#0f5132">索引: 1回で完了</text></svg><p class="cap">図: 繰り返し処理と1回の索引探索の違いが速度差の理由。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CTE ・ LATERAL ・ 再帰を使い分ける ― 「名前を付けた一時テーブル」の正体</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14px;margin:0 0 16px}
+  table.tbl th,table.tbl td{text-align:left;padding:7px 9px;border:1px solid #d9e5df}
+  table.tbl th{background:#eaf5ef}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 30 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>CTE ・ LATERAL ・ 再帰を使い分ける ― 「名前を付けた一時テーブル」の正体</h1>
+  <p>WITH 句は単なる見やすさのための別名ではなく、PostgreSQL 12 以降では「インライン化されるか、材料化 (マテリアライズ) されるか」という実行計画そのものに関わる選択です。LATERAL は FROM 句の中で前の表の行を参照する唯一の方法で、再帰 CTE は停止条件を自分で保証しない限り永遠に回ります。この回では、この 3 つを実機の実行計画とエラーメッセージで確認します。</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 3 回 <a href="./sql-naive-tree.html">ナイーブツリー</a> (WITH RECURSIVE の初出) ・ 第 29 回 <a href="./sql-window-functions.html">ウィンドウ関数で集合として考える</a></p>
+  <p class="intro">この回で答えるのは「WITH で名前を付けたクエリは、ビューのように毎回素通りするのか、それとも一時テーブルのように一度だけ計算されるのか」「グループごとの上位 N 件を取るときに、なぜ普通の JOIN ではなく LATERAL が必要になるのか」「再帰 CTE はいつ止まるのか」という 3 つの疑問です。結論を先に言うと、CTE は PostgreSQL 12 以降は既定で<b>インライン化</b> (呼び出し元に展開) されますが、複数回参照すると既定で<b>材料化</b> (1 回だけ計算してメモリに置く) に切り替わり、この切り替わりを <code>MATERIALIZED</code>/<code>NOT MATERIALIZED</code> で明示できます。LATERAL は「右側の表が左側の行を見てよい」という唯一の仕組みで、再帰 CTE は自分で書いた停止条件以外に安全装置が無いので、書き忘れると <code>statement_timeout</code> に当たるまで本当に回り続けます。</p>
+
+  <section>
+    <h2>1. この回で解く問題 ― WITH は「名前を付けた箱」でしかない</h2>
+    <p><code>WITH 名前 AS (SELECT ...)</code> という書き方 (共通テーブル式、CTE) は、長いクエリを読みやすい単位に分割するためによく使われます。しかし「読みやすくするためだけの別名」と理解していると、2 つの誤解が生まれます。1 つは「CTE は必ず 1 回だけ計算されて、その結果が使い回される」という誤解、もう 1 つは「CTE もサブクエリも結局同じように最適化される」という誤解です。どちらも PostgreSQL 12 以降では正確ではありません。</p>
+    <p>もう 1 つの問題は「グループごとに上位 N 件を取りたい」という定番の要求です。第 29 回で見た <code>ROW_NUMBER() OVER (PARTITION BY ...)</code> で書けますが、グループごとに違う条件 (違う LIMIT や、グループの値を使った絞り込み) を付けたい場合、ウィンドウ関数だけでは書きにくくなります。ここで必要になるのが <b>LATERAL</b> です。</p>
+    <p>3 つ目は再帰です。親子関係や「この行は別の行の重複である」といった連鎖をたどるには <code>WITH RECURSIVE</code> が必要ですが、再帰である以上「いつ止まるか」を自分で保証しなければ、円環データや書き忘れで無限に回り続けます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="CTEがインライン化されるか材料化されるかを示す図">
+        <text x="150" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">インライン化</text>
+        <rect x="30" y="35" width="240" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="65" font-size="12" text-anchor="middle" fill="#0f5132">WITH の中身を呼び出し元に展開</text>
+        <text x="150" y="100" font-size="11.5" text-anchor="middle" fill="#4a5d54">外側の WHERE が内側まで届く</text>
+        <text x="450" y="20" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">材料化 (マテリアライズ)</text>
+        <rect x="330" y="35" width="240" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="450" y="65" font-size="12" text-anchor="middle" fill="#5b3d80">WITH の中身を先に 1 回だけ計算</text>
+        <text x="450" y="100" font-size="11.5" text-anchor="middle" fill="#4a5d54">外側の WHERE は後から掛かる</text>
+        <text x="300" y="150" font-size="12.5" text-anchor="middle" fill="#12211a">どちらになるかで、同じ SQL でも実行計画と速さが変わる</text>
+      </svg>
+      <p class="cap">図: CTE は書き方と参照回数によって、呼び出し元への展開か、1 回だけの計算かが切り替わる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 仕組み ― CTE は既定でインライン化される (PostgreSQL 12 以降)</h2>
+    <p>PostgreSQL の公式ドキュメントによれば、<b>再帰的でなく、副作用 (データ変更) も無く、1 回しか参照されない CTE は、既定でサブクエリと同じようにインライン化 (呼び出し元に展開) される</b>とされています。これは PostgreSQL 12 で導入された挙動で、それより前のバージョンでは CTE は常に最適化の壁 (optimization fence) として働き、必ず 1 回だけ計算されていました。同じ <code>bugs</code> テーブルに対して、CTE をそのまま使った場合と <code>MATERIALIZED</code> を付けた場合の実行計画です。</p>
+    <pre><code>EXPLAIN (COSTS OFF)
+WITH recent AS (
+  SELECT * FROM bugs
+)
+SELECT * FROM recent WHERE bug_id = 1;</code></pre>
+    <pre><code> Index Scan using bugs_pkey on bugs
+   Index Cond: (bug_id = 1)</code></pre>
+    <p>外側の <code>WHERE bug_id = 1</code> が CTE の内側まで押し込まれ (プッシュダウン)、<code>bugs_pkey</code> を使った <code>Index Scan</code> 1 発で済んでいます。<code>recent</code> という名前は実行計画のどこにも残っていません。これに <code>AS MATERIALIZED</code> を付けると挙動が変わります。</p>
+    <pre><code>EXPLAIN (COSTS OFF)
+WITH recent AS MATERIALIZED (
+  SELECT * FROM bugs
+)
+SELECT * FROM recent WHERE bug_id = 1;</code></pre>
+    <pre><code> CTE Scan on recent
+   Filter: (bug_id = 1)
+   CTE recent
+     ->  Seq Scan on bugs</code></pre>
+    <p>こちらは <code>bugs</code> テーブルをまず <code>Seq Scan</code> で全件読み、<code>recent</code> という一時的な結果をメモリに置いてから、その上で <code>bug_id = 1</code> の絞り込みを掛けています。インデックスを使った絞り込みの機会が失われ、全件スキャンになっています。同じ 1 行を取るだけのクエリでも、<code>MATERIALIZED</code> を付けるかどうかでアクセスするデータ量が大きく変わります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="CTEのインライン化と材料化の実行計画の違いを示す図">
+        <text x="150" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">既定 (インライン化)</text>
+        <rect x="30" y="35" width="240" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="65" font-size="12" text-anchor="middle" fill="#0f5132">Index Scan (bug_id=1 で直接絞る)</text>
+        <text x="450" y="20" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">AS MATERIALIZED</text>
+        <rect x="330" y="35" width="240" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="450" y="65" font-size="11.5" text-anchor="middle" fill="#5b3d80">Seq Scan (全件) → CTE Scan で絞る</text>
+        <text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#4a5d54">インライン化は外側の絞り込みを内側に届け、材料化は内側を先に固定してしまう</text>
+        <text x="300" y="155" font-size="12" text-anchor="middle" fill="#4a5d54">bugs テーブル全体を読むか、1 行だけ読むかの差になる</text>
+      </svg>
+      <p class="cap">図: 既定 (インライン化) は絞り込みが内側まで届くが、MATERIALIZED は内側を先に固定してから絞り込む。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 仕組み ― 2 回以上参照すると既定が材料化に変わる、データ変更 CTE</h2>
+    <p>CTE を複数回参照する場合は話が変わります。公式ドキュメントのとおり、<b>2 回以上参照される CTE は、既定で材料化される</b> (もう一度計算し直すのではなく、1 回だけ計算してその結果を再利用する) という挙動になります。担当者ごとの作業時間の合計 (<code>totals</code>) を自己結合した例です。</p>
+    <pre><code>WITH totals AS (
+  SELECT reported_by, SUM(hours) AS total_hours FROM bugs WHERE hours IS NOT NULL GROUP BY reported_by
+)
+SELECT t1.reported_by, t1.total_hours
+FROM totals t1 JOIN totals t2 ON t1.reported_by = t2.reported_by
+WHERE t1.total_hours > 0;</code></pre>
+    <pre><code> Hash Join
+   CTE totals
+     ->  HashAggregate
+           ->  Seq Scan on bugs
+   ->  CTE Scan on totals t2
+   ->  Hash
+         ->  CTE Scan on totals t1</code></pre>
+    <p><code>HashAggregate</code> (集計) は 1 回しか出てきません。<code>totals</code> は 1 回だけ計算され、<code>t1</code> と <code>t2</code> という 2 つの参照はどちらもその結果を <code>CTE Scan</code> で読むだけです。ここに <code>NOT MATERIALIZED</code> を付けると、参照ごとに集計をやり直します。</p>
+    <pre><code>WITH totals AS NOT MATERIALIZED ( ... )
+...</code></pre>
+    <pre><code> Hash Join
+   ->  HashAggregate
+         ->  Seq Scan on bugs
+   ->  Hash
+         ->  HashAggregate
+               ->  Seq Scan on bugs bugs_1</code></pre>
+    <p>今度は <code>HashAggregate</code> と <code>Seq Scan on bugs</code> が 2 回に増えています。<code>totals</code> という集計を 2 回計算し直しているためです。集計そのものが軽ければインライン化の方が速いこともありますが、集計や複雑な結合を含む重い CTE を何度も参照するなら、既定の材料化 (1 回だけ計算) の方が有利です。どちらが速いかは、CTE の中身が軽いか重いか、外側でどれだけ絞り込まれるかによって変わるので、実際に <code>EXPLAIN</code> で両方を確認するのが確実です。</p>
+    <h3>データ変更 CTE ― 1 つの文で削除と挿入をつなぐ</h3>
+    <p>CTE は <code>SELECT</code> だけでなく <code>INSERT</code>・<code>UPDATE</code>・<code>DELETE</code> の <code>RETURNING</code> 結果を次の CTE や外側のクエリに渡せます。「FIXED のまま 2026-02-01 より前に報告されたバグをアーカイブ用テーブルに移す」を、削除と挿入をまとめた 1 つの文で実行した結果です。</p>
+    <pre><code>WITH moved AS (
+  DELETE FROM bugs
+  WHERE status = 'FIXED' AND date_reported < '2026-02-01'
+  RETURNING *
+)
+INSERT INTO bugs_archive
+SELECT * FROM moved;</code></pre>
+    <p>実行前は 19 件のバグがあり、このうち条件に合う 5 件が <code>bugs_archive</code> に移動し、<code>bugs</code> には 14 件が残りました。1 つの文の中で完結するので、削除だけ成功して挿入が失敗する (あるいはその逆) という中間状態が生まれません。これは 2 つの文に分けて <code>BEGIN</code>/<code>COMMIT</code> で囲むのと似ていますが、1 文であること自体がアトミック性を保証してくれるので、トランザクション制御を書き忘れる余地がありません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="データ変更CTEでDELETEとINSERTをつなぐ図">
+        <rect x="30" y="30" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="140" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">DELETE ... RETURNING *</text>
+        <text x="140" y="75" font-size="11" text-anchor="middle" fill="#4a5d54">19 件中 5 件を削除</text>
+        <rect x="330" y="30" width="220" height="60" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="440" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">INSERT INTO bugs_archive</text>
+        <text x="440" y="75" font-size="11" text-anchor="middle" fill="#4a5d54">削除された 5 件を挿入</text>
+        <text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#12211a">1 つの文の中でつながっているので、片方だけ成功する状態が無い</text>
+      </svg>
+      <p class="cap">図: WITH moved AS (DELETE ... RETURNING) を INSERT に渡すことで、削除と挿入を 1 つの文にまとめる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 仕組み ― LATERAL で「グループごとの上位 N 件」を書く</h2>
+    <p>「各担当者の、直近 2 件のバグ報告だけを見たい」という要求を、サブクエリを <code>FROM</code> に書いて試すと、次のエラーになります。</p>
+    <pre><code>SELECT a.account_name, b.bug_id
+FROM accounts a
+CROSS JOIN (
+  SELECT bug_id FROM bugs WHERE reported_by = a.account_id ORDER BY date_reported DESC LIMIT 2
+) b;
+-- ERROR:  invalid reference to FROM-clause entry for table "a"
+-- HINT:  To reference that table, you must mark this subquery with LATERAL.</code></pre>
+    <p>通常のサブクエリは、それより前に <code>FROM</code> に出てきた表の行を見ることができません。各担当者ごとに違う <code>account_id</code> で絞り込みたいのに、サブクエリの中で <code>a.account_id</code> を参照できないので、この書き方は成立しません。<b>LATERAL</b> を付けると、エラーメッセージの指示どおりこの参照が許可されます。</p>
+    <pre><code>SELECT a.account_name, b.bug_id, b.date_reported, b.summary
+FROM accounts a
+CROSS JOIN LATERAL (
+  SELECT bug_id, date_reported, summary
+  FROM bugs
+  WHERE reported_by = a.account_id
+  ORDER BY date_reported DESC, bug_id DESC
+  LIMIT 2
+) b
+ORDER BY a.account_name, b.date_reported DESC;</code></pre>
+    <table class="tbl">
+      <thead><tr><th>account_name</th><th>bug_id</th><th>date_reported</th><th>summary</th></tr></thead>
+      <tbody>
+        <tr><td>alice</td><td>15</td><td>2026-02-16</td><td>pagination off by one</td></tr>
+        <tr><td>alice</td><td>14</td><td>2026-02-15</td><td>search index stale</td></tr>
+        <tr><td>bob</td><td>19</td><td>2026-03-21</td><td>dashboard cache miss</td></tr>
+        <tr><td>bob</td><td>18</td><td>2026-03-20</td><td>slow dashboard load</td></tr>
+        <tr><td>carol</td><td>13</td><td>2026-02-03</td><td>typo in email subject</td></tr>
+        <tr><td>carol</td><td>12</td><td>2026-02-02</td><td>wrong rounding in invoice</td></tr>
+        <tr><td>dave</td><td>17</td><td>2026-03-05</td><td>oauth redirect loop</td></tr>
+        <tr><td>dave</td><td>16</td><td>2026-03-04</td><td>session expires early</td></tr>
+      </tbody>
+    </table>
+    <p>4 人の担当者それぞれについて、直近 2 件 (全員ちょうど 2 件以上報告しているので、どの担当者も 2 行ずつ) が取れています。実行計画を見ると、この仕組みがどう動いているかが分かります。</p>
+    <pre><code>EXPLAIN (COSTS OFF)
+SELECT a.account_name, b.bug_id, b.date_reported
+FROM accounts a
+CROSS JOIN LATERAL ( ... LIMIT 2 ) b;</code></pre>
+    <pre><code> Nested Loop
+   ->  Seq Scan on accounts a
+   ->  Limit
+         ->  Sort
+               ->  Bitmap Heap Scan on bugs
+                     Recheck Cond: (reported_by = a.account_id)
+                     ->  Bitmap Index Scan on bugs_reported_by_idx
+                           Index Cond: (reported_by = a.account_id)</code></pre>
+    <p><code>Nested Loop</code> になっており、<code>accounts</code> の行を 1 行読むたびに、その <code>account_id</code> を使って内側 (<code>bugs</code>) を検索し、<code>LIMIT 2</code> で止めています。<code>PARTITION BY</code> を使うウィンドウ関数は「全体を 1 回ソートしてから各グループの上位を取る」方式ですが、LATERAL は「グループごとに専用のインデックス検索を <code>LIMIT</code> 付きで実行する」方式です。グループ数が少なく、各グループに適したインデックスがある場合は LATERAL の方が有利になることがあります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="LATERALが外側の行を参照する図">
+        <rect x="30" y="30" width="180" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="120" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">accounts の 1 行 (alice)</text>
+        <path d="M210,55 L330,55" stroke="#1f4a68" stroke-width="2" marker-end="url(#arrow)"/>
+        <rect x="340" y="30" width="230" height="50" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/>
+        <text x="455" y="60" font-size="11.5" text-anchor="middle" fill="#1f4a68">LATERAL: alice の bugs だけ検索</text>
+        <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1f4a68"/></marker></defs>
+        <text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#4a5d54">LATERAL の中は、左側の行ごとに account_id を変えて再評価される</text>
+      </svg>
+      <p class="cap">図: LATERAL の右側のサブクエリは、左側の表の行ごとに異なる値を参照しながら再評価される。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 仕組み ― 再帰 CTE の停止条件と CYCLE 句</h2>
+    <p><code>WITH RECURSIVE</code> は「最初の 1 回 (非再帰項)」と「前回の結果を使ってもう 1 回計算する (再帰項)」を <code>UNION ALL</code> でつなぎ、再帰項が 0 行を返すまで繰り返します。「このバグは別のバグの重複である」という連鎖 (<code>bug_duplicates(bug_id, duplicate_of)</code>) を作り、bug_id=22 から重複の連鎖をたどって根本の (もう重複先が無い) バグまで遡った実行結果です。</p>
+    <pre><code>WITH RECURSIVE chain(start_id, bug_id, duplicate_of, depth) AS (
+  SELECT bug_id, bug_id, duplicate_of, 1
+  FROM bug_duplicates WHERE bug_id = 22
+  UNION ALL
+  SELECT c.start_id, d.bug_id, d.duplicate_of, c.depth + 1
+  FROM bug_duplicates d
+  JOIN chain c ON d.bug_id = c.duplicate_of
+  WHERE c.depth < 20
+)
+SELECT * FROM chain ORDER BY depth;</code></pre>
+    <table class="tbl">
+      <thead><tr><th>bug_id</th><th>duplicate_of</th><th>depth</th></tr></thead>
+      <tbody>
+        <tr><td>22</td><td>21</td><td>1</td></tr>
+        <tr><td>21</td><td>20</td><td>2</td></tr>
+        <tr><td>20</td><td>15</td><td>3</td></tr>
+      </tbody>
+    </table>
+    <p>22 → 21 → 20 → 15 とたどり、根本のバグは 15 だと分かりました。ここで止まっているのは <code>bug_duplicates</code> に <code>bug_id=15</code> の行が無い (15 はもう重複先を持たない) ためですが、安全のため <code>WHERE c.depth &lt; 20</code> という<b>明示的な深さの上限</b>も入れています。これが「停止条件」です。</p>
+    <p>連鎖が循環している (A は B の重複、B は A の重複) 場合、深さの上限が無いと同じ行を永遠に行き来します。PostgreSQL 14 以降の <b>CYCLE 句</b>を使うと、同じキーに戻ってきたことを自動的に検出して止めてくれます。</p>
+    <pre><code>WITH RECURSIVE chain(bug_id, duplicate_of) AS (
+  SELECT bug_id, duplicate_of FROM bug_duplicates WHERE bug_id = 30
+  UNION ALL
+  SELECT d.bug_id, d.duplicate_of
+  FROM bug_duplicates d JOIN chain c ON d.bug_id = c.duplicate_of
+) CYCLE bug_id SET is_cycle USING path
+SELECT bug_id, duplicate_of, is_cycle FROM chain;</code></pre>
+    <table class="tbl">
+      <thead><tr><th>bug_id</th><th>duplicate_of</th><th>is_cycle</th></tr></thead>
+      <tbody>
+        <tr><td>30</td><td>31</td><td>f</td></tr>
+        <tr><td>31</td><td>30</td><td>f</td></tr>
+        <tr><td>30</td><td>31</td><td>t</td></tr>
+      </tbody>
+    </table>
+    <p>30 と 31 が互いを重複としている循環データに対し、3 回目に再び bug_id=30 に戻ってきた時点で <code>is_cycle = t</code> が立ち、そこで止まっています。深さの上限を自分で書く方法と比べて、CYCLE 句は「本当に同じ行に戻ってきたか」を正確に検出できる点が強みです。</p>
+    <h3>単純な連番には再帰 CTE より generate_series</h3>
+    <p>再帰 CTE は親子関係のような「木」をたどるのには向いていますが、1 から 100,000 までの連番のような、階層を持たない単純な繰り返しに使うのは不向きです。同じ 100,000 行を再帰 CTE と <code>generate_series</code> で作った実行結果です。</p>
+    <pre><code>WITH RECURSIVE nums(n) AS (
+  SELECT 1
+  UNION ALL
+  SELECT n + 1 FROM nums WHERE n < 100000
+)
+SELECT count(*) FROM nums;
+-- Execution Time: 22.760 ms (Recursive Union, WorkTable Scan loops=100000)
+
+SELECT count(*) FROM generate_series(1, 100000);
+-- Execution Time: 7.153 ms (Function Scan on generate_series)</code></pre>
+    <p>どちらも 100,000 行を作りますが、再帰 CTE は 1 行進むごとに <code>WorkTable Scan</code> を 1 回評価するため <code>loops=100000</code> になり、実行時間は約 22.8 ms でした。<code>generate_series</code> は専用の集合返却関数 1 回の呼び出しで済み、約 7.2 ms でした (いずれもウォームキャッシュでの実行)。約 3 倍の差であり、データに階層や連鎖の構造が無いなら、再帰を使う理由はありません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="CYCLE句が循環を検出して止める図">
+        <circle cx="200" cy="80" r="50" fill="none" stroke="#1f4a68" stroke-width="2"/>
+        <text x="160" y="60" font-size="12" fill="#1f4a68">30</text>
+        <text x="240" y="100" font-size="12" fill="#1f4a68">31</text>
+        <path d="M175,65 Q200,40 225,65" stroke="#1f4a68" stroke-width="1.5" fill="none" marker-end="url(#arrow2)"/>
+        <path d="M225,95 Q200,120 175,95" stroke="#1f4a68" stroke-width="1.5" fill="none" marker-end="url(#arrow2)"/>
+        <defs><marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1f4a68"/></marker></defs>
+        <rect x="340" y="55" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="78" font-size="12" text-anchor="middle" fill="#b5401f">3 回目に 30 へ戻る → is_cycle=t</text>
+        <text x="300" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">CYCLE 句は「訪れたキー」を記録し、再訪した時点で停止する</text>
+      </svg>
+      <p class="cap">図: 30 と 31 が互いを指す循環で、CYCLE 句が再訪を検出して無限に回らないようにする。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. どこで壊れるか ― よくある間違い</h2>
+    <h3>間違い 1: 停止条件を書き忘れた再帰 CTE</h3>
+    <p>深さの上限も <code>CYCLE</code> 句も付けずに再帰項を書くと、再帰項が 0 行を返すまで止まりません。<code>statement_timeout</code> を 500 ミリ秒に設定した上で、停止条件の無い再帰 CTE を実際に実行した結果です。</p>
+    <pre><code>SET statement_timeout = '500ms';
+WITH RECURSIVE nums(n) AS (
+  SELECT 1
+  UNION ALL
+  SELECT n + 1 FROM nums
+)
+SELECT count(*) FROM nums;
+-- ERROR:  canceling statement due to statement timeout</code></pre>
+    <p>これは実際に PostgreSQL 18 で発生したエラーです。<code>n</code> は増え続けるだけで、<code>WHERE</code> による上限も <code>CYCLE</code> 句も無いため、<code>statement_timeout</code> が無ければメモリか CPU を使い切るまで回り続けたはずです。再帰 CTE を書くときは、<b>再帰項に必ず停止条件 (上限、または既に処理した行を除く条件) を入れる</b>ことが前提になります。</p>
+    <h3>間違い 2: 「CTE は 1 回しか計算されない」と思い込んで重い処理を複数回書く</h3>
+    <p>節 3 で見たとおり、2 回以上参照される CTE は既定で材料化され 1 回だけ計算されますが、これは「絶対にそうなる」という保証ではありません。<code>NOT MATERIALIZED</code> を明示したり、CTE の中身が軽くプランナがインライン化を選んだりすると、参照の数だけ計算し直されることがあります。重い集計を含む CTE を複数回参照するコードをレビューするときは、<code>EXPLAIN</code> で集計ノードが何回出てくるかを数える価値があります。</p>
+    <h3>間違い 3: LATERAL を使わずに「外側の値を使う内側のクエリ」を書こうとする</h3>
+    <p>節 4 のエラーのとおり、<code>LATERAL</code> を付け忘れると「外側の行を参照できない」というエラーで即座に気づけます。気づきにくいのは、<code>LEFT JOIN LATERAL</code> と <code>LEFT JOIN</code> (LATERAL 無し) を間違えて使うケースです。右側に外側への参照が無ければ <code>LATERAL</code> を付けてもエラーにはなりませんが、意味のない (常に同じ結果を返す) サブクエリを書いてしまっていることに気づきにくくなります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="statement_timeoutで無限再帰が止まる図">
+        <rect x="30" y="30" width="540" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">n=1 → n=2 → n=3 → ... (止まる条件が無い)</text>
+        <rect x="90" y="90" width="420" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="115" font-size="12" text-anchor="middle" fill="#b5401f">500ms 後に statement_timeout で強制終了</text>
+      </svg>
+      <p class="cap">図: 停止条件が無い再帰は、statement_timeout のような外部の仕組みが無ければ止まらない。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. シニアの書き方 ― 判断の基準</h2>
+    <p><b>1. CTE を書くときは、材料化されてほしいかどうかを自分で決める。</b>「重い集計を 1 回だけ計算してから複数回使い回したい」なら <code>MATERIALIZED</code> を明示し、「単純な絞り込みなのでインデックスを使った絞り込みを内側まで届けたい」なら素のまま (または <code>NOT MATERIALIZED</code>) にします。既定の挙動 (1 回参照ならインライン化、複数回参照なら材料化) に黙って従うのではなく、意図を明示することで、PostgreSQL のバージョンが変わっても挙動が変わらないコードになります。</p>
+    <p><b>2. 「グループごとに違う条件を適用したい」ときは LATERAL を検討する。</b>ウィンドウ関数は「全体を 1 回ソートして、各グループの中で順位を付ける」という形に向いていますが、グループごとに異なるパラメータを使う検索 (「このカテゴリでは在庫がある商品だけ」など) には LATERAL の方が自然に書けます。</p>
+    <p><b>3. 再帰 CTE を書いたら、必ず停止条件を声に出して確認する。</b>「このデータに循環が無いと保証できるか」「保証できないなら CYCLE 句か深さの上限を入れたか」をコードレビューの通過条件にします。階層を持たない単純な連番には、再帰ではなく <code>generate_series</code> を使います。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/queries-with.html" target="_blank" rel="noopener">PostgreSQL: 7.8. WITH Queries (Common Table Expressions)</a> ― CTE のインライン化の既定動作 (非再帰・副作用無し・1 回参照なら既定でインライン化、2 回以上参照なら既定で材料化) と MATERIALIZED/NOT MATERIALIZED、データ変更 CTE の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-RECURSIVE" target="_blank" rel="noopener">PostgreSQL: 7.8.2. Recursive Queries</a> ― WITH RECURSIVE の評価順序、SEARCH/CYCLE 句の構文の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-LATERAL" target="_blank" rel="noopener">PostgreSQL: 7.2.1.6. LATERAL Subqueries</a> ― LATERAL が FROM リストの前の項目を参照できる唯一の仕組みであることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/functions-srf.html" target="_blank" rel="noopener">PostgreSQL: 9.25. Set Returning Functions</a> ― generate_series の仕様の一次情報。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( <a href="https://www.oreilly.co.jp/books/9784814400744/" target="_blank" rel="noopener">https://www.oreilly.co.jp/books/9784814400744/</a> ) ― このシリーズ全体の章立ての参考元。本回の中身は書籍の引用ではなく、PostgreSQL 公式ドキュメントと実機での検証から書いている。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-window-functions.html">← 第 29 回 ウィンドウ関数で集合として考える</a><a href="./sql-index.html">目次</a><a href="./sql-upsert-merge.html">第 31 回 UPSERT と MERGE ― 冪等な書き込み →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '`WITH recent AS (SELECT * FROM bugs) SELECT * FROM recent WHERE bug_id = 1;` を PostgreSQL 18 で EXPLAIN すると `Index Scan using bugs_pkey` 1 本だけになった。この理由として最も適切なものは？',
+    opts: [
+      'recent は 1 回しか参照されておらず副作用も無いので、既定で呼び出し元にインライン化され、外側の WHERE が内側まで届いたから',
+      'recent に主キー制約が設定されていることをオプティマイザが検知し、それが引き金になってインライン化されたから',
+      'PostgreSQL は CTE の中身を常にキャッシュしており、2 回目以降は参照しないから',
+      'WHERE 句が CTE の外にあるため、実際には評価されていないから',
+      'CTE は定義すれば常にインライン化されるため、MATERIALIZED を付けない限り必ず 1 回の Index Scan になるから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>PostgreSQL 12 以降、再帰的でなく副作用も無く 1 回しか参照されない CTE は既定でインライン化され、サブクエリと同様に外側の条件が内側まで押し込まれる。実機の結果どおり Index Scan 1 本になった。',
+      'インライン化を決めるのは recent の中身に制約があるかどうかではなく、参照回数が 1 回であること・再帰や副作用が無いことである。bugs テーブルの主キー制約自体はインライン化の有無とは無関係に元から存在している。',
+      'CTE の中身を常にキャッシュする仕組みではない。インライン化された CTE はキャッシュではなく、クエリそのものに展開される。',
+      'WHERE 句は実際に評価されており、Index Cond: (bug_id = 1) として実行計画に現れている。',
+      'CTE の既定の挙動は参照回数で変わり、2 回以上参照されると既定で材料化される。常にインライン化されるという主張は誤りで、本問のケースは参照が 1 回だけという条件が効いている特殊な場合である。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>1 回しか参照されない CTE は、呼び出し元に展開されます。</p><div class="fig"><svg viewBox="0 0 560 130" aria-label="CTEインライン化の図"><rect x="40" y="30" width="200" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132">WITH recent AS (...)</text><text x="140" y="75" font-size="11" text-anchor="middle">1 回だけ参照</text><text x="300" y="60" font-size="16" text-anchor="middle" fill="#1f4a68">→</text><rect x="340" y="30" width="200" height="60" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="440" y="55" font-size="12" text-anchor="middle" fill="#1f4a68">Index Scan bug_id=1</text><text x="440" y="75" font-size="11" text-anchor="middle">展開されて 1 本に</text></svg><p class="cap">図: 1 回だけの参照は展開され、外側の条件がそのまま適用される。</p></div>' }
+  },
+  {
+    q: '`totals` という集計 CTE を `t1` と `t2` の 2 回参照して自己結合したとき、実行計画に HashAggregate は何回出てきたか (実機の結果に基づく)。',
+    opts: [
+      '0 回。集計は実行計画に現れない',
+      '1 回。既定では 2 回以上参照される CTE は 1 回だけ計算され、結果が再利用されるから',
+      '2 回。参照した回数だけ必ず計算し直されるから',
+      '4 回。t1 と t2 のそれぞれが 2 回ずつ計算されるから',
+      'エラーになる。CTE は 2 回以上参照できないから'
+    ],
+    ans: 1,
+    exps: [
+      '集計自体は HashAggregate として実行計画に明確に現れており、「現れない」というのは誤り。',
+      '<b>これが正解。</b>本文の実機結果のとおり、2 回以上参照される CTE は既定で材料化され、HashAggregate は 1 回だけ実行されて、t1 と t2 はどちらもその結果を CTE Scan で読むだけだった。',
+      '必ず計算し直されるのは NOT MATERIALIZED を明示した場合の挙動であり、既定の挙動ではない。',
+      '4 回になる根拠は無く、実機の結果とも一致しない。',
+      'CTE は何度でも参照できる。2 回以上の参照自体はエラーにならない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>2 回以上参照される CTE は、既定で 1 回だけ計算され再利用されます。</p><div class="fig"><svg viewBox="0 0 560 140" aria-label="CTEが1回だけ計算される図"><rect x="200" y="20" width="160" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="45" font-size="12" text-anchor="middle" fill="#0f5132">HashAggregate (1 回)</text><path d="M240,60 L130,100" stroke="#1f4a68" stroke-width="1.5"/><path d="M320,60 L430,100" stroke="#1f4a68" stroke-width="1.5"/><rect x="60" y="100" width="140" height="35" rx="6" fill="#e3edf5" stroke="#1f4a68"/><text x="130" y="122" font-size="11" text-anchor="middle">t1 (CTE Scan)</text><rect x="360" y="100" width="140" height="35" rx="6" fill="#e3edf5" stroke="#1f4a68"/><text x="430" y="122" font-size="11" text-anchor="middle">t2 (CTE Scan)</text></svg><p class="cap">図: 集計を 1 回だけ実行し、2 つの参照はどちらもその結果を読むだけになる。</p></div>' }
+  },
+  {
+    q: '`WITH recent AS MATERIALIZED (SELECT * FROM bugs) SELECT * FROM recent WHERE bug_id = 1;` の実行計画が `Seq Scan on bugs` → `CTE Scan ... Filter: (bug_id = 1)` になった理由として最も適切なものは？',
+    opts: [
+      'MATERIALIZED を付けると、CTE の結果がディスク上に一時テーブルとして永続化され、次回別のクエリを実行したときも再利用されるから',
+      'MATERIALIZED を付けると、固定された結果に対して自動的に一時インデックスが作られ、Filter の代わりに Index Scan になるから',
+      'MATERIALIZED は CTE の中身を先に固定して計算するため、外側の WHERE が内側の Seq Scan まで届かず、計算済みの結果に対して後から Filter が掛かるから',
+      'MATERIALIZED を付けると、WHERE 句はクエリ全体から取り除かれ、絞り込み自体が行われなくなるから',
+      'MATERIALIZED を付けると常に NOT MATERIALIZED より遅くなることが保証されているから'
+    ],
+    ans: 2,
+    exps: [
+      'MATERIALIZED が固定するのはその文の実行中だけであり、クエリが終われば結果は消える。別のクエリから再利用できる永続的なキャッシュではなく、マテリアライズドビューとは別の機能である。',
+      '実行計画に現れているのは CTE Scan + Filter であり、Index Scan ではない。MATERIALIZED は中身を固定するだけで、固定した結果に対してインデックスを自動作成する仕組みは無い。',
+      '<b>これが正解。</b>MATERIALIZED は CTE の中身を先に (絞り込み無しで) 計算して固定するため、Seq Scan で全件読んでから、その結果に対して後から bug_id=1 の Filter が掛かる。これが本文の実機結果と一致する。',
+      '実行計画には Filter: (bug_id = 1) がそのまま現れており、絞り込みは行われている。MATERIALIZED が変えるのは「いつ絞り込むか」であり、絞り込み自体を無くす機能ではない。',
+      '本問のように 1 回しか参照されない CTE に強く絞り込む場合は MATERIALIZED の方が遅くなりやすいが、2 回以上参照されて集計を共有する場合は既定の材料化の方が速くなる (他の設問を参照)。「常に遅い」という一般化は誤りで、効くかどうかは参照回数や絞り込みの強さに依存する。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>MATERIALIZED は中身を先に固定するため、絞り込みは後からしか掛けられません。</p><div class="fig"><svg viewBox="0 0 560 130" aria-label="MATERIALIZEDが絞り込みを遅らせる図"><rect x="30" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="60" font-size="12" text-anchor="middle" fill="#b5401f">Seq Scan (全件を先に固定)</text><text x="300" y="60" font-size="16" text-anchor="middle" fill="#1f4a68">→</text><rect x="330" y="30" width="200" height="50" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="430" y="60" font-size="12" text-anchor="middle" fill="#1f4a68">CTE Scan + Filter</text></svg><p class="cap">図: 中身を先に全件固定してから、外側で絞り込む。</p></div>' }
+  },
+  {
+    q: 'データ変更 CTE (`WITH moved AS (DELETE ... RETURNING *) INSERT INTO bugs_archive SELECT * FROM moved;`) を 1 つの文で書く利点として最も適切なものは？',
+    opts: [
+      'DELETE と INSERT が別々のトランザクションとして実行されるため、進捗をこまめにコミットできる',
+      'RETURNING を書かなくても、削除された行は自動的に bugs_archive 側に複製される',
+      'DELETE で削除した行の領域は、同じ文の実行中にただちに VACUUM されてディスクから回収される',
+      '削除した行を失わずに、同じ文の中で別のテーブルへの挿入に渡せるため、片方だけが成功する中間状態が生まれない',
+      'bugs と bugs_archive の列順が違っていても、SELECT * を使えば自動的に対応する列名に揃えて挿入してくれる'
+    ],
+    ans: 3,
+    exps: [
+      'これはむしろ逆で、1 つの文の中の DELETE と INSERT は同じトランザクションの一部として実行される。別々のトランザクションに分かれるなら、この設問が問うている利点 (中間状態が生まれないこと) 自体が失われてしまう。',
+      '自動的に複製される仕組みは無く、DELETE の結果を INSERT 側に渡すには RETURNING で明示的に列を返す必要がある。RETURNING を省けば moved は空の列集合になり、INSERT 先には何も渡らない。',
+      '同じ文の中で削除しても、PostgreSQL の MVCC では削除された行はすぐには物理的に回収されず、後から autovacuum が dead tuple を片付ける。これはデータ変更 CTE の利点とは別の仕組みである。',
+      '<b>これが正解。</b>本文の実機結果どおり、19 件中 5 件が削除され、同じ文の中でそのまま bugs_archive への挿入に渡された。1 つの文の中でつながっているため、削除だけ成功して挿入が失敗するような中間状態が生まれない。',
+      'SELECT * は列の並び順のまま値を渡すだけであり、列名を見て自動的に対応付ける仕組みは無い。列順が違えば誤った列に値が入ってしまうため、本文では LIKE で列定義を揃えてから使っている。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>DELETE の RETURNING をそのまま INSERT に渡せます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="データ変更CTEの図"><rect x="30" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="60" font-size="12" text-anchor="middle" fill="#b5401f">DELETE RETURNING (5件)</text><rect x="320" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="60" font-size="12" text-anchor="middle" fill="#0f5132">INSERT INTO archive</text></svg><p class="cap">図: 1 つの文の中で削除結果を挿入先に渡す。</p></div>' }
+  },
+  {
+    q: '`LEFT JOIN LATERAL` ではなく普通の `CROSS JOIN (サブクエリ)` のまま `WHERE reported_by = a.account_id` のように外側の列を参照すると、PostgreSQL 18 で実際に出たエラーはどれか。',
+    opts: [
+      'ERROR: syntax error at or near "WHERE"',
+      'ERROR: division by zero',
+      'ERROR: invalid reference to FROM-clause entry for table "a" (LATERAL で参照しろというヒント付き)',
+      'ERROR: permission denied for table accounts',
+      'ERROR: relation "bugs" does not exist'
+    ],
+    ans: 2,
+    exps: [
+      '構文エラーではない。WHERE の書き方自体は正しく、問題は参照先のテーブルにアクセスできないこと。',
+      'ゼロ除算とは無関係のクエリであり、本文のクエリには除算そのものが登場しない。',
+      '<b>これが正解。</b>本文で実際に出たエラーは「invalid reference to FROM-clause entry for table "a"」であり、「LATERAL を付けて参照しろ」というヒントが添えられていた。',
+      '権限の問題ではなく、両方のテーブルに対する通常の SELECT 権限はある前提の話。',
+      'bugs テーブルは実在し、他のクエリでも問題なく使われている。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>LATERAL の無い FROM リストの subquery は、前の表の行を見られません。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="LATERAL無しでエラーになる図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="12" text-anchor="middle" fill="#0f5132">accounts a</text><rect x="320" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">(... WHERE x=a.account_id)</text><text x="420" y="72" font-size="10.5" text-anchor="middle" fill="#b5401f">a が見えずエラー</text></svg><p class="cap">図: LATERAL を付けなければ a を参照できず、エラーになる。</p></div>' }
+  },
+  {
+    q: 'accounts と bugs を LATERAL で結合し、各担当者ごとに直近 2 件を LIMIT で取った実行計画が Nested Loop になった理由として最も適切なものは？',
+    opts: [
+      'accounts の行を 1 行読むたびに、その account_id を使って bugs 側を検索し、LIMIT で止めるという「行ごとの再評価」が必要だから',
+      'Nested Loop は常にどんな JOIN でも使われる唯一の結合方式だから',
+      'LATERAL を使うと、右側のサブクエリは実行前に一度だけ計算されて結果がキャッシュされるため、各行ごとの再計算は不要になるから',
+      'LATERAL を使うと、プランナは必ず Hash Join に切り替えてから最後に LIMIT を適用するから',
+      'LIMIT のような行数制限はインデックスが使われている場合には自動的に無視されるため、プランナが安全策として Nested Loop を選んだから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>LATERAL の右側は左側の行ごとに異なる値 (account_id) を参照して再評価される必要があるため、本文の実機結果どおり Nested Loop になり、内側で Bitmap Heap Scan + LIMIT が行われている。',
+      'Nested Loop は複数ある結合方式の 1 つであり、常に使われるわけではない。Hash Join や Merge Join が選ばれる場合もある。',
+      'これは逆で、LATERAL の右側はまさに「行ごとに計算し直す」ことを目的とした機能である。1 回だけ計算してキャッシュされるなら、そもそも Nested Loop で行ごとに再評価する必要が無い。',
+      'Hash Join は左右を先にまとめて計算してから結合する方式であり、LATERAL のように右側が左側の行ごとの値を必要とする場合には使えない。本文の実機結果で実際に選ばれたのは Nested Loop であり、Hash Join ではない。',
+      'LIMIT がインデックス使用時に無視される仕組みは無く、本文の実行計画でも内側の Bitmap Heap Scan に LIMIT がそのまま効いている。Nested Loop が選ばれた理由は LATERAL の行ごとの再評価であり、LIMIT の扱いとは関係ない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>LATERAL は左側の行ごとに右側を再評価します。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="NestedLoopでLATERALを評価する図"><rect x="30" y="30" width="180" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="60" font-size="12" text-anchor="middle" fill="#0f5132">accounts の各行</text><rect x="320" y="30" width="200" height="50" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="420" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">その行専用の bugs 検索</text><text x="420" y="72" font-size="10.5" text-anchor="middle" fill="#1f4a68">+ LIMIT 2</text></svg><p class="cap">図: 左側の行ごとに右側のクエリを再評価するのが Nested Loop + LATERAL の形。</p></div>' }
+  },
+  {
+    q: '`bug_duplicates` で 22→21→20→15 という重複の連鎖をたどる再帰 CTE に `WHERE c.depth < 20` という条件を入れた目的として最も適切なものは？',
+    opts: [
+      '出力結果を 20 行に制限するため',
+      '循環や想定外に長い連鎖があっても、無限に再帰し続けないようにする安全装置 (停止条件) を入れるため',
+      'depth という列の型を bigint に固定するため',
+      'PostgreSQL の再帰 CTE は 20 回以上の再帰を文法的に許可しないため',
+      '本文の例では 22→21→20→15 の連鎖が深さ 20 を超えるため'
+    ],
+    ans: 1,
+    exps: [
+      '出力行数の制限が目的ではなく、実際の出力は 3 行 (depth 1〜3) だけだった。',
+      '<b>これが正解。</b>再帰 CTE は再帰項が 0 行を返すまで止まらないため、循環データや想定外の長い連鎖があった場合に備えて、深さの上限という明示的な停止条件を入れている。',
+      '型を固定する目的の条件ではない。depth はただの整数列。',
+      'PostgreSQL の再帰 CTE に 20 回という文法上の上限は無く、これは本文で自分で決めた値。',
+      '本文の連鎖は depth 1〜3 (22→21→20→15) で終わっており、20 を超えることはない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>停止条件が無いと、再帰は再帰項が 0 行になるまで続きます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="停止条件の役割を示す図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132">22→21→20→15</text><text x="140" y="72" font-size="10.5" text-anchor="middle" fill="#4a5d54">depth=3 で自然に終了</text><rect x="320" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">想定外の長い連鎖や循環</text><text x="420" y="72" font-size="10.5" text-anchor="middle" fill="#b5401f">depth&lt;20 が無いと止まらない</text></svg><p class="cap">図: 自然に終わる場合でも、想定外のデータに備えて停止条件を入れる。</p></div>' }
+  },
+  {
+    q: 'bug_id 30 と 31 が互いを重複としている循環データに CYCLE 句を使った再帰 CTE を適用した。3 回目に再び bug_id=30 が現れた行の is_cycle 列はどうなったか (実機の結果に基づく)。',
+    opts: [
+      'is_cycle が t になり、そこで再帰が止まる',
+      'is_cycle は常に f のままで、再帰は無限に続く',
+      'bug_id の値が自動的に書き換えられる',
+      'duplicate_of の値が NULL になる',
+      'エラーになり、クエリ全体が実行できない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文の実機結果どおり、1 回目と 2 回目は is_cycle=f だったが、3 回目に再び bug_id=30 に戻ってきた行では is_cycle=t となり、そこで再帰が止まった。',
+      'is_cycle が常に f のままなら無限に続くはずだが、実機では t になって止まっている。',
+      'bug_id の値が書き換えられる仕組みは無く、30 と 31 のままだった。',
+      'duplicate_of が NULL になる仕組みは無く、実際の値 (31 や 30) がそのまま表示されている。',
+      'CYCLE 句を使った本文のクエリはエラーなく実行でき、3 行の結果を返している。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>CYCLE 句は訪れたキーを記録し、再訪した時点で停止します。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="CYCLE句で循環を検出する図"><rect x="40" y="30" width="150" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="115" y="60" font-size="12" text-anchor="middle" fill="#0f5132">30→31 (f)</text><rect x="210" y="30" width="150" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="285" y="60" font-size="12" text-anchor="middle" fill="#0f5132">31→30 (f)</text><rect x="380" y="30" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="455" y="60" font-size="12" text-anchor="middle" fill="#b5401f">30→31 (t, 停止)</text></svg><p class="cap">図: 3 回目に 30 へ戻った時点で is_cycle=t が立ち、再帰が止まる。</p></div>' }
+  },
+  {
+    q: '同じ 100,000 行を作るのに、再帰 CTE (WITH RECURSIVE nums) と generate_series(1, 100000) を実機で比較した。結果として最も適切なものは？',
+    opts: [
+      '再帰 CTE の方が速かった。WorkTable Scan は常に高速だから',
+      '両者の実行時間はほぼ同じだった。結局どちらも 1 行ずつ行を生成する点では変わらないから',
+      'generate_series の方が速く (約 7 ms 台)、再帰 CTE は WorkTable Scan を 100,000 回評価する分だけ遅かった (約 23 ms 台)',
+      'generate_series は 1 回の呼び出しにつき 10,000 行までしか返せないため、100,000 行を作るには複数回呼び出す必要があった',
+      '再帰 CTE はデフォルトで再帰の深さが 1,000 回に制限されており、100,000 行を作るには設定を変更する必要があった'
+    ],
+    ans: 2,
+    exps: [
+      'WorkTable Scan は行数分 (loops=100000) 繰り返し評価されるため、常に高速とは言えない。',
+      '実行時間はほぼ同じではなく、本文の実機結果では約 3 倍の差が出ている。「1 行ずつ生成する」という処理の性質が同じでも、再帰 CTE は毎回 WorkTable を介した再帰評価のオーバーヘッドを伴うため、専用関数の generate_series より遅くなる。',
+      '<b>これが正解。</b>本文の実機結果どおり、generate_series は約 7 ms 台、再帰 CTE は WorkTable Scan を 100,000 回評価する分だけ遅く約 23 ms 台だった。約 3 倍の差になった。',
+      'generate_series に 10,000 行という上限は無く、本文でも 1 回の呼び出しで 100,000 行をそのまま作れている。上限が無いことは実行計画 (Function Scan on generate_series, rows=100000) からも確認できる。',
+      '再帰 CTE の深さにそのようなデフォルト制限は無く、本文でも設定を変更せずに 100,000 回の再帰をそのまま実行できている。再帰 CTE を遅くするのはこの制限ではなく、WorkTable Scan を 100,000 回評価するコストそのものである。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>単純な連番には、専用の関数の方が向いています。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="再帰CTEとgenerate_seriesの速度差を示す図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#b5401f">再帰 CTE</text><text x="140" y="72" font-size="11" text-anchor="middle">約 23 ms (loops=100000)</text><rect x="320" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="55" font-size="12" text-anchor="middle" fill="#0f5132">generate_series</text><text x="420" y="72" font-size="11" text-anchor="middle">約 7 ms (関数呼び出し 1 回)</text></svg><p class="cap">図: 階層の無い単純な連番には generate_series の方が速い。</p></div>' }
+  },
+  {
+    q: '`totals` という集計 CTE に `NOT MATERIALIZED` を明示すると、2 回参照した場合の実行計画はどう変わったか (実機の結果に基づく)。',
+    opts: [
+      'HashAggregate と Seq Scan on bugs が 2 回ずつ現れ、参照のたびに集計をやり直すようになった',
+      '何も変わらなかった。NOT MATERIALIZED は既定の挙動と完全に同じだから',
+      'NOT MATERIALIZED を付けると、集計結果が一時テーブルとして永続化され、次回以降のクエリでも再利用できるようになった',
+      'NOT MATERIALIZED を付けると、t1 と t2 の参照順序が入れ替わってしまい、結果の行の並び順が変わった',
+      'NOT MATERIALIZED を付けると、集計の結果が参照ごとに異なる値になり、t1 と t2 で違う合計が表示されるようになった'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文の実機結果どおり、NOT MATERIALIZED を付けると HashAggregate と Seq Scan on bugs (bugs_1 という別名付き) が 2 回ずつ現れ、参照のたびに集計をやり直すようになった。',
+      '既定 (2 回以上参照なら材料化) とは異なる挙動になっており、「完全に同じ」ではない。',
+      'これは逆で、NOT MATERIALIZED は結果を固定せずに参照ごとに計算し直すことを指示するオプションであり、一時テーブルとして永続化する仕組みは無い。永続的に再利用したい場合はマテリアライズドビューのような別の機能が必要になる。',
+      '参照順序が入れ替わる仕組みは無く、NOT MATERIALIZED が変えるのは集計を参照ごとに計算し直すかどうかだけである。本文の実機結果でも行の並び順自体に変化は無かった。',
+      '同じ SELECT を 2 回評価しても元データ (bugs テーブル) は変わっていないため、結果の値自体は毎回同じ合計になる。NOT MATERIALIZED が変えるのは「計算し直すかどうか」であり、「違う値になるかどうか」ではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>NOT MATERIALIZED は参照のたびに中身を計算し直します。</p><div class="fig"><svg viewBox="0 0 560 130" aria-label="NOT MATERIALIZEDで集計が2回になる図"><rect x="40" y="25" width="200" height="40" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="140" y="50" font-size="12" text-anchor="middle" fill="#1f4a68">HashAggregate #1 (t1 用)</text><rect x="320" y="25" width="200" height="40" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#1f4a68">HashAggregate #2 (t2 用)</text><text x="300" y="95" font-size="12.5" text-anchor="middle" fill="#4a5d54">同じ集計を 2 回計算し直すことになる</text></svg><p class="cap">図: NOT MATERIALIZED では参照の数だけ同じ処理が繰り返される。</p></div>' }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

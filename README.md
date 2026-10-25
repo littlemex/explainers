@@ -22,6 +22,7 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 | LeetCode | 156 LeetCode problems (NeetCode Roadmap and Arai 60), one page each: a Japanese summary of the problem, the idea, a C++ solution, and a step-by-step demo you can run on your own input | [leetcode/index.html](./leetcode/index.html) |
 | Distributed systems | 38 parts in four levels (Beginner / Mid / Senior / Expert): sockets, replication, sharding, CAP, consistency models, clocks, transactions, Kafka, consensus (Raft/Paxos), CRDTs, impossibility results, verification — explained then quizzed | [distsys-index.html](./distsys-index.html) |
 | Build a CPU | 24 parts in four levels (Beginner / Mid / Senior / Expert): gates, combinational and sequential logic, ALU, register file, memory, instruction set, decoder, datapath, branches, microcode, pipelining and hazards, memory bus, interrupts, testing, FPGA, video, toolchain, performance, and the gap to modern CPUs, drawn mainly as figures with implementation notes, using Digital and the rj32 CPU — explained then quizzed | [cpu-index.html](./cpu-index.html) |
+| SQL | 38 parts on writing SQL like a senior engineer, all in PostgreSQL: 27 anti-patterns following the chapter outline of *SQL Antipatterns, 2nd ed.* (logical design, physical design, queries, application development, foreign keys and normalization), then 11 senior parts on reading plans, window functions, CTE and LATERAL, upserts and MERGE, keyset pagination, constraints, JSONB, MVCC and VACUUM, locks and isolation, zero-downtime migrations, and connections in production; every query and plan shown was run on PostgreSQL 18 — explained then quizzed | [sql-index.html](./sql-index.html) |
 | MLIR | Dialects, progressive lowering, SSA, pattern rewriting — explained then quizzed | [mlir-index.html](./mlir-index.html) |
 | Mathematical statistics | MLE, CLT, Bayesian inference, hypothesis testing — explained then quizzed | [mathstats-index.html](./mathstats-index.html) |
 | Experiment series (hub) | Research-process records grouped as sub-series: cheap-model routing, pushing a small VLM with verifiers and RL, whether a decision model that generates no text is worth paying for, and the current state of gateway development | [experiments-index.html](./experiments-index.html) |
@@ -48,7 +49,7 @@ The one exception is the English series: its pages share `english/lib/fig.css` a
 
 ## Authoring rule: quiz-based explainer series
 
-The Coding (including the CS curriculum map and MIT 6.851), Distributed systems, MLIR, Mathematical statistics, and Information theory series follow a fixed format. Every page in these series MUST:
+The Coding (including the CS curriculum map and MIT 6.851), Distributed systems, SQL, MLIR, Mathematical statistics, and Information theory series follow a fixed format. Every page in these series MUST:
 
 1. **Explain first, graphically.** Open with an explanation section that builds intuition for *why* things are true, aimed at a beginner. Use inline SVG figures (not just prose) and typeset math with LaTeX via MathJax (`$...$` inline, `$$...$$` display). Prefer showing the mechanism visually over stating conclusions.
 2. **Then quiz: 10 questions, 5 options each.** After the explanation, present exactly 10 multiple-choice questions, each with 5 options.

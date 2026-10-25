@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ランダムセレクション ― ORDER BY random() の罠</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  th,td{text-align:left;padding:8px 10px;border:1px solid var(--line)}
+  th{background:#eaf5ef}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 16 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>ランダムセレクション ― ORDER BY random() の罠</h1>
+  <p>ORDER BY random() LIMIT n は、欲しい行数がいくつであっても表全体を読んで並べ替える。50 万行の表では 66 ms かかった全件ソートを、用途に応じた 4 つの代替手段でどこまで削れるかを実機で確かめる</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 01 回 <a href="./sql-antipattern-intro.html">アンチパターンとは何か</a> (サンプル DB の構造)、第 13 回 <a href="./sql-index-shotgun.html">インデックスショットガン</a> (インデックスと EXPLAIN の読み方)</p>
+  <p class="intro">「おすすめ商品をランダムに 1 件見せたい」「QA 用にランダムな行を抽出したい」という要望に対して、多くの人が最初に書くのは <code>ORDER BY random() LIMIT n</code> です。結論を先に言うと、この書き方は表の行数に関係なく表全体を 1 回読んで並べ替えるため、表が大きくなるほど重くなる書き方です。この回では、その重さを実機の EXPLAIN で確認したうえで、用途別に使い分ける 4 つの代替手段 (TABLESAMPLE SYSTEM / BERNOULLI、tsm_system_rows、ID 範囲の乱数、OFFSET 乱数) を、それぞれの速さと偏りの実測つきで見ていきます。</p>
+
+  <section>
+    <h2>1. 目的 ― 何をしたかったのか</h2>
+    <p>「表の中からランダムに 1 件、あるいは数件を選びたい」という要望は、トップページのおすすめ表示、A/B テストの対象抽出、QA のための抜き取り確認など、様々な場面で出てきます。やりたいことは単純で、「全部の行が選ばれる確率を均等にしたい (あるいは、どの程度均等かを分かった上で選びたい)」ということです。</p>
+    <p>SQL にはそのための組み込み関数 <code>random()</code> があるため、最初に試すのは次の書き方になります。</p>
+    <pre><code>SELECT product_id, product_name FROM big_products ORDER BY random() LIMIT 5;</code></pre>
+    <p>意味は分かりやすく、結果も正しくランダムです。問題は「どうやってランダムにしているか」という実装の中身にあります。</p>
+  </section>
+
+  <section>
+    <h2>2. アンチパターン ― 欲しい行数に関係なく全件を読んで並べ替える</h2>
+    <p>50 万行の <code>big_products</code> 表で <code>ORDER BY random() LIMIT 5</code> を実行し、実際の読み取り量を確認します。</p>
+    <pre><code>EXPLAIN (ANALYZE, BUFFERS, TIMING)
+SELECT product_id, product_name FROM big_products ORDER BY random() LIMIT 5;
+
+ Limit  (cost=17739.82..17739.83 rows=5 width=30) (actual time=66.051..66.052 rows=5.00 loops=1)
+   Buffers: shared hit=3188
+   ->  Sort  (cost=17739.82..18989.82 rows=500000 width=30) (actual time=66.049..66.050 rows=5.00 loops=1)
+         Sort Key: (random())
+         Sort Method: top-N heapsort  Memory: 25kB
+         Buffers: shared hit=3188
+         ->  Seq Scan on big_products  (cost=0.00..9435.00 rows=500000 width=30) (actual time=0.032..30.583 rows=500000.00 loops=1)
+               Buffers: shared hit=3185
+ Execution Time: 66.069 ms</code></pre>
+    <p><code>Seq Scan</code> が <code>rows=500000</code> と表示しているとおり、欲しいのはたった 5 行なのに表の全行 (50 万行、3185 ページ分) を読んでいます。各行に対して <code>random()</code> を 1 回呼んで並べ替えのキーを作り、その後ソートして先頭 5 件を選ぶという流れです。<code>top-N heapsort</code> によって、メモリ上に保持するのは上位 5 件分だけに抑えられていますが、それでも全行を読んで <code>random()</code> を呼ぶコストは避けられません。<code>LIMIT</code> の数を 5 から 1 に変えても、1000 に変えても、読む行数は変わらず 50 万行のままです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="ORDER BY randomが全件を読んで並べ替える図">
+        <rect x="30" y="30" width="540" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">50 万行すべてに random() を適用してソートキーを作る</text>
+        <path d="M300 70 L300 100" stroke="#9aa" stroke-width="1.5" marker-end="url(#ah2)"/>
+        <defs><marker id="ah2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#9aa"/></marker></defs>
+        <rect x="200" y="105" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#b5401f">先頭 5 件だけを残す (LIMIT 5)</text>
+        <text x="300" y="165" font-size="12" text-anchor="middle" fill="#4a5d54">欲しいのは 5 行でも、読む量は表全体のまま変わらない</text>
+      </svg>
+      <p class="cap">図: LIMIT で絞っても、ソートキーを作るための全件読み取りは避けられない。</p>
+    </div>
+    <p>この問い合わせの重さは、表の行数が増えるほど線形に増えていきます。50 万行で 66 ms だったものが、500 万行になれば単純計算で 10 倍近い時間がかかるようになり、トップページのような頻繁に呼ばれる場所に置くと、表の成長と共に静かに重くなっていく問い合わせになります。</p>
+  </section>
+
+  <section>
+    <h2>3. 見つけ方</h2>
+    <p>この問い合わせはエラーにならず結果も正しいため、本番で性能が問題になるまで気づかれないことが多いアンチパターンです。見つけるには 2 つの方法があります。</p>
+    <p>1 つ目はコードの中を <code>order by random()</code> や <code>ORDER BY RANDOM()</code> で検索することです。大文字小文字を無視した正規表現 <code>order\s+by\s+random\s*\(\s*\)</code> で、アプリケーションのコードや保存済みの SQL ファイルを検索すれば、該当箇所を機械的に洗い出せます。</p>
+    <p>2 つ目は EXPLAIN の出力の中に <code>Sort Key: (random())</code> という行が無いかを確認することです。この行が <code>Seq Scan</code> の上に乗っている場合、その問い合わせは表の全行を読んで並べ替えていることが確定します。<code>pg_stat_statements</code> (shared_preload_libraries が必要な拡張) が有効な環境では、正規化された問い合わせテキストに <code>random()</code> を含むものを集計し、呼び出し頻度と平均実行時間を一覧にすることで、優先して直すべき箇所を絞り込めます。</p>
+  </section>
+
+  <section>
+    <h2>4. 使ってよい場合</h2>
+    <p><code>ORDER BY random()</code> がいつも悪いわけではありません。次のような場合は、わざわざ代替手段に切り替える必要はありません。</p>
+    <p>1 つ目は、<b>表が小さく、呼び出し頻度も低い場合</b>です。数百行から数千行程度の表であれば全件スキャンのコストはごく小さく、1 日に数回しか実行しないバッチ処理であれば、わざわざ複雑な代替手段を使う理由がありません。</p>
+    <p>2 つ目は、<b>サンプリングではなく、完全に均等な抜き取りが要件として必要な場合</b>です。この回で紹介する代替手段は速度と引き換えに何らかの偏りを持ちます。法律や社内規定で「全行が完全に同じ確率で選ばれることを保証する」ことが求められる抜き取り検査のような場面では、遅くても <code>ORDER BY random()</code> (または行単位でランダムに選ぶ <code>TABLESAMPLE BERNOULLI</code>) の方が安全な選択です。</p>
+  </section>
+
+  <section>
+    <h2>5. 解決策 ― 用途に応じた 4 つの代替手段</h2>
+    <h3>5.1 TABLESAMPLE SYSTEM ― ページ単位で速いが隣接した行が固まる</h3>
+    <p><code>TABLESAMPLE SYSTEM (割合)</code> は、表をページ (ディスク上の 1 ブロック、既定 8KB) の単位でランダムに選び、選ばれたページの行をすべて返します。ページそのものを読むかどうかしか判定しないため、全件を読む必要がありません。</p>
+    <pre><code>EXPLAIN (ANALYZE, BUFFERS, TIMING)
+SELECT product_id, product_name FROM big_products TABLESAMPLE SYSTEM (1);
+
+ Sample Scan on big_products  (cost=0.00..178.00 rows=5000 width=22) (actual time=0.005..0.396 rows=4867.00 loops=1)
+   Sampling: system ('1'::real)
+   Buffers: shared hit=31
+ Execution Time: 0.539 ms</code></pre>
+    <p>読み取りページ数はわずか 31 で、実行時間は 0.539 ms でした。<code>ORDER BY random()</code> の 66.069 ms と比べて 2 桁近く速く、1 % 指定でおよそ 4867 行 (50 万行の約 0.97 %) が選ばれています。ただし、速さの代償として「隣接する行がまとめて選ばれる」偏りがあります。割合を 0.1 % に下げて、選ばれた <code>product_id</code> を昇順に並べてみます。</p>
+    <pre><code>SELECT product_id FROM big_products TABLESAMPLE SYSTEM (0.1) ORDER BY product_id LIMIT 40;
+
+ 379941
+ 379942
+ 379943
+   ...(中略、379944〜379979 まで連番)...
+ 379980</code></pre>
+    <p>40 件すべてが <code>379941</code> から <code>379980</code> まで連続した id でした。これは「ランダムな 40 件」ではなく「たまたま選ばれた 1 つのページに入っていた 40 件」です。同じ時期に挿入された行が同じページに収まりやすいテーブルでは、SYSTEM サンプリングの結果は時期的に偏ったサンプルになります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="TABLESAMPLE SYSTEMがページ単位で選ぶため隣接行が固まる図">
+        <text x="300" y="20" font-size="13" text-anchor="middle" fill="#12211a" font-weight="700">ディスク上のページ (それぞれ数十行を含む)</text>
+        <rect x="30" y="35" width="70" height="40" rx="4" fill="#f0f0f0" stroke="#aaa"/>
+        <rect x="110" y="35" width="70" height="40" rx="4" fill="#eaf5ef" stroke="#0f5132" stroke-width="2.5"/>
+        <text x="145" y="60" font-size="11" text-anchor="middle" fill="#0f5132">選択</text>
+        <rect x="190" y="35" width="70" height="40" rx="4" fill="#f0f0f0" stroke="#aaa"/>
+        <rect x="270" y="35" width="70" height="40" rx="4" fill="#f0f0f0" stroke="#aaa"/>
+        <rect x="350" y="35" width="70" height="40" rx="4" fill="#f0f0f0" stroke="#aaa"/>
+        <rect x="430" y="35" width="70" height="40" rx="4" fill="#f0f0f0" stroke="#aaa"/>
+        <rect x="510" y="35" width="60" height="40" rx="4" fill="#f0f0f0" stroke="#aaa"/>
+        <text x="300" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">選ばれたページの行は全部返る ― そのページの行はたまたま id が近い</text>
+        <rect x="140" y="115" width="320" height="36" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="300" y="138" font-size="12" text-anchor="middle" fill="#b5401f">結果: 379941〜379980 の連番 40 件</text>
+      </svg>
+      <p class="cap">図: SYSTEM サンプリングはページを選ぶだけなので、1 ページ分の行がまとめて (隣接したまま) 返る。</p>
+    </div>
+    <h3>5.2 TABLESAMPLE BERNOULLI ― 行単位で偏りは小さいが全件を読む</h3>
+    <p><code>TABLESAMPLE BERNOULLI (割合)</code> は、行 1 件ごとに独立したコイン投げで採否を決めます。ページをまとめて取るか捨てるかではなく、1 行ずつ判定するため、SYSTEM のような隣接の偏りはありません。</p>
+    <pre><code>EXPLAIN (ANALYZE, BUFFERS, TIMING)
+SELECT product_id, product_name FROM big_products TABLESAMPLE BERNOULLI (1);
+
+ Sample Scan on big_products  (cost=0.00..3235.00 rows=5000 width=22) (actual time=0.002..4.380 rows=5099.00 loops=1)
+   Sampling: bernoulli ('1'::real)
+   Buffers: shared hit=3185
+ Execution Time: 4.526 ms</code></pre>
+    <p>読み取りページ数は 3185 で、表全体のページ数とほぼ同じです。つまり BERNOULLI は <code>ORDER BY random()</code> と同じく全件を読みますが、読んだ後にソートをしない分、4.526 ms と <code>ORDER BY random()</code> の 66.069 ms より速く済みます。割合を 0.02 % にして結果の <code>product_id</code> を見ると、SYSTEM のときとは違い、値がばらばらに散らばっていることが分かります。</p>
+    <pre><code>SELECT product_id FROM big_products TABLESAMPLE BERNOULLI (0.02) ORDER BY product_id LIMIT 20;
+
+ 1027, 1154, 3482, 6363, 11252, 24364, 25074, 26935, 28946, 30293, ...</code></pre>
+    <p>BERNOULLI は SYSTEM より遅いものの、行の抜き取りに偏りが入らないという意味では <code>ORDER BY random()</code> に近い性質を持ちます。「数 % 程度を抜き取って統計を取りたいが、全件を読む時間は惜しくない」という場面に向いています。</p>
+    <h3>5.3 tsm_system_rows ― 割合でなく行数そのものを指定する</h3>
+    <p><code>TABLESAMPLE SYSTEM (割合)</code> は割合から推定した行数しか保証しません (小さい表では 0 行になることもあります)。contrib 拡張の <code>tsm_system_rows</code> を有効にすると、<code>SYSTEM_ROWS(行数)</code> という指定で欲しい行数そのものを指定できます。</p>
+    <pre><code>CREATE EXTENSION IF NOT EXISTS tsm_system_rows;
+EXPLAIN (ANALYZE, BUFFERS, TIMING)
+SELECT product_id, product_name FROM big_products TABLESAMPLE SYSTEM_ROWS(5);
+
+ Sample Scan on big_products  (cost=0.00..4.05 rows=5 width=22) (actual time=0.003..0.004 rows=5.00 loops=1)
+   Sampling: system_rows ('5'::bigint)
+   Buffers: shared hit=1
+ Execution Time: 0.007 ms
+
+ product_id
+------------
+     112099
+     112100
+     112101
+     112102
+     112103</code></pre>
+    <p>読み取りはわずか 1 ページ、0.007 ms で、要求どおり正確に 5 行が返りました。ただし内部の仕組みは <code>SYSTEM</code> と同じくページ単位なので、結果を見ると分かるように、やはり隣接した 5 件 (<code>112099</code> から <code>112103</code>) が返っています。「行数を正確に指定したい」という問題は解決しますが、「隣接した行が固まる」という偏りの問題は解決しません。</p>
+  </section>
+
+  <section>
+    <h2>5 (続き). ID 範囲の乱数と OFFSET 乱数</h2>
+    <h3>5.4 ID 範囲の乱数 ― インデックスで一気に絞れるが欠番に偏る</h3>
+    <p>主キーが連番の数値であれば、「最小値から最大値の間の乱数を作り、その値以上で最小の行を 1 件取る」という方法が使えます。</p>
+    <pre><code>EXPLAIN (ANALYZE, BUFFERS, TIMING)
+SELECT product_id, product_name FROM big_products
+WHERE product_id >= (SELECT floor(random() * (500000-1) + 1)::bigint)
+ORDER BY product_id LIMIT 1;
+
+ Limit  (cost=0.45..0.48 rows=1 width=22) (actual time=0.009..0.009 rows=1.00 loops=1)
+   Buffers: shared hit=4
+   ->  Index Scan using big_products_pkey on big_products (cost=0.42..5818.10 rows=166667 width=22) (actual time=0.009..0.009 rows=1.00 loops=1)
+         Index Cond: (product_id >= (InitPlan 1).col1)
+ Execution Time: 0.015 ms</code></pre>
+    <p>主キーのインデックスを使った <code>Index Scan</code> になり、読み取りはわずか 4 バッファ、0.015 ms です。欠番 (削除された行) が無い間はほぼ均等に行が選ばれますが、削除によって id に欠番ができると、欠番の直後の行に選ばれる確率が集中します。これを確かめるため、<code>product_id</code> が 100001 から 200000 までの 10 万行 (全体の 20 %) を削除し、同じ方法で 2000 回乱数を引いてみます。</p>
+    <pre><code>DELETE FROM big_products WHERE product_id > 100000 AND product_id <= 200000;
+
+-- 2000 回引いた結果の着地点を数えて多い順に並べる
+ picked_id | count
+-----------+-------
+    200001 |   373
+     59449 |     2
+     45438 |     2
+     87544 |     2
+    272780 |     2</code></pre>
+    <p>2000 回のうち 373 回 (18.65 %) が <code>product_id = 200001</code> (削除した範囲のすぐ後ろの行) に集中しました。削除した範囲は全体の 20 % (10 万 / 50 万) なので、ほぼその比率どおりに「欠番の直後の 1 行」へ乱数が吸い込まれていることが分かります。それ以外の行はそれぞれ 1〜2 回程度しか選ばれていません。退会したユーザーや削除された商品のように、欠番が生まれる現実のテーブルでこの方法を使うと、生き残った特定の行だけが不自然に多く選ばれ続けます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="欠番がID範囲の乱数を1点に集中させる図">
+        <rect x="30" y="40" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="110" y="65" font-size="11.5" text-anchor="middle" fill="#0f5132">id 1〜100000 (在る)</text>
+        <rect x="190" y="40" width="160" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 3"/>
+        <text x="270" y="65" font-size="9.5" text-anchor="middle" fill="#b5401f">id 100001〜200000 (欠番 20%)</text>
+        <rect x="350" y="40" width="30" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2.5"/>
+        <text x="365" y="30" font-size="11" text-anchor="middle" fill="#1f4a68">200001</text>
+        <rect x="380" y="40" width="190" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="475" y="65" font-size="11.5" text-anchor="middle" fill="#0f5132">id 200002〜500000 (在る)</text>
+        <path d="M270 85 L365 85" stroke="#b5401f" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ah3)"/>
+        <defs><marker id="ah3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#b5401f"/></marker></defs>
+        <text x="300" y="115" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">欠番 20% 分の乱数がすべて id=200001 に吸い込まれる (実測 18.65%)</text>
+      </svg>
+      <p class="cap">図: 欠番の幅がそのまま、欠番直後の 1 行が選ばれる確率に上乗せされる。</p>
+    </div>
+    <h3>5.5 OFFSET 乱数 ― 偏りは小さいが OFFSET の大きさがコストになる</h3>
+    <p>行数を数え、0 からその行数未満までの乱数を <code>OFFSET</code> に渡して 1 行取る方法です。欠番があっても「存在する行の中から数えて何番目か」で選ぶため、ID 範囲の乱数のような欠番への集中は起きません。</p>
+    <pre><code>EXPLAIN (ANALYZE, BUFFERS, TIMING)
+SELECT product_id, product_name FROM big_products ORDER BY product_id OFFSET 250000 LIMIT 1;
+
+ Limit  (cost=8092.42..8092.45 rows=1 width=22) (actual time=24.657..24.658 rows=1.00 loops=1)
+   Buffers: shared hit=2279
+   ->  Index Scan using big_products_pkey on big_products (cost=0.42..16184.42 rows=500000 width=22) (actual time=0.007..17.837 rows=250001.00 loops=1)
+ Execution Time: 24.661 ms</code></pre>
+    <p>欠番の偏りは避けられますが、<code>OFFSET</code> に渡した数だけインデックスをたどって読み飛ばす必要があるため、コストは <code>OFFSET</code> の値に比例します。50 万行の表で中央付近 (25 万) を指定すると 24.661 ms かかりました。OFFSET が 0 に近ければ速く、表の後半に近づくほど遅くなるという、乱数の値によって実行時間が大きくばらつく書き方でもあります。このコストの構造は、深いページ送りが遅くなる第 32 回のページネーションの問題と同じ根を持ちます。</p>
+    <table>
+      <thead><tr><th>方法</th><th>50 万行での実測</th><th>行単位の偏り</th><th>向いている場面</th></tr></thead>
+      <tbody>
+        <tr><td>ORDER BY random()</td><td>66.069 ms</td><td>無し (基準)</td><td>小さい表、低頻度のバッチ</td></tr>
+        <tr><td>TABLESAMPLE SYSTEM</td><td>0.539 ms (全件取得)</td><td>隣接行が固まる</td><td>大量サンプルの統計用途 (個々の偏りは問題にならない)</td></tr>
+        <tr><td>TABLESAMPLE BERNOULLI</td><td>4.526 ms (全件取得)</td><td>無し</td><td>偏りを避けつつ数 % を抜き取りたい</td></tr>
+        <tr><td>tsm_system_rows</td><td>0.007 ms</td><td>隣接行が固まる</td><td>正確な行数が必要、偏りは許容</td></tr>
+        <tr><td>ID 範囲の乱数</td><td>0.015 ms</td><td>欠番に集中</td><td>削除が無い (または稀な) 表から 1 行</td></tr>
+        <tr><td>OFFSET 乱数</td><td>0.015〜24.661 ms (OFFSET依存)</td><td>小さい</td><td>削除がある表から偏りを抑えて 1 行</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>6. PostgreSQL エンジンで考慮しておくこと</h2>
+    <h3>6.1 random() をサブクエリに包むと 1 回しか評価されない罠</h3>
+    <p>複数件のランダムな値を一度に作ろうとして、<code>random()</code> を外側の行を参照しないスカラサブクエリに包むと、PostgreSQL は「外側の行に依存しない計算」と判断し、<code>InitPlan</code> として<b>1 回だけ計算してキャッシュ</b>します。<code>random()</code> 自体は毎回違う値を返す VOLATILE な関数ですが、サブクエリとして括られた途端にこの最適化の対象になります。</p>
+    <pre><code>-- 生の random(): 2000 行それぞれで評価される
+SELECT count(DISTINCT r) FROM (SELECT random() AS r FROM generate_series(1,2000)) s;
+ count
+-------
+  2000
+
+-- サブクエリに包むと 1 回しか評価されない
+SELECT count(DISTINCT r) FROM (SELECT (SELECT random()) AS r FROM generate_series(1,2000)) s;
+ count
+-------
+     1</code></pre>
+    <p>2000 行生成しても、サブクエリに包んだ方は全行が同じ乱数値になりました。前節の「ID 範囲の乱数」を使って複数件を一度に取ろうとする場合、このままではどの行も同じ乱数から計算された同じ id に集中してしまいます。回避するには、外側の行の値を式の中に実際に混ぜ込み、サブクエリを外側の行に相関させる必要があります (本文中の検証では <code>+ (g - g)</code> のように常に 0 になる式を使って、外側の行番号 <code>g</code> への参照を作りました)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="random()をサブクエリに包むとキャッシュされる図">
+        <rect x="30" y="30" width="250" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="155" y="50" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">SELECT random() FROM ...</text>
+        <text x="155" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">行ごとに再計算 (正しい)</text>
+        <rect x="320" y="30" width="250" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="445" y="50" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">SELECT (SELECT random()) FROM ...</text>
+        <text x="445" y="68" font-size="11.5" text-anchor="middle" fill="#b5401f">InitPlan として 1 回だけ計算</text>
+        <text x="300" y="120" font-size="12.5" text-anchor="middle" fill="#4a5d54">外側の行に相関していないサブクエリは、PostgreSQL が「1 回計算すれば十分」と判断する</text>
+      </svg>
+      <p class="cap">図: 相関の無いサブクエリに包んだ random() は InitPlan として 1 回だけ評価され、全行で同じ値になる。</p>
+    </div>
+    <h3>6.2 tsm_system_rows は contrib 拡張であること</h3>
+    <p><code>SYSTEM_ROWS</code> は PostgreSQL 本体にはビルトインされていない、<code>tsm_system_rows</code> という contrib 拡張が提供する機能です。使う前に <code>CREATE EXTENSION tsm_system_rows;</code> が必要で、権限を持つロールか、スーパーユーザーがデータベースごとに有効化しておく必要があります。</p>
+    <h3>6.3 OFFSET 乱数は MVCC のスナップショットの中で数える</h3>
+    <p>OFFSET 乱数の母数にする行数は、通常 <code>count(*)</code> で数えますが、この値は数えた瞬間のスナップショットに基づきます。行数を数えてから <code>OFFSET</code> を実行するまでの間に別のトランザクションが行を挿入・削除すると、数えた行数と実際の行数がわずかにずれ、OFFSET が本来より僅かに前後の行を指すことがあります。これは致命的な偏りにはなりませんが、常に完全に正確な母数ではないことは意識しておく必要があります。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( https://www.oreilly.co.jp/books/9784814400744/ ) ― 「ランダムセレクション」という章立てと章構成 (目的・アンチパターン・見つけ方・使ってよい場合・解決策) の参考に使った。中身の記述は本ページ独自のもので、書籍の内容を推測したものではない。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-select.html#SQL-FROM" target="_blank" rel="noopener">PostgreSQL: 7.2.1.4. TABLESAMPLE Clause</a> ― TABLESAMPLE SYSTEM / BERNOULLI の構文と、ページ単位・行単位という抽出方法の違いの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/tsm-system-rows.html" target="_blank" rel="noopener">PostgreSQL: F.44. tsm_system_rows</a> ― SYSTEM_ROWS が割合でなく行数そのものを指定できる contrib 拡張であることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/functions-math.html" target="_blank" rel="noopener">PostgreSQL: 9.3.3. Random Functions</a> ― random() が VOLATILE な関数であることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/xfunc-volatility.html" target="_blank" rel="noopener">PostgreSQL: 38.7. Function Volatility Categories</a> ― VOLATILE 関数の評価タイミングと、サブクエリが外側の行に相関しない場合に一度だけ評価される InitPlan 化の背景の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/queries-order.html" target="_blank" rel="noopener">PostgreSQL: 7.6. LIMIT and OFFSET</a> ― OFFSET が指定した件数だけ行を読み飛ばすという実装の一次情報 (コストが OFFSET の値に比例する根拠)。</li>
+      <li><a href="https://www.postgresql.org/docs/current/using-explain.html" target="_blank" rel="noopener">PostgreSQL: 14.1. Using EXPLAIN</a> ― EXPLAIN (ANALYZE, BUFFERS) の読み方、Seq Scan / Index Scan / Sort の各行の意味の一次情報。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-ambiguous-groups.html">← 第 15 回 アンビギュアスグループ</a><a href="./sql-index.html">目次</a><a href="./sql-poor-mans-search-engine.html">第 17 回 プアマンズ・サーチエンジン →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '50 万行の表に対して `ORDER BY random() LIMIT 5` を実行したとき、EXPLAIN (ANALYZE, BUFFERS) で確認できる事実として最も適切なものは？',
+    opts: [
+      'Seq Scan が rows=500000 と表示され、欲しい行数 (5) とは無関係に表全体を読む',
+      'LIMIT 5 のおかげで、最初に見つかった 5 行だけを読んで終了する',
+      'インデックスを自動で使い、5 行だけを直接読み出す',
+      '表の行数が少ないほど、読み取るページ数は増える',
+      'random() は呼び出されず、物理的な格納順がそのまま使われる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文の実測どおり、Seq Scan は rows=500000 と表示され、各行に random() を適用してソートキーを作るために表全体を読む。LIMIT で絞っても読む量は変わらない。',
+      'LIMIT は並べ替えた後の先頭を切り出すだけで、並べ替えの前提になる全件の読み取りをスキップできるわけではない。',
+      'ORDER BY random() の列はテーブルに存在しない計算値なので、インデックスは使えない。実際の実行計画も Seq Scan だった。',
+      '行数が少なければ読み取るページ数も少なくなる。多いほど増えるという関係が逆になっている。',
+      'random() は呼び出されており、Sort Key: (random()) として実行計画に表示される。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>LIMIT は並べ替えの後に切り出すだけで、並べ替える前の読み取りは全件のままです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="LIMITは全件読み取りを省略しない図"><rect x="30" y="30" width="240" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#0f5132">50 万行を読んで random() を適用</text><rect x="310" y="30" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="12" text-anchor="middle" fill="#b5401f">LIMIT 5 で先頭だけ残す</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">LIMIT の数字を変えても、左側の全件読み取りは変わらない</text></svg>'
+          + '<p class="cap">図: LIMIT は右側の切り出しにしか効かず、左側の全件読み取りは常に発生する。</p></div>'
+    }
+  },
+  {
+    q: '`TABLESAMPLE SYSTEM (0.1)` で取得した 40 件の product_id が、すべて連番 (379941〜379980) だった理由として最も適切なものは？',
+    opts: [
+      'このテーブルには連番のデータしか存在しないから',
+      'SYSTEM は product_id の昇順にしか行を返せない仕様だから',
+      'SYSTEM はディスク上のページ単位でランダムに選び、選ばれたページの行をそのまま全部返すから',
+      'SYSTEM は常に先頭ページだけを返す仕様だから',
+      'ORDER BY を付け忘れたため、たまたま連番に見えただけ'
+    ],
+    ans: 2,
+    exps: [
+      'このテーブルは generate_series で作った連番データだが、連番になった理由はデータの性質ではなく、ページ単位の抽出方法そのものにある。',
+      'SYSTEM の結果に順序の仕様は無く、取得後に ORDER BY で昇順に並べたのは説明のための後処理。',
+      '<b>これが正解。</b>SYSTEM はページ単位でランダムに選び、選ばれたページに入っている行をすべて返す。1 ページには挿入された順で近い id の行がまとまって入っているため、結果が連番になりやすい。',
+      '先頭ページだけを返す仕様ではなく、ページはランダムに選ばれる。本文でも別の実行で異なる範囲の id が返っている。',
+      'ORDER BY を付けて並べたのは結果を見やすくするためで、連番であること自体の原因ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>選ばれるのはページ単位で、ページの中の行は全部まとめて返ります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="SYSTEMがページ単位で選ぶ図"><rect x="30" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="50" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">1 ページ</text><text x="130" y="68" font-size="11" text-anchor="middle" fill="#12211a">id が近い行が密集</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">結果</text><text x="420" y="68" font-size="11" text-anchor="middle" fill="#12211a">ページ内の行がそのまま返る</text></svg>'
+          + '<p class="cap">図: SYSTEM はページを単位に選ぶため、結果はページ内の行がまとまって返る。</p></div>'
+    }
+  },
+  {
+    q: '`TABLESAMPLE BERNOULLI (1)` が `TABLESAMPLE SYSTEM (1)` より遅かった (4.526 ms 対 0.539 ms) 理由は？',
+    opts: [
+      'BERNOULLI は必ず結果をディスクに書き出すから',
+      'BERNOULLI は行ごとに採否を判定するため、ページを 1 つも省略できず表全体を読む必要があるから',
+      'BERNOULLI も SYSTEM と同じくページ単位で判定しているが、採否の基準が厳しいぶん余分なページまで読むから',
+      'BERNOULLI は取得した行をいったんすべて並べ替えてから返すから',
+      'BERNOULLI はインデックスが無いと使えない仕様だから'
+    ],
+    ans: 1,
+    exps: [
+      '結果をディスクに書き出す仕様ではない。通常の問い合わせ結果と同様にメモリ上で処理される。',
+      '<b>これが正解。</b>BERNOULLI は行 1 件ごとに独立した判定をするため、どのページも読まずに済ませることができず、結果として表全体 (3185 ページ) を読む。ページ単位で省略できる SYSTEM より遅くなる。',
+      'ページ単位で判定するのは SYSTEM の方である。BERNOULLI は行 1 件ごとに判定するため、どのページも丸ごと省略できないのであって、採否の基準の厳しさとは関係がない。',
+      '並べ替えのコストが乗るのは <code>ORDER BY random()</code> の方である。本文の実測でも並べ替えを伴わない BERNOULLI (4.526 ms) は <code>ORDER BY random()</code> (66.069 ms) よりずっと速く、BERNOULLI が遅い理由は並べ替えではなく行ごとの判定でページを省略できないことにある。',
+      'BERNOULLI も SYSTEM と同様、主キーなどのインデックスの有無に関係なく使用できる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>行単位の判定は、どのページも読まずに済ませることができません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="BERNOULLIが全ページを読む図"><rect x="30" y="30" width="500" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">全 3185 ページを読み、行ごとにコイン投げで採否を決める</text><text x="280" y="95" font-size="12" text-anchor="middle" fill="#4a5d54">ページを省略できないため SYSTEM より遅いが、偏りも小さい</text></svg>'
+          + '<p class="cap">図: BERNOULLI は行単位の判定のため、ページの省略ができない。</p></div>'
+    }
+  },
+  {
+    q: '`tsm_system_rows` 拡張の `SYSTEM_ROWS(5)` について正しい説明は？',
+    opts: [
+      '指定した行数より常に多い行数が返る',
+      '行単位の抽出なので、偏りは完全に無くなる',
+      'PostgreSQL 本体に標準で組み込まれており、拡張を有効化する必要は無い',
+      '正確に指定した行数を返すが、内部はページ単位の抽出なので隣接した行が固まって返ることがある',
+      'BERNOULLI と全く同じアルゴリズムで動作する'
+    ],
+    ans: 3,
+    exps: [
+      '本文の実測では指定どおり正確に 5 行が返っており、常に多く返るという主張は誤り。',
+      '内部はページ単位の抽出のままなので、SYSTEM と同様の隣接する偏りが残る。',
+      'tsm_system_rows は contrib 拡張であり、CREATE EXTENSION で有効化する必要がある。',
+      '<b>これが正解。</b>SYSTEM_ROWS は欲しい行数を正確に指定できる点が SYSTEM との違いだが、内部のアルゴリズムはページ単位の抽出であり、本文の実測でも 112099〜112103 の連番 5 件が返っている。',
+      'BERNOULLI は行単位の判定だが、SYSTEM_ROWS はページ単位の判定であり、アルゴリズムが異なる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>行数の正確さとページ単位の偏りは別の軸です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="SYSTEM_ROWSが行数は正確だが偏りは残る図"><rect x="30" y="30" width="240" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="50" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">行数の正確さ ― 解決</text><text x="150" y="68" font-size="11" text-anchor="middle" fill="#12211a">指定どおり 5 行が返る</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">隣接の偏り ― 未解決</text><text x="420" y="68" font-size="11" text-anchor="middle" fill="#12211a">ページ単位のまま</text></svg>'
+          + '<p class="cap">図: SYSTEM_ROWS は行数の正確さだけを解決し、ページ単位の偏りはそのまま残る。</p></div>'
+    }
+  },
+  {
+    q: '`product_id` の 100001〜200000 (全体の 20%) を削除した後、ID 範囲の乱数で 1 行を選ぶ方法を 2000 回繰り返したとき、実測で何が起きたか？',
+    opts: [
+      '欠番の直後の行 (id=200001) が約 18.65% の確率で選ばれ、他の行より大きく偏った',
+      'どの行も完全に均等な確率 (1/400000) で選ばれ、偏りは一切無かった',
+      '削除した範囲の行だけが選ばれ続けた',
+      '欠番にあたった乱数 (約 20%) は毎回別々の生きている行に散らばるので、特定の 1 行に集中することは無かった',
+      '毎回同じ id が選ばれ、2000 回とも全く同じ結果になった'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>欠番の範囲 (20%) に落ちた乱数はすべて欠番直後の id=200001 に吸い込まれるため、実測でも 2000 回中 373 回 (18.65%) がこの 1 点に集中した。',
+      '本文の実測は均等ではなく、欠番の直後の 1 行に 18.65% という大きな偏りが出た。',
+      '削除された行はもはや存在しないため選ばれることはできない。選ばれ続けたのは「欠番の直後」の行である。',
+      '欠番にあたった乱数の割合がおよそ 20% になる点は正しいが、<code>WHERE product_id >= 乱数 ORDER BY product_id LIMIT 1</code> は条件を満たす最小の id を 1 つ返すだけなので、欠番にあたった乱数はすべて同じ行 (id=200001) に集中する。別々の行に散らばるという推測は誤り。',
+      '毎回同じ id になったのは「random() をサブクエリに包んで相関を外した」別の実験の話で、この設問の正しい実装では毎回違う乱数が使われている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>欠番の幅がそのまま、直後の 1 行に上乗せされる確率になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="欠番20%が1行に集中する図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2" stroke-dasharray="4 3"/><text x="130" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">欠番 20%</text><rect x="250" y="30" width="30" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2.5"/><text x="340" y="55" font-size="12" fill="#1f4a68">← id=200001 が実測 18.65% を独占</text></svg>'
+          + '<p class="cap">図: 欠番 20% の幅がそのまま、直後の 1 行の選ばれる確率に加算される。</p></div>'
+    }
+  },
+  {
+    q: '`ORDER BY product_id OFFSET 250000 LIMIT 1` が 24.661 ms かかった理由として最も適切なものは？',
+    opts: [
+      'OFFSET に指定した数だけ行をインデックス上で読み飛ばす必要があり、250000 という大きな値がそのままコストになったから',
+      'OFFSET の位置に達するまでは Seq Scan で全件を読むため、インデックスを使うクエリより遅くなるから',
+      'LIMIT 1 のせいでクエリプランナが最適化を放棄したから',
+      'OFFSET の値は初回実行時にキャッシュされるため、2 回目以降はコストが掛からないはずだから',
+      'OFFSET は乱数とは無関係にエラーを起こす構文だから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>OFFSET は「読み飛ばす行数」をそのまま指定する構文で、PostgreSQL は内部的にその数だけ行を読み進めてから結果を返す。250000 という大きな値を指定すると、それだけの行を読み進めるコストがそのままかかる。',
+      '本文の実行計画では Seq Scan ではなく <code>Index Scan using big_products_pkey</code> が使われている。OFFSET が遅いのは Seq Scan に切り替わるからではなく、Index Scan であっても指定した行数だけインデックスを辿って読み飛ばす必要があるからである。',
+      'LIMIT 1 自体は最適化の放棄を引き起こさない。実行計画も Index Scan を使った妥当なものだった。',
+      'キャッシュされるのはページの内容であって、OFFSET で指定した行数だけ読み飛ばす処理自体は実行のたびに行われる。OFFSET の値 (0 に近いか 25 万に近いか) によって実行時間が大きく変わること自体が、コストが毎回かかっている証拠である。',
+      'OFFSET はエラーを起こす構文ではなく、正しく 1 行を返している。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>OFFSET の値がそのまま読み飛ばす行数になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="OFFSETの値が読み飛ばす行数になる図"><rect x="30" y="40" width="300" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="180" y="65" font-size="12" text-anchor="middle" fill="#b5401f">25 万行を読み飛ばす (OFFSET 250000)</text><rect x="350" y="40" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="440" y="65" font-size="12" text-anchor="middle" fill="#0f5132">1 行だけ返す</text><text x="280" y="100" font-size="12" text-anchor="middle" fill="#4a5d54">OFFSET の値が大きいほど読み飛ばす時間も増える</text></svg>'
+          + '<p class="cap">図: OFFSET の値がそのまま、読み飛ばすために読む行数になる。</p></div>'
+    }
+  },
+  {
+    q: '頻繁に行が削除される表から、欠番の偏りを避けつつ 1 行をランダムに選びたい場合、本文の実測を踏まえて最も妥当な選択は？',
+    opts: [
+      'ID 範囲の乱数 (欠番の直後に大きく偏るが気にしない)',
+      'OFFSET 乱数 (欠番があっても生きている行の中から数えて選ぶため、偏りが小さい)',
+      'TABLESAMPLE SYSTEM (ページ単位の隣接した偏りがあっても構わない)',
+      'ORDER BY product_id LIMIT 1 (常に最小の id を返すだけ)',
+      'tsm_system_rows の SYSTEM_ROWS(1) (指定した行数を正確に 1 件返せるので十分)'
+    ],
+    ans: 1,
+    exps: [
+      'ID 範囲の乱数は本文の実測のとおり欠番の直後に大きく偏るため、欠番が頻繁にある表には不向き。',
+      '<b>これが正解。</b>OFFSET 乱数は「生きている行を数えて何番目か」で選ぶため、欠番があっても ID 範囲の乱数のような 1 点への集中が起きにくい。コストが OFFSET の値に比例する代償はあるが、欠番への耐性という点では本文の 4 手法の中で最も適している。',
+      'SYSTEM はそもそも「1 行だけ」を目的にした手法ではなく、ページ単位の隣接した偏りも大きい。',
+      '常に最小の id を返すのはランダム選択になっておらず、要件を満たさない。',
+      'SYSTEM_ROWS は欲しい行数を正確に指定できる点では優れているが、内部のアルゴリズムは SYSTEM と同じページ単位の抽出であり、隣接した行が固まって返る偏りは残る。欠番への耐性とは別の問題であり、要件を解決しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>欠番があっても、生きている行を基準に数える方法なら集中が起きにくくなります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="OFFSET乱数が欠番に強い図"><rect x="30" y="30" width="240" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="50" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">ID 範囲の乱数</text><text x="150" y="68" font-size="11" text-anchor="middle" fill="#12211a">欠番の直後に集中</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">OFFSET 乱数</text><text x="420" y="68" font-size="11" text-anchor="middle" fill="#12211a">生きている行を数えて選ぶ</text></svg>'
+          + '<p class="cap">図: OFFSET 乱数は生存している行を基準に数えるため、欠番による集中が起きにくい。</p></div>'
+    }
+  },
+  {
+    q: '`SELECT (SELECT random()) AS r FROM generate_series(1,2000)` の結果が、2000 行すべて同じ値になった理由は？',
+    opts: [
+      'random() は VOLATILE 関数なので、本来は呼び出しごとに毎回違う値を返すはずで、この結果は PostgreSQL のバグである',
+      'generate_series(1,2000) は内部的に結果をキャッシュしており、2 回目以降の呼び出しでは 1 回目に生成した値をそのまま返すから',
+      'サブクエリに random() を書くと、PostgreSQL がそのサブクエリを副作用の無い STABLE 関数として自動的に書き換えるから',
+      'サブクエリが外側の行 (generate_series の各行) に相関していないため、PostgreSQL が InitPlan として 1 回だけ評価してキャッシュしたから',
+      'generate_series を使う問い合わせでは、VOLATILE な関数の結果は常に 1 回だけ評価されてキャッシュされる仕様だから'
+    ],
+    ans: 3,
+    exps: [
+      'VOLATILE だから毎回違う値になるはずだという理解は、相関の無いスカラサブクエリが InitPlan として扱われるケースでは当てはまらない。バグではなく、PostgreSQL の計画作成の仕組みどおりの挙動である。',
+      'generate_series 自体に結果をキャッシュして再利用する仕組みは無く、本文の集計 (count(*) が 2000 件) でも 2000 行がそれぞれ生成されていることが確認できる。1 回だけ計算されて再利用されたのは random() を含む相関の無いサブクエリの方である。',
+      'PostgreSQL が random() の揮発性 (VOLATILE) を自動的に STABLE に書き換えるという仕組みは無く、volatility の区分は pg_proc に定義されたまま変わらない。1 回だけ評価されたのは、このサブクエリが generate_series の各行 (外側の行) を一切参照しない、相関の無いサブクエリだからであり、揮発性の分類とは別の、計画作成時の最適化の話である。',
+      '<b>これが正解。</b>外側の行に相関しないスカラサブクエリは、PostgreSQL の計画作成時に InitPlan として扱われ、1 回だけ計算した値が全行で再利用される。random() 自体は VOLATILE だが、この最適化の対象になる。',
+      '1 回だけキャッシュされるのは generate_series を使っているからではなく、サブクエリが外側の行に相関していないからである。実際に <code>SELECT random() AS r FROM generate_series(1,2000)</code> のように相関サブクエリを使わずに直接呼び出すと、本文の実測どおり 2000 行がほぼすべて異なる値になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>相関の無いサブクエリは 1 回だけ評価され、結果がキャッシュされます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="InitPlanが1回だけ評価される図"><rect x="30" y="30" width="240" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="50" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">(SELECT random())</text><text x="150" y="68" font-size="11" text-anchor="middle" fill="#12211a">InitPlan として 1 回だけ</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">2000 行すべて</text><text x="420" y="68" font-size="11" text-anchor="middle" fill="#12211a">同じキャッシュ値を使う</text></svg>'
+          + '<p class="cap">図: 1 回だけ評価された値が、2000 行すべてで再利用される。</p></div>'
+    }
+  },
+  {
+    q: 'EXPLAIN の出力に `Sort Key: (random())` という行があり、その下に `Seq Scan` があるとき、この問い合わせについて言えることは？',
+    opts: [
+      'ORDER BY random() を使っており、表全体を読んで並べ替えている可能性が高い',
+      'インデックスを使って高速にランダムな行を選んでいる',
+      'TABLESAMPLE を使っており、ページ単位でしか行を読んでいない',
+      'Sort Key: (random()) が表示されているのは、並べ替えの対象が既に少数の行に絞り込まれていることを示している',
+      'Sort Key: (random()) は EXPLAIN の説明用の表示にすぎず、実際の実行では random() は評価されずダミーの値が使われている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Sort Key: (random()) は random() の値で並べ替えていることを示し、その下に Seq Scan があることから、表全体を読んで並べ替えるタイプの問い合わせだと判断できる。',
+      'Sort Key: (random()) が出ている時点で、インデックスではなく Seq Scan + Sort の組み合わせであることを示している。',
+      'TABLESAMPLE を使った場合は Sample Scan という別の行が表示され、Sort Key: (random()) は出てこない。',
+      'Sort Key は並べ替えの基準を示すだけで、入力行数の多さ少なさを示す情報ではない。入力行数は Sort の子ノードである Seq Scan の rows 推定 (本文の例では 500000) を見て判断する必要があり、Sort Key の有無だけで少数の行に絞り込まれているとは言えない。',
+      'EXPLAIN (ANALYZE, ...) は実際にクエリを実行した結果に基づく計画を表示しており、Sort Key: (random()) は実行時に本当に random() が評価されてソートキーとして使われたことを示している。表示のためだけのダミー値ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>EXPLAIN の中の文字列だけで、問い合わせの種類を判別できます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="EXPLAINの文字列で見分ける図"><rect x="30" y="30" width="240" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="50" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">Sort Key: (random())</text><text x="150" y="68" font-size="11" text-anchor="middle" fill="#12211a">+ Seq Scan</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">Sample Scan</text><text x="420" y="68" font-size="11" text-anchor="middle" fill="#12211a">TABLESAMPLE を使用</text></svg>'
+          + '<p class="cap">図: 実行計画の文字列を見れば、どの方式で乱数選択をしているかが分かる。</p></div>'
+    }
+  },
+  {
+    q: '法律や社内規定で「全行が完全に同じ確率で選ばれることを保証する」ことが求められる抜き取り検査を実装する場面で、最も妥当な選択は？',
+    opts: [
+      'TABLESAMPLE SYSTEM または tsm_system_rows (ページ単位で速く選べる)',
+      'ID 範囲の乱数 (インデックスで高速に選べる)',
+      'ORDER BY random() または行単位の TABLESAMPLE BERNOULLI (速度より均等さを優先する)',
+      'OFFSET に固定値 0 を指定する (常に先頭行を返す)',
+      'OFFSET 乱数 (欠番による集中が起きにくく、本文の実測でも偏りが小さかった)'
+    ],
+    ans: 2,
+    exps: [
+      'SYSTEM や tsm_system_rows はページ単位の抽出であり、本文の実測でも隣接した行が固まって返ることが確認されている。均等さが要件なら不向き。',
+      'ID 範囲の乱数は欠番があると特定の行に大きく偏ることが実測で確認されている。均等さの保証が必要な場面には不向き。',
+      '<b>これが正解。</b>本文の「使ってよい場合」で述べたとおり、完全に均等な抜き取りが求められる場面では、速度を犠牲にしても ORDER BY random() (全行に等しく random() を適用) か、行単位で判定する BERNOULLI が適している。',
+      'OFFSET 0 は常に先頭行を返すだけで、ランダム選択になっていない。',
+      'OFFSET 乱数は欠番による集中には強いが、母数にする行数を数えるタイミングと OFFSET を実行するタイミングの間に別のトランザクションが行を増減させると、数えた行数と実際の行数がわずかにずれる (本文 6.3)。「完全に同じ確率であることを保証する」という厳格な要件には、この程度のずれも許されない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>速さと均等さはトレードオフの関係にあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="速さと均等さのトレードオフの図"><rect x="30" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="50" font-size="12" text-anchor="middle" fill="#0f5132" font-weight="700">SYSTEM / ID 範囲</text><text x="140" y="68" font-size="11" text-anchor="middle" fill="#12211a">速いが偏りがある</text><rect x="310" y="30" width="220" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="50" font-size="12" text-anchor="middle" fill="#1f4a68" font-weight="700">random() / BERNOULLI</text><text x="420" y="68" font-size="11" text-anchor="middle" fill="#12211a">遅いが均等さが高い</text></svg>'
+          + '<p class="cap">図: 均等さを最優先するなら、遅くても random() や BERNOULLI を選ぶ。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

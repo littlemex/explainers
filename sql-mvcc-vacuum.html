@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MVCC と VACUUM ― 行は上書きされない</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  table.tbl th{text-align:left;padding:8px 10px;border:1px solid #d9e5df;background:#eaf5ef}
+  table.tbl td{padding:8px 10px;border:1px solid #d9e5df}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 35 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>MVCC と VACUUM ― 行は上書きされない</h1>
+  <p>UPDATE も DELETE も既存の行を書き換えず、新しい版を増やすだけである。古い版を回収して空間を取り戻すのが VACUUM の仕事で、これが滞ると肥大化と周回問題が起きる</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 34 回 <a href="./sql-jsonb.html">JSONB の使い所と使わない所</a> (生成列と pg_stat_user_tables の基本的な読み方)</p>
+  <p class="intro">「UPDATE は行の値をその場で書き換える」という直感は、PostgreSQL では成り立ちません。UPDATE も DELETE も、既存の行には触れず、条件を満たす新しい版を追加するだけです。古い版は、どのトランザクションからも見えなくなった後に、VACUUM という別の処理が回収します。この回では、PostgreSQL 18.6 の実機で xmin/xmax という行の版番号、pageinspect 拡張で見える物理的な証拠、pg_stat_user_tables の dead tuple の増減、そして VACUUM が古い版を回収する様子を順に確かめ、肥大化 (bloat) ・ 自動 VACUUM の閾値 ・ 長いトランザクションが VACUUM を止める理由 ・ XID 周回と凍結までをつなげて見ます。</p>
+
+  <!-- ===== 1. この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 「上書き」ではなく「新しい版の追加」</h2>
+    <p>PostgreSQL は <b>MVCC (Multi-Version Concurrency Control, 多版型並行制御)</b> という方式で並行実行を実現しています。MVCC の核心は、1 つの行に対して複数の「版 (バージョン)」を同時に保持できることです。あるトランザクションが行を読んでいる間に、別のトランザクションが同じ行を更新しても、読んでいる側は自分が開始した時点の版を読み続けられます。読み取りが書き込みを待たず、書き込みも読み取りを待たない、という設計の土台がこれです。</p>
+    <p>この設計を実現するために、PostgreSQL の各行 (正確にはタプル) には <code>xmin</code> (この版を作ったトランザクション ID) と <code>xmax</code> (この版を無効にしたトランザクション ID、まだ無効化されていなければ 0) という隠れた列があります。UPDATE は、古い版の <code>xmax</code> に自分の ID を書き込み (これで古い版はこれ以降のトランザクションから見えなくなる)、新しい値を持つ新しい版を <code>xmin</code> = 自分の ID で挿入します。DELETE も同様に、行の <code>xmax</code> を自分の ID にするだけで、新しい版は作りません。どちらも「書き換え」ではなく「版の追加、または無効化」です。</p>
+    <p>この仕組みの裏側には代償があります。古い版はすぐには消えず、テーブルの中に残り続けます。これを回収するのが <b>VACUUM</b> です。VACUUM が滞ると、誰からも見えない古い版 (dead tuple) がテーブルに積み重なり、テーブルが肥大化 (bloat) し、検索が遅くなります。この回では、この「版が増える」「VACUUM が回収する」という 2 つの動きを、実際の xmin/xmax の値と EXPLAIN に相当する VACUUM VERBOSE の出力で確かめます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="UPDATEが新しい版を追加する様子を示す図">
+        <rect x="30" y="30" width="220" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">旧版</text>
+        <text x="140" y="75" font-size="11.5" text-anchor="middle" fill="#12211a">xmin=100, xmax=0 → 105</text>
+        <rect x="350" y="30" width="220" height="60" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="460" y="55" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">新版</text>
+        <text x="460" y="75" font-size="11.5" text-anchor="middle" fill="#12211a">xmin=105, xmax=0</text>
+        <line x1="250" y1="60" x2="350" y2="60" stroke="#9aa" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#9aa"/></marker></defs>
+        <text x="300" y="16" font-size="11" text-anchor="middle" fill="#4a5d54">UPDATE (トランザクション 105)</text>
+        <text x="140" y="115" font-size="12" text-anchor="middle" fill="#b5401f">まだテーブルに残っている (dead tuple)</text>
+        <text x="300" y="150" font-size="13" text-anchor="middle" fill="#4a5d54">VACUUM が古い版 (xmax 以降どの版からも見えない行) を回収する</text>
+      </svg>
+      <p class="cap">図: UPDATE は旧版の xmax を更新トランザクションの ID にし、新版を xmin = 自分の ID で追加する。旧版は VACUUM まで残る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 2. xmin/xmaxの実測 ===== -->
+  <section>
+    <h2>2. 仕組み ― xmin と xmax を実機で見る</h2>
+    <p><code>sample_schema.sql</code> を読み込んだ直後の <code>bugs</code> テーブルで、隠れた列 <code>xmin</code> ・ <code>xmax</code> ・ 物理的な位置を示す <code>ctid</code> を見てみます。</p>
+    <pre><code>SELECT bug_id, xmin, xmax, ctid FROM bugs ORDER BY bug_id;
+--  bug_id | xmin | xmax | ctid
+-- --------+------+------+-------
+--       1 | 2893 | 2896 | (0,1)
+--       2 | 2893 | 2896 | (0,2)
+--       3 | 2893 | 2894 | (0,3)
+--       4 | 2893 | 2896 | (0,4)
+--       5 | 2893 | 2896 | (0,5)</code></pre>
+    <p>まだ 1 度も UPDATE していないのに <code>xmax</code> が 0 ではありません。「<code>xmax</code> が 0 でなければ削除された行」という理解は不正確です。この <code>bugs</code> の行は <code>bugs_products</code> や <code>comments</code> から外部キーで参照されており、子テーブルへの INSERT 時に親行へ <code>FOR KEY SHARE</code> ロックが取られ、そのロックの印が <code>xmax</code> に書き込まれています。<code>pageinspect</code> 拡張の <code>heap_page_items</code> で行の生の情報 (infomask というビットの集まり) を見ると、これが削除ではなく「ロックのみ」であることが分かります。</p>
+    <pre><code>CREATE EXTENSION IF NOT EXISTS pageinspect;
+SELECT lp, t_xmin, t_xmax, t_infomask,
+       (t_infomask & 16)  <> 0 AS xmax_is_keyshare_lock,  -- HEAP_XMAX_KEYSHR_LOCK = 0x0010
+       (t_infomask & 128) <> 0 AS xmax_is_lock_only        -- HEAP_XMAX_LOCK_ONLY   = 0x0080
+FROM heap_page_items(get_raw_page('bugs',0)) ORDER BY lp;
+--  lp | t_xmin | t_xmax | t_infomask | xmax_is_keyshare_lock | xmax_is_lock_only
+-- ----+--------+--------+------------+-----------------------+-------------------
+--   1 |   2893 |   2896 |        403 | t                     | t
+--   2 |   2893 |   2896 |        403 | t                     | t
+--   3 |   2893 |   2894 |        403 | t                     | t
+--   4 |   2893 |   2896 |        403 | t                     | t
+--   5 |   2893 |   2896 |        403 | t                     | t</code></pre>
+    <p><code>xmax_is_lock_only</code> が全行で真であることから、この <code>xmax</code> は「この版を削除した」印ではなく「この版をロックしているトランザクションがいる」という印だと分かります。実務では「<code>xmax</code> が 0 でない行が増えた」というだけで「DELETE が多発している」と誤読してしまう場面がありますが、この infomask のビットまで見ないと、ロックと削除は区別できません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="xmaxがロックの印であることを示す図">
+        <rect x="30" y="20" width="250" height="110" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="155" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">xmax が本当に「削除」の場合</text>
+        <text x="155" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">この版は以後どこからも</text>
+        <text x="155" y="86" font-size="11.5" text-anchor="middle" fill="#12211a">見えなくなる (dead tuple)</text>
+        <text x="155" y="108" font-size="11" text-anchor="middle" fill="#4a5d54">infomask の LOCK_ONLY は立たない</text>
+        <rect x="320" y="20" width="250" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="445" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">xmax が「ロックのみ」の場合</text>
+        <text x="445" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">行は見え続ける</text>
+        <text x="445" y="86" font-size="11.5" text-anchor="middle" fill="#12211a">(FK 参照による FOR KEY SHARE)</text>
+        <text x="445" y="108" font-size="11" text-anchor="middle" fill="#0f5132">infomask の LOCK_ONLY が立つ</text>
+      </svg>
+      <p class="cap">図: xmax が 0 でなくても、infomask の LOCK_ONLY ビットが立っていれば削除ではなくロックの印。FK 参照は親行をこの形でロックする。</p>
+    </div>
+  </section>
+
+  <!-- ===== 3. UPDATEで版が増える ===== -->
+  <section>
+    <h2>3. 仕組み ― UPDATE は版を増やし、VACUUM が回収する</h2>
+    <p><code>bug_id = 3</code> の行を 1 回 UPDATE し、前後の <code>xmin</code> ・ <code>xmax</code> ・ <code>ctid</code> を比べます。</p>
+    <pre><code>UPDATE bugs SET priority = 'HIGH' WHERE bug_id = 3;
+SELECT bug_id, xmin, xmax, ctid FROM bugs WHERE bug_id = 3;
+--  bug_id | xmin | xmax | ctid
+-- --------+------+------+-------
+--       3 | 2898 |    0 | (0,6)
+
+SELECT relname, n_live_tup, n_dead_tup, n_tup_upd, n_tup_hot_upd
+FROM pg_stat_user_tables WHERE relname='bugs';
+--  relname | n_live_tup | n_dead_tup | n_tup_upd | n_tup_hot_upd
+-- ---------+------------+------------+-----------+---------------
+--  bugs    |          5 |          1 |         1 |             1</code></pre>
+    <p>UPDATE 後の <code>bug_id=3</code> は <code>xmin=2898</code> という新しい版になり、物理的な位置も <code>ctid=(0,3)</code> から <code>(0,6)</code> に変わりました。しかし古い版は消えていません。<code>n_dead_tup</code> (死んでいる版の数) が 0 から 1 に増え、これがテーブルの中に残っている古い版の数です。<code>n_tup_hot_upd</code> も 1 で、この更新が <b>HOT 更新 (Heap Only Tuple)</b> として処理されたことが分かります。HOT 更新は、更新対象の列がどの索引にも含まれておらず、かつ同じページに新しい版を置く空きがある場合に使われる最適化で、索引側を更新しなくて済む分、通常の更新より軽く済みます。</p>
+    <pre><code>SELECT lp, t_ctid, t_xmin, t_xmax FROM heap_page_items(get_raw_page('bugs',0)) ORDER BY lp;
+--  lp | t_ctid | t_xmin | t_xmax
+-- ----+--------+--------+--------
+--   1 | (0,1)  |   2893 |   2896
+--   2 | (0,2)  |   2893 |   2896
+--   3 | (0,6)  |   2893 |   2898   ← 旧版。t_ctid が新版 (0,6) を指す
+--   4 | (0,4)  |   2893 |   2896
+--   5 | (0,5)  |   2893 |   2896
+--   6 | (0,6)  |   2898 |      0   ← 新版。これが今の bug_id=3
+</code></pre>
+    <p>この <code>heap_page_items</code> の結果が、MVCC の「上書きしない」を直接示す物理的な証拠です。行スロット 3 (lp=3) は消えておらず、<code>t_xmax=2898</code> (更新したトランザクションの ID) を持ちながら、<code>t_ctid</code> で新しい版の場所 (lp=6) を指しています。これは HOT 更新の連鎖をたどるための仕組みで、索引はまだ古いスロット 3 を指したままでも、索引から辿った先でこのポインタを追って最新の版 (lp=6) に到達できます。</p>
+  </section>
+
+  <!-- ===== 4. VACUUMが回収する ===== -->
+  <section>
+    <h2>4. 仕組み ― VACUUM は回収するがファイルは縮めない</h2>
+    <p>ここで <code>VACUUM (VERBOSE)</code> を実行すると、古い版が回収されます。</p>
+    <pre><code>VACUUM (VERBOSE) bugs;
+-- tuples: 1 removed, 5 remain, 0 are dead but not yet removable
+-- new relfrozenxid: 2893, which is 15 XIDs ahead of previous value
+
+SELECT relname, n_live_tup, n_dead_tup FROM pg_stat_user_tables WHERE relname='bugs';
+--  relname | n_live_tup | n_dead_tup
+-- ---------+------------+------------
+--  bugs    |          5 |          0</code></pre>
+    <p><code>tuples: 1 removed</code> が、先ほど増えた 1 件の dead tuple が回収されたことを示しています。<code>n_dead_tup</code> も 0 に戻りました。重要なのは、VACUUM が回収するのは「行スロットを再利用可能にする」ことであり、ファイル自体を小さくするわけではないという点です。次の節でこれをテーブルのサイズで確認します。</p>
+  </section>
+
+  <!-- ===== 5. fillfactorとbloat ===== -->
+  <section>
+    <h2>5. 仕組み ― fillfactor が HOT 更新率を左右し、肥大化が残る</h2>
+    <p>HOT 更新が使えるかどうかは、ページの中に新しい版を置ける空きがあるかどうかに左右されます。<code>fillfactor</code> (ページを何 % まで詰めて書き込むか、既定は 100) を変えた 2 つのテーブルで、同じだけ行を入れて同じ UPDATE をかけ、HOT 更新率を比べます。</p>
+    <pre><code>CREATE TABLE ff_full (id int PRIMARY KEY, payload text) WITH (fillfactor=100);
+CREATE TABLE ff_room (id int PRIMARY KEY, payload text) WITH (fillfactor=70);
+INSERT INTO ff_full SELECT g, repeat('x', 100) FROM generate_series(1,2000) g;
+INSERT INTO ff_room SELECT g, repeat('x', 100) FROM generate_series(1,2000) g;
+-- 挿入直後のサイズ: ff_full 280 kB, ff_room 400 kB (fillfactor 70 は最初から 30% の空きを確保する分大きい)
+
+UPDATE ff_full SET payload = repeat('y', 100);
+UPDATE ff_room SET payload = repeat('y', 100);
+SELECT relname, n_tup_upd, n_tup_hot_upd, round(100.0*n_tup_hot_upd/n_tup_upd,1) AS hot_pct
+FROM pg_stat_user_tables WHERE relname IN ('ff_full','ff_room');
+--  relname | n_tup_upd | n_tup_hot_upd | hot_pct
+-- ---------+-----------+---------------+---------
+--  ff_full |      2000 |             0 |     0.0
+--  ff_room |      2000 |           900 |    45.0</code></pre>
+    <p><code>fillfactor=100</code> の <code>ff_full</code> は、挿入時にページを 100 % まで詰めてしまっているため、UPDATE で新しい版を置く空きが元のページに無く、<b>HOT 更新率は 0 %</b> になりました。全ての行が別のページに新しい版を作る必要があり、テーブルサイズも <b>280 kB から 552 kB</b> とほぼ倍増しています。一方 <code>fillfactor=70</code> の <code>ff_room</code> は最初から 30 % の空きを確保していたため、更新の <b>45 % が同じページ内の HOT 更新</b>で済み、サイズの増加も <b>400 kB から 624 kB</b> に収まりました。更新が多い列を含むテーブルでは、<code>fillfactor</code> を下げて空きを確保しておくことが、索引の更新コストと肥大化の両方を抑える実務的な対策になります。</p>
+    <pre><code>VACUUM (VERBOSE) ff_full;              -- tuples: 2000 removed, 2000 remain
+SELECT pg_size_pretty(pg_relation_size('ff_full')) AS full_after_vacuum;
+--  full_after_vacuum
+-- -------------------
+--  552 kB                 ← 通常の VACUUM では縮まない
+
+VACUUM FULL ff_full;
+SELECT pg_size_pretty(pg_relation_size('ff_full')) AS full_after_vacuum_full;
+--  full_after_vacuum_full
+-- ------------------------
+--  280 kB                 ← VACUUM FULL はテーブルを書き直して縮める</code></pre>
+    <p>通常の <code>VACUUM</code> は 2000 件の dead tuple を回収しましたが、テーブルのサイズは <b>552 kB のまま変わりません</b>。回収した空間は「次の INSERT や UPDATE が再利用できる空き」として記録されるだけで、ファイルそのものは縮みません。これに対して <code>VACUUM FULL</code> はテーブル全体を新しいファイルに書き直すため、サイズは <b>280 kB まで戻ります</b>。ただし <code>VACUUM FULL</code> はテーブルに <b>ACCESS EXCLUSIVE ロック</b> を取るため、実行中はそのテーブルへの読み書きが全て待たされます。本番環境で気軽に実行してよい操作ではなく、第 37 回で扱う「止めずにスキーマを変える」話と地続きの制約です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="fillfactorとHOT更新率、VACUUMとVACUUM FULLの違いを示す図">
+        <text x="150" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54" font-weight="700">fillfactor=100 (既定)</text>
+        <rect x="60" y="35" width="180" height="30" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="150" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">HOT 更新率 0 %</text>
+        <text x="450" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54" font-weight="700">fillfactor=70</text>
+        <rect x="360" y="35" width="180" height="30" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="450" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">HOT 更新率 45 %</text>
+        <rect x="60" y="95" width="180" height="30" fill="#fff6e8" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="150" y="115" font-size="11" text-anchor="middle" fill="#b5401f">VACUUM: 552 kB のまま</text>
+        <rect x="360" y="95" width="180" height="30" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="450" y="115" font-size="11" text-anchor="middle" fill="#0f5132">VACUUM FULL: 280 kB に復帰</text>
+        <text x="300" y="155" font-size="12" text-anchor="middle" fill="#4a5d54">VACUUM FULL は縮むが ACCESS EXCLUSIVE ロックの代償がある</text>
+      </svg>
+      <p class="cap">図: fillfactor の低さが HOT 更新率を上げ肥大化を抑える。VACUUM FULL は縮むがロックの代償が大きい。</p>
+    </div>
+  </section>
+
+  <!-- ===== 6. autovacuumの閾値 ===== -->
+  <section>
+    <h2>6. 仕組み ― autovacuum はどの時点で動き出すか</h2>
+    <p>手動の <code>VACUUM</code> を毎回実行するのは現実的ではないため、通常は <code>autovacuum</code> という背景プロセスが自動で実行します。発火するかどうかの基準は次の式です。</p>
+    <pre><code>dead tuple 数 > autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × reltuples</code></pre>
+    <p>このサーバーの既定値を確認します。</p>
+    <pre><code>SHOW autovacuum_vacuum_threshold;     --  50
+SHOW autovacuum_vacuum_scale_factor;  --  0.2
+SHOW autovacuum_naptime;              --  1min</code></pre>
+    <p>既定では、1 万行のテーブルなら <code>50 + 0.2 × 10000 = 2050</code> 件の dead tuple が積もるまで autovacuum は動きません。更新が頻繁な小さいテーブルでは、これでは遅すぎることがあります。ここではサーバー全体の設定を変えず、<b>このテーブルだけ</b> <code>ALTER TABLE ... SET (...)</code> で閾値を下げ、実際に自動発火するところまで実機で待ちます。</p>
+    <pre><code>CREATE TABLE av_demo (id int PRIMARY KEY, val int);
+INSERT INTO av_demo SELECT g, g FROM generate_series(1,200) g;
+ALTER TABLE av_demo SET (autovacuum_vacuum_threshold = 5, autovacuum_vacuum_scale_factor = 0.0);
+UPDATE av_demo SET val = val + 1 WHERE id <= 50;  -- dead tuple 50 件 (閾値 5 件を超える)
+
+SELECT relname, n_dead_tup, autovacuum_count FROM pg_stat_user_tables WHERE relname='av_demo';
+--  relname | n_dead_tup | autovacuum_count
+-- ---------+------------+------------------
+--  av_demo |         50 |                0
+
+-- autovacuum_naptime (既定 1 分) の次の巡回を待つ
+SELECT relname, n_dead_tup, last_autovacuum, autovacuum_count FROM pg_stat_user_tables WHERE relname='av_demo';
+--  relname | n_dead_tup |        last_autovacuum        | autovacuum_count
+-- ---------+------------+-------------------------------+------------------
+--  av_demo |          0 | 2026-10-25 09:40:21.180266+00 |                1</code></pre>
+    <p>約 1 分後、<code>autovacuum_count</code> が 0 から 1 に変わり、<code>n_dead_tup</code> が 50 から 0 に戻りました。<code>last_autovacuum</code> にタイムスタンプが入ったことからも、人手を介さずに autovacuum が実際に動いたことが確認できます。閾値をテーブル単位で調整できることは、更新頻度がテーブルごとに大きく違う実務でよく使う手段です。ジョブキューのように頻繁に UPDATE/DELETE される小さいテーブルほど、既定値のままでは dead tuple が溜まりやすく、個別に閾値を下げる価値があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="autovacuumの閾値を超えて自動発火する様子を示す図">
+        <line x1="40" y1="90" x2="560" y2="90" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="94" font-size="12" fill="#12211a">dead tuple 数</text>
+        <line x1="40" y1="60" x2="560" y2="60" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="570" y="64" font-size="11" fill="#b5401f" text-anchor="end">閾値 5</text>
+        <rect x="380" y="25" width="120" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="440" y="48" font-size="11.5" text-anchor="middle" fill="#0f5132">50 件 &gt; 閾値</text>
+        <text x="440" y="110" font-size="12" text-anchor="middle" fill="#4a5d54">次の autovacuum_naptime (1 分) の巡回で発火</text>
+      </svg>
+      <p class="cap">図: dead tuple 数が閾値を超えると、次の巡回のタイミングで autovacuum が自動的に動く。</p>
+    </div>
+  </section>
+
+  <!-- ===== 7. 長いトランザクションがVACUUMを止める ===== -->
+  <section>
+    <h2>7. どこで壊れるか ― 長いトランザクションが VACUUM を止める</h2>
+    <p>VACUUM は「どのトランザクションからも見えなくなった版」しか回収できません。もし古いスナップショットを持ったトランザクションがまだ開いていれば、その版はまだ「見える」可能性があるため、VACUUM は手を付けられません。これを 2 つの psql セッションで実機で再現します。1 本目のセッションで <code>REPEATABLE READ</code> のトランザクションを開いたまま 12 秒間保持し、その間にもう 1 本のセッションで UPDATE と VACUUM を実行します。</p>
+    <pre><code>-- セッション A (バックグラウンドで保持)
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT count(*) FROM bugs;      -- ここでスナップショットが固定される
+SELECT pg_sleep(12);
+COMMIT;
+
+-- セッション B (こちらで実行)
+SELECT pid, state, backend_xmin FROM pg_stat_activity WHERE pid <> pg_backend_pid();
+--  pid  | state  | backend_xmin
+-- ------+--------+--------------
+--  1801 | active |         3078
+
+UPDATE bugs SET priority = 'LOW'  WHERE bug_id = 3;
+UPDATE bugs SET priority = 'HIGH' WHERE bug_id = 3;
+VACUUM (VERBOSE) bugs;
+-- tuples: 0 removed, 7 remain, 2 are dead but not yet removable
+-- removable cutoff: 3078, which was 2 XIDs old when operation ended</code></pre>
+    <p>セッション A の <code>backend_xmin=3078</code> より新しい版は、A からはまだ見える可能性があるため回収できません。VACUUM の出力 <code>2 are dead but not yet removable</code> が、この「回収できない dead tuple」の数です。<code>removable cutoff: 3078</code> は、VACUUM がこの時点で安全に回収できる限界の XID が、まさにセッション A の <code>backend_xmin</code> と同じ値で止まっていることを示しています。</p>
+    <pre><code>-- セッション A が COMMIT した後、もう一度 VACUUM
+VACUUM (VERBOSE) bugs;
+-- tuples: 2 removed, 5 remain, 0 are dead but not yet removable</code></pre>
+    <p>セッション A が抜けた後は、同じ 2 件が <code>tuples: 2 removed</code> として回収されました。実務でこれが問題になるのは、バッチ処理やレポート生成で長時間トランザクションを開いたままにするコードや、<code>idle in transaction</code> のまま放置された接続です。こうした長時間のトランザクションが 1 本あるだけで、他のテーブルの VACUUM まで巻き込んで止めてしまうことがあります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="長いトランザクションがVACUUMを止める様子を示す図">
+        <line x1="40" y1="50" x2="560" y2="50" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="54" font-size="12" fill="#12211a">A</text>
+        <rect x="80" y="30" width="420" height="40" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="290" y="55" font-size="10" text-anchor="middle" fill="#1f4a68">REPEATABLE READ のトランザクションが 12 秒間開いたまま (backend_xmin 固定)</text>
+        <line x1="40" y1="120" x2="560" y2="120" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="124" font-size="12" fill="#12211a">B</text>
+        <rect x="100" y="100" width="150" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="175" y="125" font-size="11.5" text-anchor="middle" fill="#0f5132">UPDATE ×2</text>
+        <rect x="270" y="100" width="160" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="350" y="118" font-size="11" text-anchor="middle" fill="#b5401f">VACUUM:</text>
+        <text x="350" y="134" font-size="11" text-anchor="middle" fill="#b5401f">2 件回収できず</text>
+        <text x="300" y="170" font-size="12" text-anchor="middle" fill="#4a5d54">A が COMMIT した後の VACUUM で、ようやく 2 件とも回収される</text>
+      </svg>
+      <p class="cap">図: セッション A のスナップショットが残っている間、B の VACUUM は対象の版を「回収できない」まま残す。</p>
+    </div>
+  </section>
+
+  <!-- ===== 8. XID周回と凍結 ===== -->
+  <section>
+    <h2>8. シニアの書き方 ― XID 周回を理解し、凍結に任せる</h2>
+    <p><code>xmin</code> ・ <code>xmax</code> はトランザクション ID (XID) で、32 bit の符号付き整数として循環します。古い XID と新しい XID の大小比較は「半分より近い方が新しい」という円環の比較で行われるため、約 20 億回トランザクションが進むと、かつて「未来」だった XID が「過去」に見えてしまう <b>周回 (wraparound)</b> が起きます。これを防ぐ仕組みが <b>凍結 (freeze)</b> です。凍結された行は特別な印が付き、XID の大小比較を経由せず常に「確定して見える」行として扱われます。</p>
+    <pre><code>SELECT relname, age(relfrozenxid) AS xid_age, relfrozenxid FROM pg_class WHERE relname = 'bugs';
+--  relname | xid_age | relfrozenxid
+-- ---------+---------+--------------
+--  bugs    |     187 |         2893
+
+VACUUM (FREEZE, VERBOSE) bugs;
+-- frozen: 1 pages from table (100.00% of total) had 5 tuples frozen
+-- new relfrozenxid: 3080, which is 187 XIDs ahead of previous value
+
+SELECT relname, age(relfrozenxid) AS xid_age_after_freeze FROM pg_class WHERE relname = 'bugs';
+--  relname | xid_age_after_freeze
+-- ---------+----------------------
+--  bugs    |                    0</code></pre>
+    <p><code>age(relfrozenxid)</code> は「このテーブルの中で最も古い未凍結の XID が、現在から何トランザクション前か」を表します。普段の <code>VACUUM</code> では、十分に古い版だけを <code>vacuum_freeze_min_age</code> (既定 5000 万) を基準に凍結しますが、<code>VACUUM FREEZE</code> は今すぐ全行を凍結します。凍結された行は、<code>pageinspect</code> の infomask で確認できます。</p>
+    <pre><code>SELECT lp, t_xmin, t_infomask, (t_infomask & 768) AS frozen_marker  -- 256+512
+FROM heap_page_items(get_raw_page('bugs',0)) WHERE t_xmin IS NOT NULL ORDER BY lp;
+--  lp | t_xmin | t_infomask | frozen_marker
+-- ----+--------+------------+---------------
+--   1 |   2893 |       2819 |           768
+--   2 |   2893 |       2819 |           768
+--   4 |   2893 |       2819 |           768
+--   5 |   2893 |       2819 |           768
+--   8 |   3079 |      11011 |           768</code></pre>
+    <p>5 行とも <code>t_infomask</code> 自体の値は違いますが (<code>HASNULL</code> など他のビットの有無で変わる)、<code>HEAP_XMIN_COMMITTED (256)</code> と <code>HEAP_XMIN_INVALID (512)</code> の 2 つのビットが両方立つ (合計 768) という組み合わせは共通しています。この 2 つのビットが同時に立つことは普通ならあり得ない (committed と invalid は矛盾する) ため、PostgreSQL はこの組み合わせを「凍結済み」の印として再利用しています。これが、凍結された行は <code>xmin</code> の値を見ずに常に可視と判定できる理由です。</p>
+    <p>実務でのシニアの判断は、<b>XID 周回そのものを手動で管理しようとしないこと</b>です。<code>autovacuum</code> は <code>autovacuum_freeze_max_age</code> (既定 2 億) に達する前に、通常の巡回とは別に強制的な凍結 VACUUM を実行します。シニアが見るべき指標は <code>age(relfrozenxid)</code> がこの上限にどれだけ近づいているか、そして第 7 節で見た「長いトランザクションが VACUUM を止めていないか」です。大きなテーブルで <code>age(relfrozenxid)</code> が上限に近づいているのに <code>autovacuum</code> が進まない場合、原因はほぼ必ず「止まっている長いトランザクション」か「autovacuum がスケジュールに追いつけないほど更新が多い」のどちらかです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="XID周回と凍結の関係を示す図">
+        <circle cx="150" cy="95" r="55" fill="none" stroke="#9aa" stroke-width="1.5"/>
+        <text x="150" y="28" font-size="11.5" text-anchor="middle" fill="#4a5d54">XID は円環で循環する</text>
+        <circle cx="150" cy="40" r="4" fill="#0f5132"/>
+        <circle cx="120" cy="140" r="5" fill="#2f5f8a"/>
+        <text x="150" y="172" font-size="11" text-anchor="middle" fill="#1f4a68">凍結済みの行は円環の外、常に可視</text>
+        <rect x="310" y="45" width="260" height="90" rx="10" fill="#fff6e8" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="440" y="68" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">age(relfrozenxid) が</text>
+        <text x="440" y="88" font-size="12" text-anchor="middle" fill="#b5401f" font-weight="700">autovacuum_freeze_max_age</text>
+        <text x="440" y="108" font-size="12" text-anchor="middle" fill="#b5401f">(既定 2 億) に近づくと</text>
+        <text x="440" y="124" font-size="12" text-anchor="middle" fill="#b5401f">強制的な凍結が走る</text>
+      </svg>
+      <p class="cap">図: XID は循環するため、凍結された行だけが円環の比較から外れて常に可視と判定される。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/mvcc-intro.html" target="_blank" rel="noopener">PostgreSQL: 13.1. Introduction</a> ― MVCC が読み取りと書き込みを互いにブロックしない設計であることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/storage-hot.html" target="_blank" rel="noopener">PostgreSQL: 73.6. Heap-Only Tuples (HOT)</a> ― HOT 更新が成立する条件 (索引対象の列を更新しない、同じページに空きがある) の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/routine-vacuuming.html" target="_blank" rel="noopener">PostgreSQL: 25.1. Routine Vacuuming</a> ― VACUUM が空間を再利用可能にするだけでファイルを縮めないこと、autovacuum の閾値の式、age(relfrozenxid) と周回防止の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/pageinspect.html" target="_blank" rel="noopener">PostgreSQL: F.29. pageinspect</a> ― heap_page_items と infomask のビット (HEAP_XMAX_LOCK_ONLY, HEAP_XMIN_COMMITTED/INVALID による凍結の印) の定義。</li>
+      <li><a href="https://www.postgresql.org/docs/current/ddl-system-columns.html" target="_blank" rel="noopener">PostgreSQL: 5.6. System Columns</a> ― xmin, xmax, ctid という隠れた列の定義の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/monitoring-stats.html" target="_blank" rel="noopener">PostgreSQL: 28.2. The Cumulative Statistics System</a> ― pg_stat_user_tables の n_dead_tup, n_tup_hot_upd, last_autovacuum の定義。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-jsonb.html">← 第 34 回 JSONB の使い所と使わない所</a><a href="./sql-index.html">目次</a><a href="./sql-locks-concurrency.html">第 36 回 ロックと分離レベル →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'PostgreSQL において UPDATE 文が実際にテーブルに対して行う操作として最も正確なものは？',
+    opts: [
+      '旧版の xmax を更新トランザクションの ID にし、新しい値を持つ新版を xmin = 自分の ID で追加する',
+      'ディスク上の該当する値をその場で直接上書きする',
+      '常に行を削除してから、新しい行として INSERT し直す',
+      '旧版をメモリ上にのみ保持し、ディスクには一切書き込まない',
+      '対象の行を必ずテーブルファイルの末尾に移動させる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で確認した通り、UPDATE は旧版の xmax に更新トランザクションの ID を書き込んで無効化の印をつけ、新しい値を持つ新版を xmin = 自分の ID で別の行スロットに追加する。',
+      'その場での直接上書きではない。旧版は xmax が付いたまま残り、新版が別に追加される。これは MVCC が読み取りと書き込みを衝突させない設計の土台になっている。',
+      'DELETE と INSERT を 2 回に分けて実行するわけではなく、1 つの UPDATE 文の中で旧版の無効化と新版の追加が一体として行われる。',
+      '新版も旧版と同じくディスク上のページに書き込まれる。メモリ上だけに留まるという主張は誤り。',
+      '新版が必ずファイルの末尾に行くわけではなく、同じページ内に空きがあれば HOT 更新としてそこに置かれる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>UPDATE は旧版を無効化し、新版を追加するだけです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="UPDATEの動作を示す図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="55" font-size="12" text-anchor="middle" fill="#b5401f">旧版: xmax = 更新者の ID</text><rect x="320" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="55" font-size="12" text-anchor="middle" fill="#0f5132">新版: xmin = 更新者の ID</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">旧版は消えず、VACUUM まで残る</text></svg>'
+          + '<p class="cap">図: UPDATE は旧版の無効化と新版の追加という 2 つの操作の組み合わせ。</p></div>'
+    }
+  },
+  {
+    q: '実機で bugs テーブルの xmax が 0 でなかった原因と、その解釈として最も正確なものは？',
+    opts: [
+      'xmax が 0 でない行は必ず削除された行であり、消えるのを待っている状態である',
+      'infomask の LOCK_ONLY ビットが立っているなら、その xmax は削除ではなく、FK 参照による行ロックの印である',
+      'xmax は常にそのテーブルを作成したユーザーの ID を表す固定値である',
+      'xmax は常に単一のトランザクション ID をそのまま保持する列であり、複数のトランザクションが同時に行をロックする状況を表現する手段は無い',
+      'xmax は UPDATE や DELETE、ロックのたびに 1 ずつ増加していく、その行専用の通し番号である'
+    ],
+    ans: 1,
+    exps: [
+      'xmax が 0 でないことだけでは削除かどうか判定できない。この回で確認した通り、ロックのみの場合もある。',
+      '<b>これが正解。</b>実機の heap_page_items で infomask の HEAP_XMAX_LOCK_ONLY ビットが立っていることを確認した。これは bugs_products や comments からの FK 参照が FOR KEY SHARE ロックを取った印で、削除ではない。',
+      'xmax はトランザクション ID であり、テーブル作成者とは無関係。UPDATE や DELETE、ロックのたびに異なる値が入る。',
+      '違う。複数のトランザクションが同時に同じ行をロックした場合、PostgreSQL は MultiXactId という仕組みを使い、xmax にその MultiXactId を格納する (infomask の HEAP_XMAX_IS_MULTI ビットが立つ)。1 つの値で複数のトランザクションによるロックを表現できる。',
+      '違う。xmax は『その行専用』の連番ではなく、データベース全体で共有されるトランザクション ID (XID) そのものである。同じテーブルの別の行の xmax と比べても、行ごとの連番のような規則性は無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>infomask のビットを見て、ロックか削除かを区別します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="xmaxのロックと削除の区別を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="12" text-anchor="middle" fill="#b5401f">削除: LOCK_ONLY ビット無し</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="12" text-anchor="middle" fill="#0f5132">ロックのみ: LOCK_ONLY ビット有り</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">同じ「xmax が 0 でない」状態でも中身は違う</text></svg>'
+          + '<p class="cap">図: xmax が 0 でないことは削除とロックの両方で起こるため、infomask まで見る必要がある。</p></div>'
+    }
+  },
+  {
+    q: 'HOT 更新 (Heap Only Tuple) が成立するための条件として最も正確なものは？',
+    opts: [
+      '索引を持つ列を更新した場合にのみ HOT 更新が使われる',
+      'テーブルに索引が全く存在しない場合にのみ HOT 更新が使われる',
+      '索引対象の列を更新せず、かつ同じページ内に新版を置く空きがある場合に使われる',
+      'ページに十分な空きがあれば、索引対象の列を更新した場合でも新版をそのページに置くだけで HOT 更新になる',
+      '1 回目の UPDATE が通常の更新になった場合でも、同じトランザクション内で続けて同じ行を UPDATE すれば、2 回目以降は必ず HOT 更新になる'
+    ],
+    ans: 2,
+    exps: [
+      '索引を持つ列を更新すると索引のエントリも更新する必要があり、HOT 更新の対象から外れる。逆の説明になっている。',
+      '索引の有無とは無関係で、索引が存在するテーブルでも、更新する列が索引対象でなければ HOT 更新が使われる。',
+      '<b>これが正解。</b>実機の n_tup_hot_upd の増加で確認した通り、索引対象外の列の更新で、かつ同じページに空きがある場合に HOT 更新になる。',
+      '違う。索引対象の列を更新した場合は索引のエントリ自体を新版に向けて書き換える必要があるため、ページに空きがあっても HOT 更新の対象から外れる。空き領域の有無だけでは決まらない。',
+      '違う。HOT 更新になるかどうかは毎回のページの空き状況と更新対象列で決まり、同じトランザクション内で連続して UPDATE したからといって 2 回目以降が自動的に HOT になるわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>索引対象外の列の更新で、同じページに空きがあれば HOT 更新になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="HOT更新の条件を示す図"><rect x="30" y="30" width="230" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">索引対象外の列を更新</text><text x="145" y="75" font-size="11.5" text-anchor="middle" fill="#0f5132">+ 同じページに空き</text><text x="420" y="60" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">→ HOT 更新</text></svg>'
+          + '<p class="cap">図: 2 つの条件が揃ったときだけ HOT 更新として処理される。</p></div>'
+    }
+  },
+  {
+    q: 'fillfactor=100 の ff_full と fillfactor=70 の ff_room に同じ UPDATE をかけた実測結果として正しいものは？',
+    opts: [
+      'fillfactor=100 と fillfactor=70 で、HOT 更新率に差は無かった',
+      'fillfactor=100 の方が HOT 更新率が高かった',
+      'fillfactor=70 では更新後にテーブルサイズがむしろ縮小した',
+      'fillfactor=100 では HOT 更新率 0 %、fillfactor=70 では 45 % という差が実測された',
+      'fillfactor の値は更新の速さに一切影響しないことが確認された'
+    ],
+    ans: 3,
+    exps: [
+      '実測では明確な差が出ており、差が無いという主張は誤り。',
+      '実測はその逆で、空きを確保した fillfactor=70 の方が HOT 更新率が高かった。',
+      '縮小はしておらず、どちらのテーブルも UPDATE 後にサイズが増加した (280→552 kB, 400→624 kB)。',
+      '<b>これが正解。</b>fillfactor=100 は挿入時にページを 100 % 詰めてしまい新版を置く空きが無いため HOT 更新率 0 %、fillfactor=70 は 30 % の空きがあるため 45 % が HOT 更新になった。',
+      'fillfactor の値は HOT 更新が使えるかどうかを左右し、結果として更新の負荷にも影響する。無関係という主張は実測と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>空きが無いと新版は別ページに作られ、索引の更新コストも増えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="fillfactorによるHOT更新率の差を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="12" text-anchor="middle" fill="#b5401f">fillfactor=100: HOT 0%</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="12" text-anchor="middle" fill="#0f5132">fillfactor=70: HOT 45%</text></svg>'
+          + '<p class="cap">図: 空きを確保した fillfactor=70 の方が、同じページ内で更新を済ませられる割合が高い。</p></div>'
+    }
+  },
+  {
+    q: 'VACUUM と VACUUM FULL の違いとして最も正確なものは？',
+    opts: [
+      'VACUUM も VACUUM FULL も、常にテーブルサイズを即座に縮小する',
+      'VACUUM は ACCESS EXCLUSIVE ロックを取るが、VACUUM FULL は取らない',
+      'VACUUM はテーブルを完全に書き直すが、VACUUM FULL は空き領域を記録するだけである',
+      'VACUUM FULL は自動的に定期実行され、通常の VACUUM は手動でしか実行できない',
+      'VACUUM は空き領域を再利用可能にするだけでファイルを縮めないが、VACUUM FULL は書き直して縮める代わりに ACCESS EXCLUSIVE ロックを取る'
+    ],
+    ans: 4,
+    exps: [
+      '実測では通常の VACUUM の後もテーブルサイズは 552 kB のまま変わらなかった。常に縮小するという主張は誤り。',
+      '実際はその逆で、テーブル全体を書き直す VACUUM FULL の方が ACCESS EXCLUSIVE ロックを取る。',
+      '説明が逆になっている。書き直すのは VACUUM FULL であり、通常の VACUUM は空き領域を記録するだけ。',
+      'autovacuum (背景プロセス) は通常の VACUUM に相当する処理を自動実行するが、VACUUM FULL が自動的に定期実行されることは無い。',
+      '<b>これが正解。</b>実機で確認した通り、VACUUM は 552 kB のままだったが VACUUM FULL は 280 kB まで縮んだ。VACUUM FULL はテーブルを書き直す代わりに、実行中は読み書きを全てブロックする ACCESS EXCLUSIVE ロックを取る。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>縮むかどうかと、ロックの強さはトレードオフです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="VACUUMとVACUUM FULLの代償の違いを示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="12" text-anchor="middle" fill="#0f5132">VACUUM: 縮まないが軽い</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="12" text-anchor="middle" fill="#b5401f">VACUUM FULL: 縮むが全ロック</text></svg>'
+          + '<p class="cap">図: VACUUM FULL は確実に縮むが、実行中はテーブルへのアクセスが全てブロックされる。</p></div>'
+    }
+  },
+  {
+    q: 'autovacuum がテーブルに対して発火するかどうかを決める条件として最も正確なものは？',
+    opts: [
+      'dead tuple 数が autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × reltuples を超えると、次の巡回で自動的に VACUUM が走る',
+      'autovacuum はテーブルの行数が 10 万を超えた瞬間に必ず発火する',
+      'autovacuum は CREATE TABLE 実行時に 1 度だけ動作し、それ以降は動かない',
+      'autovacuum の閾値はサーバー全体で固定され、テーブル単位では変更できない',
+      'autovacuum は dead tuple が 0 件になるまで常に実行され続ける'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で確認した通り、av_demo に ALTER TABLE SET で閾値を下げ、dead tuple 数がこの式の値を超えた状態で約 1 分待つと、autovacuum_count が実際に増え last_autovacuum が記録された。',
+      '行数の絶対値だけでは発火しない。dead tuple 数と、閾値 ・ scale_factor ・ reltuples の関係で決まる。',
+      'autovacuum は巡回ごとに全テーブルの状態を見ており、CREATE TABLE 時の 1 回だけに限らず、条件を満たすたびに繰り返し動作する。',
+      '実機で ALTER TABLE ... SET (autovacuum_vacuum_threshold = 5, ...) によってテーブル単位で閾値を変更できることを確認した。サーバー全体の設定を変えずに済む。',
+      'autovacuum は 1 回の巡回で処理を完了すると終了し、常駐して監視し続けるわけではない。次に閾値を超えたときに再び発火する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>閾値を超えると、次の巡回のタイミングで自動的に動きます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="autovacuumの発火条件を示す図"><rect x="30" y="30" width="250" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="155" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">dead tuple &gt; 閾値 + scale×reltuples</text><text x="420" y="55" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">→ 次の巡回で発火</text></svg>'
+          + '<p class="cap">図: 閾値を超えた状態が、次の autovacuum_naptime の巡回タイミングで検知されて発火する。</p></div>'
+    }
+  },
+  {
+    q: '長いトランザクションが開いている間、別のセッションの VACUUM が dead tuple を回収できない理由として最も正確なものは？',
+    opts: [
+      '長いトランザクションがあると、VACUUM 自体がエラーになり実行できなくなる',
+      '長いトランザクションのスナップショットより新しい版は、その古いスナップショットからまだ見える可能性があるため回収できない',
+      '長いトランザクションは自動的に全テーブルをロックし、UPDATE 自体を禁止する',
+      '長いトランザクションがあると、dead tuple の数が自動的に減少する',
+      '長いトランザクションの影響は同じテーブルに限られ、他のテーブルの VACUUM には一切及ばない'
+    ],
+    ans: 1,
+    exps: [
+      'VACUUM はエラーにはならず実行できる。ただし回収できる範囲が狭くなるだけ。',
+      '<b>これが正解。</b>実機で確認した通り、セッション A の backend_xmin より新しい版は A からまだ見える可能性があるため、VACUUM は「2 are dead but not yet removable」としてその版を残した。',
+      '長いトランザクションが UPDATE 自体を禁止するわけではない。実際に B 側で UPDATE は正常に実行できている。',
+      '実測はその逆で、dead tuple はむしろ回収されずに残り、数は減らなかった。',
+      '長いトランザクションのスナップショットは、そのトランザクションが参照する可能性のあるテーブル全体に影響しうる。1 つのテーブルに限られるとは言えない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>古いスナップショットが残っている間は、その時点の版を安全に消せません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="長いトランザクションの影響を示す図"><rect x="30" y="30" width="250" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="155" y="55" font-size="12" text-anchor="middle" fill="#1f4a68">A: backend_xmin が固定</text><rect x="320" y="30" width="210" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="425" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">B の VACUUM: 回収できない</text></svg>'
+          + '<p class="cap">図: A のスナップショットが見る可能性のある版は、A が終わるまで安全に回収できない。</p></div>'
+    }
+  },
+  {
+    q: 'VACUUM (VERBOSE) の出力にある "removable cutoff" が意味するものとして最も正確なものは？',
+    opts: [
+      'removable cutoff は VACUUM を実行したトランザクション自身の XID の値であり、他のセッションの状態とは無関係に決まる',
+      'autovacuum_vacuum_threshold と常に同じ値になる',
+      'VACUUM がこの時点で安全に回収できる限界の XID を示し、開いているトランザクションの backend_xmin で止まる',
+      'removable cutoff は vacuum_freeze_min_age の設定値そのものであり、トランザクションの実行状況とは関係なく固定されている',
+      'removable cutoff は WAL (ログ) の書き込み位置 (LSN) を表す値であり、XID とは無関係である'
+    ],
+    ans: 2,
+    exps: [
+      '違う。removable cutoff は VACUUM を実行したトランザクション自身の XID ではなく、その時点でデータベース全体に存在する最も古い backend_xmin (まだ開いている他のトランザクションのスナップショット) を基準に決まる。他のセッションの状態と無関係ではない。',
+      'autovacuum_vacuum_threshold は dead tuple 数の閾値であり、removable cutoff は XID (トランザクション ID) の値。単位も意味も異なる。',
+      '<b>これが正解。</b>実機で確認した通り、セッション A が開いている間は removable cutoff が A の backend_xmin (3078) で止まっており、それより新しい版は安全に回収できないことを示していた。',
+      '違う。vacuum_freeze_min_age はどれだけ古い版を凍結対象にするかを決めるパラメータであり、removable cutoff (安全に回収できる限界の XID) とは別の値である。removable cutoff は固定値ではなく、その時点で開いているトランザクションの状況によって動く。',
+      '違う。removable cutoff は WAL の書き込み位置 (LSN) ではなく、トランザクション ID (XID) に基づく値である。LSN と XID は別の単調増加する値であり、混同してはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>removable cutoff は、回収してよい限界の XID です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="removable cutoffの意味を示す図"><line x1="40" y1="65" x2="520" y2="65" stroke="#9aa" stroke-width="2"/><circle cx="380" cy="65" r="6" fill="#c0492f"/><text x="380" y="45" font-size="11.5" text-anchor="middle" fill="#b5401f">removable cutoff (= 開いている A の backend_xmin)</text><text x="150" y="100" font-size="12" text-anchor="middle" fill="#0f5132">これより古い版は回収できる</text><text x="470" y="100" font-size="12" text-anchor="middle" fill="#b5401f">これより新しい版は保留</text></svg>'
+          + '<p class="cap">図: removable cutoff より新しい版は、開いているトランザクションから見える可能性があるため保留される。</p></div>'
+    }
+  },
+  {
+    q: 'XID 周回 (wraparound) を防ぐための「凍結 (freeze)」の仕組みとして最も正確なものは？',
+    opts: [
+      '凍結された行は、物理的にテーブルから削除される',
+      'age(relfrozenxid) は、テーブルの行数そのものを表す指標である',
+      'XID 周回は autovacuum を完全に無効化しない限り絶対に起きない',
+      '凍結された行は infomask の 2 つのビット (committed と invalid が両方立つ) で示され、xmin の大小比較を経由せず常に可視と判定される',
+      '凍結は手動の VACUUM FREEZE でしか行われず、通常の運用では一切発生しない'
+    ],
+    ans: 3,
+    exps: [
+      '凍結は削除ではなく、行はそのまま残り、可視性の判定方法だけが変わる。',
+      'age(relfrozenxid) は行数ではなく、最も古い未凍結の XID が現在から何トランザクション前かを表す指標。',
+      'autovacuum は周回を防ぐために freeze_max_age に基づいて強制的な凍結 VACUUM を実行する。無効化していなくても、設計上の仕組みとして周回を避けているだけで、「絶対に起きない」という保証そのものが目的ではない。',
+      '<b>これが正解。</b>実機の heap_page_items で、凍結された行は t_infomask の HEAP_XMIN_COMMITTED (256) と HEAP_XMIN_INVALID (512) が両方立つ (合計 768) という通常ありえない組み合わせで示され、これにより xmin の値を見ずに常に可視と判定できることを確認した。',
+      '通常の VACUUM も、十分に古い版を vacuum_freeze_min_age を基準に自動的に凍結する。手動の VACUUM FREEZE に限らない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>矛盾するはずの 2 つのビットが同時に立つことを「凍結済み」の印として使っています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="凍結の印を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">COMMITTED(256) + INVALID(512)</text><text x="420" y="55" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">= 768 → 凍結済み</text></svg>'
+          + '<p class="cap">図: 単独では矛盾する 2 つのビットの組み合わせを、凍結済みの印として再利用している。</p></div>'
+    }
+  },
+  {
+    q: 'この回で確かめた、MVCC と VACUUM の関係についての最も適切なまとめは？',
+    opts: [
+      'UPDATE は行をその場で書き換えるので、VACUUM は基本的に不要である',
+      'VACUUM を頻繁に実行すればテーブルサイズは自動的に VACUUM FULL と同じだけ縮小する',
+      'xmax が 0 でなければ、必ず削除された行だと判断してよい',
+      'autovacuum の閾値は、常にサーバー全体の既定値のままにしておくのが最も安全である',
+      'UPDATE / DELETE は新しい版を追加するだけで、古い版を VACUUM が回収する。長時間トランザクションや低すぎる閾値はこの回収を妨げ、肥大化や XID 周回の危険を生む'
+    ],
+    ans: 4,
+    exps: [
+      '本文全体で確認した通り、UPDATE は行をその場で書き換えておらず、新版の追加と旧版の無効化によって実現されている。VACUUM が不要という結論は成り立たない。',
+      '実測では通常の VACUUM はテーブルサイズを縮めなかった。VACUUM FULL と同じ効果があるという主張は実測と矛盾する。',
+      'Q2 で確認した通り、xmax が 0 でなくても削除ではなくロックの印であることがある。infomask を見ないと判断できない。',
+      'av_demo の例で確認した通り、テーブルごとに更新頻度が大きく違う場合は、テーブル単位で閾値を調整する方が実務的に有効な場合がある。',
+      '<b>これが正解。</b>UPDATE / DELETE は新しい版を追加するだけで、古い版は VACUUM が回収する。長時間トランザクションが開いていると回収が止まり (第 7 節)、autovacuum の閾値が追いつかないと dead tuple が積み重なり (第 6 節)、どちらも肥大化や XID 周回のリスクにつながる、というのが本文全体の結論。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>版の追加・回収・凍結という 3 つの動きが、この回の全体をつないでいます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="MVCCとVACUUMのまとめの図"><rect x="20" y="20" width="160" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="50" font-size="11.5" text-anchor="middle" fill="#0f5132">UPDATE/DELETE</text><text x="100" y="70" font-size="11.5" text-anchor="middle" fill="#0f5132">→ 新版を追加</text><rect x="200" y="20" width="160" height="90" rx="8" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="280" y="50" font-size="11.5" text-anchor="middle" fill="#b5401f">VACUUM</text><text x="280" y="70" font-size="11.5" text-anchor="middle" fill="#b5401f">→ 旧版を回収</text><rect x="380" y="20" width="160" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="460" y="50" font-size="11.5" text-anchor="middle" fill="#1f4a68">凍結</text><text x="460" y="70" font-size="11.5" text-anchor="middle" fill="#1f4a68">→ 周回を防ぐ</text></svg>'
+          + '<p class="cap">図: 版を増やす UPDATE/DELETE、それを回収する VACUUM、周回を防ぐ凍結の 3 つが一続きの仕組み。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

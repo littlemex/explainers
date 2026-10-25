@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>止めずにスキーマを変える ― 1 本の ALTER TABLE が行列を作る</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  table.tbl th{text-align:left;padding:8px 10px;border:1px solid #d9e5df;background:#eaf5ef}
+  table.tbl td{padding:8px 10px;border:1px solid #d9e5df}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 37 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>止めずにスキーマを変える ― 1 本の ALTER TABLE が行列を作る</h1>
+  <p>DDL の多くは一瞬で終わるのに、本番で長い待ちを生むのはロックの強さと順番の問題である。書き換えを避ける書き方と、待ちすぎないための道具を実機の数字で確認する</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 36 回 <a href="./sql-locks-concurrency.html">ロックと分離レベル</a> (表レベルロックの段階、トランザクション ID 待ちの構造)</p>
+  <p class="intro">「DDL は一瞬で終わるはずだから、本番中に流しても大丈夫」という判断は、ロックの強さと待ち行列の仕組みを見落としています。この回では、PostgreSQL 18.6 の実機で 2 本の psql セッションを動かし、<code>ALTER TABLE</code> が <code>ACCESS EXCLUSIVE</code> ロックを待つ間に無関係な <code>SELECT</code> までその後ろに並んでしまう様子、<code>lock_timeout</code> で待ちすぎを防ぐ方法、<code>CREATE INDEX CONCURRENTLY</code> の効果と失敗時の後始末、<code>ADD COLUMN DEFAULT</code> と列の型変更がいつ全行書き換えになるのかを、実測の時間とロックモードで確認します。</p>
+
+  <!-- ===== 1. この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― DDL が一瞬で終わるとは限らない</h2>
+    <p><code>ALTER TABLE</code> や <code>CREATE INDEX</code> の多くは、文そのものの処理時間は短くても、実行する前に<b>ロックを獲得する</b>という手順を踏みます。対象のテーブルを他のトランザクションが使っている間は、DDL はそのロックが空くまで待ちます。問題は、DDL が要求するロックの多くが <code>ACCESS EXCLUSIVE</code> という最も強いロックで、これは通常の <code>SELECT</code> が持つ最も弱い <code>AccessShareLock</code> とも衝突することです。</p>
+    <p>さらに厄介なのは、DDL がロックを待っている間、<b>その後に来た他のクエリまで、DDL の後ろに並んでしまう</b>ことです。これは特定の操作を飢餓させない (starvation を防ぐ) ための仕組みで、新しい要求は、今まさにロックを持っている側と衝突しなくても、既に待ち行列にいる要求と衝突するなら先に並んでいる要求を追い越せません。この回では、この行列の実態を実機のタイムスタンプで確認し、その根拠を PostgreSQL のソースコードのコメントでも裏付けます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="DDLのロック待ちに後続のSELECTが並んでしまう問題の図">
+        <rect x="20" y="20" width="560" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">長時間の SELECT が行を読んでいる (AccessShareLock)</text>
+        <rect x="20" y="80" width="260" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="150" y="105" font-size="12" text-anchor="middle" fill="#b5401f">ALTER TABLE: ACCESS EXCLUSIVE 待ち</text>
+        <rect x="320" y="80" width="260" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="105" font-size="12" text-anchor="middle" fill="#b5401f">無関係な SELECT も後ろに並ぶ</text>
+        <text x="300" y="150" font-size="12.5" text-anchor="middle" fill="#4a5d54">行列は先着順。後から来た無害な操作も DDL を追い越せない</text>
+      </svg>
+      <p class="cap">図: 強いロックを待つ DDL の後ろには、本来衝突しないはずの後続クエリまで並んでしまう。</p>
+    </div>
+  </section>
+
+  <!-- ===== 2. ロック待ちの行列を実機で見る ===== -->
+  <section>
+    <h2>2. 仕組み ― ロック待ちの行列に無関係な SELECT まで並ぶ</h2>
+    <p>3 本のセッションを使います。s1 が 6 秒間行を読み続け、1 秒後に s2 が <code>ALTER TABLE</code> を実行し、さらに 1 秒後に s3 が無関係な 1 行だけの <code>SELECT</code> を実行します。</p>
+    <pre><code>-- s1: 6 秒間 bugs を読み続ける (AccessShareLock)
+BEGIN; SELECT pg_sleep(6) FROM bugs LIMIT 1; COMMIT;
+
+-- s2 (1 秒後): 列を追加する (ACCESS EXCLUSIVE を要求)
+SELECT clock_timestamp() AS s2_start;               -- 10:16:11.191831
+ALTER TABLE bugs ADD COLUMN queue_test_col int;      -- s1 の間は待たされる
+SELECT clock_timestamp() AS s2_done;                 -- 10:16:16.127316 (約 4.94 秒後)
+
+-- s3 (さらに 1 秒後): bugs から 1 行だけ読むだけの、本来は s1 と衝突しない SELECT
+SELECT clock_timestamp() AS s3_start;                -- 10:16:12.267695
+SELECT bug_id FROM bugs LIMIT 1;                     -- ここで待たされる
+SELECT clock_timestamp() AS s3_done;                  -- 10:16:16.129698 (約 3.86 秒後)</code></pre>
+    <p>s2 は s1 の残り時間とほぼ同じ約 <b>4.94 秒</b>待たされました。これは予想どおりです。問題は s3 です。s3 の <code>SELECT bug_id FROM bugs LIMIT 1</code> は <code>AccessShareLock</code> しか必要とせず、s1 が持っている <code>AccessShareLock</code> と衝突しません。それにもかかわらず、s3 は s2 とほぼ同時 (約 <b>3.86 秒後</b>) にしか結果を返しませんでした。理由は、PostgreSQL のロック管理が新しい要求を許可する前に 2 段階のチェックをしていることです。まず「既に待ち行列にいる要求と衝突しないか」を確認し、衝突するならその場で既存の保持者と衝突するかどうかに関わらず自分も待ち行列に並びます。衝突しなければ、次に「現在ロックを保持している側と衝突しないか」を確認します。s3 が到着した時点で、既に s2 の <code>ACCESS EXCLUSIVE</code> 要求が待ち行列にいたため、s3 は 1 段目のチェックで待ち行列入りが決まり、s1 との衝突を調べる段階にすら進みませんでした。これは PostgreSQL のソースコード (<code>src/backend/storage/lmgr/lock.c</code> の <code>LockAcquireExtended</code>) のコメントに明記された、後から来た要求が既存の待機者を飢餓させない (starvation を防ぐ) ための規則です。公式ドキュメントのロック関連ページはこの行列の順序規則そのものを解説していないため、この回ではソースコードのコメントと実機の結果の両方で確認したうえで述べています。実務でこれが起きると、1 本の長時間クエリと 1 本の DDL が重なっただけで、そのテーブルに対する<b>全てのクエリ</b>が同じ長さだけ止まってしまいます。</p>
+  </section>
+
+  <!-- ===== 3. lock_timeoutで待ちすぎを防ぐ ===== -->
+  <section>
+    <h2>3. シニアの書き方 ― lock_timeout で待ちすぎを防ぐ</h2>
+    <p>本番環境でマイグレーションを実行する際、ロックが取れないまま何分も待たされるのは避けたい事態です。<code>lock_timeout</code> をセッション単位で設定すると、指定した時間内にロックを獲得できなければ、DDL 自身が諦めてエラーで終わります。重要なのは、<code>lock_timeout</code> が切れても相手の長時間クエリには何も影響せず、単に DDL 側がロックを諦めて何も変更せずに終了するという点です。これにより、本番で「気づいたら何分もロック待ちで全クエリが止まっていた」という事態を避け、リトライや時間帯の調整を判断する材料にできます。</p>
+    <pre><code>SET lock_timeout = '2s';
+ALTER TABLE bugs ADD COLUMN lock_timeout_test int;
+-- 2 秒以内にロックが取れなければ、以下のエラーで終わる (列は追加されない)
+-- ERROR:  55P03: canceling statement due to lock timeout</code></pre>
+    <p>この <code>lock_timeout</code> はセッション単位の <code>SET</code> で設定できるため、他の利用者の接続やサーバー全体の設定には影響しません。マイグレーションツールの多くは、DDL の前に短い <code>lock_timeout</code> を設定することを推奨しています。</p>
+  </section>
+
+  <!-- ===== 4. CREATE INDEX CONCURRENTLY ===== -->
+  <section>
+    <h2>4. 仕組み ― CREATE INDEX CONCURRENTLY は書き込みを止めない代わりに遅い</h2>
+    <p>50 万行の <code>big_events</code> テーブルで、通常の <code>CREATE INDEX</code> と <code>CONCURRENTLY</code> 付きを比較します。索引の構築中に別セッションから 1 行 <code>INSERT</code> してみます。</p>
+    <pre><code>-- 通常の CREATE INDEX
+SELECT clock_timestamp() AS ci_start;       -- 10:16:19.560332
+CREATE INDEX idx_big_val_normal ON big_events (val);
+SELECT clock_timestamp() AS ci_done;        -- 10:16:20.038772 (構築に約 0.48 秒)
+-- 同時に実行した INSERT
+--   write_start: 10:16:19.815536  write_done: 10:16:20.045980  (約 0.23 秒、ci_done まで待たされた)
+
+-- CREATE INDEX CONCURRENTLY
+SELECT clock_timestamp() AS cic_start;      -- 10:16:21.182087
+CREATE INDEX CONCURRENTLY idx_big_val ON big_events (val);
+SELECT clock_timestamp() AS cic_done;       -- 10:16:24.461976 (構築に約 3.28 秒、通常の約 6.9 倍)
+-- 同時に実行した INSERT
+--   write_start2: 10:16:21.441  write_done2: 10:16:21.444  (約 3 ミリ秒、ブロックされない)</code></pre>
+    <p>通常の <code>CREATE INDEX</code> は <code>ShareLock</code> を取り、これは書き込み (<code>RowExclusiveLock</code>) と衝突するため、構築が終わるまで <code>INSERT</code> は待たされます (実測で約 0.23 秒)。<code>CREATE INDEX CONCURRENTLY</code> は <code>ShareUpdateExclusiveLock</code> という書き込みと衝突しないロックを使う代わりに、テーブルを 2 回走査し、構築中の変更を後から取り込む手順を踏むため、構築そのものには約 6.9 倍の時間がかかりました。しかしその間の <code>INSERT</code> はわずか 3 ミリ秒で完了しており、全く待たされていません。</p>
+    <p><code>CONCURRENTLY</code> には代償もあります。構築の途中でエラー (例えば一意制約違反) が起きると、トランザクション全体を使い切った通常の <code>CREATE INDEX</code> のようにロールバックして元に戻るのではなく、<b>INVALID な索引がカタログに残ります</b>。重複データのある列に <code>CREATE UNIQUE INDEX CONCURRENTLY</code> を試すと、次のようになります。</p>
+    <pre><code>CREATE UNIQUE INDEX CONCURRENTLY idx_bugs_ext_ref ON bugs (ext_ref);
+-- ERROR:  23505: could not create unique index "idx_bugs_ext_ref"
+-- DETAIL:  Key (ext_ref)=(EXT-1) is duplicated.
+
+SELECT indexrelid::regclass, indisvalid, indisready FROM pg_index WHERE indexrelid='idx_bugs_ext_ref'::regclass;
+--     indexrelid    | indisvalid | indisready
+-- ------------------+------------+------------
+--  idx_bugs_ext_ref | f          | f
+
+\d bugs
+--     "idx_bugs_ext_ref" UNIQUE, btree (ext_ref) INVALID</code></pre>
+    <p>この <code>INVALID</code> な索引は、ディスク容量を使い続け、<code>INSERT</code>/<code>UPDATE</code> のたびに (無効なまま) 更新の対象にもなり続けます。放置せず <code>DROP INDEX</code> で明示的に消し、重複データを直してから再実行する必要があります。</p>
+    <pre><code>DROP INDEX idx_bugs_ext_ref;
+UPDATE bugs SET ext_ref = 'EXT-2' WHERE bug_id = 2;  -- 重複を解消
+CREATE UNIQUE INDEX CONCURRENTLY idx_bugs_ext_ref ON bugs (ext_ref);  -- 成功、indisvalid=t</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="通常のCREATE INDEXとCONCURRENTLYの比較を示す図">
+        <rect x="20" y="20" width="260" height="110" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="150" y="45" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">通常の CREATE INDEX</text>
+        <text x="150" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">構築: 約 0.48 秒 (速い)</text>
+        <text x="150" y="88" font-size="11.5" text-anchor="middle" fill="#12211a">書き込み: 約 0.23 秒待たされる</text>
+        <text x="150" y="108" font-size="11" text-anchor="middle" fill="#b5401f">失敗時はロールバックで元に戻る</text>
+        <rect x="320" y="20" width="260" height="110" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="450" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">CREATE INDEX CONCURRENTLY</text>
+        <text x="450" y="68" font-size="11.5" text-anchor="middle" fill="#12211a">構築: 約 3.28 秒 (約 6.9 倍遅い)</text>
+        <text x="450" y="88" font-size="11.5" text-anchor="middle" fill="#12211a">書き込み: 約 3 ミリ秒、待たない</text>
+        <text x="450" y="108" font-size="11" text-anchor="middle" fill="#0f5132">失敗時は INVALID な索引が残る</text>
+      </svg>
+      <p class="cap">図: CONCURRENTLY は書き込みを止めない代わりに構築が遅く、失敗時の後始末も自分で行う必要がある。</p>
+    </div>
+  </section>
+
+  <!-- ===== 5. ADD COLUMN DEFAULTとNOT VALID ===== -->
+  <section>
+    <h2>5. 仕組み ― ADD COLUMN DEFAULT の高速化と NOT VALID 制約</h2>
+    <p>PostgreSQL 11 以降、<code>ADD COLUMN ... DEFAULT <定数></code> はテーブルを書き換えません。デフォルト値をカタログにメタデータとして記録するだけで、既存の行はディスク上では変わらず、読み取り時に仮想的にデフォルト値が補われます。50 万行の <code>big_events</code> で確認します。</p>
+    <pre><code>ALTER TABLE big_events ADD COLUMN status text NOT NULL DEFAULT 'active';
+-- Time: 4.828 ms                     ← メタデータのみ、全行書き換え無し
+
+ALTER TABLE big_events ADD COLUMN created_at2 timestamptz NOT NULL DEFAULT clock_timestamp();
+-- Time: 829.152 ms                   ← 約 172 倍遅い (volatile なデフォルトは書き換えが必要)</code></pre>
+    <p><code>clock_timestamp()</code> のような <b>volatile (実行ごとに結果が変わる)</b> なデフォルトは、各行に別々の値を書き込む必要があるため、1 つのメタデータでは表現できず、結局全行書き換えが走ります。高速化されるのは <code>DEFAULT 'active'</code> のような定数だけでなく、<code>IMMUTABLE</code> (入力が同じなら結果も必ず同じ) と <code>STABLE</code> (同一トランザクション内では結果が変わらない。<code>current_date</code> など) の式も対象です。実機で <code>STABLE</code> な自作関数を <code>DEFAULT</code> に指定しても約 1.5 ミリ秒で終わり、volatile の場合とは明確に違うことを確認しました。この 3 区分のどこに属するかで、1 つの値を全行で共有できるか (メタデータだけで済む) どうかが決まります。列を追加するときは、デフォルト式の volatility (不変性の区分) を意識する必要があります。</p>
+    <p>CHECK 制約を追加する場合も同様の考え方が使えます。<code>NOT VALID</code> を付けると、既存行の検証をスキップしてカタログの制約定義だけを追加するため、瞬時に完了します。検証は後から別の文で行い、こちらは書き込みをブロックしない軽いロックで済みます。</p>
+    <pre><code>ALTER TABLE big_events ADD CONSTRAINT chk_status
+  CHECK (status IN ('active','inactive')) NOT VALID;
+-- Time: 1.013 ms                     ← 既存行は検証しない
+
+ALTER TABLE big_events VALIDATE CONSTRAINT chk_status;
+SELECT locktype, mode, granted FROM pg_locks WHERE pid=pg_backend_pid() AND relation='big_events'::regclass;
+--  locktype |           mode           | granted
+-- ----------+--------------------------+---------
+--  relation | ShareUpdateExclusiveLock | t</code></pre>
+    <p><code>VALIDATE CONSTRAINT</code> が取る <code>ShareUpdateExclusiveLock</code> は、第 35 回で見た <code>VACUUM</code> と同じ強さです。これは他の <code>SELECT</code> や <code>UPDATE</code> と衝突せず、同種の保守作業 (別の <code>VALIDATE</code> や <code>CREATE INDEX CONCURRENTLY</code>) とだけ衝突します。つまり「制約を即座に追加し、検証は後で軽いロックのまま済ませる」という 2 段階に分ければ、本番中でも新しい CHECK 制約を安全に導入できます。</p>
+  </section>
+
+  <!-- ===== 6. 列の型変更: 書き換えの有無 ===== -->
+  <section>
+    <h2>6. どこで壊れるか ― 列の型変更は書き換えの有無で速度が大きく変わる</h2>
+    <p><code>ALTER TABLE ... ALTER COLUMN ... TYPE ...</code> は、変更の内容によって全行書き換えが走るかどうかが変わります。同じ 50 万行のテーブルで、幅を広げるだけの変更と、型そのものを変える変更を比べます。</p>
+    <pre><code>-- varchar(10) → varchar(20): 既存の値はそのままで表現できる (書き換え不要)
+ALTER TABLE big_events ALTER COLUMN short_code TYPE varchar(20);
+-- Time: 0.713 ms
+
+-- int → bigint: ストレージ上の表現幅そのものが変わる (全行書き換えが必要)
+ALTER TABLE big_events ALTER COLUMN seq_num TYPE bigint;
+-- Time: 808.845 ms                   ← 約 1134 倍遅い
+
+BEGIN;
+ALTER TABLE big_events ALTER COLUMN seq_num TYPE int;
+SELECT locktype, mode, granted FROM pg_locks WHERE pid=pg_backend_pid() AND relation='big_events'::regclass AND locktype='relation';
+--  locktype |        mode         | granted
+-- ----------+---------------------+---------
+--  relation | ShareLock           | t
+--  relation | AccessExclusiveLock | t
+ROLLBACK;</code></pre>
+    <p><code>varchar</code> の幅を広げる変更は、既存の値がそのまま新しい型の制約を満たすため、PostgreSQL は書き換えをスキップできます (9.2 以降の最適化)。一方 <code>int</code> から <code>bigint</code> への変更は、ディスク上のバイト表現の幅そのものが変わるため、全ての行を新しい形式で書き直す必要があり、<code>ACCESS EXCLUSIVE</code> ロックを保持したまま時間のかかる処理が走ります。大きなテーブルでこの種の型変更を本番中に実行すると、書き換えが終わるまでテーブル全体への読み書きが止まります。</p>
+    <p>この問題への実務的な回避策は、新しい型の列を別名で追加し (<code>ADD COLUMN</code>)、アプリケーション側かトリガーで新旧両方の列を書き込むようにしてからバックフィルし、最後に古い列名を捨てて新しい列名に差し替える、という手順です。これは次の節で見る expand/contract パターンの一例です。</p>
+  </section>
+
+  <!-- ===== 7. シニアの書き方: expand/contract ===== -->
+  <section>
+    <h2>7. シニアの書き方 ― expand/contract で、1 回の切り替えを避ける</h2>
+    <p>この回で見た対策 (<code>lock_timeout</code>、<code>CONCURRENTLY</code>、<code>NOT VALID</code>、書き換え不要な型変更) は、どれも「1 回の操作が長時間ロックを持つ時間を短くする」という共通の方針を持っています。もう一段上の判断が <b>expand/contract (展張 ・ 収縮)</b> パターンです。</p>
+    <p>列の意味や型を変えたいとき、「古い列を新しい列に直接書き換える」のではなく、次の順序に分けます。<b>(1) expand</b>: 新しい列や新しい制約を、既存のものを壊さない形で追加する (<code>ADD COLUMN</code>、<code>NOT VALID</code> の制約、<code>CONCURRENTLY</code> の索引)。<b>(2) 移行</b>: アプリケーションを新旧両方に対応させ、徐々に新しい方へ書き込みを移す。<b>(3) contract</b>: 古い列や制約が誰にも使われなくなったことを確認してから、安全に削除する。この 3 段階に分けることで、どの 1 回の DDL も短時間で終わり、<code>ACCESS EXCLUSIVE</code> を長時間持つ操作を避けられます。</p>
+    <p>この回で確認した実測をこの判断に当てはめると、<code>ADD COLUMN DEFAULT <定数></code> と <code>NOT VALID</code> 制約は expand の段階で安心して使える道具 (数ミリ秒で終わる)、<code>CREATE INDEX CONCURRENTLY</code> は expand の段階で索引を追加する標準の方法 (遅いが書き込みを止めない)、volatile なデフォルトや型そのものの変更は、expand の中で直接行わず、新しい列を作ってバックフィルする側に回すべき操作、という位置づけになります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="expand/contractパターンの3段階を示す図">
+        <rect x="20" y="20" width="170" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">expand</text>
+        <text x="105" y="68" font-size="11" text-anchor="middle" fill="#12211a">ADD COLUMN</text>
+        <text x="105" y="86" font-size="11" text-anchor="middle" fill="#12211a">NOT VALID 制約</text>
+        <rect x="215" y="20" width="170" height="90" rx="8" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">移行</text>
+        <text x="300" y="68" font-size="11" text-anchor="middle" fill="#12211a">新旧両方に書く</text>
+        <text x="300" y="86" font-size="11" text-anchor="middle" fill="#12211a">バックフィル</text>
+        <rect x="410" y="20" width="170" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="495" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">contract</text>
+        <text x="495" y="68" font-size="11" text-anchor="middle" fill="#12211a">古い列 ・ 制約を</text>
+        <text x="495" y="86" font-size="11" text-anchor="middle" fill="#12211a">安全に削除</text>
+        <text x="300" y="135" font-size="12.5" text-anchor="middle" fill="#4a5d54">どの 1 回の DDL も短時間で終わるよう、変更を 3 段階に分ける</text>
+      </svg>
+      <p class="cap">図: expand/contract は、長時間ロックを持つ変更を避けるために変更を段階的に分ける設計方針。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/explicit-locking.html" target="_blank" rel="noopener">PostgreSQL: 13.3. Explicit Locking</a> ― 表レベルロックの衝突表と、ACCESS EXCLUSIVE/ShareLock/ShareUpdateExclusiveLock の定義の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-altertable.html#SQL-ALTERTABLE-NOTES" target="_blank" rel="noopener">PostgreSQL: ALTER TABLE ― Notes</a> ― ADD COLUMN DEFAULT の高速化 (PostgreSQL 11 以降) の条件と、列の型変更がいつ全行書き換えになるかの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-createindex.html" target="_blank" rel="noopener">PostgreSQL: CREATE INDEX</a> ― CONCURRENTLY の仕組みと、失敗時に INVALID な索引が残る挙動の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT" target="_blank" rel="noopener">PostgreSQL: lock_timeout (runtime config)</a> ― lock_timeout がセッション単位の設定であることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/view-pg-locks.html" target="_blank" rel="noopener">PostgreSQL: 54.13. pg_locks</a> ― locktype/mode/granted 列の意味の一次情報 (本文の pg_locks 問い合わせで使用。第 36 回と共通)。このページ自身は「pg_locks は待ち行列内の順序を公開しない」と明記しており、行列の順序規則そのものの出典ではない。</li>
+      <li><a href="https://github.com/postgres/postgres/blob/REL_18_6/src/backend/storage/lmgr/lock.c#L1089" target="_blank" rel="noopener">PostgreSQL 18.6 ソースコード: lock.c (LockAcquireExtended 内のコメント)</a> ― 「新しい要求は、待ち行列にいる要求と衝突する場合、現在の保持者と衝突するかどうかに関わらず待ち行列に並ぶ」という starvation 防止規則の一次情報。公式ドキュメントにこの規則の明記が無いため、ソースコードで裏付けた。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( https://www.oreilly.co.jp/books/9784814400744/ ) ― 章立てのみ参考 (本回は書籍の対象外のシニア編)。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-locks-concurrency.html">← 第 36 回 ロックと分離レベル</a><a href="./sql-index.html">目次</a><a href="./sql-operations-connections.html">第 38 回 接続・タイムアウト・本番運用 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 's1 (6 秒間の長時間 SELECT)、s2 (1 秒後の ALTER TABLE)、s3 (さらに 1 秒後の無関係な 1 行 SELECT) を実機で動かした結果として最も正確なものは？',
+    opts: [
+      's3 は s1 と直接衝突しないにもかかわらず、先に並んでいた s2 の ACCESS EXCLUSIVE 要求の後ろに並び、約 3.86 秒待たされた',
+      's3 は s1 や s2 と全く無関係なので、常に即座に結果が返る',
+      's2 の ALTER TABLE は AccessShareLock しか要求しないので、誰もブロックしない',
+      's3 が待たされたのはネットワークの問題であり、ロックの行列とは無関係である',
+      'ロック待ち行列は到着順ではなく、常にランダムな順序で処理される'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で s3_start から s3_done までの差を測ると約 3.86 秒で、s2_done とほぼ同じタイミングだった。s3 は本来 s1 と衝突しないのに、既に待ち行列にいた s2 を追い越せず、後ろに並んでしまった。',
+      '実測では約 3.86 秒待たされており、即座に返るという主張は誤り。',
+      'ALTER TABLE ADD COLUMN は ACCESS EXCLUSIVE ロックを要求する。AccessShareLock しか要求しないという主張は誤りで、これが s1 と衝突する原因になっている。',
+      'ネットワークの問題ではなく、タイミングの一致 (s2_done と s3_done がほぼ同時) から、ロックの待ち行列が原因であることが明確に分かる。',
+      '実測では s2 が先に並び、その後に来た s3 は s2 より後に処理された。これは先着順の挙動と一致し、ランダムという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>先に並んだ ALTER TABLE を、後から来た無関係な SELECT は追い越せません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="ロック待ち行列の先着順を示す図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="130" y="55" font-size="12" text-anchor="middle" fill="#b5401f">s2: ALTER TABLE (先に並ぶ)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">s3: 無関係な SELECT (後ろに並ぶ)</text></svg>'
+          + '<p class="cap">図: 待ち行列は先着順。後から来た無害な操作も、先に並ぶ強いロック要求を追い越せない。</p></div>'
+    }
+  },
+  {
+    q: 'lock_timeout をセッションに設定した場合の効果として最も正確なものは？',
+    opts: [
+      'lock_timeout を設定すると、相手の長時間クエリの方が強制終了される',
+      'lock_timeout は自分の文がロックを獲得できる時間を制限し、超えると自分から諦めてエラーで終わる。相手のトランザクションには影響しない',
+      'lock_timeout はサーバー全体の設定であり、SET コマンドでは変更できない',
+      'lock_timeout が切れると、対象のテーブルが破損する',
+      'lock_timeout による中断は、常にデッドロック (40P01) を意味するエラーコードを返す'
+    ],
+    ans: 1,
+    exps: [
+      '実機で確認した通り、lock_timeout が切れるのは自分 (ALTER TABLE を実行した側) の文であり、相手の長時間クエリは影響を受けずに最後まで実行された。',
+      '<b>これが正解。</b>実機で SET lock_timeout=\'2s\' の後、ALTER TABLE が 2 秒以内にロックを獲得できず "ERROR: 55P03: canceling statement due to lock timeout" で自分から終了した。列は追加されず、相手には影響しない。',
+      '実機で SET lock_timeout=\'2s\' のようにセッション単位で変更できることを確認した。サーバー全体の設定を変える必要はない。',
+      'テーブルの破損とは無関係で、ロックを獲得できなかった文がキャンセルされるだけの、安全な中断。',
+      'lock_timeout によるエラーコードは 55P03 であり、デッドロックのコード (40P01) とは異なる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>lock_timeout は自分の文だけを制限します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="lock_timeoutの効果を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">相手: 影響を受けず最後まで実行</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">自分: 2秒で諦め 55P03 エラー</text></svg>'
+          + '<p class="cap">図: lock_timeout は自分の文を安全に中断させるだけで、相手には影響しない。</p></div>'
+    }
+  },
+  {
+    q: '50 万行のテーブルで通常の CREATE INDEX と CREATE INDEX CONCURRENTLY を比較した実機の結果として最も正確なものは？',
+    opts: [
+      '両者の構築時間に差は無かった',
+      'CONCURRENTLY の方が速く構築でき、書き込みも常に即座に完了した',
+      '通常は約 0.48 秒で構築できたが書き込みを約 0.23 秒ブロックし、CONCURRENTLY は約 3.28 秒 (約 6.9 倍) かかったが書き込みは約 3 ミリ秒で完了しブロックされなかった',
+      '通常の CREATE INDEX は書き込みを永久にブロックし続ける',
+      'CONCURRENTLY は索引を作らず、テーブルの統計だけを更新する機能である'
+    ],
+    ans: 2,
+    exps: [
+      '実測では通常が約 0.48 秒、CONCURRENTLY が約 3.28 秒と明確な差があった。',
+      'CONCURRENTLY の方が構築は遅かった (約 6.9 倍)。速いという主張は実測と矛盾する。',
+      '<b>これが正解。</b>実機の clock_timestamp() の差で、通常の CREATE INDEX は構築 0.48 秒 ・ 書き込み待ち 0.23 秒、CONCURRENTLY は構築 3.28 秒 ・ 書き込み待ち 3 ミリ秒という、速さと書き込みブロックのトレードオフを確認した。',
+      '通常の CREATE INDEX のブロックは構築が終わるまでの一時的なものであり、永久という主張は誤り。実測でも 0.23 秒で解放されている。',
+      'CONCURRENTLY も通常と同じく実際に索引を構築する機能であり、統計の更新ではない。実機で idx_big_val という索引が実際に作られたことを確認した。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>速さと書き込みブロックは、どちらかしか選べないトレードオフです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="CREATE INDEXのトレードオフを示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="11" text-anchor="middle" fill="#b5401f">通常: 0.48秒構築/0.23秒ブロック</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#0f5132">CONCURRENTLY: 3.28秒構築/3msブロック</text></svg>'
+          + '<p class="cap">図: CONCURRENTLY は構築時間を犠牲にして、書き込みのブロックをほぼ無くす。</p></div>'
+    }
+  },
+  {
+    q: 'CREATE UNIQUE INDEX CONCURRENTLY が重複データで失敗したときの実機の挙動として最も正確なものは？',
+    opts: [
+      '失敗すると自動的にロールバックされ、索引はカタログに残らない',
+      '失敗すると索引だけでなく、対象のテーブル自体も削除される',
+      'この種の失敗は発生せず、CONCURRENTLY は常に成功する',
+      '失敗すると INVALID な索引がカタログに残り、DROP INDEX で明示的に削除し、データを修正してから再実行する必要がある',
+      '失敗すると、PostgreSQL が数分後に自動的に再試行する'
+    ],
+    ans: 3,
+    exps: [
+      '実機で確認した通り、索引は削除されずに indisvalid=f, indisready=f の INVALID な状態でカタログに残った。',
+      'テーブル自体は影響を受けず、bugs テーブルの他の列やデータは正常に残っていた。',
+      '実機で実際に "ERROR: 23505: could not create unique index" というエラーが発生しており、常に成功するという主張は誤り。',
+      '<b>これが正解。</b>実機で、重複データのある列に CREATE UNIQUE INDEX CONCURRENTLY を試すとエラーになり、索引は INVALID な状態でカタログに残った。DROP INDEX で削除し、重複を解消してから再実行して初めて indisvalid=t になった。',
+      'PostgreSQL に自動再試行の機能は無く、INVALID な索引はそのまま放置され続ける。手動での後始末が必要。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>失敗した CONCURRENTLY の索引は、自動では消えません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="CONCURRENTLY失敗後の後始末を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">失敗: INVALID な索引が残る</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#0f5132">DROP INDEX → データ修正 → 再実行</text></svg>'
+          + '<p class="cap">図: INVALID な索引は明示的に削除し、原因を直してから作り直す必要がある。</p></div>'
+    }
+  },
+  {
+    q: 'ADD COLUMN DEFAULT が高速化される条件について、実機の結果として最も正確なものは？',
+    opts: [
+      'どんなデフォルト式を指定しても、常に数ミリ秒で終わる',
+      'デフォルト値を指定すると、常に全行書き換えが走る',
+      'PostgreSQL 11 以降では、列追加 (ADD COLUMN) そのものが廃止された',
+      'volatile (実行ごとに結果が変わる) な式の方が、定数のデフォルトより高速化される',
+      '定数や IMMUTABLE・STABLE な式のデフォルトはメタデータのみで数ミリ秒、volatile な式 (例: clock_timestamp()) は全行書き換えが走り、実測で約 172 倍遅かった'
+    ],
+    ans: 4,
+    exps: [
+      '実機で、定数デフォルトは約 4.8 ミリ秒だったが、volatile なデフォルトは約 829 ミリ秒かかった。どんな式でも数ミリ秒という主張は実測と矛盾する。',
+      '定数デフォルトではメタデータのみの高速化が働き、実測でも約 4.8 ミリ秒だった。常に全行書き換えという主張は誤り。',
+      '実機で ADD COLUMN は問題なく実行できており、廃止されたという主張は誤り。',
+      '実測はその逆で、volatile な式の方が明確に遅かった (約 172 倍)。',
+      '<b>これが正解。</b>実機で、定数デフォルト (status DEFAULT \'active\') は約 4.8 ミリ秒、volatile なデフォルト (created_at2 DEFAULT clock_timestamp()) は約 829 ミリ秒かかり、約 172 倍の差を確認した。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>デフォルト値が 1 つに決まるかどうかで、書き換えの必要性が変わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="ADD COLUMN DEFAULTの高速化条件を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="12" text-anchor="middle" fill="#0f5132">定数 DEFAULT: 約 4.8 ms</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="12" text-anchor="middle" fill="#b5401f">volatile DEFAULT: 約 829 ms</text></svg>'
+          + '<p class="cap">図: 全行で同じ値を使えるデフォルトはメタデータだけで済み、行ごとに違う値が必要なデフォルトは書き換えが走る。</p></div>'
+    }
+  },
+  {
+    q: 'NOT VALID で CHECK 制約を追加し、その後 VALIDATE CONSTRAINT で検証する手順について、実機の結果として最も正確なものは？',
+    opts: [
+      'NOT VALID で追加した制約は既存行を検証せず数ミリ秒で完了し、後から VALIDATE CONSTRAINT で検証する際は ShareUpdateExclusiveLock という書き込みをブロックしない軽いロックで済む',
+      'NOT VALID を付けると、その制約は永久に無効になり、二度と有効にできない',
+      'VALIDATE CONSTRAINT は常に ACCESS EXCLUSIVE ロックを取り、実行中は書き込みを止める',
+      'NOT VALID な制約は、追加後に新しく入ってくる行にも適用されない',
+      'VALIDATE CONSTRAINT を実行すると、既存の全データが削除される'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で ADD CONSTRAINT ... NOT VALID が約 1 ミリ秒で完了し、後から VALIDATE CONSTRAINT を実行した際には pg_locks で ShareUpdateExclusiveLock が確認できた。これは VACUUM と同じ強さで、通常の読み書きをブロックしない。',
+      'VALIDATE CONSTRAINT を実行すれば有効にできる。実機でも実際に検証が完了している。永久に無効という主張は誤り。',
+      '実機の pg_locks で確認した通り、VALIDATE CONSTRAINT が取るのは ShareUpdateExclusiveLock であり、ACCESS EXCLUSIVE ではない。',
+      'NOT VALID は既存行の検証をスキップするだけで、追加後に入ってくる新しい行には制約が適用される。',
+      'VALIDATE CONSTRAINT はデータを検証するだけの読み取り操作であり、データを削除する操作ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>NOT VALID と VALIDATE CONSTRAINT の 2 段階に分けることで、どちらも軽い操作になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="NOT VALIDとVALIDATE CONSTRAINTの2段階を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">ADD CONSTRAINT NOT VALID: 約 1ms</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">VALIDATE CONSTRAINT: 軽いロック</text></svg>'
+          + '<p class="cap">図: 制約の追加と検証を分けることで、どちらも書き込みを止めない。</p></div>'
+    }
+  },
+  {
+    q: '列の型変更が全行書き換えを必要とするかどうかの条件について、実機の結果として最も正確なものは？',
+    opts: [
+      'どの型変更も常に全行書き換えが必要である',
+      'varchar の幅を広げるような、既存の値がそのまま新しい型を満たす変更は書き換え不要だが、int → bigint のようにストレージ上の表現幅が変わる変更は全行書き換えが必要で、実測で約 1134 倍遅かった',
+      '型変更は常に瞬時に終わり、書き換えという概念自体が存在しない',
+      'varchar の幅を広げる変更の方が、int → bigint への変更より常に遅い',
+      '型変更にロックは一切関係しない'
+    ],
+    ans: 1,
+    exps: [
+      '実機で varchar(10)→varchar(20) は約 0.7 ミリ秒で完了しており、常に全行書き換えが必要という主張は誤り。',
+      '<b>これが正解。</b>実機で varchar の幅を広げる変更は約 0.7 ミリ秒 (書き換え無し)、int から bigint への変更は約 809 ミリ秒 (全行書き換え) で、約 1134 倍の差を確認した。',
+      'int から bigint への変更では明確に時間がかかっており (約 809 ミリ秒)、瞬時に終わるという主張は誤り。',
+      '実測はその逆で、varchar の幅を広げる変更の方が圧倒的に速かった。',
+      '実機の pg_locks で AccessExclusiveLock を含むロックが取得されていることを確認しており、ロックと無関係という主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>既存の値がそのまま新しい型を満たせるかどうかが分かれ目です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="型変更の書き換えの有無を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">varchar 幅拡張: 約 0.7ms (書き換え無し)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#b5401f">int→bigint: 約 809ms (書き換えあり)</text></svg>'
+          + '<p class="cap">図: 表現幅が変わる型変更は全行書き換えが走り、変わらない変更はメタデータだけで済む。</p></div>'
+    }
+  },
+  {
+    q: 'int から bigint への ALTER COLUMN TYPE を実行中、実機の pg_locks で確認できたロックの様子として最も正確なものは？',
+    opts: [
+      'AccessShareLock だけが取得されていた',
+      '行ロックのみが取得され、表レベルのロックは一切取得されなかった',
+      'AccessExclusiveLock が取得されていることを確認した。これは最も強い表レベルロックで、他のほぼ全ての操作と衝突する',
+      'ロックは一切取得されず、他のセッションと完全に並行して実行できた',
+      'ShareUpdateExclusiveLock だけで完了し、通常の読み書きを一切妨げなかった'
+    ],
+    ans: 2,
+    exps: [
+      '実機では AccessShareLock より強い ShareLock と AccessExclusiveLock が確認されており、AccessShareLock だけという主張は誤り。',
+      '実機の pg_locks の問い合わせは locktype=\'relation\' で絞っており、表レベルのロックが確かに取得されていることを確認した。',
+      '<b>これが正解。</b>実機の pg_locks で ShareLock と AccessExclusiveLock の両方が granted=t で確認できた。AccessExclusiveLock は全行書き換えを伴う操作にふさわしい、最も強いロック。',
+      '実機でロックが確認されており、並行実行できるという主張は誤り。全行書き換えの間、他の操作は基本的に止まる。',
+      'VALIDATE CONSTRAINT (前節) とは異なり、ALTER COLUMN TYPE による書き換えは ShareUpdateExclusiveLock では済まず、AccessExclusiveLock まで必要とする。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>全行書き換えを伴う型変更は、最も強いロックを必要とします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="型変更のロック強度を示す図"><rect x="30" y="30" width="500" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="55" font-size="12.5" text-anchor="middle" fill="#b5401f">AccessExclusiveLock ― 他のほぼ全ての操作と衝突する最強のロック</text></svg>'
+          + '<p class="cap">図: 全行書き換えを伴う ALTER COLUMN TYPE は、読み書き全てを止める強さのロックを要求する。</p></div>'
+    }
+  },
+  {
+    q: 'expand/contract パターンの考え方として最も正確なものは？',
+    opts: [
+      '列の変更は常に 1 回の ALTER TABLE で完結させるべきである',
+      'expand/contract は本の読み方の順序を示す用語であり、DDL の設計とは無関係である',
+      'contract の段階で新しい列を追加し、expand の段階で古い列を削除する',
+      '新しい列や制約をまず安全な形で追加し (expand)、移行期間を経て、古いものが使われなくなってから削除する (contract) ことで、どの 1 回の DDL も短時間で終わるようにする',
+      'expand/contract を使うと、型変更に伴う書き換えのコストが完全にゼロになる'
+    ],
+    ans: 3,
+    exps: [
+      '本文で見た通り、1 回の DDL に全てを詰め込むと、volatile なデフォルトや型変更のように長時間のロックを招く操作が混ざる危険がある。段階的に分けるのが expand/contract の考え方。',
+      'expand/contract は DDL の設計パターンの名前であり、本文でも ADD COLUMN や NOT VALID 制約、CONCURRENTLY の索引をどの段階で使うかという文脈で説明した。',
+      '順序が逆になっている。expand で新しいものを安全に追加し、contract で古いものを削除する。',
+      '<b>これが正解。</b>本文で説明した通り、expand (追加) → 移行 → contract (削除) の 3 段階に分けることで、どの 1 回の DDL も短時間で終わり、長時間 ACCESS EXCLUSIVE を持つ操作を避けられる。',
+      '書き換えのコストそのものが消えるわけではなく、書き換えが必要な操作を expand の中で直接行わず、新しい列を作ってバックフィルする側に回すことで、1 回の DDL の影響範囲を小さくするという考え方。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>3 段階に分けることで、どの 1 回の変更も短時間で終わります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="expand/contractの3段階を示す図"><rect x="20" y="30" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="55" font-size="12" text-anchor="middle" fill="#0f5132">expand: 追加</text><rect x="200" y="30" width="160" height="40" rx="6" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="280" y="55" font-size="12" text-anchor="middle" fill="#b5401f">移行: 併用</text><rect x="380" y="30" width="160" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="460" y="55" font-size="12" text-anchor="middle" fill="#1f4a68">contract: 削除</text></svg>'
+          + '<p class="cap">図: 3 段階に分けることで、1 回ごとの DDL が長時間ロックを持つ事態を避けられる。</p></div>'
+    }
+  },
+  {
+    q: 'この回で確かめた、DDL の危険性についての最も適切なまとめは？',
+    opts: [
+      'DDL は文字数が短ければ、必ず高速に終わる',
+      '本番環境での DDL は、すべてメンテナンス時間を取って一括実行するのが唯一の正解である',
+      'ロックの強さやモードを気にする必要はなく、タイムアウトの設定だけで十分である',
+      'CONCURRENTLY を使えば常にすべての問題が解決し、失敗は起こらない',
+      'DDL の危険は実行時間の長さではなくロックの強さと順番にあり、lock_timeout や CONCURRENTLY、NOT VALID、書き換え不要な変更を組み合わせ、変更を expand/contract の段階に分けることでロック保持時間を短くするのがシニアの判断'
+    ],
+    ans: 4,
+    exps: [
+      '本文で確認した通り、ADD COLUMN DEFAULT は文として短くても、volatile なデフォルトを使えば長い書き換えが走る。文字数と実行時間は無関係。',
+      '本文で見た lock_timeout や CONCURRENTLY、NOT VALID はいずれも、一括のメンテナンス時間を取らずに安全に変更するための道具であり、一括実行が唯一の正解という主張とは異なる方針を示している。',
+      '本文全体で、ロックの強さ (ACCESS EXCLUSIVE か ShareUpdateExclusiveLock か) が実際の影響範囲を決めることを確認した。タイムアウトだけでは不十分。',
+      'Q4 で確認した通り、CONCURRENTLY にも失敗の可能性 (重複データなど) があり、INVALID な索引が残るという後始末が必要になる。',
+      '<b>これが正解。</b>本文全体を通して、ロックの強さと行列の先着順が DDL の危険の本質であり、lock_timeout で待ちすぎを防ぎ、CONCURRENTLY や NOT VALID で軽いロックに留め、書き換えが必要な変更は expand/contract の段階に分けて影響範囲を小さくする、という判断がこの回の結論。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>この回で見た道具は、どれも「ロックを短く ・ 弱く保つ」という同じ方針でつながっています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="この回のまとめの図"><rect x="20" y="20" width="160" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="50" font-size="11.5" text-anchor="middle" fill="#0f5132">lock_timeout</text><text x="100" y="70" font-size="11.5" text-anchor="middle" fill="#0f5132">→ 待ちすぎない</text><rect x="200" y="20" width="160" height="90" rx="8" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="280" y="50" font-size="11.5" text-anchor="middle" fill="#b5401f">CONCURRENTLY/NOT VALID</text><text x="280" y="70" font-size="11.5" text-anchor="middle" fill="#b5401f">→ 軽いロックで済ます</text><rect x="380" y="20" width="160" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="460" y="50" font-size="11.5" text-anchor="middle" fill="#1f4a68">expand/contract</text><text x="460" y="70" font-size="11.5" text-anchor="middle" fill="#1f4a68">→ 影響範囲を分割</text></svg>'
+          + '<p class="cap">図: 3 つの道具はいずれも、ロックの保持時間と強さを小さくするという同じ方針を実現している。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

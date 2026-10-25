@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>制約で正しさを守る ― アプリの検証だけでは足りない</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14px;margin:0 0 16px}
+  table.tbl th,table.tbl td{text-align:left;padding:7px 9px;border:1px solid #d9e5df}
+  table.tbl th{background:#eaf5ef}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 33 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>制約で正しさを守る ― アプリの検証だけでは足りない</h1>
+  <p>「アプリケーションコードで入力チェックをしているから大丈夫」という考え方は、そのアプリ以外の経路 (別のサービス、バッチ処理、psql での手作業) から書き込みが入る可能性がある限り成立しません。この回では CHECK ・ DOMAIN ・ 生成列 ・ EXCLUDE 制約 ・ 部分一意インデックスという、PostgreSQL がデータそのものに正しさを縛り付ける仕組みを、実際に制約を破ろうとしたときのエラーで確認します。</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 26 回 <a href="./sql-foreign-key-mistakes.html">外部キーのミニ・アンチパターン</a> (NOT VALID や DEFERRABLE などの制約の基礎) ・ 第 11 回 <a href="./sql-31-flavors.html">サーティワンフレーバー</a> (CHECK 制約の初出)</p>
+  <p class="intro">この回で答えるのは「入力値の正しさを、アプリケーションのコードだけで守ってよいか」という問いです。結論は、アプリのコードはそのアプリを経由した書き込みしか検証できないが、<b>データベースの制約はどの経路から書き込まれても必ず検査される</b>ということです。CHECK ・ DOMAIN ・ 生成列 ・ 範囲型 + EXCLUDE 制約 ・ 部分一意インデックスという 5 つの道具を、実際に制約を破ろうとしたときに PostgreSQL 18 が返したエラーで確認します。</p>
+
+  <section>
+    <h2>1. この回で解く問題 ― アプリの外から書き込まれたらどうなるか</h2>
+    <p>「作業時間 (<code>hours</code>) は 0 以上でなければならない」という規則を、アプリケーションの入力フォームでチェックしているとします。これで安全だと思えるかもしれませんが、同じテーブルには他にも書き込みの経路があります。管理者が <code>psql</code> で直接 <code>UPDATE</code> する、別のバッチ処理が値を書き換える、将来追加される別のサービスがこのテーブルに直接書き込む、といった経路です。アプリのコードは、<b>そのアプリを経由しない書き込みを一切検査できません</b>。</p>
+    <p>この問題を解決するのが、データベース側の<b>制約</b> (constraint) です。制約はテーブルの定義そのものに縛り付けられているので、<code>INSERT</code> や <code>UPDATE</code> がどの経路から来ても、必ず同じ検査を通過しなければコミットできません。この回では、単純な範囲の制約 (CHECK) から、複数の行をまたいだ「時間の重なりを禁止する」制約 (EXCLUDE) まで、PostgreSQL が提供する制約の道具を順番に見ていきます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="アプリの検証と制約が守る範囲の違いを示す図">
+        <rect x="30" y="30" width="220" height="130" rx="10" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="140" y="55" font-size="12.5" text-anchor="middle" fill="#5b3d80" font-weight="700">アプリの入力検証</text>
+        <text x="140" y="80" font-size="11" text-anchor="middle">Web フォーム経由の書き込みだけ</text>
+        <text x="140" y="130" font-size="11" text-anchor="middle" fill="#b5401f">psql・バッチ処理・他サービスからの</text>
+        <text x="140" y="148" font-size="11" text-anchor="middle" fill="#b5401f">直接の書き込みは検査されない</text>
+        <rect x="330" y="30" width="240" height="130" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="450" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">データベースの制約</text>
+        <text x="450" y="80" font-size="11" text-anchor="middle">テーブルの定義そのものに縛り付く</text>
+        <text x="450" y="130" font-size="11" text-anchor="middle" fill="#198754">どの経路から書き込まれても</text>
+        <text x="450" y="148" font-size="11" text-anchor="middle" fill="#198754">必ず同じ検査を通過する</text>
+      </svg>
+      <p class="cap">図: アプリの検証は 1 つの経路しか守らないが、制約はテーブルへのすべての経路を守る。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 仕組み ― CHECK と DOMAIN</h2>
+    <p><b>CHECK 制約</b>は、1 行の中の列の値に対する条件を列単位・行単位で宣言します。<code>bugs.hours</code> (作業時間) が負の値にならないようにした実機の結果です。</p>
+    <pre><code>ALTER TABLE bugs ADD CONSTRAINT bugs_hours_nonneg CHECK (hours >= 0);
+UPDATE bugs SET hours = -1 WHERE bug_id = 1;
+-- ERROR:  new row for relation "bugs" violates check constraint "bugs_hours_nonneg"</code></pre>
+    <p>この制約が付いた後は、アプリのコードを経由しているかどうかに関わらず、<code>hours</code> に負の値を書き込もうとする行は必ず拒否されます。</p>
+    <p>同じ形式の制約を複数の列や複数のテーブルで繰り返し使いたい場合は、<b>DOMAIN</b> (ドメイン) を使うと、制約込みの型を 1 回定義して使い回せます。メールアドレスらしい形式を要求するドメインを作り、<code>accounts.email</code> の型として使った実機の結果です。</p>
+    <pre><code>CREATE DOMAIN email_address AS text CHECK (VALUE ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$');
+ALTER TABLE accounts ALTER COLUMN email TYPE email_address;
+UPDATE accounts SET email = 'not-an-email' WHERE account_id = 1;
+-- ERROR:  value for domain email_address violates check constraint "email_address_check"</code></pre>
+    <p>CHECK 制約はそのテーブルの中だけで有効ですが、DOMAIN は型そのものに制約が付くので、別のテーブルで同じ <code>email_address</code> 型の列を作れば、同じ検査がそのテーブルにもそのまま適用されます。「メールアドレスらしい形式」のような、複数のテーブルで繰り返し必要になる検査は DOMAIN に寄せておくと、検査のルールが 1 か所に集約されます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="CHECK制約とDOMAINの違いを示す図">
+        <text x="150" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">CHECK 制約</text>
+        <rect x="30" y="35" width="240" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="60" font-size="12" text-anchor="middle" fill="#0f5132">bugs テーブルだけに付く</text>
+        <text x="150" y="80" font-size="11" text-anchor="middle" fill="#4a5d54">他のテーブルには影響しない</text>
+        <text x="450" y="20" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">DOMAIN</text>
+        <rect x="330" y="35" width="240" height="60" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="450" y="60" font-size="12" text-anchor="middle" fill="#5b3d80">型そのものに検査が付く</text>
+        <text x="450" y="80" font-size="11" text-anchor="middle" fill="#4a5d54">どのテーブルの列でも同じ検査が効く</text>
+        <text x="300" y="135" font-size="12.5" text-anchor="middle" fill="#12211a">繰り返し使う検査は DOMAIN に寄せると 1 か所で管理できる</text>
+      </svg>
+      <p class="cap">図: CHECK は 1 つのテーブルに付くが、DOMAIN は型として複数のテーブルをまたいで再利用できる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 仕組み ― 生成列 (STORED と PostgreSQL 18 の VIRTUAL)</h2>
+    <p><b>生成列</b> (generated column) は、同じ行の他の列から計算した値を列として持たせる仕組みです。「アプリ側で毎回計算して書き込む」のではなく、「データベースに計算のルールそのものを登録する」ことで、計算忘れや計算ミスを無くします。<code>bugs.summary</code> の文字数を、<code>STORED</code> と、PostgreSQL 18 で追加された <code>VIRTUAL</code> の両方で定義した実機の結果です。</p>
+    <pre><code>ALTER TABLE bugs ADD COLUMN summary_len_stored int GENERATED ALWAYS AS (length(summary)) STORED;
+ALTER TABLE bugs ADD COLUMN summary_len_virtual int GENERATED ALWAYS AS (length(summary)) VIRTUAL;
+SELECT bug_id, summary, summary_len_stored, summary_len_virtual FROM bugs WHERE bug_id = 1;</code></pre>
+    <table class="tbl">
+      <thead><tr><th>bug_id</th><th>summary</th><th>summary_len_stored</th><th>summary_len_virtual</th></tr></thead>
+      <tbody><tr><td>1</td><td>crash when saving</td><td>17</td><td>17</td></tr></tbody>
+    </table>
+    <p>どちらも同じ値 (17 文字) を返しますが、計算されるタイミングが違います。<code>pg_attribute.attgenerated</code> という内部カタログを見ると、<code>STORED</code> は <code>s</code>、<code>VIRTUAL</code> は <code>v</code> という区別が付いていることが確認できます。</p>
+    <pre><code>SELECT attname, attgenerated FROM pg_attribute
+WHERE attrelid = 'bugs'::regclass AND attname IN ('summary_len_stored','summary_len_virtual');
+--  summary_len_stored  | s
+--  summary_len_virtual | v</code></pre>
+    <p><code>STORED</code> は書き込み時に計算してディスクに保存するので、読み取り時の計算コストは掛かりませんが、書き込み時に計算コストが掛かり、ディスク容量も消費します。<code>VIRTUAL</code> は読み取るたびに計算するので、ディスク容量を消費しない代わりに、読み取りのたびに計算コストが掛かります。<code>STORED</code> と <code>VIRTUAL</code> のどちらも書かずに <code>GENERATED ALWAYS AS (...)</code> だけを書くと、PostgreSQL 18 では <code>VIRTUAL</code> が既定になります (実機で <code>attgenerated</code> が <code>v</code> になることを確認済み)。PostgreSQL 17 以前は生成列が <code>STORED</code> しか無かったので、この既定の変化は書き方を変えていないつもりでも挙動が変わる落とし穴になります。どちらも、<code>UPDATE</code> でその列に直接値を書き込もうとすると拒否されます。</p>
+    <pre><code>UPDATE bugs SET summary_len_stored = 999 WHERE bug_id = 1;
+-- ERROR:  column "summary_len_stored" can only be updated to DEFAULT
+-- DETAIL:  Column "summary_len_stored" is a generated column.</code></pre>
+    <p>「<code>summary</code> を変更したのに文字数の列を更新し忘れる」という不整合が、生成列を使うことで構造上発生しなくなります。これは単なる自動計算の便利機能ではなく、「この列の値は必ずこの式から導出される」という<b>正しさの宣言</b>そのものです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="STOREDとVIRTUALの違いを示す図">
+        <text x="150" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">STORED</text>
+        <rect x="30" y="35" width="240" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="60" font-size="12" text-anchor="middle" fill="#0f5132">書き込み時に計算してディスクに保存</text>
+        <text x="150" y="80" font-size="11" text-anchor="middle" fill="#4a5d54">読み取りは速いが容量を使う</text>
+        <text x="450" y="20" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">VIRTUAL (PG18+)</text>
+        <rect x="330" y="35" width="240" height="60" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="450" y="60" font-size="12" text-anchor="middle" fill="#5b3d80">読み取り時に毎回計算</text>
+        <text x="450" y="80" font-size="11" text-anchor="middle" fill="#4a5d54">容量は使わないが毎回計算する</text>
+        <text x="300" y="135" font-size="12.5" text-anchor="middle" fill="#12211a">attgenerated が s/v でこの違いを区別する</text>
+      </svg>
+      <p class="cap">図: STORED は書き込み時に計算して保存、VIRTUAL は読み取り時にその場で計算する。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 仕組み ― 範囲型と EXCLUDE 制約で予約の重なりを防ぐ</h2>
+    <p>CHECK 制約は 1 行の中だけを検査しますが、「同じ会議室の予約時間が重なってはいけない」という規則は、<b>複数の行をまたいだ比較</b>が必要です。これを 1 つの制約として宣言できるのが <b>EXCLUDE 制約</b>です。PostgreSQL の範囲型 (<code>tsrange</code> など) と組み合わせ、「同じ <code>room_id</code> で、かつ時間帯が重なる (<code>&amp;&amp;</code>) 行があってはならない」と宣言します。</p>
+    <pre><code>CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE room_bookings (
+  booking_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  room_id int NOT NULL,
+  during tsrange NOT NULL,
+  booked_by bigint NOT NULL REFERENCES accounts(account_id),
+  EXCLUDE USING gist (room_id WITH =, during WITH &&)
+);</code></pre>
+    <p><code>room_id</code> のような等値比較 (<code>=</code>) を GiST インデックスの中で使うには、contrib 拡張の <b>btree_gist</b> が必要です。範囲の重なり判定 (<code>&amp;&amp;</code>) はもともと GiST が得意とする演算ですが、通常の等値比較はそうではないため、btree_gist がその橋渡しをします。実際に予約を入れてみた結果です。</p>
+    <pre><code>INSERT INTO room_bookings (room_id, during, booked_by) VALUES
+  (101, '[2026-04-01 10:00, 2026-04-01 11:00)', 1);   -- 成功
+INSERT INTO room_bookings (room_id, during, booked_by) VALUES
+  (102, '[2026-04-01 10:00, 2026-04-01 11:00)', 2);   -- 成功 (別の room_id なので重ならない)
+INSERT INTO room_bookings (room_id, during, booked_by) VALUES
+  (101, '[2026-04-01 11:00, 2026-04-01 12:00)', 3);   -- 成功 (同じ room_id だが時間が重ならない)
+INSERT INTO room_bookings (room_id, during, booked_by) VALUES
+  (101, '[2026-04-01 10:30, 2026-04-01 10:45)', 4);   -- 失敗</code></pre>
+    <pre><code>ERROR:  conflicting key value violates exclusion constraint "room_bookings_room_id_during_excl"
+DETAIL:  Key (room_id, during)=(101, ["2026-04-01 10:30:00","2026-04-01 10:45:00")) conflicts with
+         existing key (room_id, during)=(101, ["2026-04-01 10:00:00","2026-04-01 11:00:00")).</code></pre>
+    <p>4 番目の予約は、同じ <code>room_id=101</code> で、既存の予約 (10:00〜11:00) と時間が重なる (10:30〜10:45) ため、挿入する前に拒否されました。エラーメッセージには、どの既存の行と衝突したかまで表示されています。アプリ側で「既存の予約を検索して重なりを確認してから挿入する」というコードを書くと、第 31 回で見た check-then-act のレースがそのまま発生しますが、EXCLUDE 制約はこの検査と拒否を 1 つの <code>INSERT</code> 文の中で、データベース側がアトミックに行います。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="EXCLUDE制約が時間の重なりを検出する図">
+        <line x1="40" y1="60" x2="560" y2="60" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="100" y="45" width="200" height="30" rx="4" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="200" y="65" font-size="11" text-anchor="middle" fill="#0f5132">room 101: 10:00-11:00</text>
+        <rect x="380" y="45" width="140" height="30" rx="4" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="450" y="65" font-size="11" text-anchor="middle" fill="#0f5132">room 101: 11:00-12:00</text>
+        <rect x="135" y="100" width="140" height="30" rx="4" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="205" y="120" font-size="10.5" text-anchor="middle" fill="#b5401f">room 101: 10:30-10:45</text>
+        <line x1="205" y1="95" x2="205" y2="78" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <text x="300" y="160" font-size="12.5" text-anchor="middle" fill="#4a5d54">新しい予約が既存の予約 (10:00-11:00) と時間的に重なるため拒否される</text>
+      </svg>
+      <p class="cap">図: EXCLUDE 制約は、同じ room_id の中で時間帯が重なる行の挿入を拒否する。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 仕組み ― 部分一意インデックス</h2>
+    <p>「<code>accounts</code> の中で、既定の管理者として選ばれているのは必ず 1 人以下」という規則は、<code>is_default_admin</code> という真偽値の列全体に一意制約を付けるだけでは実現できません。<code>false</code> の行は何行あってもよく、<code>true</code> の行だけが 1 行以下であるべきだからです。これを実現するのが<b>部分一意インデックス</b> (partial unique index、<code>WHERE</code> 句付きの一意インデックス) です。</p>
+    <pre><code>ALTER TABLE accounts ADD COLUMN is_default_admin boolean NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX accounts_one_default_admin ON accounts (is_default_admin) WHERE is_default_admin;
+
+UPDATE accounts SET is_default_admin = true WHERE account_id = 1;
+-- 成功: account_id=1 が true、他の 3 人は false
+UPDATE accounts SET is_default_admin = true WHERE account_id = 2;
+-- ERROR:  duplicate key value violates unique constraint "accounts_one_default_admin"
+-- DETAIL:  Key (is_default_admin)=(t) already exists.</code></pre>
+    <p>このインデックスは <code>WHERE is_default_admin</code> という条件に合う行 (<code>true</code> の行) だけを対象にしているので、<code>false</code> の行はインデックスに含まれず、何行あっても一意制約の対象外です。<code>true</code> の行が 2 行目になろうとした瞬間だけ、一意制約が働いて拒否されます。普通の一意制約では「全ての行で値が重複してはいけない」としか書けませんが、部分一意インデックスは「ある条件に合う行の中でだけ重複してはいけない」という、より細かい正しさを表現できます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="部分一意インデックスがtrueの行だけを対象にする図">
+        <rect x="40" y="30" width="520" height="40" rx="6" fill="#f3f9f6" stroke="#8fd6b4" stroke-width="1.5"/>
+        <text x="300" y="55" font-size="12" text-anchor="middle" fill="#4a5d54">accounts: is_default_admin = t, f, f, f</text>
+        <rect x="80" y="90" width="90" height="35" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="125" y="112" font-size="11.5" text-anchor="middle" fill="#b5401f">t (1 行のみ許可)</text>
+        <rect x="200" y="90" width="320" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="360" y="112" font-size="11.5" text-anchor="middle" fill="#0f5132">f (何行あってもよい、インデックス対象外)</text>
+      </svg>
+      <p class="cap">図: WHERE 句付きの一意インデックスは、条件に合う行だけを一意性の対象にする。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. どこで壊れるか ― よくある間違い</h2>
+    <h3>間違い 1: 制約を付けずにアプリ側の検証だけに頼る</h3>
+    <p>節 1 で見たとおり、アプリのコードはそのアプリを経由した書き込みしか検証できません。別のサービスやバッチ処理が同じテーブルに書き込む計画が将来出てきた時点で、アプリ側の検証はすり抜けられます。「今は 1 つのアプリしか書き込んでいないから大丈夫」という判断は、将来の経路の増加に対して脆くなります。</p>
+    <h3>間違い 2: 複数行をまたいだ規則を 1 行の CHECK で表現しようとする</h3>
+    <p>CHECK 制約は 1 行の中の列の値しか参照できません。「同じ会議室の予約が重ならない」のような複数行をまたいだ規則を CHECK で書こうとすると、サブクエリを使った CHECK は許可されておらずエラーになります。このような規則には EXCLUDE 制約や、トリガーによる検証が必要です。</p>
+    <h3>間違い 3: 生成列に使う式が IMMUTABLE でない関数を含む</h3>
+    <p>生成列の式には、同じ入力に対して常に同じ結果を返す (<code>IMMUTABLE</code> な) 関数しか使えません。<code>now()</code> のような現在時刻に依存する関数を生成列の式に使おうとすると、エラーになります。生成列は「この行の他の列から導出できる値」のためのものであり、外部の状態に依存する値には向きません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 140" role="img" aria-label="CHECKが1行しか見られないことを示す図">
+        <rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="60" font-size="12" text-anchor="middle" fill="#0f5132">CHECK: 1 行の中だけ</text>
+        <rect x="340" y="30" width="220" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="450" y="60" font-size="12" text-anchor="middle" fill="#5b3d80">EXCLUDE: 複数行をまたいだ比較</text>
+        <text x="300" y="115" font-size="12.5" text-anchor="middle" fill="#4a5d54">規則が何行をまたぐかで、使う制約の種類が変わる</text>
+      </svg>
+      <p class="cap">図: 1 行の中の規則か、複数行をまたぐ規則かで、適した制約の種類が変わる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. シニアの書き方 ― 制約はアプリの検証より強い理由</h2>
+    <p>アプリケーションの入力検証は「利用者に分かりやすいエラーメッセージを早い段階で返す」という役割において重要ですが、それだけでは<b>データの正しさを保証する役割を果たせません</b>。制約が無いテーブルは、どれだけアプリ側の検証を頑張っても、アプリ以外の経路からの書き込みに対して無防備なままです。</p>
+    <p><b>1. 業務上「絶対に成立してはいけない」規則は、必ずデータベースの制約として書く。</b>「負の時間はあり得ない」「同じ会議室の予約は重ならない」のような、ビジネス上の不変条件は、アプリのコードではなく制約として表現します。</p>
+    <p><b>2. アプリの検証とデータベースの制約は、役割分担であって二択ではない。</b>アプリ側の検証は、利用者に早く分かりやすいフィードバックを返す役割を担い、データベースの制約は、どんな経路からでも最終的な正しさを保証する役割を担います。両方があって初めて、使いやすさと正しさの両方が手に入ります。</p>
+    <p><b>3. 複数行をまたぐ規則こそ、制約で守る価値が高い。</b>1 行の中の検証はアプリ側でもそれなりに書けますが、「2 つの行の値が同時に満たすべき関係」は、アプリのコードで正しく書くのが難しく、しかもレース (第 31 回で見た check-then-act の競合) が入り込みやすい領域です。EXCLUDE 制約のような、データベースが複数行を一度に見て検査する仕組みは、この種の規則に向いています。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/ddl-constraints.html" target="_blank" rel="noopener">PostgreSQL: 5.5. Constraints</a> ― CHECK 制約、EXCLUDE 制約、生成列 (GENERATED ... STORED/VIRTUAL) の構文と意味の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/domains.html" target="_blank" rel="noopener">PostgreSQL: 8.19. Domain Types / CREATE DOMAIN</a> ― DOMAIN の定義と、型として複数のテーブルに再利用できることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/rangetypes.html" target="_blank" rel="noopener">PostgreSQL: 8.17. Range Types</a> ― tsrange などの範囲型と && (重なり) 演算子の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/btree-gist.html" target="_blank" rel="noopener">PostgreSQL: F.7. btree_gist</a> ― 等値比較を GiST インデックスで使うために btree_gist が必要であることの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/indexes-partial.html" target="_blank" rel="noopener">PostgreSQL: 11.8. Partial Indexes</a> ― WHERE 句付きの部分インデックスと、それを使った部分一意制約の一次情報。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( <a href="https://www.oreilly.co.jp/books/9784814400744/" target="_blank" rel="noopener">https://www.oreilly.co.jp/books/9784814400744/</a> ) ― このシリーズ全体の章立ての参考元。本回の中身は書籍の引用ではなく、PostgreSQL 公式ドキュメントと実機での検証から書いている。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-pagination.html">← 第 32 回 ページネーション ― OFFSET を捨てる</a><a href="./sql-index.html">目次</a><a href="./sql-jsonb.html">第 34 回 JSONB の使い所と使わない所 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '`ALTER TABLE bugs ADD CONSTRAINT bugs_hours_nonneg CHECK (hours >= 0);` を追加した後、`UPDATE bugs SET hours = -1 WHERE bug_id = 1;` を実行すると実機でどうなったか。',
+    opts: [
+      'ERROR: new row for relation "bugs" violates check constraint "bugs_hours_nonneg" というエラーになった',
+      '正常に実行され、hours が -1 になった',
+      'ADD CONSTRAINT は追加した時点で既に存在する行だけを検査する一度限りの操作であり、以後の UPDATE や INSERT には影響しないため、この UPDATE は通る',
+      'CHECK 制約は FOREIGN KEY 制約と同様に DEFERRABLE にでき、COMMIT 時までまとめて検査を遅らせられるため、この UPDATE 文自体はいったん成功する',
+      'CHECK 制約は BEFORE UPDATE トリガーを使って初めて評価される仕組みであり、トリガーが定義されていなければこの UPDATE は検査されずに成功する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文の実機結果どおり、CHECK 制約に違反する UPDATE はエラーで拒否され、hours は変更されなかった。',
+      '正常に実行されたわけではなく、CHECK 制約違反としてエラーになった。',
+      '違う。ADD CONSTRAINT 時の検証は既存行に対する一度限りのものではなく、以後のすべての UPDATE や INSERT に対しても同じ CHECK が継続して適用される。',
+      '違う。PostgreSQL の CHECK 制約 (と NOT NULL 制約) は DEFERRABLE にできず、常に文の実行直後に即時検査される。遅延検査が選べるのは FOREIGN KEY 制約など一部だけである。',
+      '違う。CHECK 制約はトリガーとは独立してシステムが文の実行時に自動で評価する仕組みで、トリガーの有無とは無関係にこの UPDATE は拒否される。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>CHECK 制約は条件を満たさない行の書き込みを拒否します。</p><div class="fig"><svg viewBox="0 0 560 110" aria-label="CHECK制約が負の値を拒否する図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#b5401f">hours = -1</text><rect x="320" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="430" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">ERROR: violates check constraint</text></svg><p class="cap">図: hours >= 0 を満たさない値は書き込み時に拒否される。</p></div>' }
+  },
+  {
+    q: 'CHECK 制約の代わりに DOMAIN (`CREATE DOMAIN email_address AS text CHECK (...)`) を使う主な利点は何か。',
+    opts: [
+      'DOMAIN は実行速度が常に CHECK より速い',
+      '同じ検査のルールを型として定義し、複数のテーブルの複数の列で繰り返し再利用できる',
+      'DOMAIN を使うと一意制約が不要になる',
+      'DOMAIN を使うとインデックスが自動的に作られる',
+      'DOMAIN は NULL を一切許容しない'
+    ],
+    ans: 1,
+    exps: [
+      '実行速度が常に速いという根拠は無く、本文でも速度の比較は行っていない。',
+      '<b>これが正解。</b>DOMAIN は制約込みの型を定義するため、別のテーブルで同じ型の列を作れば同じ検査がそのまま適用される。繰り返し使う検査のルールを 1 か所に集約できる。',
+      '一意制約とは無関係の機能であり、DOMAIN を使っても一意性の検査は別途必要。',
+      'インデックスを自動作成する機能ではなく、DOMAIN はあくまで型とその検査を再利用する仕組み。',
+      'DOMAIN が NULL を許すかどうかは定義時に NOT NULL を付けるかどうかで決まり、DOMAIN 自体が常に NULL を禁止するわけではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>DOMAIN は型として複数のテーブルに再利用できます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="DOMAINの再利用性を示す図"><rect x="200" y="20" width="160" height="35" rx="6" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="280" y="43" font-size="12" text-anchor="middle" fill="#5b3d80">email_address 型</text><rect x="40" y="80" width="150" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="115" y="103" font-size="11" text-anchor="middle">accounts.email</text><rect x="370" y="80" width="150" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132"/><text x="445" y="103" font-size="11" text-anchor="middle">別テーブルの列</text></svg><p class="cap">図: 1 つの DOMAIN を複数のテーブルの列で使い回せる。</p></div>' }
+  },
+  {
+    q: '`summary_len_stored` という生成列に対して `UPDATE bugs SET summary_len_stored = 999 WHERE bug_id = 1;` を実行すると実機でどうなったか。',
+    opts: [
+      '正常に実行され、値が 999 に書き換わった',
+      '999 ではなく自動的に正しい文字数が設定された',
+      'ERROR: column "summary_len_stored" can only be updated to DEFAULT というエラーになった',
+      'INSERT 文で OVERRIDING SYSTEM VALUE を指定すれば、生成列にも任意の値を直接書き込める',
+      'ALTER TABLE ... ALTER COLUMN ... DROP EXPRESSION を事前に実行していなくても、UPDATE 時には自動的に通常の列として扱われ、直接の値を書き込める'
+    ],
+    ans: 2,
+    exps: [
+      '正常には実行されず、生成列への直接の書き込みはエラーで拒否される。',
+      '自動的に正しい値に補正されるわけではなく、そもそも書き込み自体がエラーになる。',
+      '<b>これが正解。</b>本文の実機結果どおり、生成列は DEFAULT 以外の値を直接指定して更新することができず、エラーになった。',
+      '違う。OVERRIDING SYSTEM VALUE は GENERATED ALWAYS AS IDENTITY の列 (連番) に書き込むための機能であり、式から計算する生成列には適用できない。この UPDATE もやはりエラーになる。',
+      '違う。DROP EXPRESSION を実行して生成列の性質を取り除かない限り、生成列は常に式からの計算値しか持てない。この例ではその操作をしていないため、999 を書き込む UPDATE はエラーになる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>生成列は直接の書き込みを許しません。</p><div class="fig"><svg viewBox="0 0 560 110" aria-label="生成列への直接書き込みがエラーになる図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#b5401f">UPDATE ... = 999</text><rect x="320" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="430" y="55" font-size="11" text-anchor="middle" fill="#0f5132">ERROR: can only be updated to DEFAULT</text></svg><p class="cap">図: 生成列は常に式から計算され、直接の値の指定はできない。</p></div>' }
+  },
+  {
+    q: '`pg_attribute.attgenerated` を調べたところ、summary_len_stored は `s`、summary_len_virtual は `v` だった。この 2 つの違いとして最も適切なものは？',
+    opts: [
+      's は NULL を許容し、v は許容しない',
+      's は文字列型専用、v は数値型専用である',
+      's の方が常に値が大きく、v の方が常に値が小さい',
+      's は書き込み時に計算してディスクに保存し、v は読み取るたびにその場で計算する (ディスクには保存しない)',
+      's と v に実質的な違いは無く、表記が違うだけである'
+    ],
+    ans: 3,
+    exps: [
+      'NULL の許容/禁止とは無関係の区別で、attgenerated は計算のタイミングだけを表す。',
+      '型の種類とは無関係の区別で、どちらも int 型の列として定義されている。',
+      '値の大小とは無関係で、本文の例ではどちらも同じ値 (17) を返している。',
+      '<b>これが正解。</b>STORED (s) は書き込み時に計算してディスクに保存し、VIRTUAL (v, PostgreSQL 18 以降) は読み取るたびにその場で計算してディスクには保存しない。',
+      '実質的な違いが無いとは言えず、保存のタイミングと容量の使い方が異なる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>s と v は計算のタイミングが違います。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="sとvの違いを示す図"><rect x="40" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#0f5132">s: 書き込み時に計算・保存</text><rect x="320" y="30" width="220" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="430" y="55" font-size="12" text-anchor="middle" fill="#5b3d80">v: 読み取り時に計算</text></svg><p class="cap">図: 保存するか、その場で計算するかの違い。</p></div>' }
+  },
+  {
+    q: 'room_bookings に EXCLUDE USING gist (room_id WITH =, during WITH &&) を付けた状態で、room_id=101 に 10:00-11:00 の予約がある時、同じ room_id=101 に 10:30-10:45 の予約を INSERT すると実機でどうなったか。',
+    opts: [
+      '正常に挿入され、2 つの予約が両方とも残った',
+      'EXCLUDE 制約は UNIQUE 制約と同じく完全一致しか見ないため、during の範囲が完全には一致しない今回のケースは許可される',
+      'この EXCLUDE 制約は INSERT 時には働くが、既存の予約を UPDATE で時間変更する場合には検査されない',
+      'room_id WITH = と during WITH && はそれぞれ独立に (OR のように) 評価されるため、room_id が同じというだけで、during が重なるかどうかに関係なく拒否される',
+      'ERROR: conflicting key value violates exclusion constraint というエラーで拒否された'
+    ],
+    ans: 4,
+    exps: [
+      '正常に挿入されたわけではなく、時間が重なるため拒否された。',
+      '違う。EXCLUDE 制約は UNIQUE 制約とは異なり && (重なり) のような演算子で判定するため、during の範囲が完全に一致しなくても、少しでも重なっていれば制約違反になる。',
+      '違う。EXCLUDE 制約は CHECK 制約と同様に INSERT でも UPDATE でも評価され、UPDATE によって時間が重なるように変更した場合も同じエラーで拒否される。',
+      '違う。EXCLUDE 制約の複数条件はカンマで並べた全てを同時に満たす既存行がある場合だけ拒否の対象になる (AND に相当)。room_id が同じでも during が重ならなければ拒否されない。',
+      '<b>これが正解。</b>本文の実機結果どおり、同じ room_id で時間が重なる予約は「conflicting key value violates exclusion constraint」というエラーで拒否された。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>時間が重なる予約は拒否されます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="重なる予約が拒否される図"><rect x="60" y="30" width="200" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="160" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">既存: 10:00-11:00</text><rect x="140" y="80" width="140" height="30" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="210" y="100" font-size="10.5" text-anchor="middle" fill="#b5401f">新規: 10:30-10:45 → 拒否</text></svg><p class="cap">図: 新しい予約の時間帯が既存の予約と重なるため、挿入がエラーになる。</p></div>' }
+  },
+  {
+    q: 'room_bookings の EXCLUDE 制約で `room_id WITH =` (通常の等値比較) を GiST インデックスの中で使うために、btree_gist 拡張が必要だったのはなぜか。',
+    opts: [
+      'btree_gist が無いと tsrange 型そのものが使えないから',
+      'GiST インデックスは範囲の重なり (&&) のような演算は得意だが、通常の等値比較 (=) はもともと対応しておらず、btree_gist がその橋渡しをするから',
+      'btree_gist は EXCLUDE 制約の構文を解釈するためだけに必要だから',
+      'btree_gist を入れると自動的にすべてのインデックスが高速化されるから',
+      '等値比較には何の拡張も不要で、本文の説明は誤りである'
+    ],
+    ans: 1,
+    exps: [
+      'tsrange 型自体は PostgreSQL の標準機能であり、btree_gist が無くても使える。',
+      '<b>これが正解。</b>GiST インデックスは範囲の重なりのような演算に強いが、通常の等値比較には対応していないため、btree_gist 拡張がその橋渡しをする。',
+      'EXCLUDE 制約の構文解釈とは無関係で、btree_gist は演算子クラスを提供する拡張。',
+      'すべてのインデックスを自動的に高速化する仕組みではなく、GiST で等値比較を使うための演算子クラスを提供するだけ。',
+      '本文の実機構成では実際に btree_gist を要求されており (拡張無しでは room_id の等値比較を含む GiST インデックスが作れない)、拡張が不要という主張は誤り。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>btree_gist は等値比較を GiST の世界に持ち込みます。</p><div class="fig"><svg viewBox="0 0 560 110" aria-label="btree_gistの役割を示す図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">GiST は && (重なり) が得意</text><rect x="320" y="30" width="220" height="40" rx="6" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="430" y="55" font-size="11" text-anchor="middle" fill="#5b3d80">btree_gist が = を GiST で使えるようにする</text></svg><p class="cap">図: btree_gist が等値比較と GiST の橋渡しをする。</p></div>' }
+  },
+  {
+    q: '`CREATE UNIQUE INDEX accounts_one_default_admin ON accounts (is_default_admin) WHERE is_default_admin;` を作った後、account_id=1 を true にした状態で account_id=2 も true にしようとしたら、実機でどうなったか。',
+    opts: [
+      '全員が true になれる。部分インデックスは何も制限しないから',
+      'false の行も 1 行までしか許されない',
+      'false の行は何行あってもよいが、true の行は 1 行までしか許されない。2 人目を true にしようとするとエラーになる',
+      'このインデックスの作成自体がエラーになる',
+      'true/false に関係なく、全員の値が一意でなければならない'
+    ],
+    ans: 2,
+    exps: [
+      '何も制限しないわけではなく、true の行に対しては一意性が働く。',
+      'false の行は対象外であり、何行あってもよい。1 行までという制限は true の行にだけ掛かる。',
+      '<b>これが正解。</b>本文の実機結果どおり、false の行 (account_id 2,3,4) はそのまま残り、2 人目を true にしようとした操作だけが「duplicate key value violates unique constraint」で拒否された。',
+      'インデックスの作成自体は正常に成功している (CREATE INDEX)。',
+      '全員の値が一意である必要はなく、false は複数行で重複してよい。WHERE 句が対象を true の行だけに絞っている。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>部分一意インデックスは WHERE に合う行だけを対象にします。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="部分一意インデックスが2人目のtrueを拒否する図"><rect x="40" y="30" width="150" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="115" y="55" font-size="11.5" text-anchor="middle" fill="#b5401f">account 1: true</text><rect x="220" y="30" width="150" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="295" y="55" font-size="11" text-anchor="middle" fill="#b5401f">account 2: true → 拒否</text><rect x="400" y="30" width="140" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="470" y="55" font-size="9.5" text-anchor="middle" fill="#0f5132">account 3,4: false (制限なし)</text></svg><p class="cap">図: true の行だけが一意性の対象になる。</p></div>' }
+  },
+  {
+    q: '「同じ会議室の予約時間が重なってはいけない」という規則を、CHECK 制約だけで (サブクエリも使わずに) 表現できない理由は何か。',
+    opts: [
+      'CHECK 制約は tsrange 型をサポートしていないから',
+      'CHECK 制約は NOT NULL と同時に使えないから',
+      'CHECK 制約は数値型の列にしか使えないから',
+      'CHECK 制約は 1 行の中の列の値しか参照できず、他の行 (既存の予約) と比較できないから',
+      'CHECK 制約は INSERT 文では評価されないから'
+    ],
+    ans: 3,
+    exps: [
+      'tsrange 型自体のサポートの有無とは無関係。CHECK 制約が参照できる範囲の問題。',
+      'NOT NULL と CHECK は普通に同時に使える。',
+      '数値型限定という制限は無く、文字列や日付などにも CHECK を使える。',
+      '<b>これが正解。</b>CHECK 制約は 1 行の中の列の値だけを検査する仕組みであり、「他の行に重なる予約があるか」のような複数行をまたいだ比較はできない。これが EXCLUDE 制約が必要になる理由。',
+      'CHECK 制約は INSERT でも UPDATE でも評価される。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>CHECK は 1 行の中だけを見ます。</p><div class="fig"><svg viewBox="0 0 560 110" aria-label="CHECKが1行しか見られない図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#0f5132">CHECK: この 1 行だけ見える</text><rect x="320" y="30" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="430" y="55" font-size="11" text-anchor="middle" fill="#b5401f">他の行の予約は見えない</text></svg><p class="cap">図: CHECK は他の行の値と比較できないため、重なりの検査には使えない。</p></div>' }
+  },
+  {
+    q: '生成列の式に `now()` のような現在時刻に依存する関数を使おうとすると、実機でどうなるか (PostgreSQL のドキュメントに基づく)。',
+    opts: [
+      '問題なく使え、行ごとに作成時の時刻が固定される',
+      '問題なく使え、読み取るたびに現在時刻に更新される',
+      '警告だけが出て、NULL が入る',
+      '自動的に IMMUTABLE な関数に変換される',
+      '生成列の式には IMMUTABLE な関数しか使えないため、エラーになる'
+    ],
+    ans: 4,
+    exps: [
+      '固定されて使えるという動作にはならず、そもそも定義時にエラーになる。',
+      '読み取るたびに更新されるという動作にもならず、定義自体が拒否される。',
+      '警告だけで NULL が入るような動作ではなく、エラーとして列の追加自体が拒否される。',
+      '自動変換する仕組みは無く、関数の性質 (IMMUTABLE かどうか) はそのまま評価される。',
+      '<b>これが正解。</b>生成列の式は同じ入力に対して常に同じ結果を返す IMMUTABLE な関数しか使えず、now() のような外部状態に依存する関数を使おうとするとエラーになる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>生成列は「他の列から導出できる値」のためのものです。</p><div class="fig"><svg viewBox="0 0 560 110" aria-label="生成列がnow()を使えない図"><rect x="40" y="30" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#b5401f">GENERATED AS (now())</text><rect x="320" y="30" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="430" y="55" font-size="11" text-anchor="middle" fill="#0f5132">ERROR: 外部状態に依存する関数は不可</text></svg><p class="cap">図: 生成列は同じ行の値だけから導出できる式に限られる。</p></div>' }
+  },
+  {
+    q: 'アプリケーションの入力検証とデータベースの制約の関係について、シニアとして最も適切な理解はどれか。',
+    opts: [
+      'アプリの検証は早いフィードバックの役割、制約はどの経路からの書き込みでも最終的な正しさを保証する役割という、役割分担の関係である',
+      'アプリの検証があれば、データベースの制約は不要である',
+      'データベースの制約があれば、アプリの検証は不要である',
+      '両方とも同じ役割を持つので、どちらか一方だけを選べばよい',
+      '制約はアプリの検証よりも常に遅いので、使わない方がよい'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>アプリの検証は利用者に早く分かりやすいフィードバックを返す役割、制約はアプリ以外の経路からの書き込みも含めて最終的な正しさを保証する役割であり、両方があって初めて使いやすさと正しさが両立する。',
+      '制約が不要という判断は、アプリ以外の経路からの書き込みに対して無防備になる。',
+      'アプリの検証が不要という判断は、利用者への早いフィードバックという利点を失う。',
+      '同じ役割ではなく、検査されるタイミングと対象経路が異なる、補完的な役割である。',
+      '制約が常に遅いという根拠は無く、本文の実機結果でも制約の検査自体は実用的な速度で行われている。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>2 つの検証は役割が異なります。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="アプリ検証と制約の役割分担を示す図"><rect x="40" y="30" width="220" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="150" y="50" font-size="12" text-anchor="middle" fill="#5b3d80">アプリの検証</text><text x="150" y="70" font-size="11" text-anchor="middle">早いフィードバック</text><rect x="320" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="430" y="50" font-size="12" text-anchor="middle" fill="#0f5132">データベースの制約</text><text x="430" y="70" font-size="11" text-anchor="middle">最終的な正しさの保証</text></svg><p class="cap">図: 2 つは置き換えではなく、補完する関係にある。</p></div>' }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UPSERT と MERGE ― 冪等な書き込み</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14px;margin:0 0 16px}
+  table.tbl th,table.tbl td{text-align:left;padding:7px 9px;border:1px solid #d9e5df}
+  table.tbl th{background:#eaf5ef}
+  table.tbl td.sess-a{background:#eaf5ef} table.tbl td.sess-b{background:#efe8f7}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 31 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>UPSERT と MERGE ― 冪等な書き込み</h1>
+  <p>「無ければ作り、あれば更新する」という操作を SELECT してから INSERT する形で書くと、2 つの処理が同時に動いた瞬間に重複エラーになります。結論を先に言うと、PostgreSQL の INSERT ... ON CONFLICT と MERGE はどちらもこの競合を 1 つの文の中で解決しますが、実際に 2 つの psql セッションを同時に走らせて確かめると、競合が起きた後の振る舞いが違います。ON CONFLICT は競合した相手の行に合わせて自動的に UPDATE 側に切り替わるのに対し、MERGE は競合すると素の INSERT と同じ重複キーエラーで止まります。</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 23 回 <a href="./sql-see-no-evil.html">シー・ノー・エビル</a> (エラーを無視しない、SQLSTATE の読み方) ・ 第 30 回 <a href="./sql-cte-lateral-recursive.html">CTE ・ LATERAL ・ 再帰を使い分ける</a> (RETURNING の基本)</p>
+  <p class="intro">この回で答えるのは「同じ行が無ければ作り、あれば更新する」という日常的な処理を安全に書く方法です。結論は、<code>SELECT</code> してから <code>INSERT</code> するという素朴な書き方は、2 つの処理が同時に走ると必ず競合し得るということ、そして PostgreSQL が用意している <code>INSERT ... ON CONFLICT</code> と <code>MERGE</code> (PostgreSQL 15 以降) は、どちらも 1 つの文で競合を解決しますが、<b>2 つの処理が本当に同時に重複した場合の振る舞いが違う</b>ということです。この違いは、実際に 2 本の psql セッションを同時に動かして確認しました。</p>
+
+  <section>
+    <h2>1. この回で解く問題 ― SELECT してから INSERT する間に割り込まれる</h2>
+    <p>「バグを見ている (watch している) 人の数を記録したい」という要件を考えます。<code>bug_watchers(bug_id, account_id, watch_count)</code> というテーブルに対して、「まだ watch していなければ 1 件追加し、既に watch していれば回数を 1 増やす」という操作です。素朴に書くと「まず存在を確認する <code>SELECT</code>」と「無ければ <code>INSERT</code> する」という 2 つの文に分かれます。</p>
+    <p>この 2 つの文の間に、別の接続が同じキーに対して先に <code>INSERT</code> してコミットすると何が起きるかを、実際に 2 つの psql セッションで確認しました。セッション A が先に <code>INSERT</code> してまだコミットしていない状態で、セッション B が「存在しない」という結果の <code>SELECT</code> を見てから <code>INSERT</code> を実行した実機の結果です。</p>
+    <table class="tbl">
+      <thead><tr><th>時刻</th><th class="sess-a">セッション A</th><th class="sess-b">セッション B</th></tr></thead>
+      <tbody>
+        <tr><td>t0</td><td class="sess-a">BEGIN; INSERT (bug_id=3) 実行 (未コミット)</td><td class="sess-b">-</td></tr>
+        <tr><td>t1 (0.5 秒後)</td><td class="sess-a">pg_sleep(2) で待機中</td><td class="sess-b">SELECT count(*) → 0 件 (A はまだ見えない)</td></tr>
+        <tr><td>t1 直後</td><td class="sess-a">(待機中)</td><td class="sess-b">INSERT (bug_id=3) を実行 → A の行待ちでブロック</td></tr>
+        <tr><td>t2 (2 秒後)</td><td class="sess-a">COMMIT</td><td class="sess-b">ブロック解除 → <b>ERROR: duplicate key value violates unique constraint</b></td></tr>
+      </tbody>
+    </table>
+    <p>B の <code>SELECT</code> は「0 件」という正しい (当時の) 結果を返しましたが、その直後に実行した <code>INSERT</code> は、A がコミットするまでブロックされ、A のコミット後に<b>重複キー違反</b>で失敗しました。「確認してから実行する」という 2 段階の操作は、確認した瞬間と実行する瞬間がずれている限り、安全ではありません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="SELECT確認とINSERTの間に割り込まれる図">
+        <line x1="40" y1="50" x2="560" y2="50" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="54" font-size="12.5" fill="#12211a">A</text>
+        <line x1="40" y1="140" x2="560" y2="140" stroke="#9aa" stroke-width="1.5"/>
+        <text x="20" y="144" font-size="12.5" fill="#12211a">B</text>
+        <rect x="70" y="30" width="150" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">INSERT (未コミット)</text>
+        <rect x="260" y="120" width="140" height="40" rx="6" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/>
+        <text x="330" y="145" font-size="11.5" text-anchor="middle" fill="#1f4a68">SELECT → 0 件</text>
+        <rect x="420" y="120" width="140" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="490" y="145" font-size="11.5" text-anchor="middle" fill="#b5401f">INSERT → エラー</text>
+        <text x="300" y="185" font-size="12.5" text-anchor="middle" fill="#4a5d54">確認した時点では正しかったが、実行する時点ではもう正しくない</text>
+      </svg>
+      <p class="cap">図: SELECT で「無い」ことを確認しても、その後の INSERT までの間に別の接続が割り込める。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 仕組み ― INSERT ... ON CONFLICT DO UPDATE/NOTHING と EXCLUDED</h2>
+    <p><code>INSERT ... ON CONFLICT</code> は「挿入しようとして、一意制約に引っかかったら代わりにこうする」を 1 つの文で書く仕組みです。<code>DO NOTHING</code> は競合したら何もしない、<code>DO UPDATE</code> は競合した既存の行を更新します。<code>DO UPDATE</code> の <code>SET</code> 句では、挿入しようとしていた (まだ入っていない) 行を <code>EXCLUDED</code> という名前の擬似テーブルで参照できます。</p>
+    <pre><code>-- DO NOTHING: 既に watch 済みなら何もしない
+INSERT INTO bug_watchers (bug_id, account_id, watch_count) VALUES (3, 1, 99)
+ON CONFLICT (bug_id, account_id) DO NOTHING;
+
+-- DO UPDATE + EXCLUDED: 既存の watch_count に、挿入しようとした値を足す
+INSERT INTO bug_watchers (bug_id, account_id, watch_count, last_watched) VALUES (3, 1, 1, now())
+ON CONFLICT (bug_id, account_id)
+DO UPDATE SET watch_count = bug_watchers.watch_count + EXCLUDED.watch_count,
+              last_watched = EXCLUDED.last_watched
+RETURNING bug_id, account_id, watch_count, last_watched;</code></pre>
+    <p><code>DO NOTHING</code> を試したときは実行結果が <code>INSERT 0 0</code> (実際には 1 行も変更されなかった) になり、既存の <code>watch_count</code> は 99 に書き換わらず元の値のままでした。<code>DO UPDATE</code> では <code>EXCLUDED.watch_count</code> (今回挿入しようとした 1) を既存の値に足し込み、<code>watch_count</code> が 1 から 2 に増えました。<code>RETURNING</code> を付けることで、挿入されたのか更新されたのかにかかわらず、最終的な行の内容をその場で受け取れます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="ON CONFLICTとEXCLUDEDの関係を示す図">
+        <rect x="30" y="30" width="220" height="60" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132">INSERT しようとした行</text>
+        <text x="140" y="75" font-size="11" text-anchor="middle" fill="#4a5d54">= EXCLUDED として参照可能</text>
+        <rect x="330" y="30" width="220" height="60" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="440" y="55" font-size="12" text-anchor="middle" fill="#5b3d80">bug_watchers の既存行</text>
+        <text x="440" y="75" font-size="11" text-anchor="middle" fill="#4a5d54">= テーブル名で参照</text>
+        <text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#12211a">DO UPDATE SET の中で、両方の値を同時に見て新しい値を決められる</text>
+      </svg>
+      <p class="cap">図: EXCLUDED は「挿入しようとしていた行」、テーブル名は「既にある行」を指す。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 仕組み ― MERGE (PostgreSQL 15 以降) と RETURNING / merge_action() (17 以降)</h2>
+    <p><code>MERGE</code> は <code>ON CONFLICT</code> よりも表現力が高く、「一致したら更新」「一致しなかったら挿入」だけでなく、条件を付けて「一致していて、かつある条件を満たすなら削除する」のように複数の分岐を 1 つの文に書けます。<code>ON CONFLICT</code> と同じ「無ければ追加、あれば回数を増やす」を <code>MERGE</code> で書いた例です。</p>
+    <pre><code>MERGE INTO bug_watchers t
+USING (SELECT 4::bigint AS bug_id, 1::bigint AS account_id) s
+ON t.bug_id = s.bug_id AND t.account_id = s.account_id
+WHEN NOT MATCHED THEN INSERT (bug_id, account_id, watch_count) VALUES (s.bug_id, s.account_id, 1)
+WHEN MATCHED THEN UPDATE SET watch_count = t.watch_count + 1
+RETURNING merge_action(), t.bug_id, t.account_id, t.watch_count;</code></pre>
+    <table class="tbl">
+      <thead><tr><th>実行</th><th>merge_action()</th><th>watch_count</th></tr></thead>
+      <tbody>
+        <tr><td>1 回目 (まだ無い)</td><td>INSERT</td><td>1</td></tr>
+        <tr><td>2 回目 (もうある)</td><td>UPDATE</td><td>2</td></tr>
+      </tbody>
+    </table>
+    <p><code>merge_action()</code> (PostgreSQL 17 で追加) は、<code>INSERT</code>・<code>UPDATE</code>・<code>DELETE</code> のうちどの分岐が実行されたかを文字列で返します。<code>ON CONFLICT</code> には「どちらが実行されたか」を直接返す仕組みが無いので、このログを残したい場合は <code>MERGE</code> の方が便利です。</p>
+    <p><code>MERGE</code> は <code>WHEN</code> 句を複数書けるので、条件によって挿入・更新・削除を切り替えられます。<code>watch_count</code> が 5 以上になったら代わりに行を削除する、という分岐を追加した例です。</p>
+    <pre><code>MERGE INTO bug_watchers t
+USING (SELECT 4::bigint AS bug_id, 1::bigint AS account_id) s
+ON t.bug_id = s.bug_id AND t.account_id = s.account_id
+WHEN MATCHED AND t.watch_count >= 5 THEN DELETE
+WHEN MATCHED THEN UPDATE SET watch_count = t.watch_count + 1
+WHEN NOT MATCHED THEN INSERT (bug_id, account_id, watch_count) VALUES (s.bug_id, s.account_id, 1)
+RETURNING merge_action(), t.bug_id, t.account_id;</code></pre>
+    <p><code>watch_count</code> を事前に 5 にしてから実行すると、実際に <code>merge_action()</code> が <code>DELETE</code> を返し、該当の行が削除されて 0 件になりました。<code>ON CONFLICT</code> には <code>DO UPDATE</code> と <code>DO NOTHING</code> の 2 択しかなく、このような条件分岐での削除は書けません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="MERGEの複数分岐を示す図">
+        <rect x="200" y="20" width="200" height="35" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="43" font-size="12" text-anchor="middle" fill="#0f5132">MERGE ... USING (1行)</text>
+        <rect x="40" y="90" width="150" height="40" rx="6" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="115" y="115" font-size="11" text-anchor="middle" fill="#5b3d80">MATCHED かつ count≥5</text>
+        <rect x="220" y="90" width="150" height="40" rx="6" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/>
+        <text x="295" y="115" font-size="11" text-anchor="middle" fill="#1f4a68">MATCHED のみ</text>
+        <rect x="400" y="90" width="160" height="40" rx="6" fill="#fff3e0" stroke="#b5401f" stroke-width="2"/>
+        <text x="480" y="115" font-size="11" text-anchor="middle" fill="#b5401f">NOT MATCHED</text>
+        <text x="115" y="150" font-size="11" text-anchor="middle" fill="#4a5d54">DELETE</text>
+        <text x="295" y="150" font-size="11" text-anchor="middle" fill="#4a5d54">UPDATE</text>
+        <text x="480" y="150" font-size="11" text-anchor="middle" fill="#4a5d54">INSERT</text>
+      </svg>
+      <p class="cap">図: MERGE は条件ごとに複数の WHEN 句を並べ、挿入・更新・削除のどれを行うかを分岐できる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 仕組み ― ON CONFLICT と MERGE、並行実行での違い (2 セッションの実機検証)</h2>
+    <p>ここからがこの回の核心です。「2 つの接続が同時に同じ新しいキーを挿入しようとしたら何が起きるか」を、<code>ON CONFLICT</code> と <code>MERGE</code> それぞれについて、実際に 2 本の psql セッションを同時に走らせて確認しました。やり方は、セッション A が <code>BEGIN</code> した中で対象の行を挿入し、<code>pg_sleep(3)</code> でコミットを 3 秒遅らせている間に、セッション B が同じキーに対して同じ文を実行する、というものです。</p>
+    <h3>4-1. ON CONFLICT DO UPDATE の場合</h3>
+    <pre><code>-- セッション A (先行)
+BEGIN;
+INSERT INTO bug_watchers (bug_id, account_id, watch_count) VALUES (1, 1, 1)
+ON CONFLICT (bug_id, account_id) DO UPDATE SET watch_count = bug_watchers.watch_count + 1;
+SELECT pg_sleep(3);
+COMMIT;
+
+-- セッション B (1 秒後に開始、同じ文)
+INSERT INTO bug_watchers (bug_id, account_id, watch_count) VALUES (1, 1, 1)
+ON CONFLICT (bug_id, account_id) DO UPDATE SET watch_count = bug_watchers.watch_count + 1;</code></pre>
+    <p>実機の結果、B の文は <b>約 1.96 秒ブロックされた後</b>、エラーにならずに成功し、<code>watch_count</code> は 2 になりました (<code>\timing on</code> で計測、A がコミットするまでの残り時間とほぼ一致)。B は A がコミットするまで待たされ、A のコミット後に「もう行が存在する」と分かった時点で、<b>自動的に DO UPDATE の分岐に切り替わって</b>処理を完了しています。</p>
+    <h3>4-2. MERGE の場合</h3>
+    <pre><code>-- セッション A (先行、MERGE で同じキーを新規挿入)
+BEGIN;
+MERGE INTO bug_watchers t USING (SELECT 2::bigint bug_id, 1::bigint account_id) s
+ON t.bug_id=s.bug_id AND t.account_id=s.account_id
+WHEN NOT MATCHED THEN INSERT (bug_id, account_id, watch_count) VALUES (s.bug_id, s.account_id, 1)
+WHEN MATCHED THEN UPDATE SET watch_count = t.watch_count + 1;
+SELECT pg_sleep(3);
+COMMIT;
+
+-- セッション B (1 秒後に開始、同じ MERGE 文)
+MERGE INTO bug_watchers t USING (SELECT 2::bigint bug_id, 1::bigint account_id) s
+ON t.bug_id=s.bug_id AND t.account_id=s.account_id
+WHEN NOT MATCHED THEN INSERT (bug_id, account_id, watch_count) VALUES (s.bug_id, s.account_id, 1)
+WHEN MATCHED THEN UPDATE SET watch_count = t.watch_count + 1;</code></pre>
+    <p>こちらも B は A のコミットまで<b>約 1.96 秒ブロック</b>されましたが、ブロックが解けた直後に次のエラーで失敗しました。</p>
+    <pre><code>ERROR:  duplicate key value violates unique constraint "bug_watchers_pkey"
+DETAIL:  Key (bug_id, account_id)=(2, 1) already exists.</code></pre>
+    <p>B の <code>MERGE</code> 文は、実行を始めた時点ではまだ A の行が存在しなかったので <code>WHEN NOT MATCHED</code> (INSERT) の分岐を選びました。しかしブロックが解けて実際に挿入しようとした時点では、A が既にコミットして同じキーの行を作っていたため、<b>選んだ分岐 (INSERT) をやり直さず、素の INSERT と同じ重複キーエラーで失敗</b>しました。最終的に <code>watch_count</code> は 1 のままで、B の更新は反映されませんでした。</p>
+    <table class="tbl">
+      <thead><tr><th>方式</th><th>B のブロック時間</th><th>ブロック解除後の結果</th></tr></thead>
+      <tbody>
+        <tr><td>INSERT ... ON CONFLICT DO UPDATE</td><td>約 1.96 秒</td><td>成功 (watch_count=2、自動的に UPDATE 側に切り替わる)</td></tr>
+        <tr><td>MERGE (WHEN NOT MATCHED / WHEN MATCHED)</td><td>約 1.96 秒</td><td>重複キーエラー (選んだ分岐をやり直さない)</td></tr>
+      </tbody>
+    </table>
+    <p>PostgreSQL の公式ドキュメントも、この違いを明確に書いています。分離レベルの章 (13.2.1 節) は、<code>MERGE</code> が <code>INSERT</code> を実行しようとして、一意インデックスに競合する行が並行して挿入された場合には一意性違反のエラーが発生すると説明したうえで、「<code>MERGE</code> は <code>MATCHED</code> の判定をやり直すことでこのようなエラーを避けようとはしない (原文: <i>MERGE does not attempt to avoid such errors by restarting evaluation of MATCHED conditions</i>)」と明記しています。つまり、<code>WHEN NOT MATCHED</code> という判定を下した時点と、実際に書き込む時点との間に矛盾が生まれても、<code>MERGE</code> はその判定をやり直さず、エラーとして表面化させてリトライに委ねる設計です。これに対して <code>ON CONFLICT DO UPDATE</code> は、公式ドキュメントが「高い並行実行下でも <code>INSERT</code> か <code>UPDATE</code> のどちらかの結果を保証する」と書いているとおり、まさに「挿入しようとしたら競合した」という状況そのものを扱うために設計されており、競合した場合の代替処理 (<code>DO UPDATE</code>/<code>DO NOTHING</code>) まで含めて 1 つの文の意味に組み込まれています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 210" role="img" aria-label="ON CONFLICTとMERGEの並行実行結果の違いを示す図">
+        <text x="150" y="20" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">ON CONFLICT DO UPDATE</text>
+        <rect x="30" y="35" width="240" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="60" font-size="11.5" text-anchor="middle" fill="#0f5132">B: INSERT → 競合 → 待つ</text>
+        <rect x="30" y="90" width="240" height="40" rx="6" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
+        <text x="150" y="115" font-size="11.5" text-anchor="middle" fill="#198754">待った後: 自動で DO UPDATE へ切替 → 成功</text>
+        <text x="450" y="20" font-size="13" text-anchor="middle" fill="#5b3d80" font-weight="700">MERGE</text>
+        <rect x="330" y="35" width="240" height="40" rx="6" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/>
+        <text x="450" y="60" font-size="11.5" text-anchor="middle" fill="#5b3d80">B: WHEN NOT MATCHED を選択 → 待つ</text>
+        <rect x="330" y="90" width="240" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="115" font-size="11" text-anchor="middle" fill="#b5401f">待った後: 選択をやり直さず重複キーエラー</text>
+        <text x="300" y="165" font-size="12.5" text-anchor="middle" fill="#12211a">どちらも「待つ」のは同じだが、待った後の振る舞いが違う</text>
+        <text x="300" y="190" font-size="12" text-anchor="middle" fill="#4a5d54">(実測: どちらも約 1.96 秒のブロック)</text>
+      </svg>
+      <p class="cap">図: 実機で確認した、ON CONFLICT と MERGE の並行実行時の振る舞いの違い。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. どこで壊れるか ― よくある間違い</h2>
+    <h3>間違い 1: SELECT で確認してから INSERT する</h3>
+    <p>節 1 で確認したとおり、「存在を確認する <code>SELECT</code>」と「結果に基づく <code>INSERT</code>」を別の文に分けると、2 つの接続が同時に動いたときに確認結果と実行結果がずれます。これは単純なミスではなく、文を分けている限り常に存在するレースです。「本番ではほとんど同時に動かないから大丈夫」という判断は、同時アクセスが増えた瞬間に崩れます。</p>
+    <h3>間違い 2: MERGE を「ON CONFLICT の上位互換」だと思い込む</h3>
+    <p>節 4 で確認したとおり、<code>MERGE</code> は競合が起きても <code>ON CONFLICT</code> のように自動で代替の分岐に切り替わりません。<code>MERGE</code> で「無ければ挿入、あれば更新」を安全に行いたい場合は、<b>一意制約があることを前提に、重複キーエラーを呼び出し元でキャッチしてリトライする</b>仕組みをアプリケーション側に用意する必要があります。「<code>MERGE</code> を使ったから競合は解決済みだ」という思い込みは、高い同時実行数の下で本番のエラーとして表面化します。</p>
+    <h3>間違い 3: ON CONFLICT の対象列を一意制約と一致させていない</h3>
+    <p><code>ON CONFLICT (列名, ...)</code> に指定する列の組は、実際に一意制約または一意インデックスが存在する組と一致していなければなりません。一致していない場合、PostgreSQL は「このような一意制約または排他制約が存在しない」というエラーを返します。複合主キーやユニーク制約が複数ある表では、どの制約に対して競合を解決したいのかを明示する必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="2段階の操作が常にレースを持つ図">
+        <rect x="30" y="30" width="240" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="55" font-size="12" text-anchor="middle" fill="#0f5132">文 1: SELECT で確認</text>
+        <rect x="330" y="30" width="240" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="55" font-size="12" text-anchor="middle" fill="#b5401f">文 2: 確認結果に基づき INSERT</text>
+        <text x="300" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">2 つの文に分かれている限り、その間に別の接続が割り込める</text>
+        <text x="300" y="125" font-size="12" text-anchor="middle" fill="#4a5d54">同時実行数が増えるほど、実際に発生する頻度も増える</text>
+      </svg>
+      <p class="cap">図: 2 つの文に分かれた「確認してから実行」は、常に割り込みの余地を残す。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. シニアの書き方 ― 判断の基準</h2>
+    <p><b>1. 「無ければ作り、あれば更新する」は必ず 1 つの文で書く。</b><code>SELECT</code> してから <code>INSERT</code> する 2 段階の書き方は、同時実行数がどれだけ少なくても理論上のレースを含みます。<code>INSERT ... ON CONFLICT</code> か <code>MERGE</code> のどちらかに最初から寄せます。</p>
+    <p><b>2. 単純な「1 つのキーに対する挿入か更新」なら ON CONFLICT を選ぶ。</b>競合した場合に自動で代替処理に切り替わる挙動が欲しいなら <code>ON CONFLICT</code> が素直です。<code>merge_action()</code> のような「どちらが実行されたか」のログが必要な場合や、条件によって挿入・更新・削除を切り替えたい場合は <code>MERGE</code> を選びます。</p>
+    <p><b>3. MERGE を使うなら、重複キーエラーのリトライを自分で用意する。</b>高い同時実行数の下で同じ新しいキーに複数の書き込みが集中する可能性があるなら、<code>MERGE</code> の重複キーエラーを想定し、アプリケーション側で再試行するか、<code>ON CONFLICT</code> に切り替えます。「エラーが出ないはず」という前提でコードを書かないことが、この回で一番言いたいことです。</p>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/sql-insert.html#SQL-ON-CONFLICT" target="_blank" rel="noopener">PostgreSQL: INSERT ― ON CONFLICT Clause</a> ― ON CONFLICT DO NOTHING/DO UPDATE の構文と EXCLUDED 擬似テーブルの一次情報。「ON CONFLICT DO UPDATE は、高い並行実行下でも INSERT か UPDATE のどちらかの結果をアトミックに保証する」という節 4 の主張の根拠。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-merge.html" target="_blank" rel="noopener">PostgreSQL: MERGE</a> ― MERGE の構文、WHEN 句の複数指定、merge_action() (PostgreSQL 17 で追加) の一次情報。Notes 節は「MERGE と ON CONFLICT には様々な違いと制限があり、互換ではない」と明記している。</li>
+      <li><a href="https://www.postgresql.org/docs/current/transaction-iso.html#XACT-READ-COMMITTED" target="_blank" rel="noopener">PostgreSQL: 13.2.1. Read Committed Isolation Level</a> ― 既定の分離レベルでの行レベルロックの待機と再評価の一次情報 (第 29 回で扱った分離レベルの応用)。節 4 で引用した「MERGE は MATCHED の判定をやり直すことで一意性違反のエラーを避けようとはしない」という一文の出典。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( <a href="https://www.oreilly.co.jp/books/9784814400744/" target="_blank" rel="noopener">https://www.oreilly.co.jp/books/9784814400744/</a> ) ― このシリーズ全体の章立ての参考元。本回の中身は書籍の引用ではなく、PostgreSQL 公式ドキュメントと実機での検証から書いている。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-cte-lateral-recursive.html">← 第 30 回 CTE ・ LATERAL ・ 再帰を使い分ける</a><a href="./sql-index.html">目次</a><a href="./sql-pagination.html">第 32 回 ページネーション ― OFFSET を捨てる →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'セッション B が「0 件」という SELECT の結果を見てから INSERT を実行したところ、実機で何が起きたか。',
+    opts: [
+      'A のコミットまでブロックされた後、重複キー違反のエラーになった',
+      '何も起きず、B の INSERT は即座に成功した',
+      'A の未コミットの行がそのまま B にも見え、2 行とも正常に存在した',
+      'B の SELECT 自体がエラーになった',
+      'データベース全体がロックされ、他のすべての接続が止まった'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>本文の実機結果どおり、B の INSERT は A の未コミットの行と競合してブロックされ、A のコミット後に重複キー違反のエラーになった。',
+      '即座に成功したわけではなく、実際には A のコミットまでブロックされてからエラーになった。',
+      'PostgreSQL の既定の分離レベル (Read Committed) では、他のトランザクションの未コミットの変更は見えない。B の SELECT が 0 件だったのはこのため。',
+      'SELECT 自体は正常に実行され、0 件という正しい結果を返している。エラーになったのは後続の INSERT。',
+      'データベース全体がロックされる仕組みは無く、競合するのはこの 1 つのキーに対する行だけ。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>SELECT で見た「0 件」と、INSERT を実行する時点の状態はずれます。</p><div class="fig"><svg viewBox="0 0 560 130" aria-label="SELECTとINSERTの間のずれを示す図"><rect x="30" y="30" width="200" height="40" rx="6" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="130" y="55" font-size="12" text-anchor="middle" fill="#1f4a68">SELECT → 0 件 (確認時点)</text><rect x="320" y="30" width="200" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="55" font-size="12" text-anchor="middle" fill="#b5401f">INSERT → エラー (実行時点)</text><text x="280" y="100" font-size="12.5" text-anchor="middle" fill="#4a5d54">確認してから実行するまでの間に、別の接続が先に書き込める</text></svg><p class="cap">図: 確認と実行が別の文である限り、その間に割り込まれる余地が残る。</p></div>' }
+  },
+  {
+    q: '`INSERT ... ON CONFLICT (bug_id, account_id) DO NOTHING` を、既に存在するキーに対して実行したところ `INSERT 0 0` という結果になった。これはどういう意味か。',
+    opts: [
+      'ON CONFLICT DO NOTHING は内部的に UPDATE 文へ書き換えられて実行されるため、競合した行に対する UPDATE トリガーが呼び出された',
+      '1 行も変更されず、既存の行はそのまま保たれた',
+      'INSERT 文自体が文法エラーで実行されなかった',
+      'DO NOTHING を指定すると、対象の一意制約がこの INSERT 文に限って一時的に無効化される',
+      '既存の行の watch_count が 0 にリセットされた'
+    ],
+    ans: 1,
+    exps: [
+      'DO NOTHING は競合した行に対して本当に何もしない処理であり、内部的に UPDATE 文へ書き換えられることはない。UPDATE 系のトリガーが定義されていても、DO NOTHING の経路ではそのトリガーは呼び出されない点が DO UPDATE との大きな違いである。',
+      '<b>これが正解。</b>本文の実機結果どおり、DO NOTHING により競合した行への変更が行われず、既存の watch_count は変化しなかった (1 のまま)。',
+      '文法エラーではなく、正常に実行されたが対象の行が無かった (0 行が変更された) という意味。',
+      'DO NOTHING は競合を検出した後の挙動 (何もせず終える) を変えるだけで、一意制約そのものを無効化する機能ではない。一意制約は検査され続けており、競合が検出されたからこそ DO NOTHING の分岐に入っている。',
+      'watch_count が 0 にリセットされることはなく、元の値のまま変わっていない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>DO NOTHING は競合した行に何も変更を加えません。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="DO NOTHINGの図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="60" font-size="12" text-anchor="middle" fill="#0f5132">既存行: watch_count=1</text><text x="300" y="60" font-size="16" text-anchor="middle" fill="#1f4a68">→</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="440" y="60" font-size="12" text-anchor="middle" fill="#0f5132">変化なし: watch_count=1</text></svg><p class="cap">図: DO NOTHING は競合しても既存の行に手を付けない。</p></div>' }
+  },
+  {
+    q: '`ON CONFLICT (...) DO UPDATE SET watch_count = bug_watchers.watch_count + EXCLUDED.watch_count` において、EXCLUDED.watch_count が指すものは何か。',
+    opts: [
+      '過去に削除された行の値',
+      'テーブル全体の watch_count の合計',
+      '今回の INSERT 文で挿入しようとしていた (まだ反映されていない) 行の watch_count の値',
+      'ランダムに生成された値',
+      '別のテーブルに存在する同名の列の値'
+    ],
+    ans: 2,
+    exps: [
+      '削除された行の値を保持する仕組みではなく、EXCLUDED はあくまで今回の INSERT 文の値を指す。',
+      '合計を自動計算する仕組みではなく、EXCLUDED は今回の 1 行だけを指す。',
+      '<b>これが正解。</b>EXCLUDED は、競合によって実際には反映されなかった「挿入しようとしていた行」を指す擬似テーブルで、本文の例では今回 INSERT しようとした watch_count=1 を指している。',
+      'ランダム生成ではなく、INSERT 文で明示的に指定した値がそのまま入る。',
+      '別テーブルではなく、同じ INSERT 文の VALUES に書いた値を指す。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>EXCLUDED は「挿入しようとした行」を指します。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="EXCLUDEDの図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132">VALUES (3, 1, 1, now())</text><text x="140" y="72" font-size="10.5" text-anchor="middle" fill="#4a5d54">= EXCLUDED</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="440" y="55" font-size="12" text-anchor="middle" fill="#5b3d80">既存行 (bug_watchers)</text></svg><p class="cap">図: EXCLUDED は今回の VALUES の値を指す、テーブル名は既存の行を指す。</p></div>' }
+  },
+  {
+    q: '`MERGE ... RETURNING merge_action(), ...` を使う主な利点として最も適切なものは？',
+    opts: [
+      'MATCHED と NOT MATCHED の判定順序が、merge_action() を使うと実行時に入れ替わる',
+      'merge_action() を呼び出すと、INSERT・UPDATE・DELETE それぞれの分岐に対応するトリガー関数が自動的に定義される',
+      '一意制約の検査が不要になる',
+      'INSERT・UPDATE・DELETE のどの分岐が実行されたかを、呼び出し元がその場で文字列として受け取れる',
+      '並行実行時のエラーが自動的に無くなる'
+    ],
+    ans: 3,
+    exps: [
+      'merge_action() は既に実行された分岐の名前を文字列として返すだけの関数であり、WHEN 句の評価順序 (上から順に最初に一致した句が実行される) に影響を与えることはない。評価順序を変えたければ WHEN 句自体の記述順を変える必要がある。',
+      'merge_action() は既に実行された分岐の名前を返すだけの関数であり、トリガー関数を新たに定義したり登録したりする機能ではない。分岐ごとに追加処理をしたいなら、別途 CREATE TRIGGER で明示的に定義する必要がある。',
+      '一意制約の検査が不要になるわけではなく、むしろ一意制約があるからこそ MATCHED/NOT MATCHED の判定が成立する。',
+      '<b>これが正解。</b>本文の実機結果どおり、merge_action() は INSERT/UPDATE/DELETE のどの分岐が実行されたかを文字列で返し、ON CONFLICT には無いログ用途に使える。',
+      '並行実行時のエラー (節 4 の重複キーエラー) は merge_action() の有無とは無関係に発生する。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>merge_action() はどの分岐が実行されたかを教えてくれます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="merge_action関数の図"><rect x="40" y="30" width="480" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="60" font-size="12.5" text-anchor="middle" fill="#0f5132">RETURNING merge_action() → INSERT / UPDATE / DELETE</text></svg><p class="cap">図: 実行された分岐の名前をそのまま受け取れる。</p></div>' }
+  },
+  {
+    q: '`watch_count` を 5 に更新した後、`WHEN MATCHED AND t.watch_count >= 5 THEN DELETE` を含む MERGE を実行した。実機の結果はどうなったか。',
+    opts: [
+      '何も起きず、watch_count はそのまま 5 で残った',
+      'watch_count がさらに 1 増えて 6 になった',
+      '新しい行が追加され、2 行になった',
+      'エラーになり MERGE 文全体が失敗した',
+      '該当行が削除され、merge_action() は DELETE を返した'
+    ],
+    ans: 4,
+    exps: [
+      '何も起きなかったわけではなく、該当の行が実際に削除された。',
+      '条件に合致したのは DELETE の分岐であり、UPDATE の分岐 (count+1) ではない。',
+      '新しい行が追加されたのではなく、既存の 1 行が削除されて 0 行になった。',
+      'エラーにはならず、MERGE 文は正常に完了している。',
+      '<b>これが正解。</b>本文の実機結果どおり、watch_count>=5 の条件に合致したので DELETE の分岐が実行され、merge_action() は DELETE を返し、該当行は削除された (rows_left=0)。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>条件を満たした分岐 (DELETE) が実行されます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="MERGEのDELETE分岐の図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132">watch_count=5 (≥5)</text><text x="300" y="60" font-size="16" text-anchor="middle" fill="#1f4a68">→</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="440" y="55" font-size="12" text-anchor="middle" fill="#b5401f">DELETE (行が消える)</text></svg><p class="cap">図: 条件 (count≥5) を満たしたので DELETE の分岐が実行された。</p></div>' }
+  },
+  {
+    q: '2 本の psql セッションで、A が先にキー X を未コミットで INSERT し、B が同じキー X に対して ON CONFLICT DO UPDATE を実行したとき、A のコミット後に B はどうなったか (実機の結果)。',
+    opts: [
+      'B はエラーになり、A の行だけが残った',
+      'B は A のコミットまでブロックされた後、競合を検出して DO UPDATE の分岐に切り替わり、watch_count が 2 になった',
+      'B は何も待たずに即座に独立した別の行を作った',
+      'A と B の両方がエラーになった',
+      'B は無限にブロックされ続け、処理が終わらなかった'
+    ],
+    ans: 1,
+    exps: [
+      'B はエラーにならず、本文の実機結果どおり成功している。',
+      '<b>これが正解。</b>本文の実機結果どおり、B は約 1.96 秒ブロックされた後、競合を検出して自動的に DO UPDATE に切り替わり、watch_count が 1 から 2 に更新された。',
+      'B は即座には実行されず、A のコミットまでブロックされている。',
+      'A も B もエラーにはならず、どちらも正常に完了している。',
+      '無限にブロックされ続けることはなく、A のコミット後に解除されている。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>ON CONFLICT は競合を検出すると自動で DO UPDATE に切り替わります。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="ON CONFLICTが自動切替する図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="140" y="55" font-size="11.5" text-anchor="middle" fill="#1f4a68">B: ブロック (1.96秒)</text><text x="300" y="60" font-size="16" text-anchor="middle" fill="#1f4a68">→</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="2"/><text x="440" y="55" font-size="12" text-anchor="middle" fill="#198754">DO UPDATE → 成功</text></svg><p class="cap">図: 競合検出後、ON CONFLICT は自動で代替処理に進む。</p></div>' }
+  },
+  {
+    q: '同じ競合状況 (A が先にキー Y を未コミットで INSERT し、B が 1 秒後に同じキーに対して MERGE を実行) で、B はどうなったか (実機の結果)。',
+    opts: [
+      'B はブロックされずに即座に完了した',
+      'B はブロックされた後、ON CONFLICT と同様に自動で UPDATE の分岐に切り替わった',
+      'B は A のコミットまでブロックされた後、選んだ WHEN NOT MATCHED の分岐をやり直さず、重複キー違反のエラーで失敗した',
+      'A の方がエラーになり、B だけが成功した',
+      'B は永久にブロックされたままで応答が返らなかった'
+    ],
+    ans: 2,
+    exps: [
+      'B はブロックされている。本文の実機結果でも約 1.96 秒のブロックが計測されている。',
+      '自動で UPDATE に切り替わるのは ON CONFLICT の挙動であり、本文の実機結果では MERGE はそのような切り替えをしなかった。',
+      '<b>これが正解。</b>本文の実機結果どおり、B は約 1.96 秒ブロックされた後、WHEN NOT MATCHED として選んでいた INSERT をそのまま実行しようとして重複キー違反のエラーになった。',
+      'エラーになったのは B であり、A は正常にコミットできている。',
+      '永久にブロックされ続けることはなく、A のコミット後にブロックは解除されている (その後エラーになる)。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>MERGE は判定済みの分岐をやり直さず、矛盾をエラーとして表面化させます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="MERGEがエラーになる図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#efe8f7" stroke="#5b3d80" stroke-width="2"/><text x="140" y="55" font-size="11.5" text-anchor="middle" fill="#5b3d80">B: ブロック (1.96秒)</text><text x="300" y="60" font-size="16" text-anchor="middle" fill="#1f4a68">→</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="440" y="55" font-size="12" text-anchor="middle" fill="#b5401f">重複キーエラー</text></svg><p class="cap">図: MERGE は競合後に分岐を選び直さず、エラーとして止まる。</p></div>' }
+  },
+  {
+    q: 'ON CONFLICT と MERGE のどちらの場合でも、B が約 1.96 秒ブロックされたのはなぜか。',
+    opts: [
+      'statement_timeout の既定値が 1.96 秒だから',
+      'B がネットワーク越しに通信しているため、常にその程度の遅延が発生するから',
+      'B がテーブル全体にロックを掛けようとして失敗したから',
+      'A が同じキーに対して未コミットの行を持っており、B の書き込みが A のコミット/ロールバックまで行レベルのロックで待たされるから',
+      'PostgreSQL がクエリをすべて 2 秒おきにバッチ処理しているから'
+    ],
+    ans: 3,
+    exps: [
+      'statement_timeout はデフォルトでは無効 (0) であり、1.96 秒という値はこの設定とは無関係。',
+      'ネットワーク遅延が原因ではなく、本文の実験は同一マシン上で行われている。',
+      'テーブル全体のロックではなく、競合しているのはこの 1 つのキーに対応する行だけである。',
+      '<b>これが正解。</b>A が未コミットの行を持っているため、B の書き込みはその行に対する行レベルロックの解放 (A のコミットかロールバック) を待つ。A の pg_sleep(3) の残り時間とほぼ一致する約 1.96 秒がこの待ち時間だった。',
+      'PostgreSQL にそのような固定間隔のバッチ処理は無く、ブロックの原因はロックの待機であって処理の間隔ではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>未コミットの行への書き込みは、行レベルロックで待たされます。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="行レベルロックの待機を示す図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="12" text-anchor="middle" fill="#0f5132">A: 未コミットの行</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#e3edf5" stroke="#1f4a68" stroke-width="2"/><text x="440" y="55" font-size="12" text-anchor="middle" fill="#1f4a68">B: ロック待ち</text></svg><p class="cap">図: B は A のコミット/ロールバックまで、その行のロックを待つ。</p></div>' }
+  },
+  {
+    q: '`ON CONFLICT (列名, ...)` に指定した列の組が、実際のテーブルの一意制約・一意インデックスの列の組と一致していない場合、PostgreSQL はどうなるか。',
+    opts: [
+      'そのような一意制約または排他制約が存在しない、という趣旨のエラーになる',
+      '一致していなくても自動的に一番近い制約を推測して使う',
+      '常に DO NOTHING として扱われる',
+      '常に DO UPDATE として扱われる',
+      '警告だけが出て、実行は成功する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>ON CONFLICT に指定した列の組に一致する一意制約または一意インデックスが無い場合、PostgreSQL はそのような制約が存在しないという趣旨のエラーを返す。',
+      '自動推測する仕組みは無く、指定した列の組は実際の制約と一致していなければならない。',
+      'DO NOTHING として扱われるのではなく、一致する制約が無いこと自体がエラーになる。',
+      'DO UPDATE として扱われるのではなく、一致する制約が無いこと自体がエラーになる。',
+      '警告だけで成功するのではなく、エラーとして実行が止まる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>ON CONFLICT の対象列は、実際の一意制約と一致していなければなりません。</p><div class="fig"><svg viewBox="0 0 560 120" aria-label="ON CONFLICTの対象列が一致しない図"><rect x="40" y="30" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">ON CONFLICT (列A, 列B)</text><rect x="340" y="30" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="440" y="50" font-size="11" text-anchor="middle" fill="#b5401f">一致する一意制約が無い</text><text x="440" y="68" font-size="11" text-anchor="middle" fill="#b5401f">→ エラー</text></svg><p class="cap">図: 指定した列の組に対応する一意制約が実在しなければエラーになる。</p></div>' }
+  },
+  {
+    q: '高い同時実行数の下で MERGE を使って「無ければ挿入、あれば更新」をしたいとき、シニアとして最も適切な判断はどれか。',
+    opts: [
+      'MERGE を使えば競合は自動的に解決されるので、何もしなくてよい',
+      '同時実行を完全に禁止するアプリケーションロックを常に使う',
+      'MERGE を諦めて、常に SELECT してから INSERT する方式に戻す',
+      'statement_timeout を極端に短く設定して様子を見る',
+      'MERGE の重複キーエラーが起きる可能性を前提に、呼び出し元でそのエラーを検出してリトライする仕組みを用意するか、必要なら ON CONFLICT に切り替える'
+    ],
+    ans: 4,
+    exps: [
+      '節 4 の実機結果どおり、MERGE は自動的に競合を解決するわけではなく、重複キーエラーで止まることがある。',
+      '常にアプリケーションロックを使うと並行処理の利点が失われ、過剰な対策になる。',
+      'SELECT してから INSERT する方式は節 1 で見たとおりレースを含むため、戻るのは後退になる。',
+      'statement_timeout を短くしても競合そのものは解決されず、単に早くエラーになるだけ。',
+      '<b>これが正解。</b>MERGE は競合時に重複キーエラーになる可能性を前提に、呼び出し元でリトライする仕組みを用意するか、自動で代替処理に切り替わる ON CONFLICT を使うという判断が、節 4 の実機結果に基づく現実的な対応になる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><p>MERGE を使うなら、エラーを前提にしたリトライが必要です。</p><div class="fig"><svg viewBox="0 0 560 130" aria-label="MERGEのリトライ戦略の図"><rect x="40" y="30" width="220" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="150" y="55" font-size="12" text-anchor="middle" fill="#b5401f">MERGE → 重複キーエラー</text><rect x="320" y="30" width="220" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="430" y="50" font-size="11.5" text-anchor="middle" fill="#0f5132">アプリ側でリトライ</text><text x="430" y="67" font-size="11.5" text-anchor="middle" fill="#0f5132">or ON CONFLICT へ</text></svg><p class="cap">図: エラーを想定したリトライ、または ON CONFLICT への切り替えが現実的な対応になる。</p></div>' }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

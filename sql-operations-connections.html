@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>接続・タイムアウト・本番運用 ― 誰が今何を待っているか</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  table.tbl th{text-align:left;padding:8px 10px;border:1px solid #d9e5df;background:#eaf5ef}
+  table.tbl td{padding:8px 10px;border:1px solid #d9e5df}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 38 回</p>
+  <span class="level lv-e">Expert</span>
+  <h1>接続・タイムアウト・本番運用 ― 誰が今何を待っているか</h1>
+  <p>接続は OS のプロセスであり無限には増やせない。3 つのタイムアウトは「何を」「どこまで」「誰を」止めるかが違い、pg_stat_activity はその全体をリアルタイムに映す唯一の窓である</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 37 回 <a href="./sql-zero-downtime-migrations.html">止めずにスキーマを変える</a> (ロックの待ち行列、トランザクション ID 待ちの構造)</p>
+  <p class="intro">この回は、PostgreSQL をアプリケーションの裏側で動かし続けるための運用面の総まとめです。PostgreSQL 18.6 の実機で、接続が OS のプロセスであること、3 種類のタイムアウト (<code>statement_timeout</code> ・ <code>idle_in_transaction_session_timeout</code> ・ <code>transaction_timeout</code>) がそれぞれ何を区別して止めるのか、<code>pg_stat_activity</code> の <code>wait_event</code> でロック待ちとスリープを見分ける方法、そしてコネクションプーリングのトランザクションモードがなぜ <code>PREPARE</code> のようなセッション状態を壊すのかを、実際のエラーと切断で確認します。</p>
+
+  <!-- ===== 1. この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 接続は無料ではなく、待たせ方にも種類がある</h2>
+    <p>アプリケーションから PostgreSQL への 1 本の接続は、サーバー側では <b>1 つの OS プロセス</b>として起動します。接続を増やすことは、単にソケットを増やすことではなく、プロセスを増やすことです。各プロセスは <code>work_mem</code> のようなセッション単位のメモリを必要とする場面があり、サーバーが受け付けられる接続数には <code>max_connections</code> という上限があります。接続を使い切った状態で新しい接続を試みると、サーバーは新しい接続そのものを拒否します。</p>
+    <p>接続を使い続ける中でも、処理が止まる理由は一様ではありません。1 つの重いクエリが時間を使っているのか、トランザクションの中で誰かがロックを持ったまま何もしていないのか、同じ行を他のトランザクションが先にロックしているのか。これらは原因も対処法も違うため、<code>pg_stat_activity</code> で「今何が起きているか」を区別して見る必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 160" role="img" aria-label="接続がプロセスであることを示す図">
+        <rect x="30" y="20" width="540" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">1 本の接続 = 1 つの OS プロセス (client backend)</text>
+        <rect x="30" y="80" width="170" height="50" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="115" y="100" font-size="11.5" text-anchor="middle" fill="#1f4a68">max_connections</text>
+        <text x="115" y="118" font-size="11" text-anchor="middle" fill="#1f4a68">上限を超えると拒否</text>
+        <rect x="220" y="80" width="170" height="50" rx="8" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/>
+        <text x="305" y="100" font-size="11.5" text-anchor="middle" fill="#b5401f">work_mem など</text>
+        <text x="305" y="118" font-size="11" text-anchor="middle" fill="#b5401f">プロセスごとに必要</text>
+        <rect x="410" y="80" width="170" height="50" rx="8" fill="#f3f9f6" stroke="#43b581" stroke-width="2"/>
+        <text x="495" y="100" font-size="11.5" text-anchor="middle" fill="#0f5132">pg_stat_activity</text>
+        <text x="495" y="118" font-size="11" text-anchor="middle" fill="#0f5132">今の状態を見る窓</text>
+      </svg>
+      <p class="cap">図: 接続はプロセスとして資源を消費し、その状態は pg_stat_activity から観察できる。</p>
+    </div>
+  </section>
+
+  <!-- ===== 2. 接続の内訳 ===== -->
+  <section>
+    <h2>2. 仕組み ― 接続の内訳と上限を実機で見る</h2>
+    <p><code>pg_stat_activity</code> には、クライアントからの接続だけでなく、PostgreSQL 自身が内部的に動かしているプロセスも含まれています。実機で <code>backend_type</code> ごとに数えてみます。</p>
+    <pre><code>SELECT backend_type, count(*) FROM pg_stat_activity GROUP BY 1 ORDER BY 1;
+--          backend_type         | count
+-- ------------------------------+-------
+--  autovacuum launcher          |     1
+--  background writer            |     1
+--  checkpointer                 |     1
+--  client backend               |     1    ← 自分 (このクエリを実行している接続)
+--  io worker                    |     3
+--  logical replication launcher |     1
+--  walwriter                    |     1
+
+SHOW max_connections;                 --  100
+SHOW superuser_reserved_connections;  --  3
+SHOW shared_buffers;                  --  128MB  (全接続で共有するバッファ)
+SHOW work_mem;                        --  4MB    (接続ごとに必要になりうるソート/ハッシュ用メモリ)</code></pre>
+    <p><code>client backend</code> だけがアプリケーションからの接続で、他は WAL の書き出しやチェックポイント、自動バキュームといった PostgreSQL 自身の運用のためのプロセスです。<code>max_connections</code> はクライアント接続の上限で、このサーバーでは 100 です。そのうち <code>superuser_reserved_connections</code> (3) は、一般の接続がこの上限に達していても、スーパーユーザーだけは接続できるよう予約されています。<code>shared_buffers</code> は全接続が共有する領域ですが、<code>work_mem</code> はソートやハッシュ結合のたびに<b>接続ごとに</b>確保されうるメモリです。接続数を増やすほど、ピーク時に必要なメモリの総量も増えるという関係が、ここから見えます。</p>
+  </section>
+
+  <!-- ===== 3. wait_eventで区別する ===== -->
+  <section>
+    <h2>3. 仕組み ― wait_event でロック待ちとスリープを見分ける</h2>
+    <p>「このクエリはなぜ返ってこないのか」を調べる最初の一手は <code>pg_stat_activity</code> の <code>state</code> ・ <code>wait_event_type</code> ・ <code>wait_event</code> です。第 36 回で見たのと同じ、<code>FOR UPDATE</code> の衝突を 2 セッションで再現し、片方は <code>pg_sleep</code> で実際に処理をしている最中、もう片方はロック待ちという状況を作ります。</p>
+    <pre><code>-- wa_A: 行をロックしてから pg_sleep(4) で処理中
+-- wa_B: 1 秒後に同じ行を FOR UPDATE で狙う (ロック待ちになる)
+
+SELECT application_name, state, wait_event_type, wait_event, query
+FROM pg_stat_activity WHERE application_name IN ('wa_A','wa_B');
+
+--  application_name | state  | wait_event_type |  wait_event   |  query (省略)
+-- ------------------+--------+-----------------+---------------+----------------
+--  wa_A             | active | Timeout         | PgSleep       | ... pg_sleep(4);
+--  wa_B             | active | Lock            | transactionid | ... FOR UPDATE; COMMIT;</code></pre>
+    <p>両方とも <code>state</code> は <code>active</code> ですが、<code>wait_event_type</code> が違います。wa_A は <code>Timeout</code>/<code>PgSleep</code> で、これは「サーバー内部のタイマーを待っている」状態、つまり本当に処理 (この場合は意図的な待機) をしています。wa_B は <code>Lock</code>/<code>transactionid</code> で、これは第 36 回で見た「相手のトランザクション ID へのロック待ち」そのものです。<code>state=active</code> だけを見て CPU を使っていると誤解せず、<code>wait_event_type</code> まで見て初めて「本当に動いているのか、何かを待っているだけなのか」が分かります。本番のトラブルシューティングでは、この <code>wait_event</code> の値ごとに集計することで、ボトルネックがロックなのか、ディスク I/O なのか、ネットワークなのかを区別できます。</p>
+  </section>
+
+  <!-- ===== 4. 3つのタイムアウト ===== -->
+  <section>
+    <h2>4. どこで壊れるか ― 3 つのタイムアウトは「何を」止めるかが違う</h2>
+    <p>PostgreSQL には用途が異なる 3 つのタイムアウト設定があります。実機でそれぞれを発火させ、エラーの種類と接続への影響の違いを確認します。</p>
+    <pre><code>-- (1) statement_timeout: 1 つの文だけを打ち切る
+SET statement_timeout = '500ms';
+SELECT pg_sleep(2);
+-- ERROR:  57014: canceling statement due to statement timeout
+SELECT 'still connected' AS proof;  -- 接続は生きているので、この後の文は実行できる
+--  still connected
+
+-- (2) idle_in_transaction_session_timeout: トランザクションの中で何もしない時間を測る
+SET idle_in_transaction_session_timeout = '1s';
+BEGIN;
+SELECT bug_id FROM bugs LIMIT 1;
+-- (ここでクライアントが 3 秒間何も送らない)
+SELECT bug_id FROM bugs LIMIT 1;
+-- FATAL:  25P03: terminating connection due to idle-in-transaction timeout
+-- (接続そのものが切断される)
+
+-- (3) transaction_timeout (PostgreSQL 17 以降): トランザクション全体の合計時間を測る
+SET transaction_timeout = '1s';
+BEGIN;
+SELECT bug_id FROM bugs LIMIT 1;  SELECT pg_sleep(0.3);
+SELECT bug_id FROM bugs LIMIT 1;  SELECT pg_sleep(0.3);
+SELECT bug_id FROM bugs LIMIT 1;  SELECT pg_sleep(0.6);
+SELECT bug_id FROM bugs LIMIT 1;
+-- FATAL:  25P04: terminating connection due to transaction timeout
+-- (個々の文はどれも短いが、合計が 1 秒を超えたので接続が切断される)</code></pre>
+    <table class="tbl">
+      <thead><tr><th>設定</th><th>何を測るか</th><th>SQLSTATE</th><th>接続への影響</th></tr></thead>
+      <tbody>
+        <tr><td>statement_timeout</td><td>1 つの文の実行時間</td><td>57014 (ERROR)</td><td>接続は継続</td></tr>
+        <tr><td>idle_in_transaction_session_timeout</td><td>トランザクション中、何もしていない時間</td><td>25P03 (FATAL)</td><td>接続が切断される</td></tr>
+        <tr><td>transaction_timeout (PG17+)</td><td>トランザクション全体の合計時間 (アイドルも実行中も含む)</td><td>25P04 (FATAL)</td><td>接続が切断される</td></tr>
+      </tbody>
+    </table>
+    <p>この 3 つは「何を測るか」が明確に異なります。<code>statement_timeout</code> は 1 文の実行時間だけを見るため、短い文をたくさん積んだ長いトランザクションには効きません。<code>idle_in_transaction_session_timeout</code> は、トランザクションを開いたままクライアントが何も送ってこない時間だけを測り、実際にクエリが走っている時間は含みません。長時間の重い処理 (バッチ処理の中の 1 つの UPDATE など) を誤って切ってしまうことはありません。<code>transaction_timeout</code> は、アイドル時間も実行時間もまとめてトランザクション全体の寿命として測るため、「短い文を何度も繰り返しながら、全体としては長時間ロックを持ち続ける」トランザクションを確実に止められます。いずれも <b>FATAL</b> になる 2 つは接続そのものを切断するため、アプリケーション側は再接続の仕組みを持っておく必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 220" role="img" aria-label="3つのタイムアウトが測る範囲の違いを示す図">
+        <rect x="165" y="20" width="270" height="26" rx="5" fill="#e3edf5" stroke="#2f5f8a" stroke-width="1.5"/>
+        <text x="300" y="38" font-size="11.5" text-anchor="middle" fill="#1f4a68">statement_timeout: 文ごと</text>
+        <rect x="155" y="52" width="290" height="26" rx="5" fill="#fff6e8" stroke="#b5401f" stroke-width="1.5"/>
+        <text x="300" y="70" font-size="11.5" text-anchor="middle" fill="#b5401f">idle_in_tx: アイドル時間だけ</text>
+        <rect x="135" y="84" width="330" height="26" rx="5" fill="#f3f9f6" stroke="#43b581" stroke-width="1.5"/>
+        <text x="300" y="102" font-size="11.5" text-anchor="middle" fill="#0f5132">transaction_timeout: 全部まとめて</text>
+        <line x1="40" y1="190" x2="560" y2="190" stroke="#9aa" stroke-width="1.5"/>
+        <rect x="60" y="160" width="100" height="25" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="110" y="177" font-size="10.5" text-anchor="middle" fill="#0f5132">文1</text>
+        <rect x="170" y="160" width="80" height="25" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3 2"/>
+        <text x="210" y="177" font-size="10" text-anchor="middle" fill="#b5401f">idle</text>
+        <rect x="260" y="160" width="100" height="25" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="310" y="177" font-size="10.5" text-anchor="middle" fill="#0f5132">文2</text>
+      </svg>
+      <p class="cap">図: 3 つのタイムアウトは、文単位 ・ アイドル時間だけ ・ トランザクション全体という異なる範囲を測る。</p>
+    </div>
+  </section>
+
+  <!-- ===== 5. プーリングのトランザクションモードの制約 ===== -->
+  <section>
+    <h2>5. どこで壊れるか ― プーリングのトランザクションモードとセッション状態</h2>
+    <p>PgBouncer のようなコネクションプーラーの<b>トランザクションモード</b>は、クライアントが 1 つのトランザクションを終えるたびに、物理的な PostgreSQL 接続を他のクライアントに回します。これにより少ない物理接続で多くのクライアントを扱えますが、<b>セッション (接続) のスコープで保持される状態</b>は、次のトランザクションで同じ物理接続に戻ってくる保証がありません。<code>PREPARE</code> した文がその代表例です。</p>
+    <pre><code>-- 同じ接続の中で、別々のトランザクションをまたいで使う
+BEGIN;
+PREPARE get_bug (bigint) AS SELECT bug_id, summary FROM bugs WHERE bug_id = $1;
+COMMIT;
+BEGIN;
+EXECUTE get_bug(1);  -- 同じ接続内なので使える
+COMMIT;
+--  bug_id |      summary
+-- --------+-------------------
+--       1 | crash when saving
+
+-- 新しい接続 (別のプロセス) から同じ名前を EXECUTE しようとする
+EXECUTE get_bug(1);
+-- ERROR:  26000: prepared statement "get_bug" does not exist</code></pre>
+    <p><code>PREPARE</code> は接続 (セッション) に紐付き、トランザクションをまたいでも消えません。しかし別の接続からは最初から存在しません。トランザクションモードのプーリングでは、アプリケーションの 1 回の論理セッションの中でも、トランザクションごとに<b>違う物理接続</b>が割り当てられることがあるため、ある時点で <code>PREPARE</code> した文が、次のトランザクションでは跡形もなく消えている、という事態が起きます。同じ理由で、<code>SET</code> によるセッション変数の変更、<code>LISTEN</code>/<code>NOTIFY</code>、<code>WITH HOLD</code> カーソル、セッションレベルのアドバイザリロック (第 36 回) も、トランザクションモードのプーリングでは信頼できません。これらを使う処理は、セッションモードのプーリング (接続をクライアントに固定する) を使うか、プーラーを経由しない直接接続にする必要があります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="トランザクションモードプーリングでセッション状態が失われる様子を示す図">
+        <text x="150" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54" font-weight="700">トランザクション 1</text>
+        <rect x="40" y="35" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="60" font-size="11.5" text-anchor="middle" fill="#0f5132">物理接続 X で PREPARE</text>
+        <text x="450" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54" font-weight="700">トランザクション 2</text>
+        <rect x="340" y="35" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/>
+        <text x="450" y="60" font-size="11.5" text-anchor="middle" fill="#b5401f">物理接続 Y で EXECUTE → 存在しない</text>
+        <text x="300" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">プーラーが論理セッションを別の物理接続に割り当てたため、</text>
+        <text x="300" y="130" font-size="12.5" text-anchor="middle" fill="#4a5d54">接続 X に紐付いていた PREPARE は接続 Y には存在しない</text>
+      </svg>
+      <p class="cap">図: トランザクションモードのプーリングでは、論理セッションと物理接続が 1 対 1 で対応しない。</p>
+    </div>
+  </section>
+
+  <!-- ===== 6. シニアの書き方: 統計の見方の総まとめ ===== -->
+  <section>
+    <h2>6. シニアの書き方 ― 統計の見方の総まとめ</h2>
+    <p>本番運用で「今何が起きているか」を判断するために、このシリーズで見てきた統計ビューを 1 つの手順にまとめます。</p>
+    <pre><code>-- (1) テーブルの健全性 (第 35 回): dead tuple の蓄積と autovacuum の稼働状況
+SELECT relname, n_live_tup, n_dead_tup, n_tup_upd, n_tup_hot_upd, last_autovacuum
+FROM pg_stat_user_tables WHERE relname = 'bugs';
+
+-- (2) 今動いている接続の状態 (この回): 待っているのか、実行中なのか
+SELECT pid, state, wait_event_type, wait_event, query
+FROM pg_stat_activity WHERE pid = pg_backend_pid();
+
+-- (3) 自分が今保持しているロックの数 (第 36 回)
+SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid();</code></pre>
+    <p>判断の順序はこうです。アプリケーションが遅いと報告が来たら、まず <code>pg_stat_activity</code> で <code>wait_event_type</code> を確認し、<code>Lock</code> なら第 36 回の行ロックの衝突を、<code>IO</code> ならディスクやキャッシュの問題を疑います。次に <code>pg_stat_user_tables</code> の <code>n_dead_tup</code> と <code>last_autovacuum</code> を見て、第 35 回で見た VACUUM の遅れがクエリの速度に影響していないかを確認します。<code>EXPLAIN (ANALYZE, BUFFERS)</code> による実行計画の分析 (第 28 回) は、個々のクエリが遅い理由を特定するための最後の一手です。なお <code>pg_stat_statements</code> は問い合わせ全体の傾向を見るのに有用ですが、<code>shared_preload_libraries</code> への追加とサーバーの再起動が必要な拡張であり、この回の実機 (<code>shared_preload_libraries</code> が空の状態) では有効化されていないため、ここでは出力を示していません。導入する際は、サーバー全体に影響する設定変更であることを踏まえ、計画的に行う必要があります。</p>
+    <p>この回で見た 3 つのタイムアウトと、接続数の上限、そして <code>pg_stat_activity</code> の <code>wait_event</code> は、どれも「今、何が資源を使っていて、何が待たされているか」を言語化するための道具です。アプリケーション開発者が SQL を書くときにこれらを意識することは少なくても、本番でそのクエリが詰まったとき、原因を 1 つずつ絞り込めるかどうかは、この回で見た仕組みをどれだけ正確に理解しているかにかかっています。</p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/runtime-config-connection.html#GUC-MAX-CONNECTIONS" target="_blank" rel="noopener">PostgreSQL: max_connections (runtime config)</a> ― 接続数の上限と superuser_reserved_connections の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STATEMENT-TIMEOUT" target="_blank" rel="noopener">PostgreSQL: statement_timeout / idle_in_transaction_session_timeout / transaction_timeout</a> ― 3 つのタイムアウトがそれぞれ何を測るかの一次情報。transaction_timeout は PostgreSQL 17 で追加された設定。</li>
+      <li><a href="https://www.postgresql.org/docs/current/monitoring-stats.html#WAIT-EVENT-TABLE" target="_blank" rel="noopener">PostgreSQL: 28.2.6. Wait Event Tables</a> ― wait_event_type と wait_event (Lock, Timeout, IO など) の分類の一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/sql-prepare.html" target="_blank" rel="noopener">PostgreSQL: PREPARE</a> ― 準備された文がセッション (接続) の生存期間に紐付くことの一次情報。</li>
+      <li><a href="https://www.pgbouncer.org/features.html" target="_blank" rel="noopener">PgBouncer: Features and limitations</a> ― トランザクションプーリングモードで PREPARE / SET / LISTEN ・ NOTIFY / セッションレベルのアドバイザリロックが安全に使えないという制約の参照に使った。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( https://www.oreilly.co.jp/books/9784814400744/ ) ― 章立てのみ参考 (本回は書籍の対象外のシニア編)。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-zero-downtime-migrations.html">← 第 37 回 止めずにスキーマを変える</a><a href="./sql-index.html">目次</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'pg_stat_activity の backend_type を集計した実機の結果として最も正確なものは？',
+    opts: [
+      'backend_type を集計すると client backend は 1 つだけで、他は autovacuum launcher など PostgreSQL 自身が動かす内部プロセスだった。max_connections は 100 で、そのうち 3 は superuser_reserved_connections として予約されている',
+      'pg_stat_activity に現れる全ての backend_type がアプリケーションからの接続である',
+      'max_connections を超えても新しい接続は自動的に待たされ、いつか必ず接続できる',
+      'shared_buffers は接続ごとに個別に確保されるメモリである',
+      'work_mem は全接続で共有される単一のメモリ領域である'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で backend_type を集計すると、client backend (自分) 以外に autovacuum launcher, background writer, checkpointer, io worker, logical replication launcher, walwriter という内部プロセスが含まれていた。max_connections=100, superuser_reserved_connections=3 も実機で確認した。',
+      '実機の結果の通り、autovacuum launcher などは PostgreSQL 自身の運用プロセスであり、アプリケーションからの接続ではない。',
+      'max_connections を超えた新しい接続は拒否される。待たされていつか必ず接続できるという保証は無い。',
+      'shared_buffers は全接続が共有する領域であり、接続ごとに個別に確保されるものではない。説明が逆になっている。',
+      'work_mem はソートやハッシュ結合のたびに接続ごとに確保されうるメモリであり、全接続で共有される単一の領域ではない。説明が逆になっている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>client backend 以外は PostgreSQL 自身の運用プロセスです。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="backend_typeの内訳を示す図"><rect x="30" y="30" width="180" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="120" y="55" font-size="12" text-anchor="middle" fill="#0f5132">client backend: 1</text><rect x="240" y="30" width="290" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="385" y="55" font-size="11" text-anchor="middle" fill="#1f4a68">内部プロセス (autovacuum/checkpointer 等): 6</text></svg>'
+          + '<p class="cap">図: pg_stat_activity にはアプリ接続と PostgreSQL 自身のプロセスが両方映る。</p></div>'
+    }
+  },
+  {
+    q: '同じ state=active の 2 つの接続を wait_event_type で比較した実機の結果として最も正確なものは？',
+    opts: [
+      'state=active であれば、どちらも常に CPU を使って処理している',
+      '同じ state=active でも、wait_event_type が Timeout/PgSleep なら意図的な待機、Lock/transactionid なら行ロック待ちと区別できる。実機で両方のパターンを確認した',
+      'wait_event_type は常に Lock という値しか取らない',
+      'wait_event を見ても、ロック待ちとディスク I/O 待ちは区別できない',
+      'pg_stat_activity には wait_event という列は存在しない'
+    ],
+    ans: 1,
+    exps: [
+      '実機で wa_A (Timeout/PgSleep) と wa_B (Lock/transactionid) はどちらも state=active だったが、内実は異なる。state だけでは区別できない。',
+      '<b>これが正解。</b>実機で、pg_sleep を実行中の wa_A は wait_event_type=Timeout, wait_event=PgSleep、FOR UPDATE で待たされていた wa_B は wait_event_type=Lock, wait_event=transactionid と、明確に異なる値が確認できた。',
+      'wait_event_type には Lock の他にも Timeout, IO, Client など複数の種類がある。常に Lock だけという主張は誤り。',
+      'wait_event_type の値そのものが Lock か IO かを区別するための情報であり、見れば区別できる。',
+      'この回で実際に wait_event 列をクエリして値を取得できており、存在しないという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>state だけでなく wait_event_type まで見ることで、本当の状況が分かります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="wait_event_typeによる区別を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">wa_A: Timeout/PgSleep (意図的な待機)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#b5401f">wa_B: Lock/transactionid (ロック待ち)</text></svg>'
+          + '<p class="cap">図: 同じ active でも wait_event_type を見れば、待っている理由が区別できる。</p></div>'
+    }
+  },
+  {
+    q: 'statement_timeout が発火したときの実機の挙動として最も正確なものは？',
+    opts: [
+      'statement_timeout が発火すると、接続全体が切断される',
+      'statement_timeout はトランザクション全体の合計時間を測る',
+      'statement_timeout は 1 つの文の実行時間だけを測り、実機でも ERROR 57014 の後に同じ接続で次の SELECT を実行できた (接続は生きている)',
+      'statement_timeout を設定すると、その後のすべての文が自動的にリトライされる',
+      'statement_timeout はサーバー全体の設定であり、SET コマンドでは変更できない'
+    ],
+    ans: 2,
+    exps: [
+      '実機で ERROR (FATAL ではない) が返り、接続は切断されなかった。接続全体が切断されるという主張は誤り。',
+      'トランザクション全体の合計時間を測るのは transaction_timeout の役割。statement_timeout は 1 文だけを対象にする。',
+      '<b>これが正解。</b>実機で statement_timeout=\'500ms\' の下 pg_sleep(2) が ERROR 57014 でキャンセルされた後、同じ接続で "still connected" という結果を返す SELECT が実行できた。',
+      '自動リトライの機能は無く、キャンセルされた文はエラーとして呼び出し側に返るだけ。',
+      '実機で SET statement_timeout=\'500ms\' のようにセッション単位で設定できることを確認した。サーバー全体の設定を変える必要はない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>statement_timeout は 1 文だけを対象にします。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="statement_timeoutの範囲を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="145" y="55" font-size="12" text-anchor="middle" fill="#b5401f">この 1 文だけ ERROR 57014</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="415" y="55" font-size="12" text-anchor="middle" fill="#0f5132">接続は継続、次の文は実行できる</text></svg>'
+          + '<p class="cap">図: statement_timeout は文単位のキャンセルで、接続そのものには影響しない。</p></div>'
+    }
+  },
+  {
+    q: 'idle_in_transaction_session_timeout が発火したときの実機の挙動として最も正確なものは？',
+    opts: [
+      'idle_in_transaction_session_timeout は、クエリが実行中である時間も含めて測る',
+      'idle_in_transaction_session_timeout が発火しても、ERROR だけで接続は継続する',
+      'idle_in_transaction_session_timeout はトランザクションの外にいる時間を測る設定である',
+      'idle_in_transaction_session_timeout はトランザクションの中で何もしていない時間だけを測り、実機でも FATAL 25P03 で接続ごと切断された',
+      'idle_in_transaction_session_timeout は CPU 使用率を測る設定である'
+    ],
+    ans: 3,
+    exps: [
+      '実機で pg_sleep のような実行中の時間ではなく、クライアントが何も送らない「アイドルな」時間だけが計測の対象だった。',
+      '実機では FATAL になり、接続そのものが切断された。ERROR だけで済むという主張は誤り。',
+      'この設定はトランザクションの<b>中</b>でのアイドル時間を測るものであり、トランザクションの外ではこの設定は関与しない。',
+      '<b>これが正解。</b>実機で BEGIN の後、1 秒間何も送らない状態を作ると "FATAL: 25P03: terminating connection due to idle-in-transaction timeout" で接続ごと切断された。',
+      'CPU 使用率とは無関係で、トランザクション中にクライアントから次のコマンドが来ない経過時間を測る設定。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>idle_in_transaction_session_timeout はアイドル時間だけを測り、接続ごと切断します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="idle_in_transaction_session_timeoutの範囲を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">BEGIN 後、何もしない (idle)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#b5401f">FATAL 25P03: 接続ごと切断</text></svg>'
+          + '<p class="cap">図: トランザクション中のアイドル時間が閾値を超えると、接続全体が終了される。</p></div>'
+    }
+  },
+  {
+    q: 'transaction_timeout の効果について、実機の結果として最も正確なものは？',
+    opts: [
+      'transaction_timeout は PostgreSQL の全バージョンで昔から使える設定である',
+      'transaction_timeout は個々の文が長い場合にしか発火しない',
+      'transaction_timeout はアイドル時間だけを測り、実行中の時間は含まない',
+      'transaction_timeout が発火しても、トランザクションだけロールバックされ接続は継続する',
+      'transaction_timeout は PostgreSQL 17 以降の設定で、アイドルも実行中も合わせたトランザクション全体の合計時間を測り、実機でも短い文を繰り返しただけで FATAL 25P04 により接続ごと切断された'
+    ],
+    ans: 4,
+    exps: [
+      'transaction_timeout は PostgreSQL 17 で追加された比較的新しい設定であり、全バージョンで使えるという主張は誤り。',
+      '実機では 0.3 秒 ・ 0.3 秒 ・ 0.6 秒という短い pg_sleep を複数回に分けて実行しただけで発火しており、個々の文の長さではなく合計時間で発火することを確認した。',
+      '実機では pg_sleep による実行中の時間も合計に含まれて発火している。アイドル時間だけという主張は誤り。',
+      '実機では FATAL になり接続が切断された。トランザクションだけのロールバックで済むという主張は誤り。',
+      '<b>これが正解。</b>実機で SET transaction_timeout=\'1s\' の下、短い pg_sleep を複数回挟んだだけで合計が 1 秒を超え、"FATAL: 25P04: terminating connection due to transaction timeout" で接続ごと切断された。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>短い文の繰り返しでも、合計時間が閾値を超えれば発火します。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="transaction_timeoutの範囲を示す図"><rect x="30" y="30" width="500" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="280" y="55" font-size="12" text-anchor="middle" fill="#b5401f">0.3秒 + 0.3秒 + 0.6秒 = 合計 1.2秒 &gt; 閾値 1秒 → FATAL 25P04</text></svg>'
+          + '<p class="cap">図: transaction_timeout は個々の文ではなく、トランザクション全体の合計時間を見る。</p></div>'
+    }
+  },
+  {
+    q: 'PREPARE した文のスコープについて、実機で確認した結果として最も正確なものは？',
+    opts: [
+      'PREPARE した文は接続 (セッション) に紐付き、トランザクションをまたいでも使えるが、別の新しい接続からは最初から存在せず EXECUTE するとエラーになる。実機で両方を確認した',
+      'PREPARE した文は、それを作成した 1 つのトランザクションの中でしか使えない',
+      'PREPARE した文はサーバー全体で共有され、どの接続からでも使える',
+      'PREPARE した文はディスクに保存され、サーバーを再起動しても残る',
+      'PREPARE した文は COMMIT すると自動的に削除される'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で、PREPARE した get_bug を別のトランザクション (同じ接続) で EXECUTE できたが、新しい接続から EXECUTE すると "ERROR: 26000: prepared statement \\"get_bug\\" does not exist" になった。',
+      '実機で、PREPARE した BEGIN/COMMIT とは別の BEGIN/COMMIT (同じ接続内) でも EXECUTE できており、1 つのトランザクション限定という主張は誤り。',
+      '実機で別の接続からは存在しないことを確認しており、サーバー全体で共有されるという主張は誤り。',
+      'PREPARE はメモリ上の状態であり、ディスクへの永続化は行われない。再起動すれば消える。',
+      '実機で COMMIT をまたいで EXECUTE できていることから、COMMIT で自動的に削除されるという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>PREPARE はトランザクションより長く、接続より短い範囲で有効です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="PREPAREのスコープを示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">同じ接続の次の BEGIN → 使える</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#b5401f">別の接続 → 存在しない (26000)</text></svg>'
+          + '<p class="cap">図: PREPARE は接続 (セッション) のスコープに紐付き、トランザクション境界よりも長く、接続の境界よりは短く存在する。</p></div>'
+    }
+  },
+  {
+    q: 'コネクションプーラーのトランザクションモードが抱える制約について、最も正確なものは？',
+    opts: [
+      'トランザクションモードのプーリングでは、PREPARE や SET、アドバイザリロックなど全てのセッション状態が問題なく動く',
+      'トランザクションモードのプーリングでは論理セッションと物理接続が 1 対 1 に対応せず、PREPARE のようなセッション状態が次のトランザクションで失われる可能性がある',
+      'トランザクションモードのプーリングは接続を無限に増やせる魔法の仕組みである',
+      'トランザクションモードのプーリングでは、SQL の実行速度そのものが常に遅くなる',
+      'トランザクションモードのプーリングは PostgreSQL 本体に組み込まれた機能であり、拡張のソフトウェアは不要である'
+    ],
+    ans: 1,
+    exps: [
+      'この回で確認した通り、PREPARE はセッション (物理接続) に紐付くため、トランザクションごとに物理接続が変わるトランザクションモードのプーリングでは安全に使えない。',
+      '<b>これが正解。</b>PREPARE の実験で確認した通り、同じ論理セッションでもトランザクションをまたいで別の物理接続に割り当てられれば、以前の接続で作った状態 (PREPARE, SET, アドバイザリロックなど) は失われる可能性がある。',
+      '接続数を減らす効果はあるが、物理接続の総数には限りがあり、無限に増やせるわけではない。',
+      '実行速度そのものを遅くする仕組みではなく、少ない物理接続を多くのクライアントで使い回すための仕組み。',
+      'PgBouncer のようなコネクションプーラーは PostgreSQL 本体とは別の、独立したソフトウェアとして動作する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>論理セッションと物理接続の対応が崩れることが制約の根本原因です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="トランザクションモードプーリングの制約を示す図"><rect x="30" y="30" width="230" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="145" y="55" font-size="11.5" text-anchor="middle" fill="#0f5132">論理セッション (クライアント側)</text><rect x="300" y="30" width="230" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="415" y="55" font-size="11" text-anchor="middle" fill="#1f4a68">トランザクションごとに違う物理接続</text></svg>'
+          + '<p class="cap">図: 1 対 1 で対応しないため、接続に紐付くセッション状態が維持できない。</p></div>'
+    }
+  },
+  {
+    q: '3 つのタイムアウト (statement_timeout, idle_in_transaction_session_timeout, transaction_timeout) の使い分けとして最も正確なものは？',
+    opts: [
+      '3 つのタイムアウトはすべて同じ範囲を測るので、どれを使っても結果は同じである',
+      'statement_timeout を設定すれば、idle_in_transaction_session_timeout は不要になる',
+      'statement_timeout は文単位、idle_in_transaction_session_timeout はアイドル時間だけ、transaction_timeout はトランザクション全体の合計、という異なる範囲を測るため、目的に応じて使い分ける',
+      'idle_in_transaction_session_timeout は、トランザクションを使わない単発の SELECT にも必ず効く',
+      '3 つのタイムアウトのうち、接続を切断するのは statement_timeout だけである'
+    ],
+    ans: 2,
+    exps: [
+      '本文の表で確認した通り、3 つは測る範囲 (文単位 ・ アイドルのみ ・ 合計) が明確に異なり、結果も異なる場面で発火する。',
+      'statement_timeout は 1 文の実行時間しか見ないため、短い文を繰り返しながらトランザクションを開けたままにする問題は検出できない。idle_in_transaction_session_timeout や transaction_timeout と役割が異なる。',
+      '<b>これが正解。</b>本文で確認した通り、3 つのタイムアウトはそれぞれ異なる範囲 (1 文 ・ アイドル時間のみ ・ トランザクション全体) を測るため、防ぎたい問題に応じて組み合わせて使う。',
+      'idle_in_transaction_session_timeout はトランザクションの<b>中</b>でのアイドル時間を測るものなので、トランザクションを開いていない単発の SELECT には関与しない。',
+      '実機で確認した通り、FATAL になり接続を切断するのは idle_in_transaction_session_timeout と transaction_timeout の方で、statement_timeout は ERROR で接続を継続させる。説明が逆になっている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>3 つは測る範囲が違うので、組み合わせて使います。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="3つのタイムアウトの使い分けを示す図"><rect x="20" y="30" width="160" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="100" y="55" font-size="11" text-anchor="middle" fill="#1f4a68">statement: 文単位</text><rect x="200" y="30" width="160" height="40" rx="6" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="280" y="55" font-size="10.5" text-anchor="middle" fill="#b5401f">idle_in_tx: アイドルのみ</text><rect x="380" y="30" width="160" height="40" rx="6" fill="#f3f9f6" stroke="#43b581" stroke-width="2"/><text x="460" y="55" font-size="10.5" text-anchor="middle" fill="#0f5132">transaction: 全体合計</text></svg>'
+          + '<p class="cap">図: 目的に応じて測る範囲の異なるタイムアウトを組み合わせる。</p></div>'
+    }
+  },
+  {
+    q: 'この回で確かめた「統計の見方」の手順として最も適切なまとめは？',
+    opts: [
+      '遅いクエリの原因調査は、常に EXPLAIN だけで十分であり、他の統計ビューは不要である',
+      'pg_stat_user_tables の n_dead_tup は、接続数を表す列である',
+      'pg_locks は常に空であり、本番環境では使う機会がない',
+      'wait_event_type で Lock か IO かを区別し、n_dead_tup と last_autovacuum で VACUUM の遅れを確認し、最後に EXPLAIN で個々のクエリを分析するという順序で原因を絞り込む',
+      'pg_stat_statements は常に有効になっているため、追加の設定は不要である'
+    ],
+    ans: 3,
+    exps: [
+      'EXPLAIN は個々のクエリの分析に有効だが、第 36 回のロック待ちや第 35 回の VACUUM の遅れのように、EXPLAIN だけでは見えない原因もある。',
+      'n_dead_tup はそのテーブルの dead tuple (第 35 回) の数を表す列で、接続数とは無関係。',
+      '第 36 回で確認した通り、行ロックを持っている間は pg_locks にエントリが現れる。常に空という主張は誤り。',
+      '<b>これが正解。</b>本文で示した通り、まず wait_event_type で待っている理由を区別し、次に n_dead_tup/last_autovacuum で VACUUM の遅れを確認し、最後に EXPLAIN で個々のクエリを掘るという順序が、これまでの回をつなぐ実務的な手順。',
+      'この回の実機で shared_preload_libraries が空であることを確認した通り、pg_stat_statements は事前の設定 (再起動を伴う) が必要で、常に有効というわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>複数の統計ビューを順番に見ることで、原因を絞り込みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="統計の見方の手順を示す図"><rect x="20" y="30" width="160" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="55" font-size="11" text-anchor="middle" fill="#0f5132">① wait_event_type</text><rect x="200" y="30" width="160" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="280" y="55" font-size="11" text-anchor="middle" fill="#1f4a68">② n_dead_tup/autovacuum</text><rect x="380" y="30" width="160" height="40" rx="6" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="460" y="55" font-size="11" text-anchor="middle" fill="#b5401f">③ EXPLAIN</text></svg>'
+          + '<p class="cap">図: 全体の状態から個々のクエリへと、段階的に絞り込んでいく。</p></div>'
+    }
+  },
+  {
+    q: 'この SQL シリーズ シニア編 (第 28 回〜第 38 回) 全体を通した、本番運用についての最も適切なまとめは？',
+    opts: [
+      '接続数は無限に増やしても性能に影響しない',
+      'タイムアウトは 1 種類だけ覚えておけば十分で、残りは使う機会がない',
+      'pg_stat_activity を見ても、ロック待ちかどうかは分からない',
+      'プーリングを使えば、セッション状態の制約は一切気にしなくてよい',
+      '接続はプロセスとして資源を消費し、3 つのタイムアウトは異なる範囲の待ちを止め、pg_stat_activity の wait_event が今起きていることを言語化する。これらを組み合わせて本番の詰まりを 1 つずつ絞り込むのがシニアの判断'
+    ],
+    ans: 4,
+    exps: [
+      '本文で確認した通り、接続はプロセスであり work_mem のようなメモリをプロセスごとに必要とする。無限に増やしても影響しないという主張は誤り。',
+      '本文で確認した通り、3 つのタイムアウトは測る範囲が異なり、防ぎたい問題に応じて組み合わせて使う必要がある。',
+      '本文で確認した通り、wait_event_type/wait_event を見ればロック待ち (Lock/transactionid) かどうかが分かる。',
+      'PREPARE の実験で確認した通り、トランザクションモードのプーリングではセッション状態が失われる可能性があり、気にしなくてよいという主張は実測と矛盾する。',
+      '<b>これが正解。</b>この回全体で確認した通り、接続はプロセスとして資源制約を持ち、3 つのタイムアウトは異なる範囲の問題を止め、wait_event は今の状態を言語化する。これらを組み合わせて段階的に絞り込むのが、シニアの本番運用の判断。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>この回で見た道具は、どれも「今何が起きているかを正確に言葉にする」という目的でつながっています。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="本番運用のまとめの図"><rect x="20" y="20" width="160" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="50" font-size="11.5" text-anchor="middle" fill="#0f5132">接続 = プロセス</text><text x="100" y="70" font-size="11.5" text-anchor="middle" fill="#0f5132">資源の制約</text><rect x="200" y="20" width="160" height="90" rx="8" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="280" y="50" font-size="11.5" text-anchor="middle" fill="#b5401f">3 つのタイムアウト</text><text x="280" y="70" font-size="11.5" text-anchor="middle" fill="#b5401f">異なる範囲を止める</text><rect x="380" y="20" width="160" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="460" y="50" font-size="11.5" text-anchor="middle" fill="#1f4a68">wait_event</text><text x="460" y="70" font-size="11.5" text-anchor="middle" fill="#1f4a68">今の状態を言語化</text></svg>'
+          + '<p class="cap">図: 3 つの道具を組み合わせて、本番で起きていることを 1 つずつ絞り込む。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

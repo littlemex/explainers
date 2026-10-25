@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSONB の使い所と使わない所 ― 形が決まった瞬間に列へ戻す</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px}
+  table.tbl th{text-align:left;padding:8px 10px;border:1px solid #d9e5df;background:#eaf5ef}
+  table.tbl td{padding:8px 10px;border:1px solid #d9e5df}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">SQL ・ 第 34 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>JSONB の使い所と使わない所 ― 形が決まった瞬間に列へ戻す</h1>
+  <p>jsonb は「形がまだ決まっていない附属データ」を飲み込むための避難所であり、同じ形が並び始めたら列と制約に戻すのがシニアの判断である</p>
+</header>
+<main>
+  <a class="back" href="./sql-index.html">← SQL シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 33 回 <a href="./sql-constraints-as-correctness.html">制約で正しさを守る</a> (CHECK ・ DOMAIN ・ 生成列の基本)</p>
+  <p class="intro">「どんな形のデータが来るか分からないから、とりあえず jsonb 列に入れておく」という判断は、短期的には正しいことが多いですが、そのまま運用を続けると検索も制約も効かないデータの沼になります。この回で確かめる結論は、jsonb は「列の形がまだ決まっていない間」を乗り切るための道具であり、同じキーの組が並び始めたら、式インデックスや生成列を使って実在の列に戻すのがシニアの判断だということです。PostgreSQL 18.6 の実機で、json と jsonb の違い、4 種類の演算子、GIN の 2 つの演算子クラス (jsonb_ops と jsonb_path_ops) の効き方の違い、そして正規化すべき兆候の見つけ方を順に確かめます。</p>
+
+  <!-- ===== 1. この回で解く問題 ===== -->
+  <section>
+    <h2>1. この回で解く問題 ― 形が決まっていないデータをどこに置くか</h2>
+    <p>バグ管理システムに、外部の連携先 (GitHub の Webhook、Jira の API、社内フォームなど) からの通知を取り込む場面を考えます。連携先ごとに送ってくる項目の数も名前も違い、今後も増えます。これを <code>source_name</code>、<code>severity_score</code>、<code>os_name</code> ... と連携先ごとに列を増やしていくと、第 09 回で扱った「メタデータトリブル」と同じ轍を踏みます。列を増やすたびにスキーマ変更が要り、使われない列が大量の NULL で埋まります。</p>
+    <p>ここで jsonb 列が受け皿になります。1 列に <code>{"source":"github","severity_score":8.2,...}</code> のような任意の構造を持たせ、連携先が増えてもスキーマ変更をしません。ただし、この自由さは無料ではありません。外部キーも CHECK 制約も、型チェックも、jsonb の中には素直には届きません。この回では、どこまでが jsonb に向いた自由さで、どこからが正規化すべき兆候なのかを、実際のデータと実行計画で線を引きます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 230" role="img" aria-label="列を増やす設計とjsonbで受ける設計の対比図">
+        <text x="150" y="30" font-size="13" text-anchor="middle" fill="#4a5d54" font-weight="700">列を増やす設計 (メタデータトリブル)</text>
+        <rect x="30" y="45" width="60" height="100" fill="#eaf5ef" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="60" y="100" font-size="11" text-anchor="middle" fill="#0f5132">source</text>
+        <rect x="95" y="45" width="60" height="100" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="125" y="100" font-size="11" text-anchor="middle" fill="#b5401f">os_name</text>
+        <rect x="160" y="45" width="60" height="100" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="190" y="90" font-size="10.5" text-anchor="middle" fill="#b5401f">jira_</text>
+        <text x="190" y="104" font-size="10.5" text-anchor="middle" fill="#b5401f">ticket</text>
+        <rect x="225" y="45" width="60" height="100" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="255" y="100" font-size="11" text-anchor="middle" fill="#b5401f">...</text>
+        <text x="150" y="172" font-size="12" text-anchor="middle" fill="#4a5d54">連携先が増えるたびに列が増え、</text>
+        <text x="150" y="190" font-size="12" text-anchor="middle" fill="#4a5d54">使わない列が NULL で埋まる</text>
+        <text x="450" y="30" font-size="13" text-anchor="middle" fill="#4a5d54" font-weight="700">jsonb で受ける設計</text>
+        <rect x="380" y="45" width="140" height="100" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="450" y="80" font-size="11.5" text-anchor="middle" fill="#1f4a68">custom_fields</text>
+        <text x="450" y="98" font-size="10.5" text-anchor="middle" fill="#1f4a68">jsonb</text>
+        <text x="450" y="114" font-size="10" text-anchor="middle" fill="#12211a">{"source":...}</text>
+        <text x="450" y="172" font-size="12" text-anchor="middle" fill="#4a5d54">列は増えないが、</text>
+        <text x="450" y="190" font-size="12" text-anchor="middle" fill="#4a5d54">検索 ・ 制約 ・ 型は自力では効かない</text>
+      </svg>
+      <p class="cap">図: 連携先ごとに列を増やす設計は第 09 回の問題を再演する。jsonb は列を増やさないが、その自由さは検索と制約の弱さと表裏一体。</p>
+    </div>
+  </section>
+
+  <!-- ===== 2. 仕組み: json と jsonb の違い ===== -->
+  <section>
+    <h2>2. 仕組み ― json と jsonb は同じ構文で違うものを保存する</h2>
+    <p>PostgreSQL には <code>json</code> と <code>jsonb</code> という 2 つの型があり、どちらも同じ JSON の構文を受け付けますが、保存の仕方が違います。<code>json</code> は入力された文字列をほぼそのまま (空白やキーの重複を含めて) 保存し、読むたびに再度パースします。<code>jsonb</code> は入力時に 1 度パースして、重複キーを排除し、順序を正規化した上で、効率よく辿れる分解済みの二値表現として保存します。実機で同じ入力を 2 つの型に入れると、この違いがそのまま見えます。</p>
+    <pre><code>SELECT '{"a":1, "a":2, "b":3}'::json  AS as_json,
+       '{"a":1, "a":2, "b":3}'::jsonb AS as_jsonb;
+--        as_json        |     as_jsonb
+-- -----------------------+------------------
+--  {"a":1, "a":2, "b":3} | {"a": 2, "b": 3}
+
+SELECT '{"a": 1,   "b":2}'::json::text  AS json_text,
+       '{"a": 1,   "b":2}'::jsonb::text AS jsonb_text;
+--      json_text     |    jsonb_text
+-- -------------------+------------------
+--  {"a": 1,   "b":2} | {"a": 1, "b": 2}</code></pre>
+    <p><code>json</code> は重複キー <code>"a"</code> を 2 つとも残し、空白もそのまま保存します。<code>jsonb</code> は重複キーを後の値で上書きして 1 つに畳み込み (<code>"a": 2</code> だけが残る)、空白も正規化します。<code>json</code> は「元の文字列をそのまま保持したい」場合に向きますが、PostgreSQL の公式ドキュメントも、ほとんどの用途では問い合わせの効率が良く重複キーの曖昧さが無い <code>jsonb</code> を推奨しています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="jsonとjsonbの保存方式の違いを示す図">
+        <rect x="30" y="20" width="240" height="140" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="150" y="45" font-size="13.5" text-anchor="middle" fill="#1f4a68" font-weight="700">json</text>
+        <text x="150" y="68" font-size="12" text-anchor="middle" fill="#12211a">入力文字列をそのまま保存</text>
+        <text x="150" y="88" font-size="11.5" text-anchor="middle" fill="#4a5d54">空白 ・ キー順 ・ 重複キーを保持</text>
+        <text x="150" y="112" font-size="11.5" text-anchor="middle" fill="#4a5d54">読むたびに再パース</text>
+        <text x="150" y="136" font-size="11" text-anchor="middle" fill="#b5401f">@&gt; や ? は使えない</text>
+        <rect x="330" y="20" width="240" height="140" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="450" y="45" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">jsonb</text>
+        <text x="450" y="68" font-size="12" text-anchor="middle" fill="#12211a">入力時に 1 度だけパース</text>
+        <text x="450" y="88" font-size="11.5" text-anchor="middle" fill="#4a5d54">重複キーを畳み込み、順序を正規化</text>
+        <text x="450" y="112" font-size="11.5" text-anchor="middle" fill="#4a5d54">分解済みの二値表現で保存</text>
+        <text x="450" y="136" font-size="11" text-anchor="middle" fill="#0f5132">@&gt; ・ ? ・ GIN 索引が使える</text>
+      </svg>
+      <p class="cap">図: json は原文保持優先、jsonb は検索効率優先。重複キーの扱いと索引が使えるかどうかが実務上の分かれ目。</p>
+    </div>
+  </section>
+
+  <!-- ===== 3. 仕組み: 演算子 ===== -->
+  <section>
+    <h2>3. 仕組み ― 取り出す演算子と絞り込む演算子は別物</h2>
+    <p><code>bugs</code> テーブルに <code>custom_fields jsonb</code> 列を追加し、GitHub ・ Jira ・ 社内フォームから来た通知を入れます。</p>
+    <pre><code>ALTER TABLE bugs ADD COLUMN custom_fields jsonb NOT NULL DEFAULT '{}'::jsonb;
+UPDATE bugs SET custom_fields =
+  '{"source":"github","severity_score":8.2,"labels":["crash","regression"],
+    "reporter_meta":{"os":"macOS","browser":"Safari"}}'::jsonb
+  WHERE bug_id = 1;</code></pre>
+    <p>値を <b>取り出す</b> 演算子は <code>-></code> (jsonb を返す) と <code>->></code> (text を返す) で、連結すると入れ子をたどれます。</p>
+    <pre><code>SELECT bug_id,
+       custom_fields -> 'source'                AS src_jsonb,
+       custom_fields ->> 'source'                AS src_text,
+       custom_fields -> 'reporter_meta' ->> 'os'  AS os,
+       custom_fields #> '{reporter_meta,browser}' AS browser_path
+FROM bugs ORDER BY bug_id;
+--  bug_id | src_jsonb  | src_text |   os    | browser_path
+-- --------+------------+----------+---------+--------------
+--       1 | "github"   | github   | macOS   | "Safari"
+--       2 | "jira"     | jira     | Windows | "Edge"
+--       3 | "internal" | internal |         |
+--       4 |            |          |         |
+--       5 |            |          |         |</code></pre>
+    <p><code>-></code> は jsonb のまま返すので連結できますが、文字列として使うには最後に <code>->></code> か <code>#>></code> (パス版) で text に落とす必要があります。4 行目 ・ 5 行目には <code>custom_fields</code> を入れていないので、既定値の空オブジェクト <code>{}</code> のまま、どのキーを取り出しても <code>NULL</code> になります。これは第 14 回で見た「NULL と空文字は違う」の jsonb 版で、<code>custom_fields = '{}'</code> であることと「キーが無い」ことは別の状態です。</p>
+    <p><b>絞り込む</b> 演算子は、取り出す演算子とは別の操作です。<code>@></code> (包含: 右辺の構造を左辺が含むか) と <code>?</code> (キーがトップレベルに存在するか)、そして jsonpath を使う <code>@?</code> と <code>jsonb_path_query</code> を確かめます。</p>
+    <pre><code>SELECT bug_id FROM bugs WHERE custom_fields @> '{"source":"github"}';         -- bug_id=1
+SELECT bug_id FROM bugs WHERE custom_fields ? 'severity_score';               -- bug_id=1,2,3
+SELECT bug_id FROM bugs WHERE custom_fields @? '$.labels[*] ? (@ == "crash")'; -- bug_id=1
+SELECT bug_id, jsonb_path_query(custom_fields, '$.reporter_meta.os') AS os
+FROM bugs WHERE custom_fields ? 'reporter_meta';
+--  bug_id |    os
+-- --------+-----------
+--       1 | "macOS"
+--       2 | "Windows"</code></pre>
+    <p><code>@></code> と <code>?</code> は <code>json</code> 型には存在しません。実機で <code>'{"a":1}'::json @> '{"a":1}'::json</code> を実行すると <code>operator does not exist: json @> json</code> になります。絞り込みの演算子が使えることが、ほとんどの場面で <code>jsonb</code> を選ぶ最大の理由です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 170" role="img" aria-label="取り出す演算子と絞り込む演算子の違いを示す図">
+        <rect x="20" y="20" width="260" height="120" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="45" font-size="13" text-anchor="middle" fill="#0f5132" font-weight="700">取り出す (値を得る)</text>
+        <text x="150" y="68" font-size="12" text-anchor="middle" fill="#12211a">-&gt;  jsonb のまま取り出す</text>
+        <text x="150" y="88" font-size="12" text-anchor="middle" fill="#12211a">-&gt;&gt; text にして取り出す</text>
+        <text x="150" y="108" font-size="12" text-anchor="middle" fill="#12211a">#&gt; パスで奥まで辿る</text>
+        <text x="150" y="128" font-size="11" text-anchor="middle" fill="#4a5d54">json でも jsonb でも使える</text>
+        <rect x="320" y="20" width="260" height="120" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="450" y="45" font-size="13" text-anchor="middle" fill="#1f4a68" font-weight="700">絞り込む (真偽を問う)</text>
+        <text x="450" y="68" font-size="12" text-anchor="middle" fill="#12211a">@&gt;  この構造を含むか</text>
+        <text x="450" y="88" font-size="12" text-anchor="middle" fill="#12211a">?  このキーがあるか</text>
+        <text x="450" y="108" font-size="12" text-anchor="middle" fill="#12211a">@?  この jsonpath に合うか</text>
+        <text x="450" y="128" font-size="11" text-anchor="middle" fill="#b5401f">jsonb だけ ・ GIN 索引が効く</text>
+      </svg>
+      <p class="cap">図: 取り出す演算子は json でも使えるが、WHERE 句で絞り込む演算子は jsonb だけの機能で、ここに GIN 索引が効く。</p>
+    </div>
+  </section>
+
+  <!-- ===== 4. 仕組み: GIN索引の2種類 ===== -->
+  <section>
+    <h2>4. 仕組み ― GIN 索引の 2 つの演算子クラスと式インデックス</h2>
+    <p>絞り込みの演算子に索引を効かせるには <b>GIN (Generalized Inverted Index, 汎用転置索引)</b> を使います。jsonb 用の GIN には既定の <code>jsonb_ops</code> と、もう 1 つの <code>jsonb_path_ops</code> という 2 つの演算子クラスがあり、索引の大きさと対応する演算子が違います。<code>bug_events</code> に 20 万行 (<code>generate_series</code> で生成、GitHub ・ Jira ・ Zendesk ・ 社内フォームが 25 % ずつ) を入れて確かめます。</p>
+    <pre><code>CREATE INDEX idx_events_payload_ops     ON bug_events USING gin (payload);
+CREATE INDEX idx_events_payload_pathops ON bug_events USING gin (payload jsonb_path_ops);
+SELECT pg_size_pretty(pg_relation_size('idx_events_payload_ops'))     AS ops_size,
+       pg_size_pretty(pg_relation_size('idx_events_payload_pathops')) AS pathops_size;
+--  ops_size | pathops_size
+-- ----------+--------------
+--  2760 kB  | 1640 kB</code></pre>
+    <p><code>jsonb_ops</code> はキーと値のそれぞれに索引項目を作るのに対し、<code>jsonb_path_ops</code> はキーと値を合わせたパス全体を 1 つのハッシュにして索引項目を作ります。同じ 20 万行で <code>jsonb_path_ops</code> は 1640 kB、<code>jsonb_ops</code> は 2760 kB で、約 1.7 倍の差が実測できました。ただし <code>jsonb_path_ops</code> が対応する演算子は <code>@></code> ・ <code>@?</code> ・ <code>@@</code> だけで、トップレベルのキー存在を問う <code>?</code> には対応しません。<code>jsonb_ops</code> を落として <code>jsonb_path_ops</code> だけにした状態で <code>?</code> を実行すると、索引が使えず Seq Scan に戻ります。</p>
+    <pre><code>DROP INDEX idx_events_payload_ops; -- jsonb_path_ops だけが残る
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM bug_events WHERE payload ? 'reporter_meta';
+-- Parallel Seq Scan on bug_events (... rows=66666.67 loops=3)
+--   Filter: (payload ? 'reporter_meta'::text)
+-- Execution Time: 18.704 ms</code></pre>
+    <p><code>jsonb_ops</code> を作り直すと <code>?</code> は索引を使うようになりますが、この実験データでは全 20 万行が <code>reporter_meta</code> キーを持つため、絞り込み後も全件がヒットします。索引で行を絞ってもヒープを読む量は変わらないので、Bitmap Index Scan のオーバーヘッドが上乗せされ、<b>Seq Scan の 18.7 ms より遅い 35.9 ms</b> になりました。索引は「対応する演算子かどうか」だけでなく「実際に絞り込めるかどうか (選択度)」の両方が揃って初めて速くなります。</p>
+    <pre><code>-- 索引無し、既定設定 (並列ワーカー 2 本が有効)
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM bug_events WHERE payload @> '{"source":"github"}';
+-- Parallel Seq Scan, Execution Time 11.356 ms
+
+-- GIN 索引を 2 つ作った後、同じ設定で再実行 (Bitmap Heap Scan は並列化されない)
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM bug_events WHERE payload @> '{"source":"github"}';
+-- Bitmap Heap Scan on idx_events_payload_pathops, Execution Time 15.954 ms
+
+-- 並列ワーカーを無効にして、索引無し/索引ありを同じ条件 (直列) で比べ直す
+SET max_parallel_workers_per_gather = 0;
+SET enable_bitmapscan = off; -- 索引無し側を測るときだけ
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM bug_events WHERE payload @> '{"source":"github"}';
+-- Seq Scan (直列), Execution Time 20.750 ms
+RESET enable_bitmapscan;
+EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM bug_events WHERE payload @> '{"source":"github"}';
+-- Bitmap Heap Scan (直列), Execution Time 14.773 ms
+RESET max_parallel_workers_per_gather;</code></pre>
+    <p>一方、25 % だけが一致する <code>@> '{"source":"github"}'</code> には、もう 1 つ別の罠があります。<code>bug_events</code> は約 40 MB しかなく、全体がバッファキャッシュに乗っているため、既定の設定 (並列ワーカー 2 本が有効) で索引無しの Seq Scan を測ると、2 本のワーカーが分担して走査するぶん壁時計時間は短く、実機では <b>11.4 ms</b> でした。続けて GIN の 2 つの索引を両方作ってから同じクエリを実行すると、プランナはより小さい <code>jsonb_path_ops</code> を選びますが、<b>Bitmap Heap Scan は並列化されない</b>ため <b>16.0 ms</b> となり、索引を作った方が遅くなりました。これは索引の作りが悪いのではなく、並列 Seq Scan という「索引以外の近道」が先に競合相手として現れたために起きる逆転です。並列ワーカーの有無をそろえて公平に比べるため <code>SET max_parallel_workers_per_gather = 0;</code> で両方を直列実行に揃えると、索引無しの Seq Scan は <b>20.8 ms</b>、索引ありの Bitmap Heap Scan は <b>14.8 ms</b> となり、索引の方が約 1.4 倍速いという、小さいながら安定した差が見えます。索引の効果を測るときは、選択度だけでなく「索引を使わない側が並列化で得をしていないか」も揃えて比べる必要があります。</p>
+    <table class="tbl">
+      <thead><tr><th>クエリ</th><th>一致率</th><th>索引無し</th><th>索引あり</th><th>倍率</th></tr></thead>
+      <tbody>
+        <tr><td><code>@> '{"source":"github"}'</code> (既定設定)</td><td>25 %</td><td>11.4 ms (Parallel Seq Scan)</td><td>16.0 ms (path_ops, 直列)</td><td>1.4 倍遅い (索引無し側が並列で得をした)</td></tr>
+        <tr><td><code>@> '{"source":"github"}'</code> (並列無効)</td><td>25 %</td><td>20.8 ms (Seq Scan, 直列)</td><td>14.8 ms (path_ops, 直列)</td><td>約 1.4 倍速い (公平な比較)</td></tr>
+        <tr><td><code>? 'reporter_meta'</code></td><td>100 %</td><td>18.7 ms (Seq Scan)</td><td>35.9 ms (jsonb_ops)</td><td>1.9 倍遅い</td></tr>
+      </tbody>
+    </table>
+    <p>範囲検索 (<code>></code> や <code>BETWEEN</code>) は GIN の <code>@></code> では表現できません。<code>severity_score</code> のような数値を範囲で絞るには、キーを取り出して型変換した式に <b>btree の式インデックス</b> を作ります。</p>
+    <pre><code>CREATE INDEX idx_events_severity_btree
+  ON bug_events (((payload->>'severity_score')::numeric));
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT count(*) FROM bug_events WHERE (payload->>'severity_score')::numeric > 9.5;
+-- 索引無し: Parallel Seq Scan, Execution Time 19.589 ms (一致 9161 / 200000, 約 4.6 %)
+-- 索引あり: Bitmap Index Scan,  Execution Time  4.046 ms (約 4.8 倍速い)</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 600 180" role="img" aria-label="jsonb_opsとjsonb_path_opsの索引サイズと対応演算子の違いを示す図">
+        <text x="150" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54" font-weight="700">jsonb_ops (既定)</text>
+        <rect x="60" y="35" width="180" height="90" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="150" y="60" font-size="12" text-anchor="middle" fill="#0f5132">2760 kB</text>
+        <text x="150" y="82" font-size="11" text-anchor="middle" fill="#12211a">@&gt; ・ ? ・ ?&amp; ・ ?|</text>
+        <text x="150" y="100" font-size="11" text-anchor="middle" fill="#12211a">キー単位の索引項目</text>
+        <text x="450" y="25" font-size="12.5" text-anchor="middle" fill="#4a5d54" font-weight="700">jsonb_path_ops</text>
+        <rect x="370" y="55" width="110" height="70" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="425" y="80" font-size="12" text-anchor="middle" fill="#1f4a68">1640 kB</text>
+        <text x="425" y="100" font-size="11" text-anchor="middle" fill="#1f4a68">@&gt; だけ</text>
+        <text x="300" y="155" font-size="12" text-anchor="middle" fill="#4a5d54">path_ops は小さいが ? には使えない ・ 用途で選ぶ</text>
+      </svg>
+      <p class="cap">図: 同じ 20 万行で jsonb_ops は 2760 kB、jsonb_path_ops は 1640 kB (実測)。対応する演算子の範囲も違う。</p>
+    </div>
+  </section>
+
+  <!-- ===== 5. どこで壊れるか ===== -->
+  <section>
+    <h2>5. どこで壊れるか ― 形が揃っているのに jsonb のまま運用する</h2>
+    <p>jsonb の自由さは「形が決まっていない」間だけ価値があります。形が決まった後も jsonb に留め続けると、2 つの問題が起きます。</p>
+    <p><b>1 つ目は外部キーと CHECK 制約が届かないことです。</b> <code>custom_fields->>'source'</code> の値は <code>github</code> ・ <code>jira</code> ・ <code>zendesk</code> ・ <code>internal</code> の 4 つしかありませんが、jsonb の中の値に直接 FK は張れません。誤字の <code>"gihub"</code> が入っても、データベースは何も教えてくれません。</p>
+    <p><b>2 つ目は、実際には形が揃っているのに気づかないことです。</b> <code>bug_events</code> の 20 万行すべてで、トップレベルのキーの組を集計すると、次のようにただ 1 種類の形しかありませんでした。</p>
+    <pre><code>SELECT (SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(payload) k) AS key_shape, count(*)
+FROM bug_events GROUP BY 1 ORDER BY 2 DESC;
+--                   key_shape                   | count
+-- ----------------------------------------------+--------
+--  {labels,reporter_meta,severity_score,source} | 200000</code></pre>
+    <p>この問い合わせは「正規化すべき兆候を見つける」ための具体的な一手です。もし上位 1 ・ 2 種類の形が行数の大半を占めるなら、その形はもう決まっていると判断してよく、jsonb に留める理由は薄れます。実際の運用では、連携先の種類が 10 種類くらいに収まった後も jsonb のまま放置され、後から「<code>source</code> だけ絞り込みたい」「<code>source</code> に外部キーを張りたい」という要求が出て詰まる、という流れをよく見ます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="正規化すべき兆候を示す図">
+        <rect x="30" y="20" width="540" height="40" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">20 万行すべてが同じキーの組 {labels, reporter_meta, severity_score, source}</text>
+        <text x="300" y="90" font-size="13" text-anchor="middle" fill="#b5401f" font-weight="700">→ 形は決まっている。jsonb に留める理由は薄い</text>
+        <text x="300" y="120" font-size="12" text-anchor="middle" fill="#4a5d54">キーの形が 1 ・ 2 種類に収束したら、正規化を検討する兆候</text>
+      </svg>
+      <p class="cap">図: キーの組をグループ化して種類数を数えるだけで、形が決まっているかどうかが見える。</p>
+    </div>
+  </section>
+
+  <!-- ===== 6. シニアの書き方 ===== -->
+  <section>
+    <h2>6. シニアの書き方 ― 判断の基準と列への戻し方</h2>
+    <p>シニアの判断基準は「よく絞り込む条件になるキー」と「制約で守りたいキー」を、jsonb の外に出すことです。やめるのではなく、jsonb はそのまま残し、その上に式を使った <b>生成列 (GENERATED ALWAYS AS ... STORED)</b> を重ねれば、JSON を送る側のコードは変えずに、受け取る側だけで列化できます。</p>
+    <pre><code>CREATE TABLE event_sources (source text PRIMARY KEY);
+INSERT INTO event_sources VALUES ('github'),('jira'),('zendesk'),('internal');
+
+ALTER TABLE bug_events ADD COLUMN source text
+  GENERATED ALWAYS AS (payload->>'source') STORED;
+ALTER TABLE bug_events ADD CONSTRAINT fk_events_source
+  FOREIGN KEY (source) REFERENCES event_sources (source);
+
+SELECT source, count(*) FROM bug_events GROUP BY 1 ORDER BY 1;
+--  source   | count
+-- ----------+-------
+--  github   | 50000
+--  internal | 50000
+--  jira     | 50000
+--  zendesk  | 50000</code></pre>
+    <p><code>source</code> 列は jsonb から自動的に計算され、手で更新する必要がありません。この列に FK を張った瞬間、<code>"gihub"</code> のような誤字は <code>event_sources</code> に存在しないので INSERT 時に拒否されます。jsonb のままでは不可能だった制約が、列に昇格させた瞬間に戻ってきます。</p>
+    <p>配列のように「1 行の中に複数件ある」構造を取り出したい場合は、PostgreSQL 17 以降の <code>JSON_TABLE</code> が使えます。<code>labels</code> 配列を行に展開する例です。</p>
+    <pre><code>SELECT jt.*
+FROM bugs b, JSON_TABLE(b.custom_fields, '$' COLUMNS (
+    source text PATH '$.source',
+    severity_score numeric PATH '$.severity_score',
+    NESTED PATH '$.labels[*]' COLUMNS (label text PATH '$')
+  )) AS jt
+WHERE b.bug_id = 1;
+--  source | severity_score |   label
+-- --------+----------------+------------
+--  github |            8.2 | crash
+--  github |            8.2 | regression</code></pre>
+    <p><code>JSON_TABLE</code> は <code>jsonb_array_elements</code> と <code>LATERAL</code> の組み合わせでも同じことができますが、COLUMNS 句に型を明示できるので、取り出した時点で型チェックが入ります。PostgreSQL 16 以前では <code>JSON_TABLE</code> 自体が無いので、<code>jsonb_array_elements_text</code> と <code>LATERAL</code> を使う必要があります。</p>
+    <p>まとめると、判断の基準は次の 3 つです。<b>(1)</b> 連携先ごとに形が違い、今後も増え続けるなら jsonb のまま。<b>(2)</b> あるキーで頻繁に絞り込む、または集計するなら、式インデックスか生成列で列に出す。<b>(3)</b> 値の範囲が決まっている、または他のテーブルと整合性を取りたいなら、生成列 + FK か CHECK で列に昇格させる。jsonb は「構造を決めないための道具」であって、「構造を決めた後も検索や制約を諦めるための道具」ではありません。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 190" role="img" aria-label="jsonbか列かを判断する基準を示す図">
+        <rect x="20" y="20" width="170" height="130" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+        <text x="105" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132" font-weight="700">形が決まらない</text>
+        <text x="105" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">連携先ごとに違う</text>
+        <text x="105" y="90" font-size="11.5" text-anchor="middle" fill="#12211a">今後も増える</text>
+        <text x="105" y="120" font-size="12" text-anchor="middle" fill="#0f5132">→ jsonb のまま</text>
+        <rect x="215" y="20" width="170" height="130" rx="10" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/>
+        <text x="300" y="45" font-size="12.5" text-anchor="middle" fill="#b5401f" font-weight="700">よく絞り込む</text>
+        <text x="300" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">WHERE / GROUP BY で</text>
+        <text x="300" y="90" font-size="11.5" text-anchor="middle" fill="#12211a">頻繁に使うキー</text>
+        <text x="300" y="120" font-size="12" text-anchor="middle" fill="#b5401f">→ 式インデックス</text>
+        <rect x="410" y="20" width="170" height="130" rx="10" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/>
+        <text x="495" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68" font-weight="700">制約を守りたい</text>
+        <text x="495" y="70" font-size="11.5" text-anchor="middle" fill="#12211a">値の候補が決まっている</text>
+        <text x="495" y="90" font-size="11.5" text-anchor="middle" fill="#12211a">他表と整合させたい</text>
+        <text x="495" y="120" font-size="12" text-anchor="middle" fill="#1f4a68">→ 生成列 + FK/CHECK</text>
+      </svg>
+      <p class="cap">図: 形が決まらない間は jsonb、絞り込みが増えたら式インデックス、制約が要るキーは生成列に昇格させる。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とし、同じ問題を再度クリックしても表示は更新されますがスコアは変わりません。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://www.postgresql.org/docs/current/datatype-json.html" target="_blank" rel="noopener">PostgreSQL: 8.14. JSON Types</a> ― json と jsonb の保存方式の違い (重複キーの畳み込み、空白の正規化) と、ほとんどの用途で jsonb を推奨するという一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/current/functions-json.html" target="_blank" rel="noopener">PostgreSQL: 9.16. JSON Functions and Operators</a> ― ->, ->>, #>, @>, ?, jsonpath (@?, @@) の定義と、JSON_TABLE の COLUMNS / NESTED PATH 構文の参照に使った。</li>
+      <li><a href="https://www.postgresql.org/docs/current/gin.html#GIN-BUILTIN-OPCLASSES" target="_blank" rel="noopener">PostgreSQL: 67.4.1. Built-in Operator Classes</a> ― jsonb_ops (既定) と jsonb_path_ops が対応する演算子の違いの一次情報。</li>
+      <li><a href="https://www.postgresql.org/docs/17/release-17.html" target="_blank" rel="noopener">PostgreSQL 17 Release Notes</a> ― JSON_TABLE が PostgreSQL 17 で追加された機能であることの確認に使った。</li>
+      <li>Bill Karwin 著, 和田卓人・和田省二 監訳, 児島修 訳『SQLアンチパターン 第2版』オライリー・ジャパン, 2024 ( https://www.oreilly.co.jp/books/9784814400744/ ) ― 「メタデータトリブル」(第 09 回) との対比として章立てのみ参考にした。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./sql-constraints-as-correctness.html">← 第 33 回 制約で正しさを守る</a><a href="./sql-index.html">目次</a><a href="./sql-mvcc-vacuum.html">第 35 回 MVCC と VACUUM →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: '{"a":1, "a":2, "b":3} という重複キーを含む文字列を jsonb にキャストして保存すると、実機ではどう保存されるか？',
+    opts: [
+      '後に書かれた値で上書きされ、キー a は値 2 として 1 つだけ残る',
+      'エラーになって挿入が拒否される',
+      '両方の値が配列にまとめられて { "a": [1,2], "b":3 } のように保存される',
+      '先に書かれた値が優先され、後の値 2 は無視される',
+      '重複キーは json 型にしかできず、jsonb にキャストすると構文エラーになる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機で確認した通り、jsonb は入力時に 1 度パースして重複キーを畳み込み、後に書かれた値 (この場合は a=2) だけが残る。json 型は逆に両方の a をそのまま文字列として保持する。',
+      'jsonb は重複キーを自動で畳み込むだけで、エラーにはならない。構文として許される範囲なので拒否する理由が無い。',
+      '重複キーを配列にまとめる変換は jsonb の仕様には存在しない。畳み込みは「後勝ち」で 1 つの値に置き換わるだけ。',
+      '実機の結果はその逆で、先に書かれた値ではなく後に書かれた値が残る。「先勝ち」だと誤解した選択肢。',
+      'json 型でも jsonb 型でも、重複キーを含む文字列はどちらも構文としては受け付けられる。構文エラーになるという主張は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>jsonb は入力時に 1 度だけパースし、重複キーを後勝ちで畳み込みます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="重複キーの畳み込みを示す図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">入力: {"a":1, "a":2, "b":3}</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">jsonb: {"a": 2, "b": 3}</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">後に書かれた a:2 が残り、先の a:1 は消える</text></svg>'
+          + '<p class="cap">図: jsonb は重複キーを後勝ちで 1 つに畳み込んで保存する。</p></div>'
+    }
+  },
+  {
+    q: 'jsonb の -> 演算子と ->> 演算子の違いとして最も正確なものは？',
+    opts: [
+      '-> は常に text を返し、->> は常に jsonb を返す',
+      '-> は値を jsonb のまま返し、->> は値を text に変換して返す',
+      '-> も ->> も全く同じ動作をする、記法だけの違いである',
+      '-> は配列専用の演算子で、->> はオブジェクト専用の演算子である',
+      '-> はキー名の大文字小文字を無視するが、->> は区別する'
+    ],
+    ans: 1,
+    exps: [
+      '実機の結果はその逆で、-> が jsonb を返し ->> が text を返す。向きを逆に覚えた誤解。',
+      '<b>これが正解。</b>-> は結果を jsonb のまま返すので連結して入れ子をたどれ、->> は最後に text に変換して取り出す。custom_fields -> \'reporter_meta\' ->> \'os\' のように組み合わせて使う。',
+      '戻り値の型が違うため、連結した場合の挙動が異なる。同じ動作という主張は誤り。',
+      '両方ともオブジェクトのキー取得にも配列の添字取得にも使え、専用という区別は無い。',
+      '大文字小文字の扱いに -> と ->> の間で差は無い。どちらもキー名を完全一致で比較する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>-> は jsonb のまま返すので連結でき、->> は文字列として確定させます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="矢印演算子の戻り値の違いを示す図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="12.5" text-anchor="middle" fill="#0f5132">a -&gt; b -&gt; c (jsonb のまま連結)</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="420" y="45" font-size="12.5" text-anchor="middle" fill="#1f4a68">a -&gt; b -&gt;&gt; c (最後だけ text)</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">-&gt;&gt; を最後に置くと文字列として比較できる</text></svg>'
+          + '<p class="cap">図: -> は jsonb のまま、->> は text にして取り出す。連結時は最後だけ ->> にする。</p></div>'
+    }
+  },
+  {
+    q: 'jsonb_path_ops だけの GIN 索引がある状態 (jsonb_ops は作っていない) で payload ? \'reporter_meta\' を実行すると、実機ではどうなるか？',
+    opts: [
+      'エラーになり実行できない',
+      'jsonb_path_ops 索引を使った Index Scan になる',
+      '索引を使えず Parallel Seq Scan にフォールバックする',
+      '実行時に自動的に jsonb_ops 索引が作られて使われる',
+      'クエリの結果が常に空になる'
+    ],
+    ans: 2,
+    exps: [
+      'クエリ自体は構文として正しいので実行できる。エラーにはならない。',
+      'jsonb_path_ops が対応する演算子は @>, @?, @@ だけで、キー存在を問う ? には対応しないため、この索引は使われない。',
+      '<b>これが正解。</b>実機で jsonb_ops 索引を drop した状態で確認した通り、? に対応する索引が無いため Parallel Seq Scan にフォールバックする。',
+      'PostgreSQL は問い合わせの実行時に索引を自動作成することはない。索引はあらかじめ CREATE INDEX で作っておく必要がある。',
+      '? は単にキーの存在を調べるだけで、結果が空になる理由は無い。実際には該当する行が返ってくる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>jsonb_path_ops は ? に対応していないため、索引があっても使われません。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="path_opsが?に使えないことを示す図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="12" text-anchor="middle" fill="#1f4a68">jsonb_path_ops: @&gt;, @?, @@ のみ</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="45" font-size="12" text-anchor="middle" fill="#b5401f">? 演算子 → 対応演算子に無い</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">対応表に無い演算子は、索引があっても Seq Scan に戻る</text></svg>'
+          + '<p class="cap">図: 索引の有無だけでなく、演算子クラスが対応する演算子かどうかも確認する必要がある。</p></div>'
+    }
+  },
+  {
+    q: '全 20 万行が一致する ? \'reporter_meta\' クエリに jsonb_ops 索引を使わせた実測結果として正しいものは？',
+    opts: [
+      '索引ありの方が常に速く、Seq Scan の何倍も速かった',
+      '索引ありと索引無しはまったく同じ実行時間だった',
+      'EXPLAIN (ANALYZE, BUFFERS) で見ると索引使用時は Bitmap Heap Scan ではなく Index Scan になり、その分 Seq Scan より速くなった',
+      '索引ありの方が遅く、Seq Scan の 18.7 ms に対し索引使用時は 35.9 ms だった',
+      'この遅さは統計情報 (ANALYZE) が古いことが原因であり、ANALYZE をやり直せば索引の方が確実に速くなる'
+    ],
+    ans: 3,
+    exps: [
+      '実測はその逆で、この 100 % 一致するクエリでは索引ありの方が遅かった。索引は常に速くなるという思い込みを狙った選択肢。',
+      '18.7 ms と 35.9 ms という異なる実行時間が実測されており、同じではない。',
+      '違う。選択度がほぼ 100 % の GIN 索引の利用は Bitmap Heap Scan の形になり、単純な Index Scan にはならない。実測でもこの形のまま Seq Scan より遅かった。',
+      '<b>これが正解。</b>全行が一致する (選択度 100 %) クエリでは、索引で絞ってもヒープを読む量が減らず、Bitmap Index Scan の分だけ余計なコストが乗って Seq Scan より遅くなった。',
+      '違う。この遅さは統計の古さが原因ではなく、ほぼ全行が一致する (選択度 100 % 近い) クエリでは GIN 索引を経由してもヒープを読む行数が減らないという構造的な理由による。ANALYZE をやり直しても索引を使う形自体が不利なままである。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>選択度が低い (ほぼ全行が一致する) 条件では、索引はむしろ overhead になります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="選択度と索引の効果の関係を示す図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="140" y="45" font-size="12" text-anchor="middle" fill="#0f5132">Seq Scan: 18.7 ms</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="420" y="45" font-size="12" text-anchor="middle" fill="#b5401f">Index Scan: 35.9 ms (一致率 100%)</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">索引は選択度が低いときにこそ効果がある</text></svg>'
+          + '<p class="cap">図: 一致率が高いクエリでは、索引を経由する分のコストが上乗せされて逆に遅くなることがある。</p></div>'
+    }
+  },
+  {
+    q: 'severity_score のような数値キーに対して payload->>\'severity_score\' > 9.5 のような範囲検索を速くしたい場合、最も適切な対策は？',
+    opts: [
+      'GIN の jsonb_ops をそのまま使えば範囲検索も自動的に速くなる',
+      'jsonb_path_ops に変えるだけで範囲検索が可能になる',
+      '範囲検索は jsonb 型では原理的に不可能なので諦めるしかない',
+      'GIN 索引を 2 つ重ねて作れば範囲検索に対応できるようになる',
+      '値を取り出して numeric に型変換した式に btree の式インデックスを作る'
+    ],
+    ans: 4,
+    exps: [
+      'GIN の jsonb_ops が対応するのは @> や ? のような包含 ・ 存在の判定であり、> や BETWEEN のような大小比較には使えない。',
+      'jsonb_path_ops も @>, @?, @@ にしか対応せず、大小比較の範囲検索には使えない。',
+      '範囲検索自体は不可能ではなく、式を使った btree 索引を作れば実現できる。実機でも 4.8 倍の高速化を確認した。',
+      'GIN 索引をいくつ重ねても、対応する演算子が増えるわけではない。範囲検索には別の索引の種類が必要。',
+      '<b>これが正解。</b>(payload->>\'severity_score\')::numeric という式をそのまま btree の式インデックスにすれば、通常の数値列と同じように範囲検索に使える。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>GIN は包含と存在の判定に強く、btree は大小の順序に強いという役割の違いがあります。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="GINとbtreeの得意分野の違いを示す図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="12" text-anchor="middle" fill="#1f4a68">GIN: @&gt;, ?, @? (包含/存在)</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="45" font-size="12" text-anchor="middle" fill="#0f5132">btree 式索引: &gt;, &lt;, BETWEEN</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">範囲検索をしたいキーは式インデックスで btree に乗せる</text></svg>'
+          + '<p class="cap">図: GIN は包含 ・ 存在判定、btree の式インデックスは大小比較の範囲検索に向く。</p></div>'
+    }
+  },
+  {
+    q: 'severity_score > 9.5 (一致率は 20 万行中 9161 行、約 4.6 %) に式インデックスを作った前後の実測結果として正しいものは？',
+    opts: [
+      '索引無し 19.589 ms に対し索引あり 4.046 ms で、約 4.8 倍速くなった',
+      '索引を作ってもまったく実行時間は変わらなかった',
+      '索引を作るとむしろ 2 倍遅くなった',
+      '索引があるとエラーが発生し、クエリを実行できなかった',
+      '索引無しの方が常に速いので、索引を作る必要は無かった'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実機の EXPLAIN (ANALYZE, BUFFERS) で、索引無しの Parallel Seq Scan が 19.589 ms、式インデックスを使った Bitmap Heap Scan が 4.046 ms で、約 4.8 倍速くなったことを確認した。',
+      '実測では明確に実行時間が短くなっており、変わらないという主張は誤り。',
+      '実測はその逆で、索引を作った後の方が速くなっている。',
+      '索引を作った後もクエリは正常に実行され、正しい行数 (9161 行) が返っている。',
+      '選択度が約 4.6 % と低い (= 絞り込みが効く) ケースなので、索引はむしろ有効だった。全件近くヒットする Q4 のケースとは対照的。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>選択度が低いクエリでは、式インデックスがはっきり効きます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="式インデックスによる高速化を示す図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f" stroke-width="2"/><text x="140" y="45" font-size="12" text-anchor="middle" fill="#b5401f">索引無し: 19.589 ms</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="45" font-size="12" text-anchor="middle" fill="#0f5132">式インデックスあり: 4.046 ms</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">一致率 4.6% の絞り込みでは索引が約 4.8 倍効いた</text></svg>'
+          + '<p class="cap">図: 一致率が低いクエリでは、式インデックスによる高速化がはっきり出る。</p></div>'
+    }
+  },
+  {
+    q: 'custom_fields->>\'source\' の値を github / jira / zendesk / internal の 4 つに限定し、誤字を防ぎたい。jsonb の中の値に直接 FK は張れないので、どう対処するのが適切か？',
+    opts: [
+      'jsonb の値はアプリ側で正規表現チェックするしかなく、データベース側では対処不能である',
+      'GENERATED ALWAYS AS (custom_fields->>\'source\') STORED の生成列を作り、その列に FK を張る',
+      'jsonb 列を json 型に変えるだけで FK が使えるようになる',
+      '通常の (生成列ではない) source 列を追加し、INSERT 時にアプリ側で custom_fields->>\'source\' の値をコピーして入れ、その列に FK を張る',
+      'jsonb 列を text[] 型に変換し、配列の要素に FK を張る'
+    ],
+    ans: 1,
+    exps: [
+      'データベース側でも、生成列を経由すれば FK や CHECK を効かせることができる。アプリ側だけに頼る必要は無い。',
+      '<b>これが正解。</b>実機で確認した通り、STORED 生成列として source を切り出し、その列に event_sources への FK を張ることで、誤字が INSERT 時に拒否されるようになった。',
+      'json 型には @> や FK 制約の対象になる仕組みは無く、型を変えるだけでは解決しない。',
+      '違う。この方法では custom_fields の内容とコピー先の source 列の同期をアプリが保証しなければならず、UPDATE で custom_fields だけ変更されれば簡単にずれる。生成列ならデータベース自身が同期を保証する点が異なる。',
+      '違う。text[] の要素に直接 FK を張ることはできない (配列要素への外部キー制約は存在しない)。型を変えても解決にはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>jsonb の値を生成列として切り出すと、そこに FK や CHECK を張れます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="生成列経由でFKを張る図"><rect x="30" y="20" width="220" height="40" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="140" y="45" font-size="12" text-anchor="middle" fill="#1f4a68">payload-&gt;&gt;'+"'"+'source'+"'"+' (jsonb の中)</text><rect x="310" y="20" width="220" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="420" y="45" font-size="12" text-anchor="middle" fill="#0f5132">source 生成列 → FK</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">生成列に昇格させた瞬間、FK が効くようになる</text></svg>'
+          + '<p class="cap">図: jsonb の値は FK の対象にできないが、生成列に写せば通常の列と同じ制約が使える。</p></div>'
+    }
+  },
+  {
+    q: 'bug_events の payload に対して「正規化すべき兆候」を実機のクエリで確かめる方法として最も適切なものは？',
+    opts: [
+      '行数が 10 万を超えたかどうかだけを確認する',
+      '1 つのキーでも使われていれば、直ちに正規化が必要だと判断する',
+      'jsonb_object_keys でキー構成を行ごとに集計し、ごく少数の形に収束していれば正規化を検討する兆候とする',
+      'jsonb は常に正規化すべきで、使ってよい場面は存在しないと判断する',
+      'キーの数が 5 個を超えたら必ず正規化しなければならないと判断する'
+    ],
+    ans: 2,
+    exps: [
+      '行数の多さと構造が決まっているかどうかは別の軸で、行数だけでは正規化すべきかは判断できない。',
+      '1 つでもキーがあれば正規化が必要という基準は厳しすぎる。形がまだ揺れている段階では jsonb のままでよい。',
+      '<b>これが正解。</b>実機で group by したところ、20 万行すべてが同じキーの組に収束していた。このようにキー構成の種類数を集計するのが、形が決まったかどうかを確認する具体的な方法。',
+      'この回で確認した通り、形が決まっていない間は jsonb が受け皿として機能する。常に正規化すべきという主張は本文の結論と矛盾する。',
+      'キーの数という基準は本質的ではなく、形が揃っているかどうかが判断の軸になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>キーの組を集計し、形の種類数を数えることで正規化の兆候が見えます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="キー構成の収束を確認する図"><rect x="30" y="20" width="500" height="40" rx="6" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="280" y="45" font-size="12" text-anchor="middle" fill="#0f5132">20 万行 → 形は 1 種類だけに収束</text><text x="280" y="90" font-size="12.5" text-anchor="middle" fill="#4a5d54">形の種類数が少ないほど、正規化を検討する理由が強くなる</text></svg>'
+          + '<p class="cap">図: jsonb_object_keys の集計で、実際には形が決まっているかどうかを直接確かめられる。</p></div>'
+    }
+  },
+  {
+    q: 'PostgreSQL 17 以降の JSON_TABLE が担う役割として最も適切なものは？',
+    opts: [
+      'jsonb 列を json 型に変換するためだけの関数である',
+      'jsonb のインデックスを自動的に作成するための関数である',
+      'json 型と jsonb 型の内容を比較するための関数である',
+      'jsonb の配列やネストした構造を、型を指定した行の集合に展開する',
+      'テーブル全体をまとめて JSON 形式でエクスポートするための関数である'
+    ],
+    ans: 3,
+    exps: [
+      '型変換そのものが目的ではなく、構造を行に展開することが JSON_TABLE の役割。',
+      'インデックス作成とは無関係で、JSON_TABLE はあくまで問い合わせ結果を行の集合に変換する機能。',
+      '型同士の比較が目的ではなく、jsonb の中身を取り出して表形式に直すための機能。',
+      '<b>これが正解。</b>実機で custom_fields の labels 配列を NESTED PATH で展開した通り、JSON_TABLE は COLUMNS 句で型を指定しながら、配列やネストした構造を複数行に展開できる。',
+      'テーブル全体のエクスポートではなく、1 つの jsonb 値 (または列) を対象に行へ分解する機能。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>1 つの jsonb の値から、配列の要素数だけ行が生まれます。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="JSON_TABLEによる展開を示す図"><rect x="30" y="20" width="200" height="50" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="130" y="50" font-size="12" text-anchor="middle" fill="#0f5132">1 行: labels=[crash,regression]</text><rect x="320" y="10" width="220" height="35" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="430" y="32" font-size="11.5" text-anchor="middle" fill="#1f4a68">行 1: label=crash</text><rect x="320" y="55" width="220" height="35" rx="6" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="430" y="77" font-size="11.5" text-anchor="middle" fill="#1f4a68">行 2: label=regression</text><text x="280" y="120" font-size="12.5" text-anchor="middle" fill="#4a5d54">NESTED PATH で配列の要素数だけ行が増える</text></svg>'
+          + '<p class="cap">図: JSON_TABLE は 1 件の jsonb から、配列の要素数に応じた複数行を生成する。</p></div>'
+    }
+  },
+  {
+    q: 'この回で確かめた、jsonb を使うかどうかの判断基準として最も適切なまとめは？',
+    opts: [
+      'jsonb は一切使わず、常に正規化されたテーブルだけを使うべきである',
+      'jsonb を使えば、正規化やインデックス設計そのものが一切不要になる',
+      'jsonb は json 型より常に遅いので、使うべきではない',
+      'GIN インデックスを作れば、常に Seq Scan より速くなる',
+      '形が決まらない間は jsonb でよいが、よく絞り込むキーは式インデックス、制約が要るキーは生成列に昇格させる'
+    ],
+    ans: 4,
+    exps: [
+      '形が決まっていない段階では jsonb が実際に役立つ場面があり、本文の custom_fields の例でもその用途を確認した。一切使わないという主張は厳しすぎる。',
+      'GIN や式インデックス、生成列と FK といった設計の工夫は、jsonb を使う場合でも必要であることをこの回で確認した。不要になるという主張は誤り。',
+      'json と jsonb は用途が違うだけで、単純な速さの優劣の話ではない。絞り込みの演算子が使えるかどうかが実務上の分かれ目。',
+      'Q4 で確認した通り、選択度が低い (ほぼ全行が一致する) クエリでは GIN 索引がむしろ Seq Scan より遅くなった。常に速くなるという主張は実測と矛盾する。',
+      '<b>これが正解。</b>形が決まらない間は jsonb の自由さを活かし、絞り込みが増えたキーは式インデックスで索引を効かせ、制約で守りたいキーは生成列 + FK/CHECK で列に昇格させる。これが本文全体を通した判断基準。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>jsonb は固定の答えではなく、形が決まる過程に応じて使い分ける道具です。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="判断基準全体のまとめの図"><rect x="20" y="20" width="160" height="90" rx="8" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/><text x="100" y="50" font-size="11.5" text-anchor="middle" fill="#0f5132">形が決まらない</text><text x="100" y="70" font-size="11.5" text-anchor="middle" fill="#0f5132">→ jsonb</text><rect x="200" y="20" width="160" height="90" rx="8" fill="#fff6e8" stroke="#b5401f" stroke-width="2"/><text x="280" y="50" font-size="11.5" text-anchor="middle" fill="#b5401f">よく絞り込む</text><text x="280" y="70" font-size="11.5" text-anchor="middle" fill="#b5401f">→ 式インデックス</text><rect x="380" y="20" width="160" height="90" rx="8" fill="#e3edf5" stroke="#2f5f8a" stroke-width="2"/><text x="460" y="50" font-size="11.5" text-anchor="middle" fill="#1f4a68">制約が要る</text><text x="460" y="70" font-size="11.5" text-anchor="middle" fill="#1f4a68">→ 生成列 + FK</text></svg>'
+          + '<p class="cap">図: 3 つの基準を段階的に当てはめて、jsonb に留めるか列に昇格させるかを決める。</p></div>'
+    }
+  },
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
