@@ -17,6 +17,9 @@ Published via GitHub Pages: https://littlemex.github.io/explainers/
 | Attention lineage | MHA to GQA/MLA, sparsification (SWA/DSA), and linear/state-space models (Mamba), traced along a release-time family tree | [attention-series-index.html](./attention-series-index.html) |
 | NKI Workshop | Writing high-performance kernels on AWS Trainium — hardware hierarchy, roofline, FlashAttention, tiling, low precision, collectives | [nki-workshop-index.html](./nki-workshop-index.html) |
 | Coding | Algorithms and coding fundamentals — binary search, complexity, DP, graph search — explained then quizzed | [coding-index.html](./coding-index.html) |
+| CS curriculum map | What a CS undergraduate studies in algorithms and theory, laid out by MIT course, with what is used daily in practice and what is mainly for researchers; includes a self-assessment | [coding-cs-map.html](./coding-cs-map.html) |
+| MIT 6.851 Advanced Data Structures | All 22 lectures of Erik Demaine's graduate course (Spring 2021) in ten Japanese pages: temporal, geometric, dynamic optimality, memory hierarchy, hashing, integer, static trees, strings, succinct, dynamic graphs; each with a prerequisite refresher, an interactive demo, real-world uses, and a 10-question quiz | [coding-ads-index.html](./coding-ads-index.html) |
+| LeetCode | 156 LeetCode problems (NeetCode Roadmap and Arai 60), one page each: a Japanese summary of the problem, the idea, a C++ solution, and a step-by-step demo you can run on your own input | [leetcode/index.html](./leetcode/index.html) |
 | Distributed systems | CAP, consistency models, consensus (Raft/Paxos), replication — explained then quizzed | [distsys-index.html](./distsys-index.html) |
 | MLIR | Dialects, progressive lowering, SSA, pattern rewriting — explained then quizzed | [mlir-index.html](./mlir-index.html) |
 | Mathematical statistics | MLE, CLT, Bayesian inference, hypothesis testing — explained then quizzed | [mathstats-index.html](./mathstats-index.html) |
@@ -44,7 +47,7 @@ The one exception is the English series: its pages share `english/lib/fig.css` a
 
 ## Authoring rule: quiz-based explainer series
 
-The Coding, Distributed systems, MLIR, Mathematical statistics, and Information theory series follow a fixed format. Every page in these series MUST:
+The Coding (including the CS curriculum map and MIT 6.851), Distributed systems, MLIR, Mathematical statistics, and Information theory series follow a fixed format. Every page in these series MUST:
 
 1. **Explain first, graphically.** Open with an explanation section that builds intuition for *why* things are true, aimed at a beginner. Use inline SVG figures (not just prose) and typeset math with LaTeX via MathJax (`$...$` inline, `$$...$$` display). Prefer showing the mechanism visually over stating conclusions.
 2. **Then quiz: 10 questions, 5 options each.** After the explanation, present exactly 10 multiple-choice questions, each with 5 options.
@@ -52,6 +55,10 @@ The Coding, Distributed systems, MLIR, Mathematical statistics, and Information 
 4. **Be self-contained.** Single HTML file, inline CSS/JS, MathJax from CDN only. No emoji. Japanese prose. In JS string literals, escape LaTeX backslashes (`'$\\log_2 n$'`).
 
 The reference implementation lives in `_template/QUIZ_TEMPLATE.html` (in the working tree used to author pages) — copy its CSS and the quiz-rendering JS engine verbatim and only fill in the `QUIZ` array and explanation content. This keeps the interaction identical across every series.
+
+## Authoring rule: LeetCode exercise pages
+
+`leetcode/` is an exercise collection, not a concept series, so it does not use the 10-question quiz format. Every page has the same sections: problem (a complete Japanese translation of the original statement, so the page alone is enough to solve it, with a link to the original), idea, a runnable step-by-step demo with the C++ solution beside it and the executing line highlighted, the C++ solution with its complexity, common mistakes, and 2-3 check questions. Pages are generated from per-problem fragments in `littlemex/data-science` (`codings/algo/leetcode/explainer/`) by `build.py`, which inlines the shared runtime so each output file is still self-contained.
 
 ## Publishing
 

@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>幾何データ構造 ― 点を木に埋め込み、二分探索を再利用する</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20; --blue:#3d7dca;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:30px;letter-spacing:.02em;line-height:1.4}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:960px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 14px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  ul,ol{margin:0 0 12px;padding-left:1.4em}
+  li{margin:0 0 6px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .warn{background:var(--ngbg);border:1.5px solid var(--ng);border-radius:10px;
+    padding:14px 16px;margin:14px 0;font-size:14.5px;color:var(--ink)}
+  .warn b{color:var(--ng)}
+  .note{background:#eef6f1;border:1.5px solid var(--g4);border-radius:10px;
+    padding:14px 16px;margin:14px 0;font-size:14.5px}
+  .note b{color:var(--g1)}
+  .prereq{background:#f7fcf9;border:1.5px dashed var(--g3);border-radius:12px;padding:16px 18px;margin:16px 0}
+  .prereq h4{margin:0 0 6px;color:var(--g1);font-size:16px}
+  .prereq + .prereq{margin-top:10px}
+  /* ===== デモ ===== */
+  .demo{background:#f7fcf9;border:1.5px dashed var(--g3);border-radius:12px;padding:16px 18px;margin:16px 0}
+  .demo h4{margin:0 0 4px;color:var(--g1);font-size:16px}
+  .demo .lead{font-size:14px;color:var(--sub);margin:0 0 12px}
+  .ctl{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:14px}
+  .ctl label{display:flex;gap:8px;align-items:center;color:var(--g1);font-weight:700}
+  .ctl input[type=range]{width:170px;accent-color:var(--g2)}
+  .ctl select,.ctl input[type=number]{font-family:inherit;font-size:14px;padding:4px 8px;
+    border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  .ctl .val{font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--ink);font-weight:400;
+    background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 8px;min-width:50px;text-align:right}
+  .btn{font-family:inherit;font-size:14px;font-weight:700;border:1.5px solid var(--g2);background:var(--g2);
+    color:#fff;border-radius:9px;padding:7px 14px;cursor:pointer;transition:.14s}
+  .btn:hover{background:var(--g1);border-color:var(--g1)}
+  .btn.ghost{background:#fff;color:var(--g1)}
+  .btn.ghost:hover{background:#eef6f1;color:var(--g1)}
+  .btn:disabled{opacity:.55;cursor:progress}
+  .out{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin:10px 0 0;font-size:14px}
+  .out b{color:var(--g1)}
+  .take{margin:10px 0 0;font-size:14px;color:var(--ink);background:#eef6f1;border-left:5px solid var(--g2);
+    border-radius:0 8px 8px 0;padding:9px 12px}
+  .take b{color:var(--g1)}
+  .demo svg{display:block;margin:0 auto;max-width:100%;height:auto;background:#fff;border:1px solid var(--line);border-radius:9px}
+  /* ===== 実務 / 出典 ===== */
+  .usecase{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0;background:#fbfdfc}
+  .usecase h4{margin:0 0 6px;color:var(--g1);font-size:15.5px}
+  .usecase .tag{display:inline-block;font-size:12px;font-weight:700;border-radius:6px;padding:2px 8px;margin:0 0 8px}
+  .usecase .tag.real{background:var(--okbg);color:var(--ok)}
+  .usecase .tag.theory{background:#eef1f6;color:#3d5a9c}
+  .usecase a{color:var(--g2)}
+  .srclist{font-size:14px}
+  .srclist li{margin:0 0 8px}
+  .srclist a{color:var(--g2)}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:22px} .ctl input[type=range]{width:130px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">CODING ・ MIT 6.851 ・ L03-L04</p>
+  <h1>幾何データ構造 ― 点を木に埋め込み、二分探索を再利用する</h1>
+  <p>平面上の点在位置から 3 次元範囲探索、動く点まで。鍵は「もう一度二分探索しない」工夫</p>
+</header>
+<main>
+  <a class="back" href="./coding-ads-index.html">← MIT 6.851 シリーズ目次へ</a>
+  <a class="back" href="./coding-index.html">← コーディング基礎 シリーズ目次へ</a>
+  <p class="intro">前回 (L01-L02) はデータ構造に「時間」という次元を追加しました。今回 (L03-L04) は「空間」を扱います。驚くのは、空間の問題を解くのにも前回の時間の技法がそのまま再利用されることです。平面を左から右へ掃くラインスイープは、実は 1 次元の問題を「時間」付きで解く永続的データ構造・レトロアクティブなデータ構造の応用に過ぎません。そこからさらに、$d$ 次元の範囲探索を効率化する<b>レイヤード・レンジツリー</b>と、その一般化である<b>フラクショナルカスケーディング</b>(「同じ二分探索を何度もやらない」ための技法)を学び、最後に「点が時間とともに動く」状況を扱う<b>キネティック・データ構造</b>で再び時間の話に戻ってきます。</p>
+
+  <section>
+    <h2>この回の位置づけ</h2>
+    <p>この 2 回の講義で解く問題は、大きく 3 つです。(1) 平面上の地図のどの面にクリックしたか判定する<b>平面上の点在位置判定</b>、(2) 点の集合から指定した箱(区間の直積)に入る点を調べる<b>直交範囲探索</b>、(3) 点が時間とともに動く状況での近傍探索である<b>キネティック・データ構造</b>です。(1) は前回のラインスイープ(時間化)で、(2) はレンジツリー・フラクショナルカスケーディングで、(3) は前回の「ポテンシャル法による償却解析」がそのまま再び主役になります。</p>
+    <p>前提として、平衡二分探索木をブラックボックスとして使う点と、前回学んだ永続性・レトロアクティブ性の結果をそのまま道具として使う点は L01-L02 (<a href="./coding-ads-01-temporal.html">永続性とレトロアクティブ性</a>) を参照してください。ここではさらに、計算幾何の基本語彙(平面グラフ・面、支配関係)と、新しい平衡木の変種である重み平衡木を補習します。</p>
+    <div class="prereq">
+      <h4>前提の補習 1 ・ 平面グラフと面、支配関係</h4>
+      <p><b>平面グラフ (planar graph)</b> とは、辺が互いに交差しないように平面に描けるグラフのことです。地図の道路網や GUI の要素の境界線がその例で、辺に囲まれた領域を<b>面 (face)</b> と呼びます。平面上の点在位置判定は「クリックした点がどの面に入っているか」を求める問題です。</p>
+      <p><b>支配関係 (dominance)</b> は、点 $q=(q_1,\ldots,q_d)$ が点 $p=(p_1,\ldots,p_d)$ を<b>支配する</b>(言い換えると $p$ が $q$ に<b>支配される</b>)とは、すべての軸について $p_i \le q_i$ が成り立つことです($p$ が $q$ から見て「左下」にある)。「クエリ点から左下方向、無限に広がる箱に $p$ が入っているか」を聞いているのと同じで、これは直交範囲探索のクエリ箱の片側(たとえば $(-\infty,b]$)だけを考えた特別な場合に相当します。L04 の 3 次元範囲探索は、点を「クエリ点 $(b_2,b_3)$ に支配されるかどうか」の判定から組み立てます。</p>
+    </div>
+    <div class="prereq">
+      <h4>前提の補習 2 ・ 重み平衡木 (weight-balanced tree) という発想</h4>
+      <p>これまでに知っているであろう平衡木 (AVL 木・赤黒木) は<b>高さ</b>を基準にバランスを取ります(左右の部分木の高さの差が一定以内)。この講義で新しく登場する<b>重み平衡木 ($BB[\alpha]$ 木)</b> は、高さではなく<b>部分木のサイズ(要素数)</b>を基準にします。節点 $v$ のすべてについて</p>
+      <p style="text-align:center">$\text{size}(\text{left}(v)) \ge \alpha \cdot \text{size}(v), \quad \text{size}(\text{right}(v)) \ge \alpha \cdot \text{size}(v)$</p>
+      <p>を保つという定義で、$\alpha$ は $1/10$ 程度の小さな値を使います。重み平衡は高さ平衡より<b>強い</b>性質で、重み平衡が保たれていれば高さも自動的に $O(\log n)$ に収まります。この性質はこの回の後半、動的なレンジツリーを実現するために使います。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>1. 平面上の点在位置問題 ― まず垂直レイシューティングに還元する</h2>
+    <p><b>平面上の点在位置判定 (planar point location)</b> は、交差のない平面グラフ(地図)が与えられたとき、クエリ点 $(x,y)$ がどの面に入っているかを answer する問題です。静的な版(地図は最初から全部与えられる)と、辺の追加・削除を許す動的な版があります。</p>
+    <p>これと密接に関係するのが<b>垂直レイシューティング (vertical ray shooting)</b> です。クエリ点 $(x,y)$ から垂直に上へ半直線を飛ばし、最初にぶつかる線分を答える問題です。静的な点在位置判定は、各辺について「その辺の下にある面」を事前計算しておけば、垂直レイシューティングに還元できます。動的な場合も同じ還元が使えますが、面の情報を動的に保つために $O(\log n)$ の加算オーバーヘッドが生じます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 220" role="img" aria-label="垂直レイシューティング">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">クエリ点から垂直に飛ばして最初にぶつかる線分を探す</text>
+        <line x1="60" y1="40" x2="240" y2="90" stroke="#0f5132" stroke-width="2.5"/>
+        <line x1="240" y1="90" x2="420" y2="60" stroke="#0f5132" stroke-width="2.5"/>
+        <line x1="100" y1="150" x2="340" y2="170" stroke="#0f5132" stroke-width="2.5"/>
+        <line x1="340" y1="170" x2="560" y2="140" stroke="#0f5132" stroke-width="2.5"/>
+        <circle cx="300" cy="195" r="5" fill="#c0492f"/>
+        <line x1="300" y1="195" x2="300" y2="165" stroke="#c0492f" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#ar3)"/>
+        <defs><marker id="ar3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs>
+        <text x="300" y="210" font-size="11.5" fill="#c0492f" text-anchor="middle">クエリ点 (x,y)</text>
+        <text x="420" y="130" font-size="11.5" fill="#4a5d54">最初にぶつかった線分 = 答え</text>
+      </svg>
+      <p class="cap">図: クエリ点から垂直に半直線を飛ばし、最初に交わる線分を答えるのが垂直レイシューティング</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. ラインスイープ ― 次元を 1 つ落として時間に変換する</h2>
+    <p><b>ラインスイープ (line sweep)</b> は幾何の問題の次元を 1 つ落とす汎用的な技法です。$d$ 次元の問題を、$x_1$ 軸に垂直な $(d-1)$ 次元の「断面」として捉え、その断面を $x_1$ 軸方向に動かしていく(掃く)と考えます。もし $x_1$ 方向に<b>時間のような解釈</b>ができるなら、$(d-1)$ 次元問題を<b>永続的データ構造</b>または<b>完全レトロアクティブなデータ構造</b>で解くことで、$d$ 次元問題が解けます。<b>これこそが L01-L02 の結果がこの講義で再利用される理由</b>です。</p>
+    <p>垂直レイシューティングでは、1 次元の断面問題は「successor クエリ」そのもので、平衡二分探索木で解けます。地図に交差がないという前提から、2 本の線分が「生きている」間に順序が入れ替わることはなく、木が変化するのは線分の左端(挿入)と右端(削除)という離散的な時点だけです。</p>
+    <ul>
+      <li><b>静的な場合</b>: このスイープを<b>部分永続化した平衡二分探索木</b>で実装すれば、垂直レイシューティングのクエリ $(x,y)$ は「$x$ に対応する更新時点のバージョン」で $(x,y)$ を探すだけで答えが出ます。全体の前処理は $O(n\log n)$ (Dobkin–Lipton, 1976)。</li>
+      <li><b>動的な場合</b>: <b>完全レトロアクティブな successor 構造</b>を使うと、動的な垂直レイシューティング(水平線分に対して)が $O(\log n)$ クエリで解けます (Giyora–Kaplan, 2009)。</li>
+    </ul>
+    <div class="fig">
+      <svg viewBox="0 0 760 230" role="img" aria-label="ラインスイープと永続的BSTの対応">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">スイープ線が x 軸を動く = 時間が進む。挿入と削除の離散的な時点だけ木が変わる</text>
+        <line x1="60" y1="60" x2="700" y2="60" stroke="#4a5d54" stroke-width="1.5"/>
+        <text x="710" y="64" font-size="11" fill="#4a5d54">x (= 時間)</text>
+        <line x1="150" y1="40" x2="150" y2="200" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="150" y="30" font-size="10.5" fill="#c0492f" text-anchor="middle">挿入(左端)</text>
+        <line x1="450" y1="40" x2="450" y2="200" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="450" y="30" font-size="10.5" fill="#c0492f" text-anchor="middle">削除(右端)</text>
+        <line x1="150" y1="90" x2="450" y2="90" stroke="#198754" stroke-width="3"/>
+        <line x1="250" y1="130" x2="620" y2="130" stroke="#198754" stroke-width="3"/>
+        <text x="60" y="180" font-size="12" fill="#0f5132">永続的 BST のバージョン軸 ↓ (x と同じ目盛り)</text>
+        <rect x="150" y="190" width="300" height="14" fill="#8fd6b4"/>
+        <rect x="250" y="190" width="370" height="14" fill="#43b581"/>
+      </svg>
+      <p class="cap">図: 線分の左端で挿入・右端で削除。これを時間軸として部分永続化 BST に対応させれば、各 x での成功者クエリが垂直レイシューティングになる</p>
+    </div>
+    <div class="note"><b>講義時点の未解決問題。</b>一般の平面グラフで動的な $O(\log n)$ 垂直レイシューティングができるか、垂直に限らない一般方向のレイシューティング(3 次元ならレイトレーシングに直結)が静的に $O(\log n)$ でできるか、は未解決として挙げられています。</div>
+  </section>
+
+  <section>
+    <h2>3. 交点を見つける ― 隣接だけ監視すればいい</h2>
+    <p>ラインスイープは線分どうしの<b>交差検出</b>にも使えます。平衡二分探索木に線分を順序付きで保持し、(1) 左端で挿入、(2) 右端で削除、(3) 2 本の線分が交差したら木の中での順序を交換、という更新を行います。</p>
+    <p>鍵となる観察は、<b>次に起きる交差は、必ず木の中で現在隣接している 2 本の線分の間で起きる</b>ということです。遠く離れた(間に別の線分がある)2 本は、先にその間の線分と交差しない限り交差できません。そこで各線分について「次に自分の後続と交差する時刻」を記録し、各内部節点に「自分の部分木内で最も早い交差時刻」を集約しておきます。この補助情報は更新のたびに $O(\log n)$ で保てて、交換自体は $O(1)$ です。全体で $k$ 個の交差があるとき $O(n\log n + k)$ で全交差を見つけられます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 180" role="img" aria-label="隣接線分だけが次の交差候補">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">次の交差は必ず「今隣接している」線分の間で起きる</text>
+        <rect x="40" y="50" width="600" height="30" fill="none" stroke="#d9e5df"/>
+        <text x="110" y="70" font-size="13" fill="#0f5132" text-anchor="middle">線分A</text>
+        <text x="260" y="70" font-size="13" fill="#0f5132" text-anchor="middle">線分B</text>
+        <text x="410" y="70" font-size="13" fill="#0f5132" text-anchor="middle">線分C</text>
+        <text x="560" y="70" font-size="13" fill="#0f5132" text-anchor="middle">線分D</text>
+        <text x="185" y="110" font-size="11.5" fill="#c0492f" text-anchor="middle">A-B間の最早交差を記録</text>
+        <text x="335" y="110" font-size="11.5" fill="#c0492f" text-anchor="middle">B-C間の最早交差を記録</text>
+        <text x="485" y="110" font-size="11.5" fill="#c0492f" text-anchor="middle">C-D間の最早交差を記録</text>
+        <text x="350" y="150" font-size="12" fill="#4a5d54" text-anchor="middle">A と C は間に B があるので、B と交差するまで A・C は交差できない</text>
+      </svg>
+      <p class="cap">図: 木の順序で隣接しているペアだけが次の交差候補。各内部節点が部分木内の最早交差時刻を集約する</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 直交範囲探索と Range Tree</h2>
+    <p><b>直交範囲探索 (orthogonal range searching)</b> は、$d$ 次元の $n$ 個の点から「箱(各軸の区間の直積)に入っている点」を答える問題です。クエリには「存在するか」「何個あるか」「全部(あるいは $k$ 個)列挙せよ」の 3 種類があり、列挙では出力サイズ $k$ が本質的に必要なので $O(\log n + k)$ を目標にします。</p>
+    <p>$d=1$ では点をソートして配列に入れ、区間 $[a,b]$ の predecessor/successor を二分探索で求めれば済みます。しかし配列は高次元に一般化しづらいので、<b>Range Tree</b> という構造を使います(講義ノートによれば Range Tree は 1970 年代後半に Bentley、Lee–Wong、Lueker、Willard など複数の研究者によって独立に発見されたと紹介されています)。データを<b>葉だけ</b>に持つ平衡二分探索木を作り、内部節点には部分木内の min/max(あるいは左部分木の max だけ)を持たせます。$\text{pred}(a)$ と $\text{succ}(b)$ への探索パスが分岐した後は、「$\text{pred}(a)$ への道で右に分岐した節点の右部分木」「$\text{succ}(b)$ への道で左に分岐した節点の左部分木」がまるごと区間に含まれる、という性質を使えば、個数は部分木サイズの合計で $O(\log n)$、列挙は該当する葉を辿って $O(k)$ で済みます。</p>
+    <p>2 次元に拡張するには、$x$ 座標だけで range tree を作り、<b>各 $x$-部分木ごとに、その部分木に含まれる点だけを $y$ 座標でソートした 2 本目の range tree</b> を吊るします。$d$ 次元まで同様に再帰すると、クエリは $O(\log^d n)$、各点は $O(\log^{d-1} n)$ 個の二次構造に現れるので空間は $O(n\log^{d-1} n)$ になります($d=1$ ならソートで $O(n\log n)$、$d>1$ なら前処理も $O(n\log^{d-1} n)$)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 780 262" role="img" aria-label="2次元range treeの構造">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">x の木の各節点から、その部分木を y でソートした木へポインタを張る</text>
+        <circle cx="140" cy="50" r="10" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="90" cy="100" r="10" fill="#8fd6b4" stroke="#0f5132"/><text x="90" y="85" font-size="11" fill="#0f5132" text-anchor="middle">αx</text>
+        <circle cx="190" cy="100" r="10" fill="#198754" stroke="#0f5132"/><text x="190" y="85" font-size="11" fill="#0f5132" text-anchor="middle">βx</text>
+        <circle cx="220" cy="150" r="10" fill="#0f5132" stroke="#0f5132"/><text x="235" y="155" font-size="11" fill="#0f5132">γx (βx の部分木)</text>
+        <line x1="140" y1="60" x2="90" y2="90" stroke="#0f5132" stroke-width="2"/>
+        <line x1="140" y1="60" x2="190" y2="90" stroke="#0f5132" stroke-width="2"/>
+        <line x1="190" y1="110" x2="220" y2="140" stroke="#0f5132" stroke-width="2"/>
+        <line x1="90" y1="100" x2="420" y2="100" stroke="#c0492f" stroke-width="1.3" stroke-dasharray="3,2"/>
+        <line x1="190" y1="100" x2="420" y2="180" stroke="#c0492f" stroke-width="1.3" stroke-dasharray="3,2"/>
+        <line x1="220" y1="150" x2="420" y2="220" stroke="#c0492f" stroke-width="1.3" stroke-dasharray="3,2"/>
+        <rect x="420" y="80" width="140" height="40" fill="#f3f9f6" stroke="#8fd6b4" rx="6"/><text x="490" y="104" font-size="11.5" text-anchor="middle">αy (y でソート)</text>
+        <rect x="420" y="160" width="140" height="40" fill="#f3f9f6" stroke="#198754" rx="6"/><text x="490" y="184" font-size="11.5" text-anchor="middle">βy (y でソート)</text>
+        <rect x="420" y="200" width="140" height="30" fill="#f3f9f6" stroke="#0f5132" rx="6"/><text x="490" y="219" font-size="11" text-anchor="middle">γy (y でソート、βy とは別物)</text>
+        <text x="390" y="250" font-size="11" fill="#4a5d54" text-anchor="middle">γx は βx の部分木だが、γy と βy は(同じ点集合でも)別々の木</text>
+      </svg>
+      <p class="cap">図: x の範囲で絞り込み、各部分木に対応する y でソートされた二次構造にジャンプして y の範囲でさらに絞り込む</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Layered Range Tree ― 探索を 1 本に集約する(フラクショナルカスケーディングの原型)</h2>
+    <p>2 次元の range tree には無駄があります。$x$ の範囲に該当する $O(\log n)$ 個の $x$-部分木それぞれで、<b>ほとんど同じ $y$ 座標の集合に対して個別に二分探索をやり直している</b>のです。これを 1 回にまとめれば $\log n$ 倍の改善になります。</p>
+    <p>やり方はこうです。各 $x$-部分木に対応する二次構造を木ではなく、<b>$y$ でソートした配列</b>に変えます。さらに、$x$ の木の節点 $v$ からその子 $v_r$ に降りるとき、$v$ の配列の各要素に「$v_r$ の配列の中での居場所」への 2 本のポインタ(左の子用・右の子用)を張っておきます。こうすると、ルートの配列で $a_2$ (や $b_2$) の位置を 1 回二分探索すれば、あとは $x$ の木を下る各ステップで<b>そのポインタを辿るだけで $O(1)$</b> で $y$ の位置が分かります。結果、2 次元の全体クエリが $O(\log n + k)$ に、$d$ 次元なら最後の 1 軸にこの技法を使って $O(\log^{d-1}n + k)$ に改善します。</p>
+    <div class="fig">
+      <svg viewBox="0 0 780 220" role="img" aria-label="レイヤード・レンジツリーのカスケードポインタ">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">大きい配列の居場所から、子の配列の居場所へポインタで O(1) ジャンプ</text>
+        <rect x="40" y="50" width="700" height="26" fill="#43b581"/>
+        <text x="390" y="68" font-size="11.5" fill="#fff" text-anchor="middle">ルートの配列(全点を y でソート)</text>
+        <rect x="200" y="110" width="380" height="26" fill="#198754"/>
+        <text x="390" y="128" font-size="11.5" fill="#fff" text-anchor="middle">子の配列(部分木の点だけ、y でソート)</text>
+        <line x1="260" y1="76" x2="230" y2="108" stroke="#c0492f" stroke-width="2" marker-end="url(#ar4)"/>
+        <line x1="420" y1="76" x2="470" y2="108" stroke="#c0492f" stroke-width="2" marker-end="url(#ar4)"/>
+        <defs><marker id="ar4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0492f"/></marker></defs>
+        <text x="390" y="170" font-size="12" fill="#4a5d54" text-anchor="middle">各要素は子の配列への 2 本のポインタを持つ(無ければ successor へ)</text>
+        <text x="390" y="195" font-size="12" fill="#0f5132" text-anchor="middle">ルートで 1 回だけ O(log n) 二分探索、以降は O(1) ジャンプの繰り返し</text>
+      </svg>
+      <p class="cap">図: ルートの配列で 1 回二分探索すれば、各子の配列の居場所はポインタを辿るだけで O(1) で分かる</p>
+    </div>
+    <div class="note"><b>さらに知られている結果。</b>静的な場合、空間を $O(n(\log^{d-1}n)/\log\log n)$ に落として同じ $O(\log^{d-1}n)$ クエリを達成できる(Chazelle)。$d>2$ では $O(n\log^d n)$ 空間で $O(\log^{d-2}n)$ クエリ(Chazelle–Guibas)、さらに $O(n\log^{d+1-\varepsilon}n)$ 空間に改善され、これがクエリ時間について最適と推測されています(Alstrup–Brodal–Rauhe, 2000)。箱の一部が無限大まで伸びる場合や、三角形・単体のような非直交のクエリ形状にも拡張があります。</div>
+  </section>
+
+  <section>
+    <h2>6. 動的な点集合 ― 重み平衡木でタダで動的化する</h2>
+    <p>ここまでは静的な点集合を前提にしていました。実は $O(n\log^{d-1}n)$ の空間・前処理があれば、<b>重み平衡木 ($BB[\alpha]$ 木)</b> を使うだけで、追加のコストなしに動的化できます。</p>
+    <p>重み平衡木のポイントは「<b>親から子への一方向のポインタしか持たない</b>」ことです(子から親への情報は必要ない)。だから、ある部分木が不均衡になったら<b>その部分木だけを丸ごと壊して完全に平衡な形で再構築</b>してよい、という自由度があります。節点 $v$ の部分木を完全平衡に再構築した直後は $\text{size}(\text{left}(v)) = k/2$ ($k$ は部分木のサイズ)です。$\alpha<1/2$ なので、これが不均衡 ($\text{size}(\text{left}(v)) < \alpha k$) になるには $\Theta(k)$ 回の更新が必要です。つまり、再構築の $O(k)$ のコストを、その直前に起きた $\Theta(k)$ 回の更新に「分割して課金」できます。</p>
+    <p>どの更新も、根からその葉までの経路上にある $O(\log n)$ 個の部分木すべてに影響を与える可能性があるので、償却コストは更新 1 回あたり $O(\log n)$ になります。これをレイヤード・レンジツリーに適用すると、<b>更新は償却 $O(\log^d n)$、クエリは変わらず $O(\log^{d-1}n)$</b> という結果が得られます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 190" role="img" aria-label="重み平衡木の再構築課金">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">不均衡になった部分木だけを壊して再構築し、その手間を更新回数に課金する</text>
+        <circle cx="140" cy="60" r="12" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="90" cy="110" r="10" fill="#8fd6b4" stroke="#0f5132"/><text x="90" y="135" font-size="10.5" fill="#4a5d54" text-anchor="middle">size k/2</text>
+        <circle cx="190" cy="110" r="10" fill="#8fd6b4" stroke="#0f5132"/><text x="190" y="135" font-size="10.5" fill="#4a5d54" text-anchor="middle">size k/2</text>
+        <line x1="140" y1="72" x2="90" y2="100" stroke="#0f5132" stroke-width="2"/>
+        <line x1="140" y1="72" x2="190" y2="100" stroke="#0f5132" stroke-width="2"/>
+        <text x="140" y="45" font-size="11" fill="#0f5132" text-anchor="middle">再構築直後: ちょうど半分</text>
+        <text x="420" y="60" font-size="12" fill="#c0492f">Θ(k) 回の更新を経て左が小さくなり α·k を割る</text>
+        <circle cx="420" cy="100" r="12" fill="#43b581" stroke="#c0492f" stroke-width="2"/>
+        <circle cx="380" cy="150" r="7" fill="#fbeeea" stroke="#c0492f"/>
+        <circle cx="460" cy="150" r="12" fill="#8fd6b4" stroke="#0f5132"/>
+        <line x1="420" y1="112" x2="380" y2="143" stroke="#c0492f" stroke-width="2"/>
+        <line x1="420" y1="112" x2="460" y2="138" stroke="#0f5132" stroke-width="2"/>
+        <text x="420" y="178" font-size="11" fill="#c0492f" text-anchor="middle">この部分木だけ壊して再構築。コストはこの Θ(k) 回の更新に課金</text>
+      </svg>
+      <p class="cap">図: 子から親への情報が不要なので部分木ごと自由に再構築できる。再構築コストは直前の Θ(k) 回の更新に割り当てられ、1 更新あたり O(log n) の償却コストになる</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. Fractional Cascading ― 1 回の二分探索で済ませる一般手法</h2>
+    <p>前節のレイヤード・レンジツリーの発想を一般化したのが<b>フラクショナルカスケーディング</b> (Chazelle–Guibas, 1986) です。次のおもちゃの問題で考えます。長さ $n$ のソート済みリストが $k$ 本 ($L_1,\ldots,L_k$) あり、ある値 $x$ の successor をすべてのリストで求めたい。素朴には $k$ 回の二分探索で $O(k\log n)$ ですが、フラクショナルカスケーディングなら $O(k+\log n)$ で済みます。</p>
+    <p><b>構成。</b>新しいリスト $L'_1,\ldots,L'_k$ を、$L'_k = L_k$、$i<k$ については「$L_i$ と $L'_{i+1}$ の<b>2 個に 1 個</b>をマージしたもの」として定義します。すると $|L'_i| \le |L_i| + \frac12|L'_{i+1}|$ という再帰関係から、等比級数の和で $|L'_i| \le 2n = O(n)$ が保証されます(無限に積み重なっても定数倍にしか増えない)。各要素には、隣のリストの該当する 2 個の近傍要素へのポインタを持たせます($L_i$ から来た要素なら $L'_{i+1}$ 側の近傍へ、その逆も)。</p>
+    <p><b>クエリ。</b>まず $L'_1$ で $x$ を 1 回二分探索します($O(\log n)$)。それ以降、$L'_i$ での位置から $L'_{i+1}$ での位置を求めるには、ポインタで示された 2 個の近傍要素の間には(マージの作り方から)ちょうど 1 個の中間要素しかないので、<b>その 1 回の比較だけ</b>で $O(1)$ で特定できます。そこから元の $L_i$・$L_{i+1}$ での位置も $O(1)$ で復元できるので、全体で $O(\log n + k)$ になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 780 230" role="img" aria-label="フラクショナルカスケーディングの構成">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">各リストを「次のリストの半分」と混ぜて、ポインタ2本で辿れるようにする</text>
+        <rect x="40" y="50" width="700" height="24" fill="#43b581"/><text x="390" y="67" font-size="11.5" fill="#fff" text-anchor="middle">L'1 = L1 + (L'2 の半分)　|L'1| ≤ 2n</text>
+        <rect x="100" y="100" width="560" height="24" fill="#198754"/><text x="380" y="117" font-size="11.5" fill="#fff" text-anchor="middle">L'2 = L2 + (L'3 の半分)</text>
+        <rect x="160" y="150" width="420" height="24" fill="#0f5132"/><text x="370" y="167" font-size="11.5" fill="#fff" text-anchor="middle">L'3 = L3 (最後のリストはそのまま)</text>
+        <line x1="200" y1="74" x2="180" y2="98" stroke="#c0492f" stroke-width="1.6"/>
+        <line x1="260" y1="74" x2="280" y2="98" stroke="#c0492f" stroke-width="1.6"/>
+        <line x1="300" y1="124" x2="280" y2="148" stroke="#c0492f" stroke-width="1.6"/>
+        <line x1="360" y1="124" x2="380" y2="148" stroke="#c0492f" stroke-width="1.6"/>
+        <text x="390" y="200" font-size="12" fill="#4a5d54" text-anchor="middle">x の位置が分かれば、ポインタ2本の間にある「ただ1つの中間要素」との比較だけで次のリストの位置が分かる</text>
+      </svg>
+      <p class="cap">図: 2 個に 1 個を次のリストへ混ぜ込む(α=1/2)ことで、サイズは等比級数的に O(n) に収まり、1 ステップの比較だけで隣のリストへ進める</p>
+    </div>
+    <p><b>一般化。</b>「2 個に 1 個」を「小さい割合 $\alpha$ を均等に混ぜる」に置き換えれば、単純なリストの鎖だけでなく<b>任意のグラフ</b>上でフラクショナルカスケーディングができます。サイクルがあっても $\alpha$ を十分小さく取れば、各頂点の集合サイズは線形に収まります。一般形は、各頂点が要素の集合を持ち、各辺 $j$ が区間 $[a_j,b_j]$ でラベル付けされ、局所的な入次数が定数で抑えられているグラフ上で、1 つの頂点から木状に到達できる $k$ 個の頂点それぞれで $x \in [a_j,b_j]$ を満たす要素を探すクエリを $O(k\log n)$ から $O(k+\log n)$ に改善します($n$ は頂点集合の最大サイズ)。</p>
+  </section>
+
+  <section>
+    <h2>8. 3 次元直交範囲探索 ― フラクショナルカスケーディングを 2 回使って最後の log を削る</h2>
+    <p>目標は $[a_1,b_1]\times[a_2,b_2]\times[a_3,b_3]$ のクエリを $O(\log n + k)$ 時間・$O(n\log^3 n)$ 空間で解くことです (Chazelle–Guibas, 1986)。4 段階に分けて組み立てます。</p>
+    <p><b>Step 1: $(-\infty,b_2)\times(-\infty,b_3)$ の支配クエリ。</b>各点を $z$ 方向の垂直な半直線(レイ)に変換し、クエリを「高さ $z=b_3$ で、クエリ点の $y=b_2$ の位置から<b>左へ</b>伸びる水平なレイ」と見ます。この水平レイが交差した垂直レイこそが、クエリ範囲に支配される点です($y\le b_2$ かつ $z\le b_3$ の両方を満たす点だけが、左に伸びるレイの高さ $b_3$ に引っかかります)。各垂直レイの下端から左右に水平線を伸ばして「面」の平面分割を作り、各面にぶつかる水平線のうち<b>半分だけ</b>をさらに伸ばして面の次数(隣接する面の数)を抑える、という操作を繰り返します。これはまさにフラクショナルカスケーディングの「半分を次に混ぜる」発想を<b>幾何的な面分割そのものに適用</b>したものです。半分ずつ伸ばすので空間の増加は等比級数で $O(n)$ に収まり(前節と同じ理屈)、$b_3$ を 1 回二分探索すれば、以降は面から面へ $O(1)$ で移動しながら $k$ 個の点を列挙できます。この Step 1 の構成自体は Chazelle の「フィルタリング探索 (filtering search)」という技法によるものです。</p>
+    <p><b>Step 2: $[a_1,b_1]\times(-\infty,b_2)\times(-\infty,b_3)$ を追加。</b>$x$ 座標の range tree を作り、各節点に Step 1 の構造をその部分木の点に対して持たせます。$z$ 座標についてグラフ版のフラクショナルカスケーディングを range tree の階層そのものに適用すると、ルートで $b_3$ を 1 回二分探索するだけで、木を下るたびに $O(1)$ で該当位置が分かるようになります。これは<b>前節のレイヤード・レンジツリーで使った「階層間のカスケードポインタ」と全く同じ発想を、今度は range tree の親子関係に対して使っている</b>点がポイントです。</p>
+    <p><b>Step 3: $[a_1,b_1]\times[a_2,b_2]\times(-\infty,b_3)$ を追加。</b>$y$ 座標について、節点 $v$ が $\text{key}=\max(\text{left}(v))$ を持ち、右部分木に Step 2 の構造、左部分木に<b>逆向き</b>の Step 2 の構造($(a_2,\infty)$ を聞ける版)を持たせます。木を下りながら、$\text{key}(v)<a_2<b_2$ なら右へ、$\text{key}(v)>b_2>a_2$ なら左へ、$a_2\le \text{key}(v)\le b_2$ になったら<b>両方の Step 2 構造を 1 回ずつ呼ぶ</b>だけで済みます。$x$ 座標は range tree で「タダ」で手に入っているので、この技法を $x$ に使う必要はありません。</p>
+    <p><b>Step 4: $z$ 座標にも同じ技法を適用</b>して $[a_1,b_1]\times[a_2,b_2]\times[a_3,b_3]$ が完成します。全体で時間 $O(\log n+k)$、空間 $O(n\log^3 n)$。一般の $d\ge3$ 次元では $O(\log^{d-2}n+k)$ になりますが、Step 1 の構造が 2 次元を超えて一般化できないため、<b>4 次元で同じ技法を使って $O(\log n)$ にすることはできません</b>(Step 2 を 2 次元に拡張すると $O(\log^2 n)$ の range tree を辿る必要が出てしまう)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 780 220" role="img" aria-label="3次元範囲探索Step1のレイスタビング">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">点を垂直レイ (z 方向)に変換し、クエリ点から左へ伸びる水平レイ(高さ b3)でスタビングする(Step 1)</text>
+        <text x="40" y="45" font-size="11" fill="#4a5d54">y軸(左右)</text>
+        <text x="750" y="118" font-size="11" fill="#4a5d54" text-anchor="end">z軸(高さ)</text>
+        <line x1="100" y1="180" x2="100" y2="50" stroke="#0f5132" stroke-width="2"/><circle cx="100" cy="180" r="4" fill="#0f5132"/>
+        <text x="100" y="196" font-size="10.5" fill="#4a5d54" text-anchor="middle">点1</text>
+        <line x1="220" y1="180" x2="220" y2="80" stroke="#0f5132" stroke-width="2"/><circle cx="220" cy="180" r="4" fill="#0f5132"/>
+        <text x="220" y="196" font-size="10.5" fill="#4a5d54" text-anchor="middle">点2</text>
+        <line x1="380" y1="180" x2="380" y2="65" stroke="#8fd6b4" stroke-width="2"/><circle cx="380" cy="180" r="4" fill="#8fd6b4"/>
+        <text x="380" y="196" font-size="10.5" fill="#4a5d54" text-anchor="middle">点3(クエリより右 = y&gt;b2)</text>
+        <line x1="520" y1="180" x2="520" y2="100" stroke="#8fd6b4" stroke-width="2"/><circle cx="520" cy="180" r="4" fill="#8fd6b4"/>
+        <text x="520" y="196" font-size="10.5" fill="#4a5d54" text-anchor="middle">点4(クエリより右)</text>
+        <line x1="40" y1="110" x2="350" y2="110" stroke="#c0492f" stroke-width="2.5" marker-start="url(#arL)"/>
+        <defs><marker id="arL" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#c0492f"/></marker></defs>
+        <circle cx="350" cy="110" r="5" fill="#c0492f"/>
+        <text x="350" y="95" font-size="10.5" fill="#c0492f" text-anchor="middle">クエリ点 (y=b2, z=b3)</text>
+        <text x="45" y="100" font-size="10.5" fill="#c0492f">左へ(y=-∞まで)</text>
+        <circle cx="100" cy="110" r="6" fill="#c0492f"/><circle cx="220" cy="110" r="6" fill="#c0492f"/>
+        <text x="370" y="140" font-size="12" fill="#4a5d54" text-anchor="middle">左へ伸びるレイが交差した垂直レイ(点1,2)だけが「y≤b2 かつ z≤b3」= クエリ範囲に支配される点</text>
+      </svg>
+      <p class="cap">図: 各点を垂直レイ (z 方向)に変換し、クエリを高さ z=b3 でクエリ点から左へ伸びる水平レイのスタビングに言い換える。右側の点 3・4はレイが届かないので、たとえ z≤b3 でも交差しない。面の次数を半分ずつ伸ばして抑えるのがフラクショナルカスケーディングの幾何版</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>9. キネティック・データ構造 ― 「動く」ことを時間イベントとして扱う</h2>
+    <p>ビデオゲームや交通シミュレーションでは、物体ごとに異なる速度で動いていて、任意の時点で近傍探索(predecessor)をしたい、時間を素早く進めたい、物体の軌道を途中で変更したい、という要求があります。これが<b>キネティック・データ構造 (kinetic data structures, Basch–Guibas–Hershberger, 1999)</b> の動機です。操作は <code>advance(t)</code> (現在時刻を $t$ に進める)と <code>change(x, f(t))</code> (物体 $x$ の軌道を変更する)の 2 つです。軌道は<b>アフィン</b> ($f(t)=a+bt$)、<b>有界次数の代数式</b> ($f(t)=\sum a_i t^i$)、あるいは最も一般的な<b>擬代数的</b>(「注目する各命題が真偽を切り替える回数が $O(1)$ 回」というだけの仮定)のいずれかを想定します。</p>
+    <p><b>証明書 (certificate) による設計。</b>(1) 「今」正しいデータ構造を保持する。(2) その正しさが成り立つ条件を<b>証明書</b>(真偽値の命題)として埋め込む。(3) 各証明書が偽になる時刻を $O(1)$ で計算する。(4) その失敗時刻を優先度キューに入れ、<code>advance(t)</code> では失敗する証明書を順番に取り出して直す。評価には 4 つの指標を使います ― <b>応答性 (responsiveness)</b>: 1 回の失敗を直す速さ、<b>局所性 (locality)</b>: 1 つの物体が関わる証明書の数、<b>コンパクト性 (compactness)</b>: 証明書の総数、<b>効率性 (efficiency)</b>: 「本質的に必要な変化」の回数に対する実際のイベント数の比。</p>
+    <h3>例 1: キネティック predecessor(キネティック・ソート)</h3>
+    <p>平衡 BST を保ち、中順巡回で得られる並び $x_1,\ldots,x_n$ に対して証明書 $\{x_i<x_{i+1}\}$ を持ちます。2 本の軌道が交差する時刻を各証明書の失敗時刻とし、失敗したら木の中で 2 要素を交換し、関係する(高々 3 個の)証明書を入れ替えます。並びが完全に逆転するような入力では、すべてのペアが一度は順序を交換するので事象数は $\Theta(n^2)$ になり得ます。<b>効率性 $O(1)$</b>(必要な変化の回数自体が $\Theta(n^2)$ なのでこれが最善)、<b>応答性 $O(\log n)$</b>(BST の更新)、<b>局所性 $O(1)$</b>(1 要素は高々 2 個の証明書に関わる)、<b>コンパクト性 $O(n)$</b>。</p>
+    <h3>例 2: キネティック・ヒープ</h3>
+    <p>ヒープを保ち、証明書は「親が両方の子より小さい」。失敗したら(子が親より小さくなって)<b>ヒープアップ(子を親の位置まで上方へ入れ替えていく操作)</b>で直し、関係する証明書を更新します。応答性 $O(\log n)$、局所性 $O(1)$、コンパクト性 $O(n)$ は predecessor の場合と同様ですが、<b>効率性が $O(\log n)$ になる</b>ことが驚きのポイントです(愚直に見積もると $O(n^2)$ になりそうですが、実際には $O(n\log n)$ イベントしか起きません)。</p>
+    <p>証明は再びポテンシャル法です。$\Phi(t,x)$ を「時刻 $t$ より後に $x$ を追い越す $x$ の子孫の数」、$\Phi(t)=\sum_x \Phi(t,x)$ とすると、これは常に「全節点の祖先・子孫ペアの総数」である $O(n\log n)$ 以下に抑えられます。節点 $y$ が親 $x$ を追い越す事象が起きるたびに $\Phi$ がちょうど 1 以上減ることを(代数的に)示せるので、事象の総数は $O(n\log n)$ を超えられません。<b>L01 で学んだポテンシャル法が、今度は「時間とともに動く」証明書の失敗回数を数えるのに再登場する</b>のが、この講義全体を通した構成の美しさです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 780 190" role="img" aria-label="キネティックpredecessorの証明書交換">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">2本の軌道が交差 = 証明書が失敗 → 木の中で交換し、隣接する証明書を更新</text>
+        <line x1="60" y1="150" x2="700" y2="60" stroke="#198754" stroke-width="2.5"/>
+        <line x1="60" y1="60" x2="700" y2="150" stroke="#43b581" stroke-width="2.5"/>
+        <circle cx="380" cy="105" r="6" fill="#c0492f"/>
+        <text x="380" y="90" font-size="11.5" fill="#c0492f" text-anchor="middle">交差 = 証明書 (xi &lt; xi+1) が失敗</text>
+        <text x="380" y="175" font-size="12" fill="#4a5d54" text-anchor="middle">失敗時刻は O(1) で事前計算済み。優先度キューから順に取り出して処理する</text>
+      </svg>
+      <p class="cap">図: 軌道の交差という「将来のイベント」を証明書の失敗として事前に計算し、優先度キューで管理する</p>
+    </div>
+    <div class="note"><b>他の結果の要約(講義ノートの一覧)。</b>2 次元凸包: 効率 $O(n^{2+\varepsilon})$・下界 $\Omega(n^2)$(3 次元は未解決)。最小包含円: $O(n^3)$ イベント、$O(n^{2+\varepsilon})$ は未解決。$(1+\varepsilon)$ 近似(直径・最小包含円/矩形): $O(1/\varepsilon^{O(1)})$ イベント。ドロネー三角形分割: 効率 $O(1)$ だが証明書変化の総数は $O(n^3)$/$\Omega(n^2)$ しか分かっておらず正確な値は未解決。一般の三角形分割: Steiner 点を許しても $\Omega(n^2)$、$O(n^{2+1/3})$ イベントは既知(擬三角形分割なら $O(n^2)$ を達成)。最小全域木: $O(m^2)$ は易しいが $o(m^2)$ は未解決(平面的など H-マイナーフリーなグラフでは $O(n^{2-1/6})$)。</div>
+  </section>
+
+  <section>
+    <h2>インタラクティブ・デモ ― フラクショナルカスケーディングで「もう一度二分探索しない」</h2>
+    <p>4 本のソート済みリスト $L_1,\ldots,L_4$ があります。値 $x$ を入力して検索すると、$L'_1$ で 1 回だけ本当の二分探索を行い、以降は(構築時に張った)ポインタを $O(1)$ で辿るだけで $L'_2,L'_3,L'_4$ での位置が分かり、そこから元の $L_1,\ldots,L_4$ それぞれでの successor(x 以上の最小値)が得られます。</p>
+    <div class="demo" id="demoFC">
+      <h4>デモ ・ 4 本のリストで successor(x) を同時に求める</h4>
+      <p class="lead">元のリスト $L_1=\{3,9,15,22,31,40,48,55\}$, $L_2=\{2,10,18,25,33,44\}$, $L_3=\{5,12,20,29,38\}$, $L_4=\{7,16,27,36\}$。好きな $x$ で検索してください。</p>
+      <div class="ctl">
+        <label>x = <input type="number" id="fcX" value="24" min="0" max="60" step="1"></label>
+        <button class="btn" id="fcGo">検索</button>
+      </div>
+      <div id="fcSvgWrap"></div>
+      <div class="out" id="fcOut"></div>
+      <p class="take"><b>読み取り。</b>素朴に 4 回別々に二分探索すると約 $4\times\log_2 8 \approx 12$ 回の比較が必要ですが、フラクショナルカスケーディングでは「$L'_1$ での 1 回の二分探索($\log_2 n$ 回)」+「残り 3 回の $O(1)$ ジャンプ」で済みます。デモの下の出力に、実際に使った比較回数を両方式で表示しています。カスケード配列 $L'_i$ のサイズが元のリストの定数倍($\le 2n$)に収まっているからこそ、この仕組み全体の空間が線形で済むことも確認してください。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>実務での出番</h2>
+    <p>多次元の範囲探索は、空間データベースや GIS で確実に実務に出てきます。一方、フラクショナルカスケーディングやキネティック・データ構造は、理論としての価値は高いものの、名前の付いた機能としてそのまま製品に実装されている例は少数です。それぞれ正直に評価します。</p>
+    <div class="usecase">
+      <span class="tag real">実例</span>
+      <h4>R-Tree ― 直交範囲探索の実務版</h4>
+      <p>SQLite の公式ドキュメントは、R-Tree モジュールが「地理座標や矩形のような多次元データに対して、指定した領域に含まれる/重なるエントリを効率的に見つける」ための索引だと説明しています。PostGIS も公式ドキュメントで「GiST の上に実装した R-Tree 索引を使って空間データを索引する」と明記しています。R-Tree は分割規則(バウンディングボックスの重なりで分割)がこの講義の重み平衡木とは異なりますが、「多次元の箱でデータを階層的に絞り込む」という<b>直交範囲探索と同じ問題 family</b>を解いています。CGAL (計算幾何アルゴリズムライブラリ) にも、この講義の <b>Range Tree</b> をそのまま実装した <code>dD Range and Segment Trees</code> パッケージがあります(パッケージ名に Segment Tree も含みますが、これは別の区間データ向けの構造で、この講義で扱った Range Tree とは別物です)。</p>
+      <p><a href="https://www.sqlite.org/rtree.html" target="_blank" rel="noopener">SQLite: R-Tree Module (公式ドキュメント)</a> / <a href="https://postgis.net/docs/using_postgis_dbmanagement.html" target="_blank" rel="noopener">PostGIS: Database Management (公式ドキュメント、R-Tree-over-GiST の記述)</a> / <a href="https://doc.cgal.org/latest/SearchStructures/index.html" target="_blank" rel="noopener">CGAL: dD Range and Segment Trees (公式ドキュメント)</a></p>
+    </div>
+    <div class="usecase">
+      <span class="tag theory">理論寄り</span>
+      <h4>フラクショナルカスケーディング ― 名前の付いた製品機能としては稀</h4>
+      <p>正直なところ、「フラクショナルカスケーディング」という名前のついた機能を製品レベルのライブラリで確認することはできませんでした(CGAL のパッケージ一覧にも専用の実装は見当たりません)。ただし<b>その発想</b> ― 「関連する複数のソート済み構造を、1 回の探索結果が再利用できる形に事前に繋いでおく」 ― は、多階層のインデックス構造を手でチューニングする場面で非公式に使われることがあります。ここは過大評価せず、「アイデアとしては一般的だが、名前の付いた標準機能としては広く実装されていない」と評価します。</p>
+    </div>
+    <div class="usecase">
+      <span class="tag theory">理論寄り(近い発想は実務にある)</span>
+      <h4>キネティック・データ構造 ― 衝突検出・物理シミュレーションに近い発想</h4>
+      <p>証明書 (certificate) が失敗するまで何もしない、という設計思想は、ゲームエンジンや物理シミュレーションの<b>連続的衝突検出 (continuous collision detection, CCD)</b> や、分子動力学の<b>イベント駆動シミュレーション</b>の発想に近いものがあります。ただし、実際のゲーム物理エンジンの多くは、この講義で定義したような厳密な証明書ベースの KDS を実装しているわけではなく、もっと簡易な「次のフレームまで進めてから再チェックする」方式や、保守的な前進(conservative advancement)を使うのが一般的です。「将来の失敗時刻を事前計算して優先度キューで管理する」という KDS の厳密な枠組み自体は、現時点では主に計算幾何・ロボティクスの研究(衝突検出、運動計画)で使われており、汎用ゲームエンジンの標準機能としては確認できませんでした。過大評価しないよう、ここは「発想は近いが、実装としては別物」と評価します。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>出典</h2>
+    <ul class="srclist">
+      <li>講義ノート (scribe notes): <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec3.pdf" target="_blank" rel="noopener">Lecture 3 — Geometric data structures I (PDF)</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec4.pdf" target="_blank" rel="noopener">Lecture 4 — Geometric data structures II, kinetic data structures (PDF)</a></li>
+      <li>講義動画ページ: <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L03.html" target="_blank" rel="noopener">L03</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L04.html" target="_blank" rel="noopener">L04</a>(MIT 6.851, Spring 2021 開講ページ、講師 Erik Demaine)</li>
+      <li>D. Dobkin, R. Lipton, “Multidimensional searching problems”, SIAM J. Comput. 5(2): 181-186, 1976. (静的な垂直レイシューティングの前処理)</li>
+      <li>Y. Giyora, H. Kaplan, “Optimal dynamic vertical ray shooting in rectilinear planar subdivisions”, ACM Trans. Algorithms 5(3), 2009.</li>
+      <li>B. Chazelle, <a href="https://www.cs.princeton.edu/~chazelle/pubs/FractionalCascading1.pdf" target="_blank" rel="noopener">“Fractional Cascading: I. A Data Structuring Technique”</a>, Algorithmica 1(2): 133-162, 1986.</li>
+      <li>B. Chazelle, <a href="https://www.cs.princeton.edu/~chazelle/pubs/FractionalCascading2.pdf" target="_blank" rel="noopener">“Fractional Cascading: II. Applications”</a>, Algorithmica 1(2): 163-191, 1986. (3 次元直交範囲探索もここに含まれる)</li>
+      <li>K. Mehlhorn, S. Näher, “Dynamic Fractional Cascading”, Algorithmica 5(2): 215-241, 1990.</li>
+      <li>B. Chazelle, “Reporting and counting segment intersections”, J. Comput. Syst. Sci. 32(2): 156-182, 1986. (省空間の静的範囲探索)</li>
+      <li>B. Chazelle, “Filtering Search: A New Approach to Query-Answering”, SIAM J. Comput. 15, 1986. (3 次元範囲探索 Step 1 の構成の出典)</li>
+      <li>J. Nievergelt, E. M. Reingold, “Binary search trees of bounded balance”, STOC 1972. ($BB[\alpha]$ 重み平衡木)</li>
+      <li>S. Alstrup, G. S. Brodal, T. Rauhe, “New data structures for orthogonal range searching”, FOCS 2000, pp. 198-207.</li>
+      <li>J. Basch, L. J. Guibas, J. Hershberger, “Data structures for mobile data”, J. Algorithms 31(1): 1-28, 1999. (キネティック・データ構造の基本枠組み)</li>
+      <li>G. D. da Fonseca, C. M. H. de Figueiredo, “Kinetic heap-ordered trees: Tight analysis and improved algorithms”, Information Processing Letters 85(3), 2003. (キネティック・ヒープの効率 $O(n\log n)$)</li>
+      <li>L. J. Guibas, “Kinetic data structures”, 2004 (サーベイ)。</li>
+    </ul>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ===== デモ: フラクショナルカスケーディング ===== */
+(function(){
+  const LISTS = [
+    [3,9,15,22,31,40,48,55],
+    [2,10,18,25,33,44],
+    [5,12,20,29,38],
+    [7,16,27,36]
+  ];
+  const K = LISTS.length;
+
+  function buildCascade(lists){
+    // L'_i = lists[i] を「L'_{i+1} の 2個に1個 (偶数番目)」とマージしたもの。
+    // 各要素には「自分以降で最初に現れるブリッジ(= L'_{i+1} からの出張要素)の、L'_{i+1} 上の位置」を持たせる。
+    const k = lists.length;
+    const Lp = new Array(k);
+    Lp[k-1] = lists[k-1].map((v,idx)=>({val:v, orig:idx, bridge:false}));
+    for(let i=k-2;i>=0;i--){
+      const sampledIdxs = [];
+      for(let j=0;j<Lp[i+1].length;j+=2) sampledIdxs.push(j);
+      const a = lists[i].map((v,idx)=>({val:v, orig:idx, bridge:false, bridgeIdx:-1}));
+      const b = sampledIdxs.map(j=>({val:Lp[i+1][j].val, orig:-1, bridge:true, bridgeIdx:j}));
+      Lp[i] = a.concat(b).sort((x,y)=>x.val-y.val);
+      let nextBridge = Lp[i+1].length; // 「自分以降に最初に現れるブリッジ」が無ければこの番兵値
+      for(let t=Lp[i].length-1;t>=0;t--){
+        if(Lp[i][t].bridge) nextBridge = Lp[i][t].bridgeIdx;
+        Lp[i][t].downBridgeIdx = nextBridge;
+      }
+    }
+    for(let i=0;i<k;i++){
+      for(const e of Lp[i]){
+        let lo=0, hi=lists[i].length;
+        while(lo<hi){ const mid=(lo+hi)>>1; if(lists[i][mid] < e.val) lo=mid+1; else hi=mid; }
+        e.origSucc = lo;
+      }
+    }
+    return Lp;
+  }
+
+  const Lp = buildCascade(LISTS);
+
+  // L'_i での位置 p (= successor(x) の位置) から、L'_{i+1} での位置を O(1) で求める。
+  // ブリッジの位置 q までは O(1) で分かるが、q の直前 (q-1) にちょうど1個だけ存在する
+  // 「サンプリングされなかった要素」との比較が1回だけ必要になる(フラクショナルカスケーディングの核心)。
+  function mapToNext(i, p, x){
+    if(p >= Lp[i].length) return Lp[i+1].length;
+    const q = Lp[i][p].downBridgeIdx;
+    if(q === 0) return 0;
+    if(q >= Lp[i+1].length){
+      const lastIdx = Lp[i+1].length - 1;
+      if(lastIdx>=0 && Lp[i+1][lastIdx].val >= x) return lastIdx;
+      return Lp[i+1].length;
+    }
+    return (Lp[i+1][q-1].val >= x) ? (q-1) : q;
+  }
+
+  function query(x){
+    let lo=0, hi=Lp[0].length, cmp=0;
+    while(lo<hi){ const mid=(lo+hi)>>1; cmp++; if(Lp[0][mid].val < x) lo=mid+1; else hi=mid; }
+    const posList = [lo];
+    for(let i=0;i<K-1;i++){
+      posList.push(mapToNext(i, posList[i], x));
+    }
+    const results = posList.map((idx,i)=>{
+      const elem = Lp[i][idx];
+      const origIdx = elem ? elem.origSucc : LISTS[i].length;
+      return { cascadeIdx: idx, origIdx, value: origIdx < LISTS[i].length ? LISTS[i][origIdx] : null };
+    });
+    return { posList, results, firstSearchComparisons: cmp };
+  }
+
+  function renderRow(label, arr, highlightIdx, getText){
+    let x = 10;
+    let out = `<text x="2" y="18" font-size="12" fill="#0f5132" font-weight="700">${label}</text>`;
+    const boxes = [];
+    for(let i=0;i<arr.length;i++){
+      const isHi = (i===highlightIdx);
+      boxes.push(`<rect data-i="${i}" x="${x}" y="24" width="38" height="24" rx="5" fill="${isHi?'#43b581':'#eef6f1'}" stroke="${isHi?'#0f5132':'#c7d9d0'}" stroke-width="${isHi?2:1}"/>`+
+        `<text x="${x+19}" y="40" font-size="12" text-anchor="middle" fill="${isHi?'#fff':'#0b2e20'}">${getText(arr[i])}</text>`);
+      x += 44;
+    }
+    return { svg: out + boxes.join(''), width: x+10 };
+  }
+
+  function render(){
+    const x = +document.getElementById('fcX').value;
+    const r = query(x);
+    let svgRows = '';
+    let yoff = 10;
+    const rowH = 56;
+    // L'1..L'4
+    for(let i=0;i<K;i++){
+      const row = renderRow(`L'${i+1} (カスケード配列, サイズ ${Lp[i].length})`, Lp[i], r.posList[i], e=>e.val);
+      svgRows += `<g transform="translate(0,${yoff})">${row.svg}</g>`;
+      yoff += rowH;
+    }
+    yoff += 10;
+    for(let i=0;i<K;i++){
+      const row = renderRow(`L${i+1} (元のリスト)`, LISTS[i], r.results[i].origIdx, v=>v);
+      svgRows += `<g transform="translate(0,${yoff})">${row.svg}</g>`;
+      yoff += rowH;
+    }
+    const maxLen = Math.max(...Lp.map(l=>l.length), ...LISTS.map(l=>l.length));
+    const width = 20 + maxLen*44 + 20;
+    const height = yoff + 10;
+    const svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="フラクショナルカスケーディングの検索経路">${svgRows}</svg>`;
+    document.getElementById('fcSvgWrap').innerHTML = svg;
+
+    const naiveCmp = K * Math.ceil(Math.log2(Math.max(2, Math.max(...LISTS.map(l=>l.length)))));
+    const fcCmp = r.firstSearchComparisons + (K-1);
+    let out = `<b>x = ${x} の successor (x 以上の最小値):</b> `;
+    out += r.results.map((res,i)=> `L${i+1}=${res.value===null?'(なし)':res.value}`).join('　');
+    out += `<br><b>比較回数:</b> フラクショナルカスケーディング ≈ ${fcCmp} 回 ( L'1 の二分探索 ${r.firstSearchComparisons} 回 + O(1) ジャンプ ${K-1} 回) 　/　 素朴な k 回の二分探索 ≈ ${naiveCmp} 回`;
+    document.getElementById('fcOut').innerHTML = out;
+  }
+
+  document.getElementById('fcGo').addEventListener('click', render);
+  document.getElementById('fcX').addEventListener('keydown', (e)=>{ if(e.key==='Enter') render(); });
+  render();
+})();
+</script>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (テンプレ共通)
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'ラインスイープが L01-L02 の結果をそのまま再利用できる理由として最も適切なものはどれか。',
+    opts: [
+      '永続性とレトロアクティブ性は幾何の問題とは無関係だが、たまたま同じ講師が担当しているから',
+      'スイープする軸 ($x_1$) に「時間のような」解釈ができるため、断面の $(d-1)$ 次元問題を永続的・レトロアクティブなデータ構造で解けば $d$ 次元問題が解けるから',
+      'ラインスイープは必ず完全永続化を必要とするから',
+      '平面グラフには交差がないという前提が、レトロアクティブ性の定義そのものだから',
+      '永続性とレトロアクティブ性を使わなくても、ラインスイープは同じ計算量で実現できる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。これは単なる偶然ではなく、講義本文が明示的に「$x_1$ 方向に timelike な解釈ができるなら、永続的・完全レトロアクティブな $(d-1)$ 次元の構造が $d$ 次元の問題を解く」と述べている、構造的な対応関係。',
+      '<b>これが正解。</b>スイープ軸を「時間」とみなせば、断面(1 次元少ない問題)の状態の変化は「更新」に対応する。静的な問題は過去の断面を見ればいいので永続性、動的な問題は過去の断面を書き換えられる必要があるのでレトロアクティブ性が、それぞれ自然に対応する。',
+      '違う。垂直レイシューティングの静的版は<b>部分永続化</b>で十分であり、完全永続化は必須ではない。動的版は完全レトロアクティブ性を使う。',
+      '違う。交差がない前提は「木の構造が離散的な時点でしか変化しない」ことを保証するためのもので、レトロアクティブ性の定義そのものとは別の話。',
+      '違う。永続性・レトロアクティブ性を使わずに同じ計算量を達成する方法は講義では示されておらず、むしろこれらを使うことで $O(\\log n)$ などの良い計算量が得られている。'
+    ],
+    why: {
+      html: '<h4>図で理解する: スイープ軸 = 時間軸</h4><p>断面の変化を「更新」と見れば、永続性・レトロアクティブ性がそのまま使える。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="line sweep as time">'
+          + '<line x1="40" y1="70" x2="520" y2="70" stroke="#4a5d54" stroke-width="2"/>'
+          + '<text x="530" y="74" font-size="11" fill="#4a5d54">x1 (スイープ方向)</text>'
+          + '<text x="280" y="40" font-size="13" fill="#0f5132" text-anchor="middle">x1 = 時間 と見れば…</text>'
+          + '<text x="280" y="100" font-size="12.5" fill="#4a5d54" text-anchor="middle">断面の状態変化 = データ構造の更新 → 永続性・レトロアクティブ性が使える</text>'
+          + '</svg><p class="cap">図: スイープする軸を時間と解釈することが、L01-L02 の技法を再利用できる理由</p></div>'
+    }
+  },
+  {
+    q: '線分交差検出のラインスイープで「次に起きる交差は、必ず木の中で現在隣接している2本の線分の間で起きる」のはなぜか。',
+    opts: [
+      '隣接していない2本の線分は、長さが違うから交差できない',
+      '2本の線分の間に別の線分が挟まっている場合、その間の線分と先に交差しない限り、挟まれた2本が入れ替わる(交差する)ことはできないから',
+      '平衡二分探索木は隣接する要素しか保持できないから',
+      '交差は必ず左端で起きると決まっているから',
+      '木の中での順序は交差とは無関係だから'
+    ],
+    ans: 1,
+    exps: [
+      '違う。線分の長さは交差の可否に直接関係しない。隣接性は「木の中での順序」の話であって、線分の長さの話ではない。',
+      '<b>これが正解。</b>木の中の順序は(その時点での)y座標方向の上下関係を表す。間に別の線分Bが挟まっている線分AとCが順序を交換する(交差する)には、連続性から先にAまたはCがBと交差して順序が変わる必要がある。したがって次に起きる交差は常に現在隣接しているペアの間に限られる。',
+      '違う。平衡二分探索木は任意個の要素を保持できる。ここでの「隣接」は中順巡回での前後関係のことで、木のサイズ制限とは無関係。',
+      '違う。交差は線分の両端の間のどこでも起きうる。左端は挿入が起きる場所であって、交差が起きる場所ではない。',
+      '違う。木の中での順序こそが、次にどの2本が交差しうるかを決める唯一の情報であり、無関係ではない。これがこの技法の中心的な観察。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 間に挟まれた線分が先に動かない限り交差できない</h4><p>連続的に動く線分は、間の線分を飛び越えられない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="adjacent crossing only">'
+          + '<line x1="60" y1="40" x2="500" y2="90" stroke="#0f5132" stroke-width="2"/><text x="60" y="30" font-size="11" fill="#0f5132">A</text>'
+          + '<line x1="60" y1="70" x2="500" y2="70" stroke="#c0492f" stroke-width="2"/><text x="60" y="85" font-size="11" fill="#c0492f">B(間に挟まる)</text>'
+          + '<line x1="60" y1="100" x2="500" y2="40" stroke="#198754" stroke-width="2"/><text x="500" y="35" font-size="11" fill="#198754">C</text>'
+          + '<text x="280" y="120" font-size="12" fill="#4a5d54" text-anchor="middle">A と C が交差するには、先に A-B か B-C が交差して順序が変わる必要がある</text>'
+          + '</svg><p class="cap">図: 間に挟まれた線分を飛び越えて交差することはできない</p></div>'
+    }
+  },
+  {
+    q: '1次元の直交範囲探索(区間 $[a,b]$ に入る点の個数・列挙)が配列と二分探索で解けるのに、なぜ講義では配列ではなく Range Tree を導入するのか。',
+    opts: [
+      '配列は1次元でも計算量が悪いから',
+      '配列には $O(\\log n)$ の二分探索が存在しないから',
+      '配列は1次元ではうまく機能するが、2次元以上に一般化しづらい(各部分木に対応する二次構造を吊るす、という操作が配列では自然にできない)ため、木の形で一般化できる Range Tree を使う',
+      'Range Tree は1次元では使えないから',
+      '配列は要素数が変わると必ず $O(n)$ かかるから'
+    ],
+    ans: 2,
+    exps: [
+      '違う。1次元では配列+二分探索は $O(\\log n + k)$ で十分に良い計算量を達成しており、計算量が悪いわけではない。',
+      '違う。配列に対する二分探索はまさに $O(\\log n)$ で動作する標準的な手法であり、講義本文でも1次元の解法として明示的に使われている。',
+      '<b>これが正解。</b>講義本文が明確に「配列は(高次元に)うまく一般化できない」と述べている。Range Tree は、木の各節点(特に各部分木)に対して再帰的に次の次元の構造を吊るすという操作が自然にできるため、$d$ 次元への拡張に向いている。',
+      '違う。講義では1次元の場合も Range Tree の説明の中で同じ結果が得られることを示しており、1次元で使えないわけではない(ただし1次元では配列で十分、という位置づけ)。',
+      '違う。ここでの配列は検索用の静的なソート済み配列であり、要素数が変わらない限り二分探索は $O(\\log n)$ のまま。$O(n)$ が必ずかかるという説明は誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 配列は吊るせない、木は吊るせる</h4><p>木の部分木には、次の次元用の構造を自然に対応させられる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="array vs tree generalization">'
+          + '<rect x="40" y="40" width="200" height="24" fill="#fbeeea" stroke="#c0492f"/><text x="140" y="57" font-size="11.5" text-anchor="middle">配列: 部分木という概念が無い</text>'
+          + '<circle cx="420" cy="30" r="10" fill="#43b581"/><circle cx="380" cy="70" r="10" fill="#8fd6b4"/><circle cx="460" cy="70" r="10" fill="#8fd6b4"/>'
+          + '<line x1="420" y1="40" x2="380" y2="60" stroke="#0f5132"/><line x1="420" y1="40" x2="460" y2="60" stroke="#0f5132"/>'
+          + '<text x="420" y="100" font-size="11.5" text-anchor="middle" fill="#0f5132">木: 各部分木に次元を吊るせる</text>'
+          + '</svg><p class="cap">図: 木構造なら部分木ごとに次の次元の二次構造を再帰的に対応させられる</p></div>'
+    }
+  },
+  {
+    q: 'レイヤード・レンジツリーが、ふつうの2次元 Range Tree に比べて $\\log n$ 倍速くなる理由として最も正確なものはどれか。',
+    opts: [
+      '二次構造を木ではなく配列にして、$x$ の木を下る際に同じ $y$ 座標の探索を1回の二分探索の結果から $O(1)$ のポインタで引き継ぐから',
+      'データの個数そのものが減るから',
+      '平衡二分探索木より配列の方が常に高速だから',
+      '座標を整数に丸めているから',
+      'メモリのキャッシュ効率が良くなるから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>複数の $x$-部分木でほぼ同じ $y$ 座標の集合に対して個別に二分探索をやり直していた無駄を、配列化+カスケードポインタによって「ルートで1回だけ二分探索し、以降は $O(1)$ で引き継ぐ」形に変えることで $\\log n$ 倍の改善を得る。',
+      '違う。データの個数は変わらない。計算量の改善は探索の<b>やり方</b>を変えたことによるもので、データ量を減らしたわけではない。',
+      '違う。配列が常に平衡木より速いという一般的な事実はなく、ここでの速さの理由は「同じ探索を繰り返さない」というアルゴリズム的な工夫による。',
+      '違う。座標の丸め(近似)はこの技法には関係ない。厳密な値のまま計算量が改善される。',
+      '違う。キャッシュ効率は実装上の副次的な利点になり得るが、講義で説明されている漸近的な $\\log n$ 倍の改善の理由はカスケードポインタによるアルゴリズム的な工夫であり、キャッシュ効率ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 1回の探索結果を使い回す</h4><p>同じ y 座標の集合を何度も二分探索していた無駄を、ポインタの引き継ぎで消す。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="layered range tree speedup">'
+          + '<text x="150" y="30" font-size="12" fill="#c0492f" text-anchor="middle">ふつうの2次元: 各部分木で毎回 O(log n) 二分探索</text>'
+          + '<text x="420" y="30" font-size="12" fill="#0f5132" text-anchor="middle">レイヤード版: 1回だけ O(log n) + 残りは O(1)</text>'
+          + '<rect x="40" y="50" width="220" height="26" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<rect x="320" y="50" width="220" height="26" fill="#eef6f1" stroke="#43b581"/>'
+          + '</svg><p class="cap">図: 探索結果の再利用が log n 倍の改善の正体</p></div>'
+    }
+  },
+  {
+    q: '重み平衡木 ($BB[\\alpha]$ 木) が「不均衡になった部分木を丸ごと再構築する」という荒っぽい戦略で、償却 $O(\\log n)$ の更新コストを達成できる理由は何か。',
+    opts: [
+      '再構築は実際には $O(1)$ でできるから',
+      '部分木を完全平衡に再構築した直後は $\\text{size}(\\text{left})=k/2$ であり、$\\alpha<1/2$ なら不均衡になるまでに $\\Theta(k)$ 回の更新が必要なので、$O(k)$ の再構築コストをその $\\Theta(k)$ 回の更新に課金できるから',
+      '重み平衡木には上向きのポインタ(子から親)があるから再構築が速い',
+      '$\\alpha=1/2$ を使っているから常に完全平衡が保たれる',
+      '更新のたびに毎回ルートから全体を再構築しているから'
+    ],
+    ans: 1,
+    exps: [
+      '違う。部分木のサイズが $k$ なら再構築には $\\Theta(k)$ の実時間がかかる。$O(1)$ というのは誤り。',
+      '<b>これが正解。</b>再構築直後は左右がちょうど半分 ($k/2$) に分かれる。$\\alpha<1/2$ の前提のもとで、これが $\\alpha k$ 未満まで不均衡になるには $\\Theta(k)$ 回の更新の積み重ねが必要であり、再構築の $O(k)$ のコストをこの $\\Theta(k)$ 回の更新に均等に割り振ると、1 更新あたり $O(1)$ の追加コストになる。これが根から葉までの $O(\\log n)$ 個の部分木それぞれで起きるため、合計で償却 $O(\\log n)$ になる。',
+      '違う。講義本文は逆に「<b>子から親へのポインタを持たない</b>からこそ、部分木を自由に壊して再構築できる」と説明している。上向きポインタがあるとむしろ再構築のたびに余分な張り替えが必要になり、自由度が下がる。',
+      '違う。$\\alpha=1/2$ を選ぶと「常に完全平衡でなければならない」という非常に厳しい制約になり、むしろ実用上は小さい $\\alpha$ (例: $1/10$) を使うことで更新時の自由度を確保する、と講義本文で明示されている。',
+      '違う。全体を毎回再構築するなら $O(n)$ かかってしまい、償却 $O(\\log n)$ にはならない。再構築は不均衡になった部分木だけに限定される。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 再構築コストを更新回数に分割して課金</h4><p>Θ(k) 回の更新がないと再構築は起きないので、1回あたりの負担は小さい。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="weight balance amortized">'
+          + '<text x="280" y="30" font-size="12.5" fill="#0f5132" text-anchor="middle">再構築コスト O(k)　を　Θ(k) 回の更新に分割</text>'
+          + '<rect x="60" y="50" width="440" height="20" fill="#43b581"/>'
+          + '<text x="280" y="90" font-size="12" fill="#4a5d54" text-anchor="middle">1 回の更新あたりの負担 = O(k)/Θ(k) = O(1)、これが O(log n) 個の部分木で積み重なる</text>'
+          + '</svg><p class="cap">図: 再構築コストを引き起こした更新の数で割ることで償却コストが一定になる</p></div>'
+    }
+  },
+  {
+    q: 'フラクショナルカスケーディングで、$L_i$ を $L\'_{i+1}$ の「2個に1個」とマージして $L\'_i$ を作るとき、なぜ「全部」ではなく「半分」を混ぜるのか。',
+    opts: [
+      '半分だけ混ぜれば十分な情報量が得られ、かつ $|L\'_i|$ が $O(n)$ に収まる等比級数になるという、情報量と空間の両方を満たすバランスだから',
+      '全部混ぜると計算に時間がかかりすぎるから(空間とは無関係)',
+      '半分だけ混ぜても実は情報が足りず、$O(k\\log n)$ のままになる',
+      '2個に1個という比率には理論的な根拠はなく、慣習的に決まっている',
+      'リストの要素数が常に偶数である必要があるから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>「全部」混ぜると各段でサイズが2倍になり、$k$ 段で $O(2^k n)$ に発散してしまう。「半分」なら $|L\'_i|\\le|L_i|+\\frac12|L\'_{i+1}|$ の再帰が等比級数になり $O(n)$ に収まる。それでも、隣り合う2個のサンプル要素の間には高々1個しか抜けがないので、1回の比較で次のリストの位置を特定できるという情報量は確保される。',
+      '違う。問題は計算時間ではなく<b>空間</b>(サイズ)の爆発。全部混ぜるとサイズが段を追うごとに2倍になり、$k$ 段で指数的に増えてしまう。',
+      '違う。半分というちょうど良い比率のおかげで、2個のサンプル要素の間には抜けが高々1個しかないため、1回の比較で十分な情報が得られ、$O(k+\\log n)$ が成立する。',
+      '違う。「2個に1個」($\\alpha=1/2$)は、一般化の節で説明されている通り、任意の小さい $\\alpha$ に一般化できる。ただし $\\alpha$ を小さくしすぎると(抜ける要素が増えすぎて)1回の比較で特定できなくなるので、適切な比率を選ぶ必要があるという意味で理論的根拠がある。',
+      '違う。要素数の偶奇とは無関係。「2個に1個」は比率の話で、個数の制約ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 多すぎず少なすぎない「半分」</h4><p>全部混ぜると発散し、混ぜなければ情報が足りない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="why half">'
+          + '<text x="130" y="30" font-size="12" fill="#c0492f" text-anchor="middle">全部混ぜる → サイズが段ごとに2倍 → 発散</text>'
+          + '<text x="420" y="30" font-size="12" fill="#c0492f" text-anchor="middle">混ぜない → 1回の比較で特定できない</text>'
+          + '<rect x="40" y="50" width="180" height="22" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<rect x="340" y="50" width="180" height="22" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<rect x="190" y="90" width="180" height="22" fill="#eef6f1" stroke="#43b581"/>'
+          + '<text x="280" y="106" font-size="11.5" text-anchor="middle">半分だけ混ぜる → O(n) に収まり、かつ情報も十分</text>'
+          + '</svg><p class="cap">図: 「半分」は空間(等比級数で収束)と情報量(1回の比較で特定可能)の両方を満たす境界</p></div>'
+    }
+  },
+  {
+    q: '3次元直交範囲探索で、フラクショナルカスケーディングが「2回」使われている箇所の組み合わせとして正しいものはどれか。',
+    opts: [
+      'Step 1 の面分割で半分ずつ線を伸ばす箇所と、Step 2 で range tree の階層を下る際に z 座標の位置を O(1) で引き継ぐ箇所',
+      'Step 3 と Step 4 の2箇所だけ',
+      'x, y, z の3つの座標すべてに同じ回数ずつ使われている',
+      'Step 1 だけで、Step 2〜4 では使われていない',
+      'フラクショナルカスケーディングはこの構成では一度も使われていない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>Step 1 では、面分割を作る際に各頂点から伸びる水平線の「半分」をさらに伸ばして面の次数を抑えるという、幾何的な形でのフラクショナルカスケーディングが使われる。Step 2 では、range tree の各節点から子へ降りる際に z 座標の位置をカスケードポインタで O(1) 引き継ぐという、グラフ版のフラクショナルカスケーディングが使われる。',
+      '違う。Step 3・Step 4 は「節点で $\\max(\\text{left})$ をキーにして木を下り、両脇の Step 2 構造を呼ぶ」という別の技法(逆向き構造との組み合わせ)であり、フラクショナルカスケーディングそのものではない。',
+      '違う。$x$ 座標は range tree で「タダ」で手に入るので特別な処理は不要であり、3つの座標に均等に技法が使われているわけではない。',
+      '違う。Step 2 でも range tree の階層間で z 座標のカスケーディングが明示的に使われている。',
+      '違う。講義本文がまさに「Step 1 はフラクショナルカスケーディングの考え方そのもの」「Step 2 では z 座標についてグラフ形のフラクショナルカスケーディングを使う」と明示している。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 2つの違う舞台で同じ発想が使われる</h4><p>幾何的な面分割(Step1)と、range treeの階層(Step2)、それぞれにフラクショナルカスケーディングの考え方が使われる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="two uses of FC">'
+          + '<text x="140" y="30" font-size="12" fill="#0f5132" text-anchor="middle">Step1: 面の次数を半分ずつ伸ばして抑える</text>'
+          + '<text x="420" y="30" font-size="12" fill="#0f5132" text-anchor="middle">Step2: range tree の階層を O(1) で下る</text>'
+          + '<rect x="40" y="50" width="200" height="22" fill="#eef6f1" stroke="#43b581"/>'
+          + '<rect x="320" y="50" width="200" height="22" fill="#eef6f1" stroke="#43b581"/>'
+          + '<text x="280" y="100" font-size="12" fill="#4a5d54" text-anchor="middle">どちらも「1回探索すれば残りはO(1)」という同じ原理</text>'
+          + '</svg><p class="cap">図: フラクショナルカスケーディングは幾何的な面分割と、木の階層という異なる場面で2回使われる</p></div>'
+    }
+  },
+  {
+    q: 'キネティック・データ構造における「証明書 (certificate)」の役割として最も正確な説明はどれか。',
+    opts: [
+      '証明書はデータ構造の正しさを数学的に証明した文書であり、実行時には使われない',
+      '証明書は「今データ構造が正しい根拠となっている条件」を表す真偽値の命題で、その失敗時刻をあらかじめ計算して優先度キューで管理することで、時計の刻みではなく「状態が本当に変わる瞬間」だけに反応できるようにする',
+      '証明書は物体の現在位置を記録するためだけのものである',
+      '証明書はキネティック・データ構造では使われず、advance(t) は毎回全データを再計算する',
+      '証明書の数が多いほど効率性 (efficiency) が良くなる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。証明書は実行時に使われる真偽値の命題であり、実際にそれが偽になる(失敗する)時刻を計算して優先度キューに入れ、advance(t) のたびにチェックされる、動的な仕組みの一部。',
+      '<b>これが正解。</b>証明書は「データ構造が正しい根拠となっている条件」を表し、その失敗時刻を $O(1)$ で事前計算して優先度キューに入れておくことで、$\\text{advance}(t)$ は「何も起きていない区間」を飛ばして、証明書が実際に失敗する瞬間だけを処理できる。これが一定の時間刻みでチェックするより効率的な理由。',
+      '違う。物体の位置や軌道 $f(t)$ 自体は別に保持されており、証明書はその軌道から導かれる「関係」(例: $x_i<x_{i+1}$)についての命題。',
+      '違う。証明書こそがキネティック・データ構造の中心的な仕組みであり、$\\text{advance}(t)$ は証明書の失敗を順に処理することで実装される。全データの再計算は避けるのがこの設計の目的。',
+      '違う。証明書の数は<b>コンパクト性</b>という別の指標であり、多いこと自体は良い性質ではない。効率性は「本質的に必要な変化の回数」に対する比で測られる別の指標。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 「今は正しい」を支える条件が壊れた瞬間だけ動く</h4><p>証明書の失敗時刻を先に計算しておき、優先度キューで管理する。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="certificate concept">'
+          + '<line x1="40" y1="60" x2="520" y2="60" stroke="#4a5d54" stroke-width="2"/>'
+          + '<circle cx="180" cy="60" r="6" fill="#c0492f"/><text x="180" y="45" font-size="11" fill="#c0492f" text-anchor="middle">証明書1失敗</text>'
+          + '<circle cx="360" cy="60" r="6" fill="#c0492f"/><text x="360" y="45" font-size="11" fill="#c0492f" text-anchor="middle">証明書2失敗</text>'
+          + '<text x="280" y="95" font-size="12" fill="#0f5132" text-anchor="middle">何も起きない区間は飛ばし、失敗の瞬間だけ処理する</text>'
+          + '</svg><p class="cap">図: 証明書の失敗時刻を優先度キューで管理し、必要な瞬間だけ処理する</p></div>'
+    }
+  },
+  {
+    q: 'キネティック・ヒープの効率性が $O(n\\log n)$ であることの証明で使われるポテンシャル関数 $\\Phi(t)$ の役割として正しい説明はどれか。',
+    opts: [
+      '$\\Phi(t)$ はヒープの高さを表し、常に $O(\\log n)$ である',
+      '$\\Phi(t,x)$ を「時刻 $t$ より後に $x$ を追い越す $x$ の子孫の数」とし、$\\Phi(t)=\\sum_x\\Phi(t,x)$ は常に $O(n\\log n)$ で抑えられ、かつ1回の証明書失敗ごとに $\\Phi$ が1以上減ることを示すことで、失敗の総回数が $O(n\\log n)$ を超えないことを証明する',
+      '$\\Phi(t)$ は現在の証明書の総数そのものである',
+      '$\\Phi(t)$ はキネティック predecessor の解析には使われるが、キネティック・ヒープでは使われない',
+      '$\\Phi(t)$ は時刻とともに単調に増加する'
+    ],
+    ans: 1,
+    exps: [
+      '違う。$\\Phi(t)$ はヒープの高さではなく、「将来追い越しが起きる子孫・祖先ペアの数」を数える量であり、ヒープの高さの話とは別の指標。',
+      '<b>これが正解。</b>$\\Phi(t,x)$ は $x$ を将来追い越す子孫の数で、全節点についての合計 $\\Phi(t)$ は祖先・子孫ペアの総数 $O(n\\log n)$ で常に抑えられる。1回の追い越し(証明書失敗)が起きるたびに $\\Phi$ が少なくとも1減ることを(代数的に)示せるので、失敗の総回数は $\\Phi$ の初期値を超えられず、$O(n\\log n)$ に収まる。これはL01の部分永続化で使ったポテンシャル法と同じ発想の応用。',
+      '違う。証明書の総数(コンパクト性)は別の指標で $O(n)$ であり、$\\Phi(t)$ とは異なる定義の量。',
+      '違う。むしろ講義ノートはキネティック・ヒープの効率性 $O(n\\log n)$ を示すために、まさにこの $\\Phi(t)$ というポテンシャル関数を導入して議論している。',
+      '違う。$\\Phi(t)$ は追い越しが起きるたびに減少することが証明の核心であり、単調増加ではなく単調に減少していく(非負のまま)量として使われる。'
+    ],
+    why: {
+      html: '<h4>図で理解する: L01のポテンシャル法が再び主役になる</h4><p>満杯→空の落差ではなく、追い越しの残り回数が減っていく形で使われる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="kinetic heap potential">'
+          + '<line x1="40" y1="90" x2="520" y2="90" stroke="#d9e5df" stroke-width="2"/>'
+          + '<path d="M40,30 L160,45 L280,55 L400,62 L520,66" stroke="#0f5132" stroke-width="2.5" fill="none"/>'
+          + '<text x="280" y="20" font-size="12" fill="#0f5132" text-anchor="middle">Φ(t) は O(n log n) から始まり、追い越しごとに1以上減る</text>'
+          + '<text x="280" y="105" font-size="12" fill="#4a5d54" text-anchor="middle">減り続けて0に届く前に止まる → 事象の総数は O(n log n) を超えない</text>'
+          + '</svg><p class="cap">図: ポテンシャル関数の単調な減少が、事象の総数の上限を保証する(L01のポテンシャル法と同じ論法)</p></div>'
+    }
+  },
+  {
+    q: 'キネティック predecessor(ソート)の事象数が最悪 $\\Theta(n^2)$ になり得るのに、これでも「効率性 $O(1)$」とされる理由は何か。',
+    opts: [
+      '事象の総数が実際には $O(n)$ だから',
+      '並びが完全に逆転するような入力では、どのペアも必ず一度は順序を交換する必要があり、$\\binom{n}{2}=\\Theta(n^2)$ という事象数そのものが「本質的に必要な変化の回数」であるため、実際のイベント数との比が $O(1)$ になるから',
+      'キネティック predecessor では証明書を使わないから',
+      '効率性は常に $O(1)$ であることが保証される指標だから',
+      'ヒープを使っているからキネティック・ヒープと同じ結果になる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。並びが完全に逆転する入力では事象数は $\\Theta(n^2)$ になり得ることが講義本文で明示されている。$O(n)$ という評価は誤り。',
+      '<b>これが正解。</b>効率性は「本質的に必要な変化の回数」に対する実際のイベント数の<b>比</b>で測る指標。並び順を常に正しく維持する必要がある以上、全ペアが順序を変える入力では $\\Theta(n^2)$ 回の変化自体が避けられない(本質的に必要)。実際のイベント数もちょうど $\\Theta(n^2)$ なので、比は $O(1)$ になる。',
+      '違う。キネティック predecessor も $\\{x_i<x_{i+1}\\}$ という証明書を明示的に使っている構成である。',
+      '違う。効率性は問題ごとに異なり、キネティック・ヒープでは $O(\\log n)$ になるなど、$O(1)$ が常に保証される指標ではない。',
+      '違う。キネティック predecessor は BST を使い、ヒープを使うのはキネティック・ヒープという別の例。両者の効率性の値($O(1)$ と $O(\\log n)$)も異なる。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 「本質的に必要」なら比は1</h4><p>避けられない変化の回数と実際のイベント数が一致すれば効率性はO(1)。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="efficiency O(1)">'
+          + '<text x="280" y="30" font-size="12.5" fill="#0f5132" text-anchor="middle">効率性 = 実際のイベント数 ÷ 本質的に必要な変化の回数</text>'
+          + '<rect x="100" y="50" width="150" height="24" fill="#43b581"/><text x="175" y="67" font-size="11.5" fill="#fff" text-anchor="middle">実際: Θ(n²)</text>'
+          + '<rect x="320" y="50" width="150" height="24" fill="#43b581"/><text x="395" y="67" font-size="11.5" fill="#fff" text-anchor="middle">必要: Θ(n²)</text>'
+          + '<text x="280" y="100" font-size="12" fill="#4a5d54" text-anchor="middle">両者が一致するので比は O(1)(=効率性が良い、という意味ではなく「無駄がない」という意味)</text>'
+          + '</svg><p class="cap">図: 効率性は絶対的な速さではなく「無駄なイベントを起こしていないか」を測る指標</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

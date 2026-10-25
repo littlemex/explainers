@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>動的グラフ ― リンクカット木とオイラー・ツアー木、そして下限 (MIT 6.851 L19-L21)</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20; --blue:#3d7dca;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 14px 20px 0;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  ul,ol{margin:0 0 12px;padding-left:1.4em}
+  li{margin:0 0 6px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .warn{background:var(--ngbg);border:1.5px solid var(--ng);border-radius:10px;padding:14px 16px;margin:14px 0;font-size:14.5px;color:var(--ink)}
+  .warn b{color:var(--ng)}
+  .note{background:#eef6f1;border:1.5px solid var(--g4);border-radius:10px;padding:14px 16px;margin:14px 0;font-size:14.5px}
+  .note b{color:var(--g1)}
+  .open{background:#fff7e6;border:1.5px solid #e8b84b;border-radius:10px;padding:12px 14px;margin:10px 0;font-size:14px}
+  .open b{color:#9a6b00}
+  .prereq{background:#f6f3ff;border:1.5px solid #c9bbf0;border-radius:10px;padding:14px 16px;margin:10px 0}
+  .prereq h4{margin:0 0 6px;color:#5a3fb0;font-size:15px}
+  .prereq dt{font-weight:700;color:#5a3fb0;margin-top:8px}
+  .prereq dd{margin:2px 0 0}
+  /* ===== デモ ===== */
+  .demo{background:#f7fcf9;border:1.5px dashed var(--g3);border-radius:12px;padding:16px 18px;margin:16px 0}
+  .demo h4{margin:0 0 4px;color:var(--g1);font-size:16px}
+  .demo .lead{font-size:14px;color:var(--sub);margin:0 0 12px}
+  .ctl{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:14px}
+  .ctl label{display:flex;gap:8px;align-items:center;color:var(--g1);font-weight:700}
+  .ctl select{font-family:inherit;font-size:14px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  .btn{font-family:inherit;font-size:14px;font-weight:700;border:1.5px solid var(--g2);background:var(--g2);
+    color:#fff;border-radius:9px;padding:7px 14px;cursor:pointer;transition:.14s}
+  .btn:hover{background:var(--g1);border-color:var(--g1)}
+  .btn.ghost{background:#fff;color:var(--g1)}
+  .btn.ghost:hover{background:#eef6f1;color:var(--g1)}
+  .btn:disabled{opacity:.55;cursor:progress}
+  .out{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin:10px 0 0;font-size:14px}
+  .out b{color:var(--g1)}
+  .take{margin:10px 0 0;font-size:14px;color:var(--ink);background:#eef6f1;border-left:5px solid var(--g2);
+    border-radius:0 8px 8px 0;padding:9px 12px}
+  .take b{color:var(--g1)}
+  .steplog{background:#fff;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:10px 0 0;
+    font-size:13.5px;font-family:"SFMono-Regular",Menlo,Consolas,monospace;max-height:220px;overflow:auto}
+  .steplog div{padding:3px 0;border-bottom:1px dashed var(--line)}
+  .steplog div:last-child{border-bottom:none}
+  .lct-node{cursor:pointer}
+  /* ===== クイズ (テンプレ共通) ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">CODING ・ MIT 6.851 ・ L19-L21</p>
+  <h1>動的グラフ ― リンクカット木とオイラー・ツアー木、そして下限</h1>
+  <p>木や一般グラフを「辺が増減していく」状態で連結性を管理する、償却計算量の総合演習</p>
+</header>
+<main>
+  <a class="back" href="./coding-ads-index.html">← MIT 6.851 シリーズ目次へ</a>
+  <a class="back" href="./coding-index.html">← コーディング基礎 シリーズ目次へ</a>
+  <p class="intro">グラフが固定なら「2 点は繋がっているか」は Union-Find や 1 回の深さ優先探索で簡単に答えられます。しかし辺が次々に追加・削除される<b>動的グラフ</b>では話が変わります。この 3 回 (L19・L20・L21) は、木に限定した場合の動的構造 (<b>リンクカット木</b>、<b>オイラー・ツアー木</b>) から始め、一般グラフの<b>完全動的連結性</b>を $O(\log^2 n)$ 償却時間で解く構造に進み、最後に「どれだけ頑張ってもこれより速くはできない」という $\Omega(\log n)$ の下限証明で締めます。この一連の議論は、償却計算量とポテンシャル法という MIT 6.851 全体の中核技法が最も密に使われる回です。</p>
+
+  <section>
+    <h2>この回の位置づけ</h2>
+    <p>解く問題は一貫して「<b>動的連結性 (dynamic connectivity)</b>: 辺・頂点の挿入と削除を許しながら、2 点 $u,v$ が連結かどうかに素早く答える」です。木だけに限定した特殊ケースから始めるのは、木には「根からの経路が一意」という強い構造があり、これを利用した高速な構造 (リンクカット木、オイラー・ツアー木) が作れるからです。一般グラフではこの構造が使えないため、L20 では「辺にレベルを割り振り、レベルごとの森を木構造で管理する」という別の仕掛けが必要になります。L21 はこれらの構造が原理的にどこまで速くできるかという下限を扱います。</p>
+    <p>この 3 回で前提になる CS 理論は、トライ・サフィックス木の回 (L16) よりもずっと重く、特に<b>償却計算量とポテンシャル法</b>が証明の中心に来ます。さらにリンクカット木は内部実装として<b>スプレー木 (splay tree)</b> をそのまま使い、その償却計算量の結果 (アクセス定理) を外から持ち込んで使います。L21 の下限証明は、上限の議論とは違う計算モデル (<b>セルプローブモデル</b>) を明示的に固定する必要があります。これらを以下で補習します。</p>
+
+    <div class="prereq">
+      <h4>前提の補習</h4>
+      <dl>
+        <dt>償却計算量 (amortized complexity, ならし計算量) とポテンシャル法</dt>
+        <dd>
+          ある操作列を $m$ 回行ったときの<b>合計コスト</b>を $m$ で割った「1 回あたりの平均」を<b>償却計算量</b>と呼びます。1 回だけ見ると高くつく操作があっても構いません ― 高くつく回の後に十分安い回が続いて、全体で均されるなら OK、という考え方です。これを厳密に証明する標準的な手法が<b>ポテンシャル法</b>です。データ構造の「状態の良さ」を表す数値 $\Phi$ (ポテンシャル関数) を 1 つ決め、$i$ 回目の操作の<b>償却コスト</b>を
+          $$\hat{c_i} = c_i + \Phi_i - \Phi_{i-1}$$
+          と定義します ($c_i$ は実際のコスト)。すると総償却コストの合計は
+          $$\sum_i \hat{c_i} = \sum_i c_i + \Phi_m - \Phi_0$$
+          となり、$\Phi_0$ が最小で $\Phi_i \ge \Phi_0$ が常に成り立つなら、総償却コストの合計は<b>総実コストの上限</b>を与えます。つまり「償却コストが毎回 $O(\log n)$ である」と示せれば、実際の合計コストも $O(m \log n)$ に収まることが保証されます。この回では $\Phi = \sum_v \log s(v)$ ( $s(v)$ はある部分木のサイズ) という形のポテンシャル関数が繰り返し使われます。</dd>
+        <dt>スプレー木 (splay tree) とアクセス定理</dt>
+        <dd>スプレー木は、アクセスしたノードをそのたびに回転操作で根まで持ち上げる、という単純な規則だけで動く 2 分探索木です。個々のアクセスは最悪 $O(n)$ かかることもありますが、<b>アクセス定理 (access theorem)</b> という結果が、ノード $v$ をスプレーする償却コストを
+          $$\mathrm{cost}(\mathrm{splay}(v)) \le 3(\lg s(u) - \lg s(v)) + 1$$
+          ( $u$ はスプレー前の $v$ の属する木の根、$s(\cdot)$ は部分木サイズ) と抑えることを保証します。リンクカット木はこの結果を「すでに証明済みの事実」として輸入し、内部で使う補助木をすべてスプレー木で実装します。</dd>
+        <dt>セルプローブモデル (cell probe model) と word RAM</dt>
+        <dd>上限 (アルゴリズムが存在する) を示すときは、どんな計算モデルでもだいたい話が通じます。しかし下限 (これより速くはできない) を示すには、計算モデルを正確に固定する必要があります。セルプローブモデルは、データ構造を $w$ ビットの「セル (ワード)」の列とみなし、<b>セルへの読み書きの回数だけ</b>を数えます。読み書きの間でどれだけ複雑な計算をしても無料、というかなり緩いモデルです。計算が無料なので上限を示す道具としては弱すぎますが、「これだけのセル読み書きが絶対に必要」という下限を示すには十分に強い (緩いモデルで下限を示せれば、より厳しい実際のモデルでも下限は成り立つ) という使い方をします。$w = \Theta(\log n)$ と仮定するのが通例です。</dd>
+        <dt>部分木サイズの拡張 (augmentation)</dt>
+        <dd>2 分探索木や木構造のデータ構造に「各ノードの部分木に含まれる要素数」を追加で持たせておき、更新 (回転・分割・結合) のたびに整合性を保つように更新する、というテクニックです。この回のほぼすべての構造 (重みの比較、ポテンシャル関数の計算) がこの拡張に依存しています。</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <h2>1. リンクカット木 (Link-Cut Trees, L19)</h2>
+    <p>リンクカット木 (Sleator & Tarjan) は、根付き木の森を次の 5 操作すべて $O(\log n)$ <b>償却</b>時間で維持します。</p>
+    <ul>
+      <li><code>make_tree()</code> ― 新しい単独の木 (頂点 1 つ) を作る。</li>
+      <li><code>link(v, w)</code> ― $v$ を $w$ の新しい子にする (辺 $(v,w)$ を追加)。前提: $v$ はある木の根で、$v$ と $w$ は別の木。</li>
+      <li><code>cut(v)</code> ― $v$ と親 $\mathrm{parent}(v)$ の間の辺を削除する (前提: $v$ は根でない)。</li>
+      <li><code>find_root(v)</code> ― $v$ が属する木の根を返す (2 頂点が連結かどうかの判定に使える)。</li>
+      <li><code>path_aggregate(v)</code> ― 根から $v$ までの経路上の辺の重みの集約値 (最大・最小・合計など) を返す。</li>
+    </ul>
+    <p>これを支えるのが<b>好ましい経路分解 (preferred-path decomposition)</b> という考え方です。「アクセス」とはこの 5 操作いずれかの引数として渡されたことを指します。各ノード $v$ の<b>好ましい子 (preferred child)</b> は、$v$ の部分木の中で最後にアクセスがあった方向の子 (最後のアクセスが $v$ 自身、またはまだ一度もアクセスがなければ好ましい子は無し)。好ましい子への辺を<b>好ましい辺</b>、好ましい辺が連続する極大な経路を<b>好ましい経路 (preferred path)</b> と呼びます。好ましい経路は木全体のノードをちょうど分割します。</p>
+    <p>リンクカット木は、木 $T$ の各好ましい経路を 1 本の<b>補助木 (auxiliary tree)</b> ― 実体はスプレー木 ― として持ちます。補助木のキーは「表現木 (represented tree, つまり元の木) における深さ」。つまり補助木の中で左側にある要素ほど元の木で根に近く、右側ほど深いということになります。補助木どうしは<b>パス親ポインタ (path-parent pointer)</b> で繋がれ、これは各補助木の根に 1 本だけあり、その好ましい経路の最上位ノードの (表現木における) 親を指します。子へのポインタではなく親へのポインタしか持たない点に注意 ― 好ましくない子は何人いるか分からないからです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 260" role="img" aria-label="好ましい経路分解">
+        <text x="20" y="20" font-size="13" fill="#12211a" font-weight="700">表現木 (左) と、その好ましい経路分解 (右・色のまとまりが1つの補助木)</text>
+        <circle cx="100" cy="50" r="14" fill="#0f5132"/><text x="100" y="55" font-size="11" fill="#fff" text-anchor="middle">A</text>
+        <line x1="100" y1="64" x2="60" y2="100" stroke="#198754" stroke-width="3"/>
+        <line x1="100" y1="64" x2="140" y2="100" stroke="#d9e5df" stroke-width="2"/>
+        <circle cx="60" cy="114" r="14" fill="#198754"/><text x="60" y="119" font-size="11" fill="#fff" text-anchor="middle">B</text>
+        <circle cx="140" cy="114" r="12" fill="#8fd6b4"/><text x="140" y="119" font-size="10" fill="#0b2e20" text-anchor="middle">C</text>
+        <line x1="60" y1="128" x2="40" y2="165" stroke="#198754" stroke-width="3"/>
+        <line x1="60" y1="128" x2="80" y2="165" stroke="#d9e5df" stroke-width="2"/>
+        <circle cx="40" cy="178" r="12" fill="#198754"/><text x="40" y="183" font-size="10" fill="#fff" text-anchor="middle">D</text>
+        <circle cx="80" cy="178" r="12" fill="#8fd6b4"/><text x="80" y="183" font-size="10" fill="#0b2e20" text-anchor="middle">E</text>
+        <text x="20" y="220" font-size="11" fill="#4a5d54">緑の太線 = 好ましい辺。E は最後にアクセスされた側ではないので灰色</text>
+
+        <rect x="300" y="20" width="110" height="130" rx="10" fill="#8fd6b4" opacity=".35"/>
+        <text x="355" y="38" font-size="11" fill="#0f5132" text-anchor="middle">補助木 {A,B,D}</text>
+        <circle cx="355" cy="60" r="10" fill="#0f5132"/><text x="355" y="64" font-size="9" fill="#fff" text-anchor="middle">A</text>
+        <line x1="355" y1="70" x2="355" y2="100" stroke="#0f5132"/>
+        <circle cx="355" cy="110" r="10" fill="#0f5132"/><text x="355" y="114" font-size="9" fill="#fff" text-anchor="middle">B</text>
+        <line x1="355" y1="120" x2="355" y2="135" stroke="#0f5132"/>
+        <circle cx="355" cy="140" r="9" fill="#0f5132"/><text x="355" y="144" font-size="8" fill="#fff" text-anchor="middle">D</text>
+
+        <rect x="460" y="90" width="70" height="40" rx="8" fill="#eef6f1"/>
+        <circle cx="495" cy="110" r="9" fill="#43b581"/><text x="495" y="114" font-size="9" fill="#fff" text-anchor="middle">C</text>
+        <text x="495" y="145" font-size="10" fill="#4a5d54" text-anchor="middle">補助木 {C}</text>
+        <line x1="460" y1="110" x2="410" y2="80" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="470" y="75" font-size="9" fill="#c0492f">path-parent→A</text>
+
+        <rect x="560" y="150" width="70" height="40" rx="8" fill="#eef6f1"/>
+        <circle cx="595" cy="170" r="9" fill="#43b581"/><text x="595" y="174" font-size="9" fill="#fff" text-anchor="middle">E</text>
+        <text x="595" y="205" font-size="10" fill="#4a5d54" text-anchor="middle">補助木 {E}</text>
+        <line x1="560" y1="170" x2="365" y2="140" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="470" y="150" font-size="9" fill="#c0492f">path-parent→D</text>
+      </svg>
+      <p class="cap">図: 好ましい経路 {A,B,D} が 1 本の補助木 (スプレー木、深さでキー付け) になり、好ましくない子 C・E はそれぞれ単独の補助木としてパス親ポインタで繋がる</p>
+    </div>
+    <h3>access(v) ― すべての操作の土台</h3>
+    <p>5 つの操作はすべて <code>access(v)</code> という 1 つの手続きの上に実装されます。<code>access(v)</code> は「$v$ がちょうどアクセスされた」という状態に補助木の森を作り直します。具体的には、根から $v$ までの好ましい経路を新しく作り、その経路上にあった古い好ましい辺はすべて壊してパス親ポインタに置き換えます。</p>
+    <pre><code>ACCESS(v):
+  v をその補助木の中でスプレーし、根に持ち上げる
+  （左部分木 = v より上位のノード、右部分木 = v より下位のノード）
+  v の好ましい子を消す:
+    path-parent(right(v)) ← v
+    right(v) ← null
+  while v が木全体の根に到達していない:
+    w ← path-parent(v)
+    w をその補助木の中でスプレーする
+    w の好ましい子を v に切り替える:
+      path-parent(right(w)) ← w
+      right(w) ← v
+      path-parent(v) ← null
+    v ← w
+  最後に v をもう一度スプレーする（便宜上）</code></pre>
+    <p>補助木のキーが「表現木での深さ」である理由がここで効いてきます。$v$ をスプレーして根に持ち上げれば、$v$ より深い (= $v$ の古い好ましい子の下流) ノードはすべて右部分木に集まっており、それを切り離すだけで「$v$ の好ましい子を消す」操作が済みます。あとは $v$ から根に向かって、パス親ポインタをたどりながら同じ手順 (親をスプレーし、その右部分木を $v$ に置き換える) を繰り返すだけです。ループの反復回数は「好ましい子が切り替わった回数」に等しくなります。</p>
+    <h3>他の操作への帰着</h3>
+    <table>
+      <tr><th>操作</th><th>実装</th></tr>
+      <tr><td><code>find_root(v)</code></td><td><code>access(v)</code> の後、補助木の中で <code>left</code> を根まで降りて最小キー (= 表現木で最も浅いノード) を見つけ、見つけたノードにもう一度 <code>access</code> する</td></tr>
+      <tr><td><code>path_aggregate(v)</code></td><td><code>access(v)</code> の後、$v$ の補助木全体の集約値 (事前に拡張しておく) を読む</td></tr>
+      <tr><td><code>cut(v)</code></td><td><code>access(v)</code> の後、$v$ の左部分木を切り離す (= 根から $v$ の直前までが別の補助木になる)</td></tr>
+      <tr><td><code>link(v, w)</code></td><td>$v,w$ の両方に <code>access</code> してから、$w$ の補助木を $v$ の左部分木にする</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>2. なぜ $O(\log n)$ 償却なのか ― ヘビー・ライト分解と鞄 (banker's) の議論</h2>
+    <p>アクセスのコストは「ループの反復回数 (= 好ましい子の切り替え回数)」×「1 回のスプレーのコスト ($O(\log n)$ 償却、前提の補習のアクセス定理より)」です。素朴には反復回数の上限が分からないので、まずは $O(\log^2 n)$ を示し、その後 $O(\log n)$ に改良します。</p>
+    <h3>$O(\log^2 n)$ 版 ― ヘビー・ライト分解</h3>
+    <p><b>ヘビー・ライト分解 (heavy-light decomposition)</b> は任意の木に使える一般的な技法です。$\mathrm{size}(v)$ を表現木における $v$ の部分木のノード数とし、親 $\mathrm{parent}(v)$ から $v$ への辺を<b>ヘビー (heavy)</b> と呼ぶのは $\mathrm{size}(v) > \tfrac{1}{2}\mathrm{size}(\mathrm{parent}(v))$ のとき、それ以外は<b>ライト (light)</b> です。1 つの親から出るヘビーな辺は<b>高々 1 本</b> (半分を超える部分木が 2 つ同時には存在できない)。ライトな辺を 1 本たどるごとに部分木のサイズは少なくとも半分になるので、根からどのノードまでのライトな辺の数 ("light-depth") も $\le \log_2 n$ です。</p>
+    <div class="fig">
+      <svg viewBox="0 0 600 150" role="img" aria-label="ヘビーライト分解">
+        <text x="20" y="20" font-size="13" fill="#12211a" font-weight="700">ヘビー辺 (太, size &gt; 半分) とライト辺 (細)</text>
+        <circle cx="300" cy="40" r="10" fill="#0f5132"/>
+        <line x1="300" y1="50" x2="220" y2="90" stroke="#0f5132" stroke-width="5"/>
+        <text x="235" y="70" font-size="11" fill="#0f5132">heavy</text>
+        <line x1="300" y1="50" x2="380" y2="90" stroke="#9fb3a9" stroke-width="2"/>
+        <text x="365" y="70" font-size="11" fill="#4a5d54">light</text>
+        <circle cx="220" cy="100" r="9" fill="#198754"/>
+        <circle cx="380" cy="100" r="7" fill="#8fd6b4"/>
+        <text x="300" y="130" font-size="12" fill="#4a5d54" text-anchor="middle">light-depth ≤ log n （ライトな辺を1本通るごとに部分木サイズが半分以下に）</text>
+      </svg>
+      <p class="cap">図: 1 ノードに出るヘビー辺は最大 1 本。ライト辺はたどるたびにサイズが半分以下になる</p>
+    </div>
+    <p>好ましい辺への切り替わりを数えます。好ましい辺がライトな辺なら、それは「根からの経路上にあるライトな辺」なので 1 回の操作で高々 $\log n$ 本しか新しく好ましくなりません。好ましい辺がヘビーな辺の場合は 1 回の操作で何本でも増えうるのですが、全体を通して見ると「ヘビーな辺が好ましくなくなる」イベントの直後には必ず「あるライトな辺が好ましくなる」イベントが起きることが示せます。ヘビーな辺が好ましくなるイベントの総数は、高々 (ヘビーな辺が好ましくなくなるイベントの総数) $+ (n-1)$ で抑えられ、前者は上で見た通り 1 操作あたり $\log n$ 本以下。ゆえに「ヘビーな辺が好ましくなる」イベントも 1 操作あたり償却 $O(\log n)$ 本。合計で 1 回の <code>access</code> は好ましい子の切り替えが償却 $O(\log n)$ 回、1 回の切り替えに $O(\log n)$ のスプレーが乗るので $O(\log^2 n)$ です。</p>
+    <h3>$O(\log n)$ 版 ― ポテンシャル法で切り替え自体を $O(1)$ 償却にする</h3>
+    <p>$\Phi = \sum_v \log s(v)$ というポテンシャル関数を考えます ($s(v)$ は $v$ を含む補助木の森における部分木サイズ)。アクセス定理 (前提の補習) により 1 回のスプレーの償却コストは $3(\log s(u) - \log s(v)) + 1$ ($u$ はスプレー前に $v$ を含んでいた補助木の根)。ここで重要な観察は、<code>access(v)</code> の 1 回のループ反復で $w$ をスプレーする直前、$w$ の補助木の根の親 (もう一段上) を $x$ とすると $s(v) \le s(w) \le s(x)$ が成り立つこと。この不等式の鎖を使うと、ループ全体のコストを足し合わせたとき、中間項がすべて打ち消し合って (telescoping)
+      $$3(\log s(\text{表現木の根}) - \log s(v)) + O(\text{好ましい子の切り替え回数})$$
+      に収まります。$s(\text{根}) = n$ なのでこれは $O(\log n)$。先ほど「切り替え回数は償却 $O(\log n)$」と示したので、2 つの $O(\log n)$ を混同しないよう注意が必要ですが、実はこの打ち消し合いの議論により<b>切り替え 1 回あたりのコストそのものが $O(1)$ 償却</b>に落ちることが示され、全体で $O(\log n)$ 償却 (2 乗ではない) が得られます。<code>cut</code> は木を 2 つに割って $s$ の値を減らすだけなのでポテンシャルは減少、<code>link</code> は $s(v) \le n$ の 1 箇所だけが増えるのでポテンシャルの増加は $\log n$ 以下 ― どちらも $O(\log n)$ 償却の範囲に収まります。</p>
+    <div class="note"><b>要点。</b>$O(\log^2 n)$ と $O(\log n)$ の違いは「好ましい子の切り替え回数そのものが $O(\log n)$ 償却」という荒い議論と、「切り替え 1 回のコストが $O(1)$ 償却」というポテンシャル法による精密な議論の差です。後者は前提の補習のアクセス定理という既存の結果を、telescoping という足し算のテクニックで積み上げ直しただけで得られています。</div>
+  </section>
+
+  <section>
+    <h2>3. オイラー・ツアー木 (Euler-Tour Trees, L20)</h2>
+    <p>リンクカット木は経路 (path) の集約が得意ですが、実装も証明もやや重い構造です。<b>オイラー・ツアー木</b> (Henzinger & King) は、より簡単に書けて解析もしやすい代替で、代わりに<b>部分木 (subtree)</b> の集約が得意という違う得意分野を持ちます (この回ではまさに部分木の情報が必要になります)。</p>
+    <p>考え方はシンプルです。木の<b>オイラー・ツアー</b> ― 根から出発し、すべての辺を往復 2 回ずつ (子に入るときと出るとき) たどって根に戻ってくる経路 ― を、そのまま 1 本の平衡 2 分探索木に、訪問順を保ったまま格納します。木の各ノードは、このツアーで自分が最初に現れた位置と最後に現れた位置へのポインタを持ちます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 170" role="img" aria-label="オイラーツアー">
+        <text x="20" y="20" font-size="13" fill="#12211a" font-weight="700">木 R-A,B ; B-C,F,G ; C-D,E のオイラー・ツアー</text>
+        <circle cx="300" cy="40" r="12" fill="#0f5132"/><text x="300" y="44" font-size="10" fill="#fff" text-anchor="middle">R</text>
+        <circle cx="200" cy="90" r="10" fill="#198754"/><text x="200" y="94" font-size="9" fill="#fff" text-anchor="middle">A</text>
+        <circle cx="400" cy="90" r="10" fill="#198754"/><text x="400" y="94" font-size="9" fill="#fff" text-anchor="middle">B</text>
+        <circle cx="330" cy="140" r="9" fill="#43b581"/><text x="330" y="144" font-size="8" fill="#fff" text-anchor="middle">C</text>
+        <circle cx="400" cy="140" r="9" fill="#43b581"/><text x="400" y="144" font-size="8" fill="#fff" text-anchor="middle">F</text>
+        <circle cx="470" cy="140" r="9" fill="#43b581"/><text x="470" y="144" font-size="8" fill="#fff" text-anchor="middle">G</text>
+        <line x1="300" y1="50" x2="200" y2="82" stroke="#198754" stroke-width="2"/>
+        <line x1="300" y1="50" x2="400" y2="82" stroke="#198754" stroke-width="2"/>
+        <line x1="400" y1="98" x2="330" y2="132" stroke="#198754" stroke-width="2"/>
+        <line x1="400" y1="98" x2="400" y2="132" stroke="#198754" stroke-width="2"/>
+        <line x1="400" y1="98" x2="470" y2="132" stroke="#198754" stroke-width="2"/>
+        <text x="320" y="165" font-size="11" fill="#4a5d54" text-anchor="middle">ツアー列: R A R B C D C E C B F B G B R （D,Eは省略、Cの子想定）</text>
+      </svg>
+      <p class="cap">図: 根に戻ってくるまで各辺を 2 回通る訪問列を、そのまま平衡 BST に入れる。各ノードは「最初の訪問」「最後の訪問」へのポインタを持つ</p>
+    </div>
+    <p>この表現だけで驚くほど多くの操作が「BST の分割・結合」に化けます。</p>
+    <ul>
+      <li><code>FindRoot(v)</code>: 根は訪問列の最初と最後に現れるので、BST の最小値 (または最大値) を返すだけ。</li>
+      <li><code>Cut(v)</code>: $v$ の部分木のツアーは、訪問列の中で $v$ から始まり $v$ で終わる連続した区間になっている。$v$ の最初の訪問の直前と、最後の訪問の直後で BST を分割 (split) すれば、「$v$ より前」「$v$ の部分木」「$v$ より後」の 3 つに分かれる。前後を結合 (concatenate) すれば $v$ の部分木だけを切り離せる。</li>
+      <li><code>Link(u, v)</code>: $u$ の木を $v$ の子として挿入する。$v$ の訪問列を「$v$ への最後の訪問」の直前で分割し、左側の末尾に「$v$ への単独の訪問」+「$u$ のツアー全体」+ 右側、という順で結合し直す。</li>
+      <li><code>Connectivity(v, w)</code>: <code>FindRoot(v) = FindRoot(w)</code> かどうかを見るだけ。</li>
+      <li><code>SubtreeAggregate(v)</code>: $v$ の最初の訪問から最後の訪問までの区間に対する range query。</li>
+    </ul>
+    <p>いずれも平衡 BST への定数回の検索・分割・結合であり、1 回 $O(\log n)$。分岐数 $\Theta(\log n)$ の B 木を平衡 BST の代わりに使えば、検索は $O(\log n / \log\log n)$、更新 (分割・結合は深さ × 分岐数) は $O(\log^2 n / \log\log n)$ まで改善できます。</p>
+    <h3>木に限定した減少的連結性 (decremental connectivity) を $O(1)$ 償却で</h3>
+    <p>「辺は削除されるだけで、最終的に全部の辺が削除される」という<b>減少的 (decremental)</b> な設定に限れば、驚くことに<b>償却 $O(1)$</b> で済みます。手順は L16 のトライの leaf trimming と同じ発想の組み合わせです。</p>
+    <ol>
+      <li>そのままオイラー・ツアー木やリンクカット木を使えば $O(\log n)$ は出る。これをまず基準にする。</li>
+      <li><b>間引き (leaf trimming)。</b>子孫を $\log n$ 個以上持つ最も深いノード群で木を刈り取る。上側 ("top tree") はノード数が $O(n/\log n)$ になるので、これにリンクカット木やオイラー・ツアー木を使っても全クエリ合計で $O(n)$。</li>
+      <li><b>下側 ("bottom tree")。</b>各木は辺が $O(\log n)$ 本しかないので、辺の集合を <b>1 ワードのビットベクトル</b>として持てます。各頂点について「根までの経路に使われる辺」を表すビットベクトルも事前に計算して持たせておく。2 つのビットベクトルの <b>AND</b> を取るだけで「経路がまだ全部残っているか」が $O(1)$ (1 ワード演算) で分かります。</li>
+      <li><b>刈り取った境目をまたぐクエリ。</b>刈り取られた経路を $\log n$ 個ずつの「チャンク」に分け、チャンクごとにビットベクトルを持つ。チャンク内はビットマスクで $O(1)$。チャンクをまたぐ場合は、各チャンクを「全部残っていれば存在する 1 つの辺」とみなして手順 1 の構造 (オイラー・ツアー木やリンクカット木) で処理すれば $O(\log n)$。</li>
+    </ol>
+    <p>すべてのクエリの合計が $O(n)$ で済み、辺は最終的にすべて削除される (= 操作数が $\Theta(n)$ 程度) という仮定のもとで、1 回あたり<b>償却 $O(1)$</b> になります。</p>
+  </section>
+
+  <section>
+    <h2>4. 完全動的連結性を $O(\log^2 n)$ で (Holm, de Lichtenberg, Thorup)</h2>
+    <p>一般グラフで挿入・削除の両方を許す<b>完全動的連結性</b>には、木の構造が使えません。アイデアは「$G$ の<b>全域森</b> (連結成分ごとに 1 本の全域木) をオイラー・ツアー木で持つ」ことですが、素朴にやると<code>insert</code>はできても<code>delete</code>で詰まります。全域森から辺を 1 本消したとき、その 2 点がまだ別の辺で繋がっているかどうかを調べる手段がないからです。</p>
+    <p>そこで、各辺に $0$ から $\log n$ までの<b>レベル</b>を付け (レベルは時間が経つにつれて減ることしかない)、レベル $i$ 以下の辺だけからなる部分グラフ $G_i$ とその全域森 $F_i$ を考えます ($G_{\log n} = G$)。維持する不変条件は 2 つです。</p>
+    <ul>
+      <li><b>不変条件 1。</b>$G_i$ の各連結成分の頂点数は $2^i$ 以下。</li>
+      <li><b>不変条件 2。</b>$F_0 \subseteq F_1 \subseteq \dots \subseteq F_{\log n}$ (レベルを辺の重みとみたときの最小全域森が $F_{\log n}$)。</li>
+    </ul>
+    <p>各 $F_i$ は B 木ベースのオイラー・ツアー木で実装します。</p>
+    <table>
+      <tr><th>操作</th><th>やること</th><th>コスト</th></tr>
+      <tr><td><code>Connected(u,v)</code></td><td>$F_{\log n}$ で <code>find_root(u)=find_root(v)</code> か見る</td><td>$O(\log n/\log\log n)$</td></tr>
+      <tr><td><code>Insert(u,v)</code></td><td>レベルを $\log n$ にして隣接リストへ追加。$u,v$ が $F_{\log n}$ で別の木なら森に加える</td><td>$O(\log n)$</td></tr>
+      <tr><td><code>Delete(u,v)</code></td><td>右の列で詳述</td><td>償却 $O(\log^2 n)$</td></tr>
+    </table>
+    <p><code>Delete(u,v)</code> の核心は「代わりの辺探し」です。隣接リストから消すだけなら簡単ですが、辺 $(u,v)$ が $F_{\log n}$ に入っている場合、$\mathrm{level}(e)$ 以上のすべての $F_i$ から $e$ を消し、不変条件 2 を保ちながら $u,v$ を再接続する代わりの辺を探す必要があります (不変条件 2 により代わりの辺は $\mathrm{level}(e)$ 未満にはできません)。$i = \mathrm{level}(e)$ から $\log n$ まで、次の手順を繰り返します。</p>
+    <ol>
+      <li>$u$ を含む木を $T_u$、$v$ を含む木を $T_v$ とし、小さい方 (一般性を失わず $T_v$) を選ぶ。不変条件 1 より $|T_u|+|T_v| \le 2^i$ なので $|T_v| \le 2^{i-1}$。</li>
+      <li>$T_v$ は小さいので、$T_v$ の中でレベル $i$ の辺を<b>全部レベル $i{-}1$ に格下げしてよい</b> (まだ不変条件 1 を満たす)。</li>
+      <li>$T_v$ 内のレベル $i$ の各辺 $(x,y)$ ($x \in T_v$) を調べる: $y$ が $T_u$ にあれば、それを $F_i,\dots,F_{\log n}$ に加えて探索を打ち切る (代わりの辺が見つかった)。そうでなければ $\mathrm{level}(x,y) \leftarrow i-1$ にして次へ。</li>
+    </ol>
+    <p>この手順を動かすには、オイラー・ツアー木に拡張 (augmentation) が必要です。部分木サイズ (小さい方の木を $O(1)$ で判定するため) と、「この部分木にレベル $i$ の辺に接続する頂点が含まれているか」というフラグです。後者があれば、空の部分木を飛び越えながら successor を辿ることで、$T_v$ 内の次のレベル $i$ の辺を $O(\log n)$ で見つけられます。</p>
+    <p>手順 1・3-i (代わりの辺が見つかって打ち切る分) のコストは合計 $O(\log^2 n)$。手順 3-ii (レベルを下げる分) は「レベルを下げられた回数」に比例しますが、<b>辺のレベルは 0 未満に下がれないので、1 本の辺が格下げされる回数は高々 $\log n$ 回</b>。これが償却 $O(\log^2 n)$ の根拠です。</p>
+  </section>
+
+  <section>
+    <h2>5. 他の動的グラフ問題 ― 分かっていること・分かっていないこと</h2>
+    <p>講義資料は、動的連結性以外の動的グラフ問題についての既知の結果を一覧でまとめています。すべて「現時点でこれが分かっている」というサーベイであり、この回で証明を導出するわけではありません。オープン (未解決) と明記されている箇所は、そのまま未解決として紹介します。</p>
+    <table>
+      <tr><th>問題</th><th>結果</th></tr>
+      <tr><td>動的連結性 (一般グラフ)</td><td>Thorup (2000): 更新 $O(\log n (\log\log n)^3)$・クエリ $O(\log n/\log\log\log n)$。Holm-de Lichtenberg-Thorup (2001): 更新 $O(\log^2 n)$・クエリ $O(\log n/\log\log n)$ (節 4)。増加のみなら Union-Find で $\Theta(\alpha(m,n))$。減少のみなら $O(m\log n + \mathrm{polylog}\,n + \#\text{クエリ})$</td></tr>
+      <tr><td>動的連結性・最悪時間</td><td>Eppstein et al.: 更新 $O(\sqrt n)$ 最悪・クエリ $O(1)$ 最悪</td></tr>
+      <tr><td>$k$-連結性</td><td>$k=2$: $O(\mathrm{polylog}\,n)$。平面・減少的: $O(\log^2 n)$。最悪時間は $k$ ごとに $O(\sqrt n)$〜$O(n\log n)$ の個別の結果</td></tr>
+      <tr><td>最小全域森</td><td>$O(\log^4 n)$ 更新 (一般)。平面グラフなら $O(\log n)$</td></tr>
+      <tr><td>平面性判定</td><td>一般に $O(n^{2/3})$。埋め込みを固定すれば $O(\log^2 n)$</td></tr>
+      <tr><td>有向グラフの到達可能性</td><td>$O(n^2)$ 償却更新・$O(1)$ 最悪クエリなど、更新×クエリのトレードオフが複数</td></tr>
+      <tr><td>全点対最短路</td><td>$O(n^2(\log n + \log^2(1+m/n)))$ 償却更新・$O(1)$ クエリなど</td></tr>
+    </table>
+    <div class="open"><b>OPEN (未解決、講義資料の記載のまま)。</b>一般グラフの動的連結性で $O(\log n)$ の更新・クエリが可能か。最悪時間で $O(\mathrm{polylog}\,n)$ の更新・クエリが可能か。$o(\log n)$ 更新かつ $\mathrm{polylog}\,n$ クエリは可能か。有向グラフの到達可能性で最悪 $o(n^2)$ の更新は可能か。</div>
+  </section>
+
+  <section>
+    <h2>6. $\Omega(\log n)$ の下限 (L21)</h2>
+    <p>L20 までは「これだけ速くできる」という上限の話でした。L21 は逆方向、「動的連結性はどう頑張ってもこれより速くはできない」という<b>下限</b>を証明します。以前から知られていた下限は $\Omega(\log n / \log\log n)$ (Fredman & Henzinger、独立に Miltersen ら) でしたが、この回では Pǎtraşcu & Demaine の手法でこれを $\Omega(\log n)$ まで引き上げます。</p>
+    <p><b>定理。</b>セルプローブモデルにおいて、パス (木の中でも特に単純な、枝分かれのない形) に対する動的連結性問題は、最悪時間で 1 操作あたり $\Omega(\log n)$ かかる。</p>
+    <h3>証明の舞台 ― $\sqrt n \times \sqrt n$ グリッドと置換</h3>
+    <p>$n$ 個の頂点を $\sqrt n \times \sqrt n$ のグリッドに並べ、隣り合う列 $C_{i-1}, C_i$ の間を完全マッチングで繋ぎます。これで $\sqrt n$ 本の互いに素なパスができ、各マッチングは置換 $\pi_1, \dots, \pi_{\sqrt n - 1}$ で符号化できます。この上で 2 つの操作を考えます。</p>
+    <ul>
+      <li><code>UPDATE(i, π)</code>: $i$ 番目の置換を $\pi$ に置き換える。これは $O(\sqrt n)$ 本の辺の削除・挿入に相当。</li>
+      <li><code>VERIFY_SUM(i, π)</code>: 最初の $i$ 個の置換の合成が $\pi$ と等しいか判定する。これは $O(\sqrt n)$ 回の連結性クエリに相当。</li>
+    </ul>
+    <p><b>主張。</b>$\sqrt n$ 回の <code>UPDATE</code> と $\sqrt n$ 回の <code>VERIFY_SUM</code> を行うには $\Omega(n \log n)$ 回のセル読み書きが必要。これが成り立てば、合計で $\Theta(n)$ 回程度の基本的な動的連結性操作 (辺の挿入・削除・クエリ) で合計 $\Omega(n\log n)$ 回のセル読み書きが強制されるので、<b>平均して</b> 1 操作あたり $\Omega(\log n)$ ― つまり、その操作列のどこかに $\Omega(\log n)$ かかる操作が少なくとも 1 回存在する、という形で最悪時間の下限が従います。</p>
+    <h3>最も意地の悪い操作列を作る</h3>
+    <p>この下限を成立させるには、データ構造がどんな入力のパターンにもうまく適応できないよう、最も意地の悪い操作列を選ぶ必要があります。</p>
+    <ul>
+      <li><code>UPDATE</code> の $\pi$ は<b>完全にランダム</b>に選ぶ。</li>
+      <li><code>VERIFY_SUM</code> の $\pi$ は、意外にも「正解」そのもの ($\pi = \sum_{j\le i}\pi_j$) を選ぶのが最悪です。不正解の $\pi$ なら 1 つの矛盾するパスを見つけた瞬間に FALSE を返せますが、正解の $\pi$ は全パスを確認しなければ TRUE と確定できません。</li>
+      <li>$i$ の並び順には<b>ビット反転列 (bit-reversal sequence)</b> を使う。$n$ ビットの数を昇順に並べ、各数のビット順序を逆転させた列です。</li>
+    </ul>
+    <p>この操作列を時系列順に並べた<b>「時間の木」(tree of time)</b> を作ります。2 分木の各葉が <code>(VERIFY_SUM, UPDATE)</code> の 1 組に対応し、ビット反転列の性質から「木の高さ $h$ の各ノードの部分木に含まれる葉は、時系列上では互いに綺麗に交互に (interleave) 現れる」という構造になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 195" role="img" aria-label="時間の木">
+        <text x="20" y="20" font-size="13" fill="#12211a" font-weight="700">時間の木 (ビット反転列、w=3の例): 0,4,2,6,1,5,3,7 の順に実行</text>
+        <line x1="60" y1="130" x2="580" y2="130" stroke="#d9e5df" stroke-width="2"/>
+        <g font-family="SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#0f5132">
+          <text x="60" y="150">0</text><text x="130" y="150">4</text><text x="200" y="150">2</text><text x="270" y="150">6</text>
+          <text x="340" y="150">1</text><text x="410" y="150">5</text><text x="480" y="150">3</text><text x="550" y="150">7</text>
+        </g>
+        <circle cx="320" cy="48" r="5" fill="#0f5132"/>
+        <line x1="320" y1="54" x2="170" y2="100" stroke="#198754"/>
+        <line x1="320" y1="54" x2="470" y2="100" stroke="#198754"/>
+        <text x="170" y="95" font-size="11" fill="#4a5d54" text-anchor="middle">左部分木 (0,4,2,6)</text>
+        <text x="470" y="95" font-size="11" fill="#4a5d54" text-anchor="middle">右部分木 (1,5,3,7)</text>
+        <text x="320" y="185" font-size="11" fill="#4a5d54" text-anchor="middle">ルートの左右は時系列で完全に交互 (0,4,2,6 と 1,5,3,7 がかみ合う)</text>
+      </svg>
+      <p class="cap">図: ある内部ノードの左右の部分木に属する葉は、実際の実行順の上で交互に現れる。この「交互配置」が左から右への情報伝達を強制する</p>
+    </div>
+    <h3>情報を運ぶのに必要なセル数 ― 符号化による議論</h3>
+    <p>時間の木のある内部ノード $v$ (左右の部分木にそれぞれ $\ell$ 枚の葉) を考えます。<b>主張 3。</b>$v$ の右部分木の操作列は、左部分木の最中に最後に書き込まれたセルを $\Omega(\ell\sqrt n)$ 回読まなければならない。これは「あるセルへの 1 回の読み取りに対して、それを最後に書いた箇所は一意に決まり、その読み書きの組を数えるのは 2 つの葉の最小共通祖先であるノードだけ」という観察から、各階層の $\ell$ の合計が $\Omega(\sqrt n)$、階層数が $\Omega(\log n)$ あることと組み合わせて主張 2 (全体で $\Omega(n\log n)$ 読み書き) を導きます。</p>
+    <p>主張 3 自体の証明は「符号化 (encoding) による議論」という下限証明の定石を使います。発想はこうです ― もし $v$ の右部分木のクエリが、左部分木で何が更新されたかをほとんど読まずに答えられてしまうなら、右部分木のクエリの<b>結果だけ</b>から左部分木の更新内容を復元できてしまうことになる。ところが左部分木で起こりうる更新の組み合わせは $2^{\Theta(\sqrt n \log n)}$ 通りもあるので、それを復元するための情報 (= 読み書きされたセルの集合 $R \cap W$) は $\Omega(\ell \sqrt n \log n)$ ビット、つまりセル数で $\Omega(\ell\sqrt n)$ 必要、という「鳩の巣原理」的な勝負になります。</p>
+    <p>素朴な <code>SUM</code> (置換の合成そのものを返すクエリ) ならここで議論は終わりますが、実際のクエリは真偽しか返さない <code>VERIFY_SUM</code> です。しかも「最悪の $\pi$ は常に正解」なので、クエリの入力 $\pi$ 自体を符号化する必要がなくなる一方、復元の際に「このセルは左部分木で最後に書かれたのか、それより前 (過去) に書かれたのか」を区別する手段を別に用意しなければなりません。この区別のために、$R, W$ の対称差を小さく符号化する<b>分離器 (separator family)</b> という組合せ論的な道具 ($O(|R|+|W|+\log\log n)$ ビットで符号化可能) を使うことで、同じ $\Omega(\ell\sqrt n)$ の下限を <code>VERIFY_SUM</code> に対しても証明できます。最終的には「$|R|+|W|$ 自体が大きければ、どこかの操作がもう $\Omega(\log n)$ かかっている (証明終わり)」「$|R|+|W|$ が小さければ、左から右へ強制的に運ばれるセル読み書きが $\Omega(\ell\sqrt n)$ 個ある (これも主張の証明になる)」という 2 択に帰着して証明が完結します。</p>
+    <div class="note"><b>要点。</b>下限証明の構造はどこまでも「情報を運ぶには、それを表すのに十分なビット数のセル読み書きが必要」という 1 つの原理の変奏です。難しいのは、<code>VERIFY_SUM</code> が常に TRUE を返すよう作られているために、素朴な符号化ではうまく情報が取り出せない (正直な「真偽値」しか見えない) 点を、分離器という道具で回避しているところです。</div>
+  </section>
+
+  <section>
+    <h2>7. デモ ― access(v) で好ましい経路がどう変わるかを自分で動かす</h2>
+    <p>下のデモは固定の表現木 (11 頂点) を用意し、好ましい子 (preferred child) のポインタだけを管理します。ノードをクリックすると <code>access(v)</code> が走り、「根から $v$ までの経路がすべて好ましい辺になり、$v$ 自身の好ましい子は消える」という節 1 の定義通りの効果が、どの辺が切り替わったかのログとともに見られます。補助木 (スプレー木) 自体の回転は描かず、好ましい経路分解という「表現木レベルで何が起きるか」に焦点を当てています。</p>
+    <div class="demo" id="demoLCT">
+      <h4>デモ・リンクカット木の access(v)</h4>
+      <p class="lead">太い緑の辺 = 好ましい辺。細い灰色の辺 = 好ましくない辺 (パス親ポインタに相当)。ノード (丸) をクリックすると、そのノードに <code>access</code> します。</p>
+      <svg id="lctSvg" viewBox="0 0 640 300" role="img" aria-label="リンクカット木デモ" style="background:#fff;border:1px solid var(--line);border-radius:10px"></svg>
+      <div class="ctl">
+        <button class="btn ghost" id="lctReset">好ましい経路をすべて解除</button>
+      </div>
+      <div class="steplog" id="lctLog"></div>
+      <p class="take"><b>読み取り。</b>最初はどのノードも一度もアクセスされていないので好ましい辺はありません。例えば <code>I</code> をクリックすると、根 $R$ から $C \to H \to I$ までが好ましい経路になります。続けて <code>J</code> をクリックすると、$H$ の好ましい子が $I$ から $J$ に切り替わり ($H$-$I$ 間の辺が好ましくなくなる)、根から $J$ までが新しい好ましい経路になります。これが「古い好ましい辺が壊れ、パス親ポインタに置き換わる」という節 1 の記述そのものです。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>8. 実務での出番</h2>
+    <p>この 3 回の内容は、MIT 6.851 全体の中でも特に「理論としての完成度は高いが、そのまま本番コードに出てくることは稀」という領域です。誇張せずに、どこまでが実戦的かを整理します。</p>
+    <ul>
+      <li><b>リンクカット木と最大フロー (理論〜一部実戦)。</b>講義ノート自身が概要で "Network Flow and Dynamic Connectivity problems" を応用として挙げています。実際、Sleator と Tarjan の原論文 (<a href="https://www.cs.cmu.edu/~sleator/papers/dynamic-trees.pdf" target="_blank" rel="noopener">A Data Structure for Dynamic Trees, 1983, PDF</a>) のモチベーションの 1 つはネットワークフロー・アルゴリズムの高速化であり、動的木を使うことで一部の最大フロー計算の漸近的な計算量を改善できることが知られています。ただし、実務で動くネットワークフロー・ソルバー (物流・通信網の最適化ツールなど) が内部でリンクカット木を実装している例はまれで、多くは実装がずっと単純な (漸近的には劣る) アルゴリズムで十分な速度を得ています。競技プログラミングの文脈では、リンクカット木やヘビー・ライト分解は実際に手で書かれる定番の道具です。</li>
+      <li><b>ヘビー・ライト分解そのもの (理論寄りだが考え方は広く使われる)。</b>「木を根から辿るとき、重い方の子を選び続ければライトな辺は $O(\log n)$ 本しかない」という考え方自体は、スプレー木の解析に限らず、木の経路クエリを静的な木の上で高速化する一般的な手法として使われます。ただしこれも、名前を挙げて「ヘビー・ライト分解を使っている」と明記された本番システムは多くありません。</li>
+      <li><b>Union-Find (増加のみの連結性) は圧倒的に実戦的。</b>この回の構造の中で唯一、現実のソフトウェアに広く入っているのが、増加のみの連結性を解く <b>Union-Find</b> です (節 5 の表の「増加のみ」の行、$\Theta(\alpha(m,n))$)。グラフ処理ライブラリ NetworkX の <a href="https://github.com/networkx/networkx/blob/main/networkx/utils/union_find.py" target="_blank" rel="noopener">union_find.py</a> はその実装例で、最小全域木を求めるクルースカル法や連結成分の検出に使われています。完全動的 (削除もできる) 連結性の構造が実際に使われる場面は、これに比べてずっと限られます。</li>
+      <li><b>オイラー・ツアー木 / 完全動的連結性 $O(\log^2 n)$ 構造 (理論寄り)。</b>Holm-de Lichtenberg-Thorup のレベル付き構造そのものを実装したライブラリはほとんど公開されておらず、実装の複雑さ (B 木ベースのオイラー・ツアー木、レベルの拡張情報) に比べて恩恵が出る場面が限られることが理由と考えられます。ストリーミング的に変化するグラフの連結成分追跡が必要な研究用途では引用されますが、「枯れた」実装が広く流通しているわけではありません。</li>
+      <li><b>$\Omega(\log n)$ の下限 (純粋に理論)。</b>この結果の実務的な価値は、直接使うものではなく「期待値を下げる」ことにあります。もし誰かが「一般グラフに対する真に完全動的な (削除も挿入もできる) connectivity を $O(1)$ で解いた」と主張したら、このセルプローブ下限は (計算モデルの仮定の範囲内で) それが不可能であることを保証してくれます。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>出典</h2>
+    <ul>
+      <li>講義ノート (scribe notes): <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec19.pdf" target="_blank" rel="noopener">L19 (PDF)</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec20.pdf" target="_blank" rel="noopener">L20 (PDF)</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec21.pdf" target="_blank" rel="noopener">L21 (PDF)</a></li>
+      <li>講義ページ・映像: <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L19.html" target="_blank" rel="noopener">L19</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L20.html" target="_blank" rel="noopener">L20</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L21.html" target="_blank" rel="noopener">L21</a></li>
+      <li>リンクカット木の原論文: D. D. Sleator, R. E. Tarjan. "A Data Structure for Dynamic Trees." <i>J. Comput. Syst. Sci.</i> 28(3):362-391, 1983. <a href="https://www.cs.cmu.edu/~sleator/papers/dynamic-trees.pdf" target="_blank" rel="noopener">PDF (著者公開版)</a></li>
+      <li>スプレー木とアクセス定理: D. D. Sleator, R. E. Tarjan. "Self-Adjusting Binary Search Trees." <i>J. ACM</i> 32(3):652-686, 1985. <a href="https://www.cs.cmu.edu/~sleator/papers/self-adjusting.pdf" target="_blank" rel="noopener">PDF (著者公開版)</a></li>
+      <li>オイラー・ツアー木: M. R. Henzinger, V. King. "Randomized dynamic graph algorithms with polylogarithmic time per operation." STOC 1995, pp. 519-527.</li>
+      <li>完全動的連結性 $O(\log^2 n)$: J. Holm, K. de Lichtenberg, M. Thorup. "Poly-logarithmic deterministic fully-dynamic algorithms for connectivity, minimum spanning tree, 2-edge, and biconnectivity." <i>J. ACM</i> 48(4):723-760, 2001.</li>
+      <li>$\Omega(\log n)$ 下限: M. Pǎtraşcu, E. D. Demaine. "Lower bounds for dynamic connectivity." STOC 2004, pp. 546-553 (Princeton CS Tech Report TR-700-04 として公開あり)。</li>
+      <li>Union-Find: R. E. Tarjan. "Efficiency of a Good But Not Linear Set Union Algorithm." <i>J. ACM</i> 22(2):215-225, 1975。実装例: <a href="https://github.com/networkx/networkx/blob/main/networkx/utils/union_find.py" target="_blank" rel="noopener">networkx/utils/union_find.py</a></li>
+    </ul>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 10 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+   デモ: リンクカット木の access(v) による好ましい経路の変化
+   補助木 (スプレー木) の内部回転は描かず、表現木レベルで
+   「好ましい子ポインタ」がどう書き換わるかだけを正確に再現する。
+   ============================================================ */
+(function(){
+  const PARENT = {A:'R', B:'R', C:'R', D:'A', E:'A', F:'B', G:'B', H:'C', I:'H', J:'H'};
+  const POS = {
+    R:[320,40], A:[160,110], B:[320,110], C:[480,110],
+    D:[110,180], E:[210,180], F:[280,180], G:[360,180],
+    H:[480,180], I:[430,250], J:[530,250]
+  };
+  let preferredChild = {}; // key: parent node, value: which child is preferred (or undefined)
+  const svg = document.getElementById('lctSvg');
+  const logEl = document.getElementById('lctLog');
+  const logLines = [];
+
+  function reset(){
+    preferredChild = {};
+    logLines.length = 0;
+    logLines.push('すべてのノードが未アクセス。好ましい辺はまだ1本もありません。');
+    render();
+  }
+
+  function isPreferred(child){
+    const p = PARENT[child];
+    return p !== undefined && preferredChild[p] === child;
+  }
+
+  function access(v){
+    logLines.push(`access(${v}) を実行:`);
+    if(preferredChild[v] !== undefined){
+      logLines.push(`  ${v} 自身の好ましい子 (${preferredChild[v]}) を消す (${v} の下流は好ましい経路から外れる)`);
+      delete preferredChild[v];
+    } else {
+      logLines.push(`  ${v} はもともと好ましい子を持っていない`);
+    }
+    let cur = v;
+    while(PARENT[cur] !== undefined){
+      const p = PARENT[cur];
+      if(preferredChild[p] !== cur){
+        const old = preferredChild[p];
+        preferredChild[p] = cur;
+        logLines.push(`  ${p} の好ましい子を ${old===undefined?'(なし)':old} → ${cur} に切り替え`);
+      }
+      cur = p;
+    }
+    logLines.push(`→ 根 R から ${v} までが好ましい経路になりました`);
+    render();
+  }
+
+  function render(){
+    let svgHtml = '';
+    // 辺
+    for(const child in PARENT){
+      const p = PARENT[child];
+      const [x1,y1] = POS[p], [x2,y2] = POS[child];
+      const pref = isPreferred(child);
+      svgHtml += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${pref?'#0f5132':'#c9d3cd'}" stroke-width="${pref?5:2}" stroke-dasharray="${pref?'none':'4,3'}"/>`;
+    }
+    // ノード
+    for(const n in POS){
+      const [x,y] = POS[n];
+      svgHtml += `<circle class="lct-node" data-node="${n}" cx="${x}" cy="${y}" r="16" fill="#198754" stroke="#0f5132" stroke-width="2"/>`;
+      svgHtml += `<text x="${x}" y="${y+4}" font-size="13" fill="#fff" text-anchor="middle" style="pointer-events:none">${n}</text>`;
+    }
+    svg.innerHTML = svgHtml;
+    svg.querySelectorAll('.lct-node').forEach(c=>{
+      c.addEventListener('click', ()=> access(c.dataset.node));
+    });
+    logEl.innerHTML = logLines.slice(-14).map(s=>`<div>${s}</div>`).join('');
+  }
+
+  document.getElementById('lctReset').addEventListener('click', reset);
+  reset();
+})();
+</script>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)
+  why    : {html} 図解つきの総合解説
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'リンクカット木における「好ましい子 (preferred child)」の定義として正しいものはどれか。',
+    opts: [
+      '部分木サイズが最大の子',
+      'アルファベット順で最初の子',
+      '$v$ の部分木内で最後にアクセスがあった方向の子。アクセスが $v$ 自身か、まだ一度もなければ存在しない',
+      '深さが最も浅い子',
+      '最初にリンクされた子'
+    ],
+    ans: 2,
+    exps: [
+      '違う。好ましい子はアクセス履歴に基づく動的な概念で、部分木のサイズ (ヘビー・ライト分解で使う基準) とは別物。サイズが大きくても最近アクセスがなければ好ましい子ではない。',
+      '違う。好ましい子はアルファベット順や固定の順序とは無関係で、直近のアクセス履歴だけで決まる。',
+      '<b>これが正解。</b>$v$ の部分木の中で最後にアクセスがあった子の方向が好ましい子になる。$v$ 自身へのアクセスが最後だった場合や、一度もアクセスがない場合は好ましい子は無し (null)。アクセスのたびにこの情報が更新される。',
+      '違う。深さの浅さは好ましい子の決定に関与しない。',
+      '違う。好ましい子は静的な構造 (最初にリンクされた順) ではなく、アクセスが起きるたびに動的に変化する。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 最後にどちら方向へ行ったか</h4><p>好ましい子は「最後にこちら側へアクセスが通った」という履歴の印。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="好ましい子の定義">'
+          + '<circle cx="280" cy="30" r="10" fill="#0f5132"/>'
+          + '<line x1="280" y1="40" x2="200" y2="80" stroke="#0f5132" stroke-width="4"/>'
+          + '<line x1="280" y1="40" x2="360" y2="80" stroke="#c9d3cd" stroke-width="2" stroke-dasharray="4,3"/>'
+          + '<text x="200" y="100" font-size="12" fill="#0f5132" text-anchor="middle">最後のアクセスはこちら側</text>'
+          + '<text x="360" y="100" font-size="12" fill="#4a5d54" text-anchor="middle">こちらは好ましくない</text>'
+          + '</svg><p class="cap">図: 太い緑が好ましい辺。アクセス履歴だけで決まる</p></div>'
+    }
+  },
+  {
+    q: '補助木 (auxiliary tree) のノードのキーとして「表現木における深さ」を使う理由は何か。',
+    opts: [
+      'キーが深さなら補助木が常に完全2分木になるから',
+      '深さを使うと補助木の空間使用量が減るから',
+      '$v$ をスプレーして根に持ち上げたとき、$v$ より深い (右部分木) か浅い (左部分木) かが明確に分かれ、$v$ の好ましい子を消す操作 (右部分木を切り離す) が正しく機能するから',
+      '深さをキーにすると van Emde Boas 木が使えるようになるから',
+      'アクセス定理が深さ以外のキーでは成立しないから'
+    ],
+    ans: 2,
+    exps: [
+      '違う。深さをキーにしても補助木が完全2分木になる保証はなく、スプレー木は入力に応じて形が変わる。',
+      '違う。キーの選び方自体は空間使用量に直接影響しない。',
+      '<b>これが正解。</b>補助木は「表現木での深さ」でキー付けされているので、ある好ましい経路の中で $v$ より浅いノードは左側、深いノードは右側にまとまる。$v$ をスプレーして根に上げれば、右部分木 = $v$ より下流 = 消すべき旧好ましい子の部分、という対応が常に保たれる。これが access の正しさの土台。',
+      '違う。van Emde Boas 木は整数の予測問題のための別の構造で、補助木のキーの選び方とは無関係。',
+      '違う。アクセス定理はスプレー木一般について部分木サイズに基づいて成り立つ結果で、キーが何を表しているかには依存しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 左が浅い、右が深い</h4><p>vをスプレーすると、浅い側と深い側がきれいに左右に分かれる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="深さキーの効果">'
+          + '<circle cx="280" cy="40" r="10" fill="#c0492f"/><text x="280" y="20" font-size="12" fill="#c0492f" text-anchor="middle">v (根に持ち上げた)</text>'
+          + '<text x="150" y="80" font-size="12" fill="#0f5132" text-anchor="middle">左部分木 = vより浅い (祖先側)</text>'
+          + '<text x="410" y="80" font-size="12" fill="#0f5132" text-anchor="middle">右部分木 = vより深い (子孫側)</text>'
+          + '</svg><p class="cap">図: 右部分木を切り離せば「v の好ましい子を消す」操作そのものになる</p></div>'
+    }
+  },
+  {
+    q: 'ヘビー・ライト分解で「ライトな辺 (light edge)」をたどったときに必ず成り立つ性質はどれか。',
+    opts: [
+      '部分木のサイズが必ず1増える',
+      '部分木のサイズが少なくとも半分以下になる',
+      'アクセスの回数が1増える',
+      '好ましい辺に必ず変わる',
+      '補助木の深さが1増える'
+    ],
+    ans: 1,
+    exps: [
+      '違う。ライトな辺をたどって子の方向に進むとき、サイズは増えるのではなく減る方向に効く定義になっている。',
+      '<b>これが正解。</b>ライトな辺は「子の部分木サイズが親の部分木サイズの半分以下」という定義そのものなので、ライトな辺を1本たどるごとに部分木のサイズは必ず半分以下になる。これにより根からのライトな辺の本数 (light-depth) は $\\log n$ 本までしか存在できない。',
+      '違う。ライト/ヘビーの分類はアクセス回数とは無関係で、表現木の静的な構造 (部分木サイズ比) だけで決まる。',
+      '違う。ライトかヘビーかという分類と、好ましいか好ましくないかという分類は独立した軸であり、ライトな辺が好ましい辺になることもあれば、ならないこともある。',
+      '違う。補助木 (スプレー木) の深さは回転によって変わり、ライト/ヘビーの分類とは別のレベルの話。'
+    ],
+    why: {
+      html: '<h4>図で理解する: ライトな辺はサイズを半減させる</h4><p>ライトな辺をたどるたびに部分木のサイズが最大でも半分になる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="light edgeの性質">'
+          + '<rect x="40" y="30" width="200" height="24" fill="#8fd6b4"/><text x="140" y="47" font-size="12" fill="#0b2e20" text-anchor="middle">size=16</text>'
+          + '<rect x="280" y="30" width="90" height="24" fill="#43b581"/><text x="325" y="47" font-size="12" fill="#fff" text-anchor="middle">size≤8</text>'
+          + '<text x="280" y="20" font-size="11" fill="#c0492f" text-anchor="middle">light edge</text>'
+          + '<text x="150" y="90" font-size="12" fill="#4a5d54" text-anchor="middle">log n 本しかライトな辺を連続して通れない</text>'
+          + '</svg><p class="cap">図: サイズが毎回半分以下になるので、たどれる本数に上限がある</p></div>'
+    }
+  },
+  {
+    q: '$O(\\log^2 n)$ の証明で「ヘビーな辺が好ましくなるイベント」が償却 $O(\\log n)$ 回/操作になることを示す議論の核心は何か。',
+    opts: [
+      'ヘビーな辺はそもそも好ましくなることがないから',
+      'ヘビーな辺が好ましくなくなるイベントの直後には、必ずライトな辺が好ましくなるイベントが起きる。後者は1操作あたり高々 $\\log n$ 回なので、前者も (総回数の上限から) 償却 $\\log n$ 回程度に抑えられる',
+      'ヘビーな辺の総数がそもそも $\\log n$ 本しかないから',
+      'ポテンシャル法を使わずに証明できるから',
+      'ヘビーな辺はすべて同時に好ましくなるから'
+    ],
+    ans: 1,
+    exps: [
+      '違う。ヘビーな辺も好ましい辺になり得る (好ましさとヘビー/ライトは独立な軸)。',
+      '<b>これが正解。</b>「ヘビーな辺が好ましくなくなる」イベントの直後には、代わりにどこかの「ライトな辺が好ましくなる」イベントが起きるという対応関係がある。後者の総回数は1操作あたり高々 $\\log n$ (light-depthの上限) なので、前者の総回数もその分だけに制限される。さらに「ヘビーな辺が好ましくなる」総回数は「好ましくなくなる」総回数 $+ (n-1)$ 以下なので、結局これも償却 $O(\\log n)$ 回/操作に収まる。',
+      '違う。木全体の辺の中でヘビーな辺は各頂点につき最大1本なので、合計では $n-1$ 本程度になり得て $\\log n$ 本に限られるわけではない。',
+      '違う。この議論自体はポテンシャル法ではなく「対応するイベントの個数を数える」組合せ的な議論であり、ポテンシャル法は次の段階 ($O(\\log n)$ への改良) で使われる。',
+      '違う。ヘビーな辺が好ましくなるタイミングは操作ごとに異なり、同時に起きるという前提はない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 不好ましくなる⇔どこかで好ましくなる</h4><p>ヘビー辺が不好ましくなるたびに、ライト辺のどこかが好ましくなっている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="対応イベント">'
+          + '<text x="30" y="30" font-size="13" fill="#c0492f">heavy edge が好ましくなくなる</text>'
+          + '<text x="300" y="30" font-size="13" fill="#4a5d54">⇒</text>'
+          + '<text x="340" y="30" font-size="13" fill="#0f5132">light edge のどこかが好ましくなる</text>'
+          + '<text x="30" y="70" font-size="12" fill="#4a5d54">light側の総回数 ≤ log n/操作 ⇒ heavy側も同程度に抑えられる</text>'
+          + '</svg><p class="cap">図: 片方の総回数を抑えれば対応するもう片方も抑えられる</p></div>'
+    }
+  },
+  {
+    q: 'ポテンシャル関数 $\\Phi = \\sum_v \\log s(v)$ を使って access のコストを $O(\\log^2 n)$ から $O(\\log n)$ に改良する議論で、最も本質的な役割を果たすのはどれか。',
+    opts: [
+      'アクセス定理の不等式 $\\mathrm{cost}(\\mathrm{splay}(v)) \\le 3(\\log s(u)-\\log s(v))+1$ を、好ましい子の切り替えのたびに足し合わせると中間項が打ち消し合い (telescoping)、合計が $O(\\log n)$ に収まること',
+      'ポテンシャルは常に0だから足し合わせても意味がないこと',
+      'すべてのノードの $s(v)$ が定数だから',
+      '$\\Phi$ を使うとスプレー木を使わなくて済むから',
+      'ヘビー・ライト分解が不要になること'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>$s(v) \\le s(w) \\le s(x)$ というループ内の不等式の連鎖があるため、各反復のアクセス定理の不等式を足し合わせると、隣り合う項が打ち消し合い、最終的に $3(\\log s(\\text{根}) - \\log s(v)) + O(\\text{切り替え回数})$ というシンプルな式に帰着する。$s(\\text{根})=n$ なので全体が $O(\\log n)$ になり、結果として「切り替え1回あたりのコスト」自体が $O(1)$ 償却に落ちる。',
+      '違う。$\\Phi$ はノードの部分木サイズに応じて変化する量であり、常に0ではない。ポテンシャルの変化こそが議論の核心。',
+      '違う。$s(v)$ は構造の変化に応じて変わる値で、定数という仮定は成り立たない。',
+      '違う。ポテンシャル法を使っても補助木がスプレー木であることは変わらず、アクセス定理自体もスプレー木の性質に基づいている。',
+      '違う。ヘビー・ライト分解は $O(\\log^2 n)$ 版の証明で「切り替え回数が償却 $O(\\log n)$」を示すのに使われた道具で、$O(\\log n)$ への改良ではポテンシャル法が別の角度からより精密な結果を与えている。両者は補完的で、片方が不要になるわけではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 足し合わせると中間が消える</h4><p>telescoping: 各項の後半と次の項の前半が打ち消し合う。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="telescoping">'
+          + '<text x="30" y="30" font-size="13" fill="#12211a">(log s1 - log s2) + (log s2 - log s3) + (log s3 - log s4)</text>'
+          + '<text x="30" y="60" font-size="13" fill="#0f5132" font-weight="700">= log s1 - log s4  （途中の項がすべて消える）</text>'
+          + '<text x="30" y="90" font-size="12" fill="#4a5d54">s1=n (根), s4=v なので全体が O(log n)</text>'
+          + '</svg><p class="cap">図: 中間項が打ち消し合う「telescoping」が O(log n) の出どころ</p></div>'
+    }
+  },
+  {
+    q: 'オイラー・ツアー木で <code>Cut(v)</code> (v の部分木を切り離す) を実装する方法として正しいものはどれか。',
+    opts: [
+      '$v$ を根として新しいオイラー・ツアーをゼロから作り直す',
+      '訪問列の中で $v$ への最初の訪問の直前と、最後の訪問の直後で BST を分割 (split) し、前後の部分を結合 (concatenate) する',
+      'ハッシュテーブルから $v$ を削除するだけでよい',
+      '$v$ の子をすべて根の直接の子にしてから削除する',
+      '訪問列全体を逆順にする'
+    ],
+    ans: 1,
+    exps: [
+      '違う。ゼロから作り直すと $O(n)$ かかってしまい、分割・結合による $O(\\log n)$ の利点が失われる。',
+      '<b>これが正解。</b>$v$ の部分木のオイラー・ツアーは、全体の訪問列の中で $v$ の最初の訪問から最後の訪問までの連続した区間になっている。その区間の前後で BST を split すれば「$v$ より前」「$v$ の部分木」「$v$ より後」に分かれ、前後を concatenate すれば $v$ の部分木だけをきれいに切り離せる。',
+      '違う。オイラー・ツアー木は訪問順を保った BST であり、ハッシュテーブルでは「連続した区間」という構造上の性質が使えない。',
+      '違う。これは木の構造そのものを変えてしまう操作で、$v$ の部分木を保ったまま切り離すという <code>Cut</code> の仕様とは異なる。',
+      '違う。訪問列を逆順にしても $v$ の部分木が連続区間であるという性質は保たれるが、切り離しの操作そのものにはならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 連続区間を split/concatenate</h4><p>vの部分木は訪問列の中で1つの連続した塊になっている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="Euler Tour Cut">'
+          + '<rect x="30" y="40" width="500" height="24" fill="#eef6f1" stroke="#d9e5df"/>'
+          + '<rect x="230" y="40" width="140" height="24" fill="#8fd6b4"/>'
+          + '<text x="300" y="57" font-size="12" fill="#0b2e20" text-anchor="middle">v の部分木の訪問区間</text>'
+          + '<text x="130" y="90" font-size="12" fill="#4a5d54" text-anchor="middle">前</text>'
+          + '<text x="450" y="90" font-size="12" fill="#4a5d54" text-anchor="middle">後</text>'
+          + '</svg><p class="cap">図: 前後を split して取り出し、前後だけを concatenate すれば切り離し完了</p></div>'
+    }
+  },
+  {
+    q: '木に限定した減少的連結性 (decremental connectivity) を償却 $O(1)$ で解く構造で、「下側 (bottom tree)」の経路がまだ残っているかを $O(1)$ で判定する仕掛けは何か。',
+    opts: [
+      '各辺をハッシュテーブルに格納し、存在確認をする',
+      '経路全体をもう一度深さ優先探索する',
+      '現在残っている辺の集合と、根までの経路に使う辺の集合をそれぞれ1ワードのビットベクトルで持ち、両者のビット単位 AND を取る',
+      '毎回オイラー・ツアー木を再構築する',
+      'van Emde Boas木で経路を管理する'
+    ],
+    ans: 2,
+    exps: [
+      '違う。ハッシュテーブルでの存在確認は1本の辺ごとには速いが、経路全体 ($O(\\log n)$ 本) をまとめて $O(1)$ で判定することはできない。',
+      '違う。深さ優先探索は経路の長さに比例した時間がかかり、$O(1)$ にはならない。',
+      '<b>これが正解。</b>下側の木は辺が $O(\\log n)$ 本しかないので、全体で1ワードのビットベクトルに収まる。根までの経路に使う辺のビットベクトルを事前に計算しておけば、「現在残っている辺」とのビット単位 AND が0でなければ (厳密には一致するかを見れば) 経路が丸ごと残っているかを1回のワード演算 = $O(1)$ で判定できる。',
+      '違う。オイラー・ツアー木の再構築は $O(\\log n)$ 以上かかり、$O(1)$ の目標に合わない。この手法はむしろオイラー・ツアー木を使わずに済ませる工夫。',
+      '違う。van Emde Boas木は整数の予測問題のための構造で、経路の残存判定には使われていない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 1ワードのANDで経路判定</h4><p>辺の集合をビットで表し、AND演算1回で経路が丸ごと残っているか判定する。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="bit vector AND">'
+          + '<text x="30" y="30" font-size="13" font-family="monospace" fill="#0f5132">現存する辺:   1 1 0 1 1</text>'
+          + '<text x="30" y="55" font-size="13" font-family="monospace" fill="#198754">根までの経路: 1 1 0 1 0</text>'
+          + '<text x="30" y="80" font-size="13" font-family="monospace" fill="#c0492f">AND結果:      1 1 0 1 0  = 経路ビットと一致 → まだ繋がっている</text>'
+          + '</svg><p class="cap">図: AND の結果が経路ビットそのものと一致するかを1ワード演算で見るだけ</p></div>'
+    }
+  },
+  {
+    q: '完全動的連結性 ($O(\\log^2 n)$ 版) で、各辺に割り振る「レベル」が満たす性質として正しいものはどれか。',
+    opts: [
+      'レベルは時間が経つにつれて増加することしかない',
+      'レベルは挿入時にランダムに割り振られ、その後は変化しない',
+      'レベルは時間が経つにつれて減少することしかなく、辺が削除されるときの「代わりの辺探し」の中で下げられる',
+      'レベルはすべての辺で常に同じ値である',
+      'レベルは頂点の次数に等しい'
+    ],
+    ans: 2,
+    exps: [
+      '違う。レベルは増加ではなく<b>減少することしかない</b>。これが「1本の辺が格下げされる回数は高々 $\\log n$ 回」という償却解析の根拠になっている。',
+      '違う。レベルは挿入時には $\\log n$ (最大値) が割り振られ、その後 <code>Delete</code> の代わりの辺探しの中で必要に応じて下げられていく。ランダムではなく決定的な規則で下がる。',
+      '<b>これが正解。</b>辺のレベルは挿入時に $\\log n$ になり、以後は <code>Delete</code> の処理 (不変条件1を保つために小さい方の木の辺を押し下げる) の中で、下がることしかない。$0$ 未満には下げられないので、1本の辺が下げられる回数は高々 $\\log n$ 回に制限され、これが償却 $O(\\log^2 n)$ の根拠になる。',
+      '違う。レベルは辺ごとに異なり、$G_i$ (レベル $i$ 以下の辺からなる部分グラフ) という階層構造を作るための値なので、全部同じでは意味がない。',
+      '違う。レベルは辺に付く値で、頂点の次数とは別の概念。'
+    ],
+    why: {
+      html: '<h4>図で理解する: レベルは一方向にしか動かない</h4><p>レベルは下がることしかないので、1本の辺が下がれる回数には上限がある。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="レベルの単調減少">'
+          + '<text x="30" y="30" font-size="13" fill="#12211a" font-weight="700">level: log n → log n -1 → ... → 0 （一方向）</text>'
+          + '<text x="30" y="65" font-size="12" fill="#4a5d54">1本の辺が下がれる回数 ≤ log n 回 ⇒ 償却 O(log n) を1辺あたり負担</text>'
+          + '</svg><p class="cap">図: 下がることしかないという単調性が償却解析の鍵</p></div>'
+    }
+  },
+  {
+    q: 'セルプローブモデルについて正しい説明はどれか。',
+    opts: [
+      '計算量の下限を証明するのには弱すぎるが、上限を証明するのに向いたモデルである',
+      'データ構造を $w$ ビットのセルの列とみなし、セルへの読み書きの回数だけを数える。読み書きの間の計算は無料とみなすため、上限の道具としては弱いが、下限を証明するには十分強い',
+      'ワード RAM モデルより計算能力が低く、実際のコンピュータより遅いモデルである',
+      '整数しか扱えないモデルで、文字列の問題には使えない',
+      '計算量を測るのではなく、メモリ使用量だけを測るモデルである'
+    ],
+    ans: 1,
+    exps: [
+      '違う。関係が逆。計算が無料という緩い仮定のため、このモデルで「速いアルゴリズムが存在する」(上限) ことを示しても実際のモデルでの保証にはなりにくい。逆に、緩いモデルでさえ「これだけの読み書きが必要」と示せれば (下限)、より厳しい実際のモデルでも成り立つ。',
+      '<b>これが正解。</b>セルプローブモデルは、データ構造の中身を $w$ ビットのセルの列と見て、セルの読み書き回数だけをコストとして数える。読み書きの間の任意の計算が無料なので、上限の議論には使いにくいが、下限の議論には「これより緩いモデルは無い」くらい強い主張になる。',
+      '違う。「計算が無料」という設定は、むしろ実際のコンピュータより<b>強力</b> (速い) モデルであり、遅いという説明は逆。',
+      '違う。整数に限定されるという制約はなく、文字列やグラフの問題の下限にも使われる (この回の動的連結性もその一例)。',
+      '違う。セルプローブモデルが数えるのは読み書きの<b>回数</b> (時間的なコスト) であり、メモリ使用量そのものを測るモデルではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 読み書きだけを数える</h4><p>セルの間で何をしても無料、読み書きの回数だけが時間になる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="cell probe model">'
+          + '<rect x="40" y="30" width="60" height="30" fill="#8fd6b4"/><rect x="110" y="30" width="60" height="30" fill="#8fd6b4"/>'
+          + '<rect x="180" y="30" width="60" height="30" fill="#8fd6b4"/>'
+          + '<text x="140" y="80" font-size="12" fill="#4a5d54" text-anchor="middle">w ビットのセルが並ぶ</text>'
+          + '<text x="330" y="50" font-size="13" fill="#c0492f">読み書きの回数だけを数える</text>'
+          + '<text x="330" y="75" font-size="12" fill="#4a5d54">(計算そのものは無料)</text>'
+          + '</svg><p class="cap">図: 緩いモデルで下限が成り立てば、厳しい実際のモデルでも下限は成り立つ</p></div>'
+    }
+  },
+  {
+    q: '$\\sqrt n$ 回の <code>UPDATE</code> と $\\sqrt n$ 回の <code>VERIFY_SUM</code> の合計が $\\Omega(n \\log n)$ 回のセル読み書きを要する、という主張 2 から、動的連結性の<b>最悪時間</b>の下限 $\\Omega(\\log n)$ が従う論理はどれか。',
+    opts: [
+      'この操作列には操作が $\\Theta(n)$ 回程度含まれ、合計コストが $\\Omega(n\\log n)$ なら、平均して $\\Omega(\\log n)$ になるので、その操作列の中に少なくとも1回は $\\Omega(\\log n)$ かかる操作が存在する',
+      '$n \\log n$ をそのまま操作1回あたりの時間とみなしてよいから',
+      'すべての操作が必ずちょうど $\\log n$ 回のセル読み書きをするから',
+      'この議論からは償却計算量の下限しか従わず、最悪時間の下限には使えない',
+      '操作の順序を入れ替えれば必ず $O(1)$ になるから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>$\\sqrt n$ 回の <code>UPDATE</code> はそれぞれ $O(\\sqrt n)$ 本の辺操作に、$\\sqrt n$ 回の <code>VERIFY_SUM</code> はそれぞれ $O(\\sqrt n)$ 回のクエリに対応するので、基本操作の総数は $\\Theta(n)$。その合計コストが $\\Omega(n \\log n)$ なら、平均コストは $\\Omega(\\log n)$ であり、平均がそれだけあるなら、その操作列の中に $\\Omega(\\log n)$ 以上かかる操作が少なくとも1つ存在することが言える。これは「存在する」という形の最悪時間の下限そのもの。',
+      '違う。$n \\log n$ は操作列全体の合計コストであり、1 回あたりの時間ではない。全体を操作数で割って初めて1回あたりの議論になる。',
+      '違う。個々の操作のコストにはばらつきがあってよく、「すべての操作がちょうど $\\log n$」という仮定は証明のどこにも使われていない。',
+      '違う。「操作列のどこかに高コストな操作がある」という議論は、まさに最悪時間 (ある入力・ある操作に対する最大コスト) の下限の典型的な示し方であり、償却の議論に限定されない。',
+      '違う。操作列はこの下限を成立させるために意図的に選ばれた「最も意地の悪い」順序であり、順序を入れ替えれば下限が消えるという主張はこの構成の意図と矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 平均が高いなら最大も高い</h4><p>合計が大きければ、平均を超える操作が少なくとも1つ存在する。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 110" aria-label="平均から最悪への議論">'
+          + '<text x="30" y="30" font-size="13" fill="#12211a" font-weight="700">合計コスト Ω(n log n) ÷ 操作数 Θ(n) = 平均 Ω(log n)</text>'
+          + '<text x="30" y="65" font-size="13" fill="#c0492f">⇒ 平均以上かかる操作が少なくとも1つ存在する (鳩の巣原理)</text>'
+          + '<text x="30" y="90" font-size="12" fill="#4a5d54">これが「最悪時間 Ω(log n)」の意味</text>'
+          + '</svg><p class="cap">図: 合計から平均、平均から「少なくとも1つ」への3段論法</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code','annotation','annotation-xml','svg']}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

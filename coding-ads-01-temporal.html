@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>永続性とレトロアクティブ性 ― データ構造に時間を埋め込む</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20; --blue:#3d7dca;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:30px;letter-spacing:.02em;line-height:1.4}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:960px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 14px 0 0;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  ul,ol{margin:0 0 12px;padding-left:1.4em}
+  li{margin:0 0 6px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .warn{background:var(--ngbg);border:1.5px solid var(--ng);border-radius:10px;
+    padding:14px 16px;margin:14px 0;font-size:14.5px;color:var(--ink)}
+  .warn b{color:var(--ng)}
+  .note{background:#eef6f1;border:1.5px solid var(--g4);border-radius:10px;
+    padding:14px 16px;margin:14px 0;font-size:14.5px}
+  .note b{color:var(--g1)}
+  .prereq{background:#f7fcf9;border:1.5px dashed var(--g3);border-radius:12px;padding:16px 18px;margin:16px 0}
+  .prereq h4{margin:0 0 6px;color:var(--g1);font-size:16px}
+  .prereq + .prereq{margin-top:10px}
+  /* ===== デモ ===== */
+  .demo{background:#f7fcf9;border:1.5px dashed var(--g3);border-radius:12px;padding:16px 18px;margin:16px 0}
+  .demo h4{margin:0 0 4px;color:var(--g1);font-size:16px}
+  .demo .lead{font-size:14px;color:var(--sub);margin:0 0 12px}
+  .ctl{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:14px}
+  .ctl label{display:flex;gap:8px;align-items:center;color:var(--g1);font-weight:700}
+  .ctl input[type=range]{width:170px;accent-color:var(--g2)}
+  .ctl select,.ctl input[type=number]{font-family:inherit;font-size:14px;padding:4px 8px;
+    border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  .ctl .val{font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--ink);font-weight:400;
+    background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 8px;min-width:50px;text-align:right}
+  .btn{font-family:inherit;font-size:14px;font-weight:700;border:1.5px solid var(--g2);background:var(--g2);
+    color:#fff;border-radius:9px;padding:7px 14px;cursor:pointer;transition:.14s}
+  .btn:hover{background:var(--g1);border-color:var(--g1)}
+  .btn.ghost{background:#fff;color:var(--g1)}
+  .btn.ghost:hover{background:#eef6f1;color:var(--g1)}
+  .btn:disabled{opacity:.55;cursor:progress}
+  .out{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin:10px 0 0;font-size:14px}
+  .out b{color:var(--g1)}
+  .take{margin:10px 0 0;font-size:14px;color:var(--ink);background:#eef6f1;border-left:5px solid var(--g2);
+    border-radius:0 8px 8px 0;padding:9px 12px}
+  .take b{color:var(--g1)}
+  .demo svg{display:block;margin:0 auto;max-width:100%;height:auto;background:#fff;border:1px solid var(--line);border-radius:9px}
+  /* ===== 実務 / 出典 ===== */
+  .usecase{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0;background:#fbfdfc}
+  .usecase h4{margin:0 0 6px;color:var(--g1);font-size:15.5px}
+  .usecase .tag{display:inline-block;font-size:12px;font-weight:700;border-radius:6px;padding:2px 8px;margin:0 0 8px}
+  .usecase .tag.real{background:var(--okbg);color:var(--ok)}
+  .usecase .tag.theory{background:#eef1f6;color:#3d5a9c}
+  .usecase a{color:var(--g2)}
+  .srclist{font-size:14px}
+  .srclist li{margin:0 0 8px}
+  .srclist a{color:var(--g2)}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:22px} .ctl input[type=range]{width:130px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">CODING ・ MIT 6.851 ・ L01-L02</p>
+  <h1>永続性とレトロアクティブ性 ― データ構造に時間を埋め込む</h1>
+  <p>過去を壊さず全部残す(永続化)か、過去に手を入れて今まで伝える(レトロアクティブ)か</p>
+</header>
+<main>
+  <a class="back" href="./coding-ads-index.html">← MIT 6.851 シリーズ目次へ</a>
+  <a class="back" href="./coding-index.html">← コーディング基礎 シリーズ目次へ</a>
+  <p class="intro">ふつうのデータ構造は更新すると過去の状態を失います。この回で見る「時間的データ構造 (temporal data structure)」は、その前提を 2 つの方向から破ります。<b>永続性 (persistence)</b> は、更新のたびに過去をすべて残し、あとから任意の過去バージョンを読める(場合によっては書ける)ようにします。<b>レトロアクティブ性 (retroactivity)</b> は逆に、過去そのものに手を入れて(「3 ステップ前の操作を実は別の値でやっていた」)、その変更が現在まで正しく伝わるようにします。どちらも MIT 6.851 (Advanced Data Structures) の最初の 2 回の講義 (L01: 永続性, L02: レトロアクティブ性) の主題で、この 2 つの技法は次回 L03 で「幾何の問題を時間の問題に変換する」ためにそのまま再利用されます。</p>
+
+  <section>
+    <h2>この回の位置づけ</h2>
+    <p>永続性とレトロアクティブ性は、どちらも「データ構造にバージョン(時刻)という次元を追加する」という同じ問題意識から生まれています。違いは向きです。永続性は<b>未来から過去を安全に覗く</b>仕組み、レトロアクティブ性は<b>過去から未来へ変更を安全に伝える</b>仕組みです。この 2 つを押さえておくと、次回 L03 で「平面上の点の位置判定」や「線分の交差判定」が、なぜ唐突に L01・L02 の結果を使って解けるのかが分かるようになります(2 次元の幾何の問題を、1 次元の問題 + 時間、に変換して解く「ラインスイープ」という手法を使うためです)。</p>
+    <p>この回の内容は、CS の学部カリキュラムで言うと「計算量の厳密な解析(償却計算量・ポテンシャル法)」と「平衡二分探索木を道具として使いこなす」ことを前提にしています。この 2 つは電気電子工学やハードウェア出身の読者には馴染みが薄いと思われるため、先に簡単に補習します。</p>
+    <div class="prereq">
+      <h4>前提の補習 1 ・ ポインタマシンモデル (pointer machine model)</h4>
+      <p>この講義では、データ構造を「固定サイズのフィールドを持つノードの集まり」として考えます。許される操作はこの 5 つだけです。</p>
+      <pre><code>x = new Node()        // ノードを 1 つ作る
+x = y.field            // フィールドを読む
+x.field = y            // フィールドに書く
+x = y + z              // ふつうの計算
+destroy(x)             // 誰も指していないノードを消す</code></pre>
+      <p>これは C の <code>struct</code> や Java の <code>object</code> がポインタ(参照)でつながったグラフだと考えるのとほぼ同じです。重要なのは<b>何がこのモデルに入らないか</b>です。可変長配列のように「サイズが動くひとつながりのメモリ領域」はこのモデルの外にあります。配列は添字で $O(1)$ ランダムアクセスできますが、その代わり「配列の真ん中に要素を 1 個だけ挿入する」といった操作を安全にバージョン管理するのが構造的に難しくなります。この講義で扱う永続性の結果は、基本的に<b>ポインタでつながったノードのグラフ</b>(連結リスト、二分探索木など)を対象にしており、配列のような構造には別の議論が必要です。</p>
+    </div>
+    <div class="prereq">
+      <h4>前提の補習 2 ・ 償却計算量とポテンシャル法</h4>
+      <p><b>償却計算量 (amortized complexity。ならし計算量とも呼ぶ。1 回だけでなく操作の列全体で費用を平均したときの、1 回あたりの上限)</b> は「どんな入力列であっても、合計コストはこの範囲を超えない」という<b>最悪ケースの保証</b>です。確率は一切使いません。平均計算量(期待値)とは別物で、1 回だけ見ると高くつく操作があっても、それが頻繁には起きないことを合計コストで示します。この考え方自体は coding-complexity-bigo.html の第 4 節で可変長配列のコピーコストを例に詳しく説明しているので、ここでは L01 で使う形だけ押さえます。</p>
+      <p><b>ポテンシャル法</b> は償却計算量を証明する道具です。データ構造の「溜まった不満」のようなものを表す関数 $\phi$ (ポテンシャル)を 1 つ決めて、</p>
+      <p style="text-align:center">$\text{償却コスト} = \text{実際のコスト} + \Delta\phi \quad (\Delta\phi = \phi_{後} - \phi_{前})$</p>
+      <p>と定義します。$\phi$ をうまく選ぶと、個々の操作が高くついた分を $\Delta\phi$ の減少が打ち消してくれて、償却コストの総和(= 実際のコストの総和)が小さいことが示せます。L01 では「mod log (後述) に溜まったエントリ数」を $\phi$ に選びます。</p>
+    </div>
+    <div class="prereq">
+      <h4>前提の補習 3 ・ 平衡二分探索木とオーダー保持構造</h4>
+      <p><b>平衡二分探索木 (balanced BST)</b> はこの講義全体で「高さが常に $O(\log n)$ に保たれ、探索・挿入・削除が $O(\log n)$ でできる木」というブラックボックスとして使われます。内部の回転規則(AVL・赤黒木など)の詳細はこの講義では重要ではありません。</p>
+      <p>もう 1 つ、完全永続化で必要になる<b>オーダー保持構造 (order-maintenance data structure)</b> を先取りで紹介します。これは「要素 $s$ を要素 $t$ の前後に挿入する」「$s$ が $t$ より前かどうかを判定する」の 2 操作を<b>両方 $O(1)$ で</b>サポートする構造です(Dietz–Sleator, L08 で詳しく扱う)。連結リストなら挿入は $O(1)$ でも前後判定は $O(n)$、平衡 BST なら両方 $O(\log n)$ になるので、両方を $O(1)$ にできるのは自明ではない結果です。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>1. 永続性の 4 段階 ― 分岐する宇宙のモデル</h2>
+    <p>永続性は「過去のバージョンについての問い合わせにどこまで答えられるか」で 4 段階に分かれます。弱い方から強い方へ並べると次の通りです。</p>
+    <ul>
+      <li><b>部分永続化 (partial persistence)</b> ― 任意の過去バージョンは<b>読める</b>が、<b>書けるのは最新バージョンだけ</b>。<code>read(var, version)</code> と <code>newversion = write(var, val)</code>。バージョンは一直線に並ぶ。</li>
+      <li><b>完全永続化 (full persistence)</b> ― 任意のバージョンに対して<b>読み書きどちらもできる</b>。<code>read(var, version)</code> と <code>newversion = write(var, version, val)</code>。1 つのバージョンから複数の子バージョンが分岐しうるので、バージョンは<b>木</b>になる。</li>
+      <li><b>融合永続化 (confluent persistence)</b> ― 完全永続化に加えて、<b>2 つの過去バージョンを 1 つに合流させる</b> <code>newversion = combine(var, val, version1, version2)</code> を許す。バージョンは木ではなく<b>有向非巡回グラフ (DAG)</b> になる。</li>
+      <li><b>関数型永続化 (functional persistence)</b> ― 関数型プログラミングのオブジェクトがすべて不変であるのと同じ発想。内部実装の自由度を制限し、<b>既存のノードを一切変更せず、新しいノードを追加するだけ</b>で永続性を実現する。</li>
+    </ul>
+    <p>強い方から弱い方へ一方向の含意があります: <b>関数型 $\Rightarrow$ 融合 $\Rightarrow$ 完全 $\Rightarrow$ 部分</b>。これは「できることが増える」のではなく「<b>実装方法を制限している</b>」という意味の含意です。関数型永続化はその実装方法のまま使えば自動的に融合永続化の操作(combine)も実現でき、combine を使わなければ完全永続化になり、最新バージョンにしか書き込まなければ部分永続化になる、という具合に、上位の制約が下位の要件を自動的に満たします。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 220" role="img" aria-label="永続性4段階のバージョングラフの形">
+        <text x="20" y="24" font-size="14" fill="#12211a" font-weight="700">バージョングラフの形で見る違い</text>
+        <text x="60" y="50" font-size="13" fill="#0f5132" text-anchor="middle">部分永続化</text>
+        <circle cx="60" cy="80" r="7" fill="#8fd6b4" stroke="#0f5132"/>
+        <circle cx="60" cy="110" r="7" fill="#8fd6b4" stroke="#0f5132"/>
+        <circle cx="60" cy="140" r="7" fill="#43b581" stroke="#0f5132"/>
+        <line x1="60" y1="87" x2="60" y2="103" stroke="#0f5132" stroke-width="2"/>
+        <line x1="60" y1="117" x2="60" y2="133" stroke="#0f5132" stroke-width="2"/>
+        <text x="60" y="165" font-size="11.5" fill="#4a5d54" text-anchor="middle">一直線・最新のみ書込</text>
+
+        <text x="280" y="50" font-size="13" fill="#0f5132" text-anchor="middle">完全永続化</text>
+        <circle cx="280" cy="80" r="7" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="240" cy="120" r="7" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="320" cy="120" r="7" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="200" cy="160" r="7" fill="#43b581" stroke="#0f5132"/>
+        <line x1="275" y1="86" x2="245" y2="113" stroke="#0f5132" stroke-width="2"/>
+        <line x1="285" y1="86" x2="315" y2="113" stroke="#0f5132" stroke-width="2"/>
+        <line x1="235" y1="127" x2="205" y2="153" stroke="#0f5132" stroke-width="2"/>
+        <text x="280" y="185" font-size="11.5" fill="#4a5d54" text-anchor="middle">分岐して木になる・全バージョン書込可</text>
+
+        <text x="620" y="50" font-size="13" fill="#0f5132" text-anchor="middle">融合 / 関数型</text>
+        <circle cx="580" cy="80" r="7" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="660" cy="80" r="7" fill="#43b581" stroke="#0f5132"/>
+        <circle cx="620" cy="130" r="7" fill="#198754" stroke="#0f5132"/>
+        <circle cx="620" cy="170" r="7" fill="#43b581" stroke="#0f5132"/>
+        <line x1="585" y1="87" x2="613" y2="123" stroke="#0f5132" stroke-width="2"/>
+        <line x1="655" y1="87" x2="627" y2="123" stroke="#0f5132" stroke-width="2"/>
+        <line x1="620" y1="137" x2="620" y2="163" stroke="#0f5132" stroke-width="2"/>
+        <text x="620" y="195" font-size="11.5" fill="#4a5d54" text-anchor="middle">2 本の版が combine で合流 = DAG</text>
+      </svg>
+      <p class="cap">図: 部分永続化は一直線、完全永続化は木、融合永続化(と関数型永続化)はバージョンが合流できる DAG</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 部分永続化 ― mod log で過去を守る</h2>
+    <p>部分永続化は、ポインタマシンモデル + 各ノードへの入次数(入ってくるポインタの本数)が $O(1)$、という条件さえ満たせば、<b>漸近的に追加コストほぼゼロで</b>実現できます (Driscoll, Sarnak, Sleator, Tarjan, 1989)。発想は「ノードが変更されるたびに書き換えるのではなく、<b>変更履歴 (mods ログ) をノードに溜めていく</b>」ことです。</p>
+    <p>各ノードを次の 3 つの領域に拡張します。</p>
+    <ol>
+      <li><b>読み取り専用領域</b> ― 元のデータとポインタ(普通のノードと同じ)</li>
+      <li><b>バックポインタ領域</b> ― 「自分を指しているノード」への逆ポインタ。入次数が高々 $p$ 本と分かっているので固定サイズで持てる</li>
+      <li><b>mod log 領域</b> ― <code>(フィールド名, バージョン, 新しい値)</code> の形の変更履歴。これも固定サイズ $2p$ 個分だけ確保する</li>
+    </ol>
+    <p><code>read(var, v)</code> は mod log の中から「バージョン $\le v$ で最大のもの」を探すだけで $O(1)$。<code>write(var, val)</code> は mod log に空きがあれば単に 1 エントリ追加するだけで $O(1)$ ですが、<b>mod log が満杯になったら</b>新しいノード $n'$ を作り、最新の値を読み取り専用領域にコピーし、$n$ を指していたノードたちのバックポインタ経由で再帰的にポインタを張り替えます。古いノード $n$ はそれ以降読み取り専用(過去を見るためだけに残る)になります。</p>
+    <div class="fig">
+      <svg viewBox="0 0 820 230" role="img" aria-label="mod log が満杯になってノードが分裂する様子">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">write で mod log が満杯 → ノード分裂</text>
+        <rect x="40" y="50" width="150" height="80" rx="8" fill="#8fd6b4" stroke="#0f5132" stroke-width="2"/>
+        <text x="115" y="70" font-size="12.5" fill="#0b2e20" text-anchor="middle">ノード n (読取専用)</text>
+        <text x="115" y="90" font-size="11.5" fill="#0b2e20" text-anchor="middle">mod log: 満杯 (2p 個)</text>
+        <text x="115" y="108" font-size="11.5" fill="#0b2e20" text-anchor="middle">v1,v2 の更新を保持</text>
+        <line x1="190" y1="90" x2="280" y2="90" stroke="#0f5132" stroke-width="2" marker-end="url(#ar1)"/>
+        <text x="235" y="78" font-size="11" fill="#4a5d54" text-anchor="middle">最新値をコピー</text>
+        <rect x="280" y="50" width="150" height="80" rx="8" fill="#43b581" stroke="#0f5132" stroke-width="2"/>
+        <text x="355" y="70" font-size="12.5" fill="#fff" text-anchor="middle">ノード n' (現在)</text>
+        <text x="355" y="90" font-size="11.5" fill="#fff" text-anchor="middle">mod log: 空</text>
+        <text x="355" y="108" font-size="11.5" fill="#fff" text-anchor="middle">以降の write を受け付ける</text>
+        <defs><marker id="ar1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#0f5132"/></marker></defs>
+        <rect x="560" y="50" width="220" height="140" rx="8" fill="#f3f9f6" stroke="#0f5132" stroke-dasharray="4,3"/>
+        <text x="670" y="70" font-size="12" fill="#0f5132" text-anchor="middle" font-weight="700">n を指していたノード x</text>
+        <text x="670" y="100" font-size="11.5" fill="#4a5d54" text-anchor="middle">バックポインタを辿って</text>
+        <text x="670" y="118" font-size="11.5" fill="#4a5d54" text-anchor="middle">write(x.p, n') を再帰呼び出し</text>
+        <text x="670" y="136" font-size="11.5" fill="#4a5d54" text-anchor="middle">(最大 p 回の再帰)</text>
+        <line x1="560" y1="90" x2="430" y2="90" stroke="#c0492f" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#ar2)"/>
+        <defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#c0492f"/></marker></defs>
+        <text x="500" y="200" font-size="11.5" fill="#4a5d54" text-anchor="middle">read(var, v) は v ≤ 各ノードの担当範囲 のノードを mod log から線形探索(定数時間)</text>
+      </svg>
+      <p class="cap">図: mod log が満杯になると新ノード n' に現在の書込先を移し、n を指す全ノードのポインタを張り替える(Driscoll–Sarnak–Sleator–Tarjan の構成)</p>
+    </div>
+    <p><b>解析。</b>空間は 1 ノードあたり $d+p+2p = O(1)$ なので全体 $O(n)$。時間はポテンシャル法を使います。$\phi = c \times (\text{現在のノードたちの mod log エントリ数の合計})$ とすると、分裂が起きたときノードは「満杯 ($2p$ 個)」から「空 (0 個)」に変わるので $\Delta\phi = -2cp$。償却コストの再帰式は</p>
+    <p style="text-align:center">$\text{償却cost}(n) \le c + c - 2cp + p \cdot \text{償却cost}(x)$</p>
+    <p>となり、再帰を 1 段展開すると $-2cp$ が再帰から来る追加コストとちょうど打ち消し合って $O(1)$ 償却時間が示せます(詳細は展開すると定数項しか残らないことを確認する計算です)。さらに Brodal (1996) はこれを<b>最悪ケースでも $O(1)$</b> にできることを示しました。</p>
+  </section>
+
+  <section>
+    <h2>3. 完全永続化 ― バージョンも木になる</h2>
+    <p>完全永続化では、任意のバージョンに書き込めるため「最新」という特別な概念が消え、<b>すべてのノードが書き込みを受け付けられる</b>必要があります。また、バージョンが木になるので、「バージョン $v$ はバージョン $w$ の祖先か」を高速に判定する必要が新たに生じます。木をただ辿ると $O(\text{バージョン数})$ かかってしまいます。</p>
+    <p>この問題は<b>括弧による線形化表現</b>で解決します。木を深さ優先で辿り、ノード $a$ に入るとき <code>(a</code>、出るとき <code>)a</code> と書き出すと、例えば木が「$a$ の子が $b,d$、$b$ の子が $c$」なら <code>(a (b (c )c )b (d )d )a</code> になります。この文字列から、$v$ が $w$ の祖先であることは「<code>(v</code> が <code>(w</code> より前にあり、かつ <code>)w</code> が <code>)v</code> より前にある」という 2 回の前後比較だけで判定できます。この前後比較と、新しいバージョンを挿入する操作を<b>両方 $O(1)$</b> で行えるのが前提の補習で紹介した<b>オーダー保持構造</b>です (Dietz–Sleator)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 210" role="img" aria-label="バージョン木の線形化表現">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">バージョン木 → 括弧の並び(線形化)</text>
+        <circle cx="120" cy="60" r="16" fill="#43b581" stroke="#0f5132"/><text x="120" y="65" font-size="13" fill="#fff" text-anchor="middle">a</text>
+        <circle cx="70" cy="120" r="16" fill="#8fd6b4" stroke="#0f5132"/><text x="70" y="125" font-size="13" fill="#0b2e20" text-anchor="middle">b</text>
+        <circle cx="170" cy="120" r="16" fill="#8fd6b4" stroke="#0f5132"/><text x="170" y="125" font-size="13" fill="#0b2e20" text-anchor="middle">d</text>
+        <circle cx="70" cy="180" r="16" fill="#8fd6b4" stroke="#0f5132"/><text x="70" y="185" font-size="13" fill="#0b2e20" text-anchor="middle">c</text>
+        <line x1="120" y1="76" x2="70" y2="104" stroke="#0f5132" stroke-width="2"/>
+        <line x1="120" y1="76" x2="170" y2="104" stroke="#0f5132" stroke-width="2"/>
+        <line x1="70" y1="136" x2="70" y2="164" stroke="#0f5132" stroke-width="2"/>
+        <rect x="330" y="90" width="400" height="44" rx="8" fill="#eef6f1" stroke="#43b581"/>
+        <text x="530" y="117" font-size="15" fill="#0b2e20" text-anchor="middle" font-family="monospace">(a (b (c )c )b (d )d )a</text>
+        <text x="530" y="160" font-size="12" fill="#4a5d54" text-anchor="middle">c が b の子孫 ⇔ (b &lt; (c かつ )c &lt; )b (比較 2 回・O(1))</text>
+      </svg>
+      <p class="cap">図: 深さ優先で木を辿って <code>(x</code> / <code>)x</code> を書き出すだけで、祖先判定が前後比較 2 回 (O(1)) に落ちる</p>
+    </div>
+    <p>構築は部分永続化とほぼ同じ発想で、各ノードは $d$ 個のデータ・$p$ 個のバックポインタに加え、最大 $2(d+p+1)$ 個まで mod を持てます。満杯になったら、<b>mod log をバージョン木の部分木ごとに 2 つに分割</b>して新ノード $m$ を作ります(ランダムに分けるのではなく、バージョン木の構造に沿って分割するのが重要な点です)。空間は分裂時 $O(1)$、時間はやはりポテンシャル法 ($\phi = -c \times \text{空きスロット数}$) で償却 $O(1)$ が示せます。</p>
+    <div class="note"><b>未解決問題 (講義当時)。</b>完全永続化を償却でなく最悪ケース $O(1)$ にできるか(脱・償却化)、部分永続化・完全永続化に見合う下界はあるか、は講義時点で未解決として挙げられています。</div>
+  </section>
+
+  <section>
+    <h2>4. 融合永続化 ― バージョンが合流するとき</h2>
+    <p><code>combine</code> 操作でバージョンを合流させると、バージョン木を辿る技法がそのまま使えなくなります。DAG には木のような「深さ優先で 1 回辿れば終わり」という性質がないからです。実際、文字列を繰り返し自分自身と連結する(string を combine し続ける)だけで、$u$ 回の融合更新のあとにはバージョン履歴に $2^u$ 通りの経路が生まれ得ます。</p>
+    <p>Fiat と Kaplan の一般的な変換は、バージョン $v$ の<b>実効的な深さ (effective depth)</b> $e(v) = 1 + \log(\text{ルートから } v \text{ への経路数})$ を使います。これは「DAG を DFS で展開して経路の重複をコピーとして数え、それを平衡化した木にしたときに到達できる最良の深さ」に相当します。このとき、オーバーヘッドは $\log(\text{更新回数}) + \max_v e(v)$ で抑えられます。文字列の自己連結を繰り返す最悪例では、根からの経路数そのものは $u$ 回の更新で $2^u$ 通りに爆発しますが、$e(v) = 1+\log(2^u) = 1+u$ となるため、<b>$e(v)$ 自身は更新回数 $u$ に対して線形にしか増えません</b>(講義ノートもこの例の図のキャプションで「$e(v)$ is linear on the number of updates」と明記しています)。オーバーヘッドが更新回数に対して線形というのは講義ノート自身も「性能が悪い (poor performance)」と評している結果ですが、それでも<b>経路の数だけ丸ごと複製する($2^u$ 個複製する)よりは指数的に優れている</b>点が重要です。クエリが無料だと仮定すると、更新あたり $\Omega(e(v))$ の下界も Fiat–Kaplan 自身の構成で示されています。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 220" role="img" aria-label="自己連結を繰り返すと経路数は指数的に増えるがe(v)は線形に留まる様子">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">自分自身を combine し続けると経路数は 2^u、しかし e(v) は線形(≈u)</text>
+        <circle cx="120" cy="60" r="12" fill="#43b581" stroke="#0f5132"/><text x="120" y="45" font-size="11" fill="#4a5d54" text-anchor="middle">v0</text>
+        <circle cx="120" cy="120" r="12" fill="#43b581" stroke="#0f5132"/><text x="150" y="124" font-size="11" fill="#4a5d54">v1 = combine(v0,v0)</text>
+        <circle cx="120" cy="180" r="12" fill="#198754" stroke="#0f5132"/><text x="150" y="184" font-size="11" fill="#4a5d54">v2 = combine(v1,v1) ― 根から 4 通りの経路</text>
+        <line x1="120" y1="72" x2="120" y2="108" stroke="#0f5132" stroke-width="2"/>
+        <path d="M120,132 Q90,150 120,168" stroke="#0f5132" stroke-width="2" fill="none"/>
+        <path d="M120,132 Q150,150 120,168" stroke="#0f5132" stroke-width="2" fill="none"/>
+        <rect x="380" y="60" width="340" height="120" rx="8" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="550" y="85" font-size="12.5" fill="#0b2e20" text-anchor="middle">経路数 = 2^u (指数的)、しかし e(v) = 1+log(2^u) = 1+u</text>
+        <text x="550" y="108" font-size="12.5" fill="#0b2e20" text-anchor="middle">オーバーヘッド = log(更新回数) + max e(v) ≈ u (線形)</text>
+        <text x="550" y="131" font-size="12.5" fill="#0b2e20" text-anchor="middle">線形は「良い」結果ではないが、2^u 個の完全複製より指数的に得</text>
+        <text x="550" y="154" font-size="11.5" fill="#c0492f" text-anchor="middle">下界: クエリ無料なら更新あたり Ω(e(v))</text>
+      </svg>
+      <p class="cap">図: 経路数は自己連結で指数的に増えるが、実効的な深さ e(v) はその対数、つまり更新回数に対して線形にしか増えない(Figure 6 のキャプション通り)</p>
+    </div>
+    <p>特殊な場合として、「互いにデータノードを共有しない 2 バージョン間でのみ combine を行う(<b>互排な操作</b>)」に限定すると、Collette, Iacono, Langerman が $O(\log n)$ のオーバーヘッドを示しています。この場合、各データノードのバージョン履歴は木になるので、<code>read(node, field, version)</code> は (1) ノード自身が更新された版、(2) <b>更新点の間にいる版</b>、(3) <b>葉より下にいる版</b> の 3 ケースに分かれます。(2) は「直前の更新がどこだったか」を木の上で辿って見つける問題で<b>リンクカット木 (L19 で扱う)</b> が使われ、(3) はさらに込み入っていて<b>フラクショナルカスケーディング (L03 で扱う)</b> を使う証明になっています。「$O(1)$ あるいは $O(\log n)$ の空間オーバーヘッドで一般の融合永続化ができるか」は講義当時の未解決問題です。</p>
+  </section>
+
+  <section>
+    <h2>5. 関数型永続化 ― 不変なノードだけで作る</h2>
+    <p>関数型永続化は実装方法そのものを縛ります。既存のノードの内容を<b>一切変更しない</b>、許される内部操作は「新しいノードを追加する」だけ、というルールです。代表例は <b>パスコピー法 (path copying)</b> による平衡 BST の関数型永続化で、更新されたノードとその祖先をすべて複製して新しい版のパスを作ります(親ポインタがない場合はルートから下向きに作業します)。平衡木であれば 1 回の更新あたりのオーバーヘッドは $O(\log n)$ です。この手法はリンクカット木にも拡張できることが Demaine–Langerman–Price によって示されています。</p>
+    <p>デック (両端から挿入・削除できる列。stack と queue を合わせた操作ができる) は連結操作を含めて<b>定数時間</b>で関数型永続化できます (Kaplan–Okasaki–Tarjan)。さらに Brodal–Makris–Tsichlas は、連結は定数時間、探索・更新は $O(\log n)$ という<b>純粋関数型かつ最悪ケース</b>の構成を示しました。トライ(接頭辞木)も部分木のコピー・削除という局所操作で関数型永続化でき、古い版の部分木をそのまま新しい版に挿入する(2 つの版を合体させる)ことができるため、<b>トライの関数型永続化は自然に融合永続化にもなる</b>という興味深い性質があります。</p>
+    <p>Pippenger は「関数型版と(関数型という制約を外した)ふつうの永続化版のコスト差は、高々 $O(\log n)$ 倍にしかならない」ことを示しました(論文タイトルは“Pure versus Impure Lisp”)。つまり<b>不変性という制約を守ること自体のコストには上限がある</b>ということです。リスト同士の分割・連結を一般のポインタマシン上で実現する問題は、講義時点では未解決とされていましたが、のちに <b>Blame Trees</b> (Demaine, Panchekha, Wilson, Yang, WADS 2013) によって解決されています。配列に対する切り貼り(cut&paste)の関数型永続化は、この講義ノートの時点ではなお未解決と記されています。</p>
+  </section>
+
+  <section>
+    <h2>6. レトロアクティブ性とは ― 過去を書き換えて今に伝える</h2>
+    <p>永続性は「過去を覗く」技術でした。レトロアクティブ性は逆に、<b>過去の操作列そのものを編集</b>し、その影響を未来まで正しく伝える技術です。操作列を 1 本のタイムラインとして考え、通常は末尾(現在)にしか追加しませんが、レトロアクティブなデータ構造はタイムラインの<b>途中</b>にも挿入・削除ができます。対象のデータ構造(例: 配列、優先度キュー)に対する本来の操作を小文字(<code>insert</code>, <code>delete-min</code> など)、タイムラインを操作するレトロアクティブな操作を大文字で書きます。</p>
+    <ul>
+      <li><code>Insert(t, update)</code> ― 時刻 $t$ に操作 <code>update</code> を挿入する</li>
+      <li><code>Delete(t)</code> ― 時刻 $t$ の操作を削除する</li>
+      <li><code>Query(t, query)</code> ― 時刻 $t$ の時点でクエリ <code>query</code> を評価する</li>
+    </ul>
+    <p>時刻 $t$ は整数と考えても構いませんが、「時刻 $t$ と $t+1$ の間に新しい操作を挿み込みたい」ことがあるため、実際には前節のオーダー保持構造を使います。レトロアクティブ性には 3 つの強さがあります。</p>
+    <ul>
+      <li><b>部分レトロアクティブ (partial)</b> ― クエリは常に $t=\infty$ (現在) で行う。過去は書き換えられるが、見るのは常に「今」の結果だけ。</li>
+      <li><b>完全レトロアクティブ (full)</b> ― クエリも任意の過去の時刻 $t$ で行える。</li>
+      <li><b>非忘却的レトロアクティブ (nonoblivious)</b> ― 挿入・削除・クエリすべてが任意の時刻で行え、さらに「ある更新によって、どのクエリの結果が変わったか」まで教えてくれる。</li>
+    </ul>
+    <p><b>簡単な特別ケース。</b>更新が<b>交換可能 (commutative)</b> ($x.y=y.x$、順序を入れ替えても結果が同じ)かつ<b>可逆 (invertible)</b> (逆操作 $x^{-1}$ が存在し $x.x^{-1}=\emptyset$)なら、過去への挿入は<code>Insert(t,op) = Insert(now,op)</code>、過去の削除は<code>Delete(t,op) = Insert(now,op⁻¹)</code>と単純化でき、トリビアルに解けます。ハッシュテーブルへの挿入や、配列への <code>A[i]+=Δ</code> (直接代入は不可)がこの例です。</p>
+  </section>
+
+  <section>
+    <h2>7. 完全レトロアクティブ性と分解可能探索問題 ― 時間を軸にしたセグメント木</h2>
+    <p>一般にはもっと難しい場合も扱えます。まず<b>探索問題</b>を「集合 $S$ を保ち、insert・delete・<code>query(x,S)</code> をサポートする」問題と定義します。そのうち<b>分解可能探索問題 (decomposable search problem)</b> は、クエリが $\text{query}(x, A\cup B) = f(\text{query}(x,A), \text{query}(x,B))$ を満たす($f$ は $O(1)$ で計算できる、$A,B$ は重なっていてもよい)という条件を満たすものです。動的最近傍探索・直線上の successor・平面上の点在位置判定などがこれに当たります。</p>
+    <p><b>結果 (Bentley–Saxe, 1980)。</b>交換可能・可逆な更新を持つ分解可能探索問題は、<b>時間軸の上に平衡二分探索木 (セグメント木) を作る</b>ことで、時間・空間ともに $O(\log m)$ 倍のオーバーヘッドで完全レトロアクティブ化できます($m$ は操作の総数)。木の葉が時刻を表し、各要素は自分の生存区間 $[L,R]$ に対応する $O(\log m)$ 個の internal node に(区間分解の標準的な性質により)ちょうど現れます。時刻 $t$ でのクエリは、$t$ に対応する葉から根までの $O(\log m)$ 個の祖先だけを見て、分解可能性を使って $f$ で結果を合成すれば済みます。</p>
+    <div class="fig">
+      <svg viewBox="0 0 820 200" role="img" aria-label="時間軸上のセグメント木による完全レトロアクティブ化">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">時間軸をセグメント木にして、生存区間を O(log m) 個の節点に分解</text>
+        <g stroke="#0f5132" stroke-width="1.5" fill="none">
+          <line x1="400" y1="40" x2="200" y2="90"/><line x1="400" y1="40" x2="600" y2="90"/>
+          <line x1="200" y1="90" x2="100" y2="140"/><line x1="200" y1="90" x2="300" y2="140"/>
+          <line x1="600" y1="90" x2="500" y2="140"/><line x1="600" y1="90" x2="700" y2="140"/>
+        </g>
+        <circle cx="400" cy="40" r="8" fill="#43b581"/>
+        <circle cx="200" cy="90" r="8" fill="#eef6f1" stroke="#0f5132"/><circle cx="600" cy="90" r="8" fill="#198754"/>
+        <circle cx="100" cy="140" r="8" fill="#eef6f1" stroke="#0f5132"/><circle cx="300" cy="140" r="8" fill="#198754"/>
+        <circle cx="500" cy="140" r="8" fill="#198754"/><circle cx="700" cy="140" r="8" fill="#eef6f1" stroke="#0f5132"/>
+        <rect x="270" y="130" width="460" height="20" fill="#8fd6b4" opacity=".5"/>
+        <text x="500" y="168" font-size="11.5" fill="#4a5d54" text-anchor="middle">緑の節点 = 要素の生存区間 [L,R] を覆う O(log m) 個の節点(分解可能性で合成)</text>
+        <text x="500" y="185" font-size="11.5" fill="#4a5d54" text-anchor="middle">時刻 t のクエリ = t の葉から根までの祖先だけを見る</text>
+      </svg>
+      <p class="cap">図: Bentley–Saxe のセグメント木。要素の生存区間は O(log m) 個の節点として現れ、クエリは根までの経路だけを見る</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>8. 一般の完全レトロアクティブ性 ― ロールバック法と下界</h2>
+    <p>分解可能でない一般の問題では、素朴な<b>ロールバック法</b>を使います: 操作とクエリの列をそのまま記録しておき、$r$ 時間単位前を変更したければ、そこから先をすべて再実行する。これは $O(r)$ のオーバーヘッドで、<b>一般には最善</b>であることが下界で示されます。</p>
+    <p><b>下界 $\Omega(r)$ の証明の発想。</b>2 つのレジスタ $X, Y$ (初期値 $\emptyset$) を持ち、$X=x$、$Y\mathrel{+}=\Delta$、$Y=X.Y$、クエリ「$Y$ は?」をサポートするデータ構造を考えます。次の操作列を実行すると</p>
+    <p style="text-align:center">$Y\mathrel{+}=a_n,\ X=X.Y,\ Y\mathrel{+}=a_{n-1},\ X=X.Y,\ \ldots,\ Y\mathrel{+}=a_0$</p>
+    <p>これはまさに<b>ホーナー法 (Horner's method)</b> による多項式評価 $Y = a_n X^n + a_{n-1}X^{n-1} + \cdots + a_0$ と同じ計算です。ここで <code>Insert(t=0, X=x)</code> を実行すると、多項式を評価する場所 $x$ そのものが変わってしまい、これは<b>多項式を評価し直す</b>のと本質的に同じコストがかかります。前処理の仕方に関わらず「履行不変 (history-independent) な代数的決定木」モデルでは、次数 $n$ の多項式の評価に $\Omega(n)$ 回の体演算が必要であることが知られており (Frandsen–Miltersen, 2001)、これが $\Omega(r)$ 下界の根拠になります。</p>
+    <p><b>セル・プローブ下界。</b>「メモリ上の何個の語(ワード)を読む必要があるか」を数えるセル・プローブモデルでは、$n$ 個の語に対して長さ $\Theta(n\log n)$ の操作列で FFT を計算させ、最後にその結果をクエリします。この操作列を retroactive に初期値だけ変えられるなら<b>動的 FFT</b> ができることになりますが、動的 FFT で 1 つの入力を変えるには $\Omega(\sqrt n)$ 回のセルプローブが必要であることが知られています。$r=\Theta(n\log n)$ だけ遡ることのオーバーヘッドに換算すると $\Omega\!\left(\sqrt{r/\lg r}\right)$ となり、これが現在知られている下界です。<b>$\Omega(r)$ そのものがセル・プローブモデルで成り立つかは未解決</b>です(ロールバック法の $O(r)$ との間にまだギャップがあります)。</p>
+    <div class="note"><b>読み方の補足。</b>この結果が言っているのは「<b>一般の</b>完全レトロアクティブ化には $r$ に比例する手間が本質的に必要になる場合がある」ということで、前節の分解可能探索問題のように追加の構造がある問題だけが $O(\log m)$ という $r$ に依存しない良いオーバーヘッドを得られます。「どういう性質を満たす問題が rollback 法より賢くできるか」を見極めるのが、この分野の勝負所です。</div>
+  </section>
+
+  <section>
+    <h2>9. レトロアクティブ優先度キュー ― 「橋 (bridge)」という発想</h2>
+    <p>優先度キューの <code>insert</code> と <code>delete-min</code> は<b>交換可能ではありません</b>(順序が結果を変える)。そのため前節の「簡単な特別ケース」は使えず、専用の技法が必要です。それでも<b>部分レトロアクティブ優先度キューは 1 操作あたり $O(\log n)$ のオーバーヘッドで実現できます</b> (Demaine–Iacono–Langerman)。</p>
+    <p>直感をつかむため、横軸を時刻、縦軸をキー値とする平面に図示します。<code>insert(t,k)</code> は点 $(t,k)$ から右へ伸びる水平な半直線。<code>delete-min()</code> は $(t,-\infty)$ から上に伸びる垂直な半直線で、最初にぶつかった水平線(= 削除される要素)をそこで止めます。削除された要素は、両端 $(t,k)$ と $(t_k,k)$ を持つ「逆さの L」字の線分になり、削除されずに残った要素は右へ伸び続ける半直線のままです。</p>
+    <div class="fig">
+      <svg viewBox="0 0 820 220" role="img" aria-label="優先度キューの操作を2次元平面に図示">
+        <text x="20" y="22" font-size="14" fill="#12211a" font-weight="700">insert = 右へ伸びる半直線、delete-min = 上に伸びて最初の半直線を止める</text>
+        <line x1="60" y1="190" x2="780" y2="190" stroke="#4a5d54" stroke-width="1.5"/>
+        <text x="790" y="195" font-size="11" fill="#4a5d54">時刻 t</text>
+        <line x1="60" y1="190" x2="60" y2="30" stroke="#4a5d54" stroke-width="1.5"/>
+        <text x="40" y="30" font-size="11" fill="#4a5d54">key</text>
+        <line x1="100" y1="150" x2="300" y2="150" stroke="#198754" stroke-width="3"/>
+        <circle cx="100" cy="150" r="4" fill="#0f5132"/>
+        <line x1="300" y1="190" x2="300" y2="150" stroke="#c0492f" stroke-width="2" stroke-dasharray="3,3"/>
+        <text x="300" y="205" font-size="10.5" fill="#c0492f" text-anchor="middle">delete-min</text>
+        <line x1="180" y1="100" x2="780" y2="100" stroke="#198754" stroke-width="3"/>
+        <circle cx="180" cy="100" r="4" fill="#0f5132"/>
+        <text x="790" y="104" font-size="10.5" fill="#0f5132">削除されず残る(半直線)</text>
+        <line x1="420" y1="60" x2="560" y2="60" stroke="#198754" stroke-width="3"/>
+        <circle cx="420" cy="60" r="4" fill="#0f5132"/>
+        <line x1="560" y1="190" x2="560" y2="60" stroke="#c0492f" stroke-width="2" stroke-dasharray="3,3"/>
+        <text x="500" y="45" font-size="10.5" fill="#4a5d54">「逆さのL」= insert と、それを消す delete-min の対</text>
+      </svg>
+      <p class="cap">図: insert は右へ伸びる半直線、delete-min はそれを途中で止めて「逆さの L」字の線分に変える</p>
+    </div>
+    <p>素朴には <code>Insert(t,"insert(k)")</code> が最終的に現在のキュー $Q_{now}$ に残す要素は $\max\{k,\ k' \mid k' \text{ は時刻} \ge t \text{ 以降に削除された}\}$ です。しかし「削除された要素」を追跡するのは連鎖反応(ある delete-min を挿入すると、それ以降の delete-min が刺す対象がドミノ式に変わる)のせいで大変です。そこで<b>橋 (bridge)</b> という概念を使って、「削除の追跡」を「挿入の追跡」に言い換えます。</p>
+    <p><b>定義: 時刻 $t_0$ が橋であるとは、$Q_{t_0} \subseteq Q_{now}$ が成り立つこと</b>(その時点で生きていた要素が、すべて現在も生きている)。$t$ の直前の橋を $t_0$ とすると、次の等式が成り立ちます。</p>
+    <p style="text-align:center">$\max\{k' \mid k' \text{ は時刻} \ge t \text{ 以降に削除}\} = \max\{k' \notin Q_{now} \mid k' \text{ は時刻} \ge t_0 \text{ 以降に挿入}\}$</p>
+    <p>(右向きは「もし $t_0$ 以降に挿入された最大値が $t$ より前に削除されていたら、その削除の瞬間自体が $t_0$ より後の橋になってしまい矛盾」、左向きは「$t$ 以降に削除された要素は定義上すべて右辺の集合に含まれる」から従います。)これで<b>削除を直接追跡する代わりに、挿入だけを 3 本の平衡二分探索木</b>で管理すれば十分になります。</p>
+    <ul>
+      <li>現在のキュー $Q_{now}$ 自体を保持する木(更新のたびに変わる)</li>
+      <li>挿入だけを時刻順に並べた木。各節点に「自分の部分木の中で $Q_{now}$ に含まれない最大のキー」を付加情報として持つ</li>
+      <li>すべての更新を時刻順に並べた木。各挿入に「$Q_{now}$ に残る挿入なら 0、残らない挿入なら $+1$、delete-min なら $-1$」を付けて、<b>部分木の合計</b>も保持する(合計が 0 になる地点 = 橋)</li>
+    </ul>
+    <p><code>Insert(t, "insert(k)")</code> はこの 3 本の木を使って $O(\log n)$ で実行できます: (1) 3 本目の木で「$t$ の直前で部分和が 0 になる地点」を探して橋 $t_0$ を見つける、(2) 2 本目の木で $t_0$ 以降の「$Q_{now}$ に入っていない最大の挿入」を見つける、(3) 3 本の木を更新する。いずれも $O(\log n)$ です。</p>
+  </section>
+
+  <section>
+    <h2>10. 他の構造の一覧と非忘却的レトロアクティブ性</h2>
+    <p>これまでの手法を他の抽象データ型にも当てはめた結果をまとめます。</p>
+    <table>
+      <tr><th>抽象データ型</th><th>部分レトロアクティブ</th><th>完全レトロアクティブ</th><th>コメント</th></tr>
+      <tr><td>queue</td><td>$O(1)$</td><td>$O(\log m)$</td><td></td></tr>
+      <tr><td>deque</td><td>$O(\log m)$</td><td>$O(\log m)$</td><td></td></tr>
+      <tr><td>union-find (増分連結性)</td><td>$O(\log m)$</td><td>$O(\log m)$</td><td></td></tr>
+      <tr><td>priority-queue</td><td>$O(\log m)$</td><td>償却 $O(\log^2 n)$ 更新 / $O(\log^2 n \log\log n)$ クエリ</td><td>完全版は階層的チェックポイント法で解決(6.851 2012 の未解決問題セッションの成果)</td></tr>
+      <tr><td>successor</td><td>$O(\log m)$</td><td>$O(\log m)$</td><td>レトロアクティブ性のそもそもの動機になった問題。部分版は探索問題だから $O(\log m)$、完全版も分解可能なので素朴には $O(\log^2 m)$ だが、Giora–Kaplan がフラクショナルカスケーディング (L03) と van Emde Boas 木 (L11) を使って $O(\log m)$ に改善した</td></tr>
+    </table>
+    <p><b>非忘却的レトロアクティブ性 (Acar–Blelloch–Tangwongsan)。</b>これは「自分のクエリはどうなるのか?」という問いに答える拡張です。データ構造をアルゴリズムの中で使う場合(例: ダイクストラ法の中の優先度キュー)、次に行う更新は過去のクエリの結果に依存します。そこで<b>クエリもタイムラインに乗せ</b>、レトロアクティブな更新をしたら「その結果、最初に答えが変わったクエリはどこか」を教えてもらい、アルゴリズムはそこから先だけを再実行すればよい、という設計にします。</p>
+    <p>2 次元平面で見ると、エラーには 2 種類あります。<b>交差エラー (crossing error)</b> は insert を挿入する・delete-min を削除するなど、新しい半直線が既存のクエリ線を横切ってしまう場合に起きます。<b>浮遊エラー (floating error)</b> は insert を削除する・delete-min を挿入するなど、クエリが参照していた線分そのものが消えてしまい、クエリの答えが根拠を失って「浮いた」状態になる場合に起きます。データ構造は、最も左下の交差と、各行ごとに最も左の浮遊エラーだけを常に把握しておきます。</p>
+    <p>例えば <code>Insert(t, "min")</code> という新しいクエリを挿入したとき「最初にぶつかる半直線はどれか」を求める問題は<b>上向きレイシューティング (upward ray shooting)</b> という動的な線分に対する問題に帰着でき、これは前節の表にある完全レトロアクティブ successor 問題と本質的に同じ技法で $O(\log m)$ で解けます。ダイクストラ法の例で言えば、グラフの奥深くで辺の重みを 1 つ間違えて計算していたとき、<b>最初に答えが変わった頂点だけを特定して、そこから先だけ再計算する</b>ことに相当します。</p>
+  </section>
+
+  <section>
+    <h2>インタラクティブ・デモ ― 部分永続化の mod log を実際に動かす</h2>
+    <p>4 つの「スロット (変数)」があり、それぞれ mod log の容量は <b>2</b> ($2p$, $p=1$ の場合)に固定しています。スロットに書き込むたびに、現在のノードの mod log にエントリを 1 つ追加します。mod log が 2 個で満杯になったら、次の書き込みで<b>ノードが分裂</b>し、古いノードは灰色(読み取り専用)になり、新しい緑色のノードが以後の書き込みを受け付けます。スライダーで過去のバージョンを選ぶと、その時点で <code>read()</code> がどの世代・どの mod log エントリを見て値を返すかが分かります。</p>
+    <div class="demo" id="demoPersist">
+      <h4>デモ ・ 書き込みを続けて mod log の分裂を見る</h4>
+      <p class="lead">スロットのボタンを押すたびに +1 した値を書き込みます。スライダーを動かして「あのバージョン時点では何が読めたか」を確認してください。</p>
+      <div class="ctl">
+        <button class="btn" id="pWrite0">スロット 0 に書く</button>
+        <button class="btn" id="pWrite1">スロット 1 に書く</button>
+        <button class="btn" id="pWrite2">スロット 2 に書く</button>
+        <button class="btn" id="pWrite3">スロット 3 に書く</button>
+        <button class="btn ghost" id="pReset">リセット</button>
+      </div>
+      <div class="ctl">
+        <label>読み出すバージョン = <input type="range" id="pVer" min="0" max="0" value="0"><span class="val" id="pVerV">0</span></label>
+      </div>
+      <div id="pSvgWrap"></div>
+      <div class="out" id="pOut"></div>
+      <p class="take"><b>読み取り。</b>緑のノードは「現在、書き込みを受け付けている」ノードで、mod log (●印) が 2 個を超えると自動的に分裂して灰色(読み取り専用)に変わります。スライダーを分裂が起きた前後で動かすと、同じスロットでも<b>見るバージョンによって値を保持しているノードが変わる</b>ことが分かります。これが「過去を一切書き換えずに $O(1)$ 償却で永続化する」仕組みの正体です。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>実務での出番</h2>
+    <p>永続性は、理論の中だけの話ではありません。「更新しても古い版が壊れない」という性質そのものが、実際に動いているソフトウェアの基盤になっている例が複数あります。レトロアクティブ性は対照的に、現状ほぼ研究上の概念に留まっています。それぞれ正直に評価します。</p>
+    <div class="usecase">
+      <span class="tag real">実例</span>
+      <h4>Clojure / Scala の永続コレクション ― 関数型永続化そのもの</h4>
+      <p>Clojure の公式リファレンスは「すべてのコレクションは immutable かつ persistent で、構造共有 (structural sharing) によって効率的な『変更後』バージョンの生成をサポートする」と明記しています。Scala の <code>Vector</code> も公式ドキュメントで「要素を更新するには、その要素を含むノードと、ルートまでそれを指している全ノードをコピーする」と説明されており、これは L01 §5 で説明した<b>パスコピー法そのもの</b>です。どちらも、裏側は $O(1)$ フィールドの単純なノードではなく分岐数の大きいトライ構造ですが、「更新のたびにルートまでの経路だけ複製し、他は共有する」という発想は完全に一致しています。</p>
+      <p><a href="https://clojure.org/reference/data_structures" target="_blank" rel="noopener">Clojure: Data Structures (公式リファレンス)</a> / <a href="https://docs.scala-lang.org/overviews/collections-2.13/concrete-immutable-collection-classes.html" target="_blank" rel="noopener">Scala: Concrete Immutable Collection Classes (公式ドキュメント)</a></p>
+    </div>
+    <div class="usecase">
+      <span class="tag real">実例(比喩として正確な範囲で)</span>
+      <h4>Git のオブジェクトモデル ― 合流するバージョン DAG</h4>
+      <p>Git の公式ドキュメントは、blob/tree/commit が SHA-1 のハッシュ値をキーとする<b>内容アドレス化されたオブジェクト</b>(「a simple key-value data store」)であり、commit は「the parent commits if any」(直前に存在した commit への、複数でありうるポインタ)を持つと説明しています。別の公式ページでは、2 本以上のブランチを取り込む commit を「merge commit, and is special in that it has more than one parent」と明記しており、これによって commit の履歴全体が L01 §4 で説明した<b>バージョン DAG</b> の形をしていることが確認できます。ただし注意が必要です: Git の merge はこの講義の <code>combine()</code> のように漸近的に効率化された操作ではなく、実際には差分を再計算する汎用の処理です。「バージョングラフの形が DAG である」という点は正確な対応ですが、「Fiat–Kaplan のアルゴリズムをそのまま実装している」わけではありません。</p>
+      <p><a href="https://git-scm.com/book/en/v2/Git-Internals-Git-Objects" target="_blank" rel="noopener">Git: Git Internals - Git Objects (公式ドキュメント)</a> / <a href="https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging" target="_blank" rel="noopener">Git: Basic Branching and Merging (公式ドキュメント、merge commit の複数の親について)</a></p>
+    </div>
+    <div class="usecase">
+      <span class="tag real">実例</span>
+      <h4>データベースの MVCC ― 部分永続化と同じデータモデル</h4>
+      <p>PostgreSQL の MVCC (多版型同時実行制御) は、公式ドキュメントによれば「各 SQL 文は、現在の実際の状態に関わらず、ある時点でのデータのスナップショットを見る」仕組みです。各行は有効区間(作られたトランザクションから、削除・更新されたトランザクションまで)を持ち、進行中のトランザクションは自分のスナップショット版を読み、書き込みは常に「今」に対して行われます。これは L01 §2 の部分永続化の API (<code>read(var,version)</code> は任意バージョン、<code>write(var,val)</code> は最新版だけ)と<b>データモデルとして同じ構造</b>です。もちろん実装目的は同時実行制御であって永続化の漸近的コストの最小化ではないので、mod log のような固定サイズの仕組みとは実装は異なります。</p>
+      <p><a href="https://www.postgresql.org/docs/current/mvcc-intro.html" target="_blank" rel="noopener">PostgreSQL: Introduction to MVCC (公式ドキュメント)</a></p>
+    </div>
+    <div class="usecase">
+      <span class="tag theory">理論寄り</span>
+      <h4>レトロアクティブ性 ― 今のところ主に研究上の概念</h4>
+      <p>正直に言うと、L02 で説明したような「過去の 1 操作だけを $O(\log n)$ や $O(\log m)$ で書き換え、残りに波及させる」仕組みを、そのまま実装している広く使われている製品を筆者は確認できていません。近い発想を持つ実世界の仕組みとしては、イベントソーシング(過去のイベントを 1 つ直して再生する)や表計算ソフトの再計算、ビルドシステムの差分リビルドがありますが、これらは基本的に L02 §8 の<b>ロールバック法 ($O(r)$、関係する分だけ全部やり直す)</b>に近い発想で動いており、橋 (bridge) のような $O(\log n)$ の高度な構造を持つ実装は一般的ではありません。自己調整計算 (self-adjusting computation, Acar 他)という学術分野がこの発想の延長にありますが、L02 の結果とは別の理論的枠組みです。過大評価しないよう、ここは「理論的に優れた枠組みであり、今後実装が広がる可能性はあるが、現時点で主流の実務適用例はない」と評価します。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>出典</h2>
+    <ul class="srclist">
+      <li>講義ノート (scribe notes): <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec1.pdf" target="_blank" rel="noopener">Lecture 1 — Persistent data structures (PDF)</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/scribe/lec2.pdf" target="_blank" rel="noopener">Lecture 2 — Retroactive data structures (PDF)</a></li>
+      <li>講義動画ページ: <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L01.html" target="_blank" rel="noopener">L01</a> / <a href="https://courses.csail.mit.edu/6.851/spring21/lectures/L02.html" target="_blank" rel="noopener">L02</a>(MIT 6.851, Spring 2021 開講ページ、講師 Erik Demaine)</li>
+      <li>J. R. Driscoll, N. Sarnak, D. D. Sleator, R. E. Tarjan, <a href="https://www.cs.cmu.edu/~sleator/papers/making-data-structures-persistent.pdf" target="_blank" rel="noopener">“Making Data Structures Persistent”</a>, J. Comput. Syst. Sci. 38(1): 86-124, 1989. (部分・完全永続化の基本構成)</li>
+      <li>G. S. Brodal, “Partially Persistent Data Structures of Bounded Degree with Constant Update Time”, Nord. J. Comput. 3(3): 238-255, 1996. (部分永続化を最悪ケース $O(1)$ に)</li>
+      <li>A. Fiat, H. Kaplan, “Making data structures confluently persistent”, J. Algorithms 48(1): 16-58, 2003. (融合永続化の一般変換・実効的深さ)</li>
+      <li>S. Collette, J. Iacono, S. Langerman, “Confluent Persistence Revisited”, SODA 2012, pp. 593-601. (互排操作に限った $O(\log n)$ オーバーヘッド)</li>
+      <li>H. Kaplan, C. Okasaki, R. E. Tarjan, “Simple Confluently Persistent Catenable Lists”, SIAM J. Comput. 30(3): 965-977, 2000. (デックの定数時間連結)</li>
+      <li>C. Okasaki, <i>Purely Functional Data Structures</i>, Cambridge University Press, 2003.</li>
+      <li>N. Pippenger, “Pure Versus Impure Lisp”, ACM TOPLAS 19(2): 223-238, 1997. (関数型永続化の $O(\log n)$ 分離上界)</li>
+      <li>E. D. Demaine, J. Iacono, S. Langerman, <a href="http://erikdemaine.org/papers/Retroactive_TALG/paper.pdf" target="_blank" rel="noopener">“Retroactive Data Structures”</a>, ACM Trans. Algorithms 3(2), 2007 (初出 SODA 2004)。(レトロアクティブ性の基本定義・優先度キューの部分レトロアクティブ化)</li>
+      <li>J. L. Bentley, J. B. Saxe, “Decomposable Searching Problems I: Static-to-Dynamic Transformation”, J. Algorithms 1(4): 301-358, 1980. (分解可能探索問題のセグメント木変換)</li>
+      <li>Y. Giora, H. Kaplan, “Optimal dynamic vertical ray shooting in rectilinear planar subdivisions”, ACM Trans. Algorithms 5(3), 2009. (完全レトロアクティブ successor を $O(\log m)$ に)</li>
+      <li>G. S. Frandsen, P. B. Miltersen, “Lower Bounds for Dynamic Algebraic Problems”, Information and Computation 171(2): 333-349, 2001. (ホーナー法由来の $\Omega(r)$ 下界の根拠)</li>
+      <li>E. D. Demaine, T. Kaler, Q. Liu, A. Sidford, A. Yedidia, “Polylogarithmic Fully Retroactive Priority Queues via Hierarchical Checkpointing”, WADS 2015, pp. 263-275. (完全レトロアクティブ優先度キュー)</li>
+      <li>U. A. Acar, G. E. Blelloch, K. Tangwongsan, “Kinetic 3D convex hulls via self-adjusting computation”, SoCG 2007, pp. 129-130. (非忘却的レトロアクティブ性の文脈で講義ノートが挙げる文献)</li>
+    </ul>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 10</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 10 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ===== デモ: 部分永続化の mod log シミュレーション ===== */
+(function(){
+  const CAP = 2; // mod log 容量 (2p, p=1)
+  const N_SLOTS = 4;
+  let globalVersion = 0;
+  let splitCount = 0;
+  let slots = [];
+
+  function reset(){
+    globalVersion = 0;
+    splitCount = 0;
+    slots = [];
+    for(let i=0;i<N_SLOTS;i++){
+      slots.push({ generations: [{ baseVersion:0, baseValue: i*10, mods: [] }], liveValue: i*10 });
+    }
+    const slider = document.getElementById('pVer');
+    slider.max = 0; slider.value = 0;
+    document.getElementById('pVerV').textContent = '0';
+    render();
+  }
+
+  function writeSlot(i){
+    globalVersion++;
+    const v = globalVersion;
+    slots[i].liveValue = slots[i].liveValue + 1;
+    const gens = slots[i].generations;
+    const gen = gens[gens.length-1];
+    if(gen.mods.length < CAP){
+      gen.mods.push({version:v, value: slots[i].liveValue});
+    } else {
+      splitCount++;
+      gens.push({baseVersion:v, baseValue: slots[i].liveValue, mods: []});
+    }
+    const slider = document.getElementById('pVer');
+    slider.max = globalVersion;
+    slider.value = globalVersion;
+    document.getElementById('pVerV').textContent = String(globalVersion);
+    render();
+  }
+
+  function readSlot(i, v){
+    const gens = slots[i].generations;
+    let gi = gens.length - 1;
+    while(gi > 0 && gens[gi].baseVersion > v) gi--;
+    const gen = gens[gi];
+    let best = null;
+    for(const m of gen.mods){ if(m.version <= v && (best===null || m.version>best.version)) best = m; }
+    return { genIndex: gi, value: best ? best.value : gen.baseValue, viaMod: !!best };
+  }
+
+  function render(){
+    const v = +document.getElementById('pVer').value;
+    const pxPerV = Math.max(26, Math.min(40, 620/Math.max(1,globalVersion)));
+    const width = Math.max(680, 70 + (globalVersion+1)*pxPerV);
+    const height = 50 + N_SLOTS*54 + 20;
+    const x = (ver) => 60 + ver*pxPerV;
+    let svg = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="mod log の状態">`;
+    svg += `<text x="10" y="18" font-size="12.5" fill="#4a5d54">バージョン軸 (現在 = ${globalVersion}, 分裂回数 = ${splitCount})</text>`;
+    for(let i=0;i<N_SLOTS;i++){
+      const rowY = 40 + i*54;
+      svg += `<text x="4" y="${rowY+17}" font-size="12.5" fill="#0f5132" font-weight="700">slot${i}</text>`;
+      const gens = slots[i].generations;
+      for(let g=0; g<gens.length; g++){
+        const gen = gens[g];
+        const startV = gen.baseVersion;
+        const endV = (g+1<gens.length) ? gens[g+1].baseVersion : (globalVersion+0.9);
+        const isLast = (g===gens.length-1);
+        const fill = isLast ? '#43b581' : '#c7d9d0';
+        const stroke = isLast ? '#0f5132' : '#7a938a';
+        svg += `<rect x="${x(startV)}" y="${rowY}" width="${Math.max(2,x(endV)-x(startV))}" height="26" fill="${fill}" stroke="${stroke}" rx="4"/>`;
+        for(const m of gen.mods){
+          svg += `<circle cx="${x(m.version)}" cy="${rowY+13}" r="4" fill="#0b2e20"/>`;
+        }
+      }
+    }
+    const cx = x(v);
+    svg += `<line x1="${cx}" y1="30" x2="${cx}" y2="${40+N_SLOTS*54}" stroke="#c0492f" stroke-width="2" stroke-dasharray="4,3"/>`;
+    svg += `<text x="${cx}" y="${40+N_SLOTS*54+14}" font-size="11.5" fill="#c0492f" text-anchor="middle">読み出しバージョン = ${v}</text>`;
+    svg += `</svg>`;
+    document.getElementById('pSvgWrap').innerHTML = svg;
+
+    let out = `<b>read(slot, ${v}) の結果:</b><br>`;
+    for(let i=0;i<N_SLOTS;i++){
+      const r = readSlot(i, v);
+      out += `slot${i} = ${r.value} (世代 #${r.genIndex}${r.viaMod ? '・mod log から' : '・base 値から'})　`;
+    }
+    document.getElementById('pOut').innerHTML = out;
+  }
+
+  document.getElementById('pWrite0').addEventListener('click', ()=>writeSlot(0));
+  document.getElementById('pWrite1').addEventListener('click', ()=>writeSlot(1));
+  document.getElementById('pWrite2').addEventListener('click', ()=>writeSlot(2));
+  document.getElementById('pWrite3').addEventListener('click', ()=>writeSlot(3));
+  document.getElementById('pReset').addEventListener('click', reset);
+  document.getElementById('pVer').addEventListener('input', (e)=>{
+    document.getElementById('pVerV').textContent = e.target.value;
+    render();
+  });
+  reset();
+})();
+</script>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (テンプレ共通)
+  q/opts/ans/exps/why
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'この講義で前提とする「ポインタマシンモデル」において、永続化の結果が素直には適用できない構造はどれか。',
+    opts: [
+      '連結リスト',
+      '固定サイズのノードを持つ二分探索木',
+      '要素数に応じてサイズが変わる可変長配列',
+      '親ポインタを持つ木構造',
+      'バックポインタを持つノード'
+    ],
+    ans: 2,
+    exps: [
+      '違う。連結リストはノードが固定サイズのフィールド (データ・次へのポインタ) を持つだけなので、ポインタマシンモデルにそのまま収まる代表例。',
+      '違う。二分探索木もノードが固定サイズ (データ・左右ポインタ) であり、講義で永続化の対象として明示的に扱われている構造。',
+      '<b>これが正解。</b>ポインタマシンモデルの基本操作は「ノードを作る・フィールドを読む・フィールドに書く・ノードを消す」だけで、ノード 1 個のサイズは固定という前提がある。可変長配列は「サイズが動くひとつながりのメモリ領域」で、この固定サイズノードの枠に収まらないため、講義で明示的に「モデルの外」とされている。',
+      '違う。親ポインタの有無はモデルの枠内の話で、固定サイズのフィールドが増えるだけ。モデルから外れる理由にはならない。',
+      '違う。バックポインタも固定本数 $p$ であれば固定サイズのフィールドとして扱えるため、モデルの枠内に収まる(実際に部分永続化の構成で使われる)。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 固定サイズのノード vs 伸び縮みする配列</h4><p>ポインタマシンは「ノード単位で固定サイズ」が前提。配列はこの前提を破る。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="ポインタマシンと配列の違い">'
+          + '<rect x="40" y="30" width="70" height="40" fill="#8fd6b4" stroke="#0f5132"/><text x="75" y="54" font-size="12" text-anchor="middle">node</text>'
+          + '<rect x="140" y="30" width="70" height="40" fill="#8fd6b4" stroke="#0f5132"/><text x="175" y="54" font-size="12" text-anchor="middle">node</text>'
+          + '<line x1="110" y1="50" x2="140" y2="50" stroke="#0f5132" stroke-width="2"/>'
+          + '<text x="140" y="15" font-size="12" fill="#4a5d54">固定サイズノードがポインタでつながる(OK)</text>'
+          + '<rect x="40" y="100" width="420" height="30" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<text x="250" y="120" font-size="12" fill="#c0492f" text-anchor="middle">配列: サイズが動く1つの領域 (このモデルの外)</text>'
+          + '</svg><p class="cap">図: ノード単位の固定サイズを前提にしたモデルと、連続領域が伸び縮みする配列の違い</p></div>'
+    }
+  },
+  {
+    q: '永続性の 4 段階「部分・完全・融合・関数型」について、正しい説明はどれか。',
+    opts: [
+      '部分永続化が最も強く、関数型永続化が最も弱い',
+      '関数型 $\\Rightarrow$ 融合 $\\Rightarrow$ 完全 $\\Rightarrow$ 部分、という一方向の含意があり、これは「できることが増える」のではなく「実装方法が制限される」ことを意味する',
+      '4 つはすべて独立で、互いに含意関係はない',
+      '完全永続化は過去のバージョンを読むことしかできない',
+      '融合永続化はバージョンが常に一直線に並ぶ'
+    ],
+    ans: 1,
+    exps: [
+      '違う。強さの順序が逆。部分永続化が最も弱く(最新しか書けない)、関数型永続化が最も強い(実装方法まで縛った上で他の性質も満たす)。',
+      '<b>これが正解。</b>関数型永続化(既存ノードを変更しない)という実装上の制約を守れば、自動的に combine も安全に実現でき(融合永続化)、combine を使わなければ完全永続化、最新版にしか書かなければ部分永続化になる。強い方から弱い方への含意は「性質が強くなる」のではなく「実装の自由度が狭まる」という意味。',
+      '違う。講義ノートは明確に「それぞれの上位レベルは下位レベルより強い」と述べており、含意関係がある。',
+      '違う。これは部分永続化の説明。完全永続化は読み書きどちらも任意のバージョンに対して行える。',
+      '違う。一直線に並ぶのは部分永続化のバージョン。融合永続化はバージョンが DAG (合流あり)になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 含意は「強さ」ではなく「制約」の方向</h4><p>関数型という狭い実装方法を守れば、自動的に融合・完全・部分の要件も満たされる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="persistence hierarchy">'
+          + '<text x="60" y="30" font-size="13" fill="#0f5132">関数型</text><text x="180" y="30" font-size="13" fill="#0f5132">⇒ 融合</text>'
+          + '<text x="300" y="30" font-size="13" fill="#0f5132">⇒ 完全</text><text x="420" y="30" font-size="13" fill="#0f5132">⇒ 部分</text>'
+          + '<text x="250" y="80" font-size="12.5" fill="#4a5d54" text-anchor="middle">矢印は「実装の自由度が狭まる」方向</text>'
+          + '<text x="250" y="100" font-size="12.5" fill="#4a5d54" text-anchor="middle">(狭い制約を守れば広い性質も自動的に満たす)</text>'
+          + '</svg><p class="cap">図: 4 段階の含意は実装制約の包含関係</p></div>'
+    }
+  },
+  {
+    q: '部分永続化の構成で、ノードの mod log が満杯になったときに起きることとして正しいのはどれか。',
+    opts: [
+      'そのノードを完全に破棄し、データを失う',
+      '新しいノードを作って以後の書き込みはそこで受け、元のノードは読み取り専用として残し、元のノードを指していたノードのバックポインタを辿ってポインタを張り替える',
+      'mod log のサイズを動的に2倍に増やして、同じノードに書き続ける',
+      '古いバージョンの読み出し (read) ができなくなる',
+      'バージョン番号をリセットする'
+    ],
+    ans: 1,
+    exps: [
+      '違う。古いノードは読み取り専用として残り、過去のバージョンを読む (read) ために使われ続ける。破棄はしない。',
+      '<b>これが正解。</b>mod log が満杯になると新ノード $n\'$ を作り、最新の値を読み取り専用領域にコピーし、$n\'$ が以後の書き込み先になる。元の $n$ は読み取り専用になり、$n$ を指していたノードは(バックポインタ経由で)$n\'$ を指すように再帰的に張り替えられる。',
+      '違う。mod log のサイズは固定 ($2p$) で、動的に増やす設計ではない。サイズを固定することで 1 ノードのサイズが $O(1)$ に保たれ、空間解析が成り立つ。',
+      '違う。古いノード(灰色)は読み取り専用のまま残り、まさに古いバージョンの read のために使われる。読めなくなるという説明は仕組みと矛盾する。',
+      '違う。バージョン番号は書き込みごとに単調に増え続ける。分裂が起きてもリセットされない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 分裂は「以後の書き込み先」の引っ越し</h4><p>古いノードはデータを保持したまま読み取り専用になるだけで、消えない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="node split">'
+          + '<rect x="40" y="40" width="160" height="60" fill="#8fd6b4" stroke="#0f5132"/><text x="120" y="75" font-size="12.5" text-anchor="middle">満杯 → 読取専用に</text>'
+          + '<line x1="200" y1="70" x2="300" y2="70" stroke="#0f5132" stroke-width="2"/>'
+          + '<rect x="300" y="40" width="160" height="60" fill="#43b581" stroke="#0f5132"/><text x="380" y="75" font-size="12.5" fill="#fff" text-anchor="middle">新ノード(空) → 以後書込</text>'
+          + '<text x="250" y="125" font-size="12" fill="#4a5d54" text-anchor="middle">古いノードは消えず、過去の read のために残る</text>'
+          + '</svg><p class="cap">図: 分裂後も古いノードは読み取り専用として生き続ける</p></div>'
+    }
+  },
+  {
+    q: '部分永続化の write 操作が償却 $O(1)$ であることを示すポテンシャル法で、ポテンシャル関数 $\\phi = c \\times (\\text{現在のノードの mod log エントリ数の合計})$ を選ぶ理由として最も適切なものはどれか。',
+    opts: [
+      '$\\phi$ を使うと write は常に実際に $O(1)$ になることが保証される',
+      'ノードが分裂するとき mod log は満杯 (2p) から空 (0) になるため $\\Delta\\phi = -2cp$ となり、この減少が分裂のコストを打ち消すから',
+      '$\\phi$ はメモリ使用量そのものを表しており、空間の計算量を求めるために使う',
+      'mod log のエントリ数は常に一定なので $\\phi$ は変化しない',
+      'ポテンシャル法を使わなくても worst case で $O(1)$ であることは明らかである'
+    ],
+    ans: 1,
+    exps: [
+      '違う。ポテンシャル法が保証するのは<b>償却</b>コストが $O(1)$ であることで、個々の write の実際のコストは分裂が起きれば大きくなる(最悪ケースでは再帰的に高くつく)。償却と実際のコストを混同している。',
+      '<b>これが正解。</b>分裂が起きたノードは mod log が満杯 ($2p$ 個) から空 (0 個) に変わるため、$\\Delta\\phi = \\phi_{後}-\\phi_{前} = -2cp$ というまとまった減少が生じる。これが分裂によって発生する「正味の実コスト」をちょうど打ち消し、償却コスト $\\text{cost}(n)+\\Delta\\phi$ を定数に抑える。これがポテンシャル法の核心。',
+      '違う。$\\phi$ はあくまで償却時間解析のための補助的な関数であり、実際のメモリ使用量(空間計算量)の議論とは別の目的で定義されている。',
+      '違う。mod log のエントリ数は write ごとに増減するので $\\phi$ も変化する。変化しないなら償却解析をする意味がない。',
+      '違う。実際には分裂時に再帰呼び出しが発生し、最悪ケースの実コストは大きくなり得る(Brodal の結果でようやく最悪ケースも $O(1)$ であることが別途示された)。ポテンシャル法を使わずに worst case を論じるのは、この講義の構成の論理の流れと矛盾する。'
+    ],
+    why: {
+      html: '<h4>図で理解する: ポテンシャルの急降下が分裂コストを吸収する</h4><p>満杯から空への落差が、分裂の実コストを帳消しにする。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="potential drop">'
+          + '<line x1="40" y1="110" x2="520" y2="110" stroke="#d9e5df" stroke-width="2"/>'
+          + '<rect x="60" y="40" width="40" height="70" fill="#c0492f"/><text x="80" y="35" font-size="11" text-anchor="middle">φ 満杯 (2p)</text>'
+          + '<line x1="100" y1="40" x2="140" y2="100" stroke="#0f5132" stroke-width="2" stroke-dasharray="4,3"/>'
+          + '<rect x="140" y="100" width="40" height="10" fill="#198754"/><text x="160" y="95" font-size="11" text-anchor="middle">φ 空 (0)</text>'
+          + '<text x="330" y="70" font-size="12.5" fill="#4a5d54" text-anchor="middle">Δφ = -2cp が分裂の実コストを相殺</text>'
+          + '</svg><p class="cap">図: 分裂直後に φ が急降下し、償却コストを一定に保つ</p></div>'
+    }
+  },
+  {
+    q: '完全永続化でバージョンが「木」になったとき、「v は w の祖先か」を $O(1)$ で判定するために使われる技法はどれか。',
+    opts: [
+      '木を深さ優先探索で毎回辿って確認する',
+      '各バージョンに連番を振り、番号の大小だけで比較する',
+      '木を深さ優先で辿って括弧表記 (v) ... )v に線形化し、オーダー保持構造で前後比較を O(1) で行う',
+      'バージョンごとにハッシュ値を計算して比較する',
+      '完全永続化では祖先判定は原理的に不可能である'
+    ],
+    ans: 2,
+    exps: [
+      '違う。深さ優先探索で毎回辿ると $O(\\text{バージョン数})$ かかってしまい、$O(1)$ にならない。講義ノートもこれを問題点として明示している。',
+      '違う。単純な挿入順の連番では、新しいバージョンをどこに挿入しても連番を維持し続けることができない(木の途中に新しい子が増えるたびに後続の番号を全部ずらす必要が出る)。',
+      '<b>これが正解。</b>木を深さ優先で辿って <code>(v</code> ・ <code>)v</code> を書き出す形に線形化すると、$v$ が $w$ の祖先であることは <code>(v &lt; (w</code> かつ <code>)w &lt; )v</code> という 2 回の前後比較で判定できる。この前後比較と新しい括弧の挿入を両方 $O(1)$ で行うのがオーダー保持構造(Dietz–Sleator)。',
+      '違う。ハッシュ値は等価性の判定には使えても、祖先関係(順序関係)を保つようには作れない。',
+      '違う。講義ではまさにこの判定を $O(1)$ で実現する技法(線形化+オーダー保持構造)を示している。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 括弧の入れ子が祖先関係そのもの</h4><p>(b ... )b の中に (c ... )c があれば c は b の子孫。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="bracket nesting">'
+          + '<text x="280" y="30" font-size="14" font-family="monospace" text-anchor="middle" fill="#0b2e20">( a ( b ( c ) c ) b ( d ) d ) a</text>'
+          + '<rect x="130" y="45" width="140" height="30" fill="none" stroke="#198754" stroke-width="2" rx="6"/><text x="200" y="90" font-size="11.5" fill="#198754" text-anchor="middle">(b ... )b</text>'
+          + '<rect x="160" y="48" width="70" height="24" fill="none" stroke="#c0492f" stroke-width="2" rx="4"/>'
+          + '<text x="330" y="90" font-size="12" fill="#4a5d54" text-anchor="middle">(c が (b の内側 → c は b の子孫</text>'
+          + '</svg><p class="cap">図: 括弧の入れ子構造がそのまま祖先・子孫の関係を表す</p></div>'
+    }
+  },
+  {
+    q: '融合永続化で定義される「実効的な深さ $e(v) = 1+\\log(\\text{ルートから } v \\text{ への経路数})$」について、正しい説明はどれか。',
+    opts: [
+      '$e(v)$ は常にバージョン数の対数より小さくなることが保証されている',
+      '文字列の自己連結を繰り返すと経路数が $2^u$ になり得るが、$e(v)$ を使ったオーバーヘッドは、それでも完全コピーに比べれば指数的に優れている',
+      '$e(v)$ はクエリの計算量を表す指標であり、更新のコストとは無関係である',
+      '$e(v)$ が大きいバージョンほど、そのバージョンへの書き込みコストは小さくなる',
+      'DAG のままバージョン木の祖先判定の技法をそのまま使えば十分である'
+    ],
+    ans: 1,
+    exps: [
+      '違う。経路数は $u$ 回の自己連結で $2^u$ 通りになり得るため、$e(v) = 1+\\log(2^u) = 1+u$ となり、更新回数 $u$ に比例して大きくなる。対数より小さいという保証はない。',
+      '<b>これが正解。</b>経路数が $2^u$ に爆発する最悪例でも、Fiat–Kaplan のオーバーヘッド ($\\log(\\text{更新回数})+\\max_v e(v)$) は「完全にコピーして経路の数だけ複製する」方法に比べれば指数的に小さい。これが融合永続化の構成が実用上の価値を持つ理由。',
+      '違う。$e(v)$ はオーバーヘッド(空間・時間)の指標として使われ、更新のコストの解析にも直接関わる量。無関係というのは誤り。',
+      '違う。むしろ経路数が多い($e(v)$ が大きい)バージョンほど、構造が複雑になりコストがかかる方向に働く。逆の説明になっている。',
+      '違う。講義本文で明示されている通り、木の祖先判定(線形化+オーダー保持構造)の技法は DAG には拡張できないことが融合永続化の難しさの出発点になっている。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 爆発する経路数と、それでも効く e(v)</h4><p>経路は指数的に増えても、完全コピーほどではない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="effective depth">'
+          + '<text x="140" y="30" font-size="12.5" fill="#4a5d54" text-anchor="middle">経路数 2^u (最悪)</text>'
+          + '<text x="420" y="30" font-size="12.5" fill="#4a5d54" text-anchor="middle">完全コピー (さらに悪い)</text>'
+          + '<rect x="60" y="50" width="160" height="26" fill="#43b581"/><text x="140" y="68" font-size="12" fill="#fff" text-anchor="middle">e(v)=1+u で抑える</text>'
+          + '<rect x="340" y="50" width="160" height="26" fill="#c0492f"/><text x="420" y="68" font-size="12" fill="#fff" text-anchor="middle">経路の数だけ丸ごと複製</text>'
+          + '<text x="280" y="105" font-size="12" fill="#0f5132" text-anchor="middle">e(v) を使う方法は、最悪でも完全コピーより指数的に得</text>'
+          + '</svg><p class="cap">図: e(v) は経路爆発を完全には防げないが、完全コピーより指数的に優れる</p></div>'
+    }
+  },
+  {
+    q: '関数型永続化における「パスコピー法 (path copying)」の説明として正しいものはどれか。',
+    opts: [
+      '更新するノードだけを複製し、他のノードへの影響は一切ない',
+      '更新されたノードとその祖先(ルートまでの経路)を複製し、他の部分は複製せずに共有する',
+      'データ構造全体を毎回複製する',
+      '親ポインタが無いと実装できない',
+      '平衡木でなくても常に $O(\\log n)$ のコストになる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。更新したノードだけを複製しても、それを指していた親ノードが古いノードを指したままでは新しい版からその更新が見えない。祖先もすべて複製してポインタを繋ぎ直す必要がある。',
+      '<b>これが正解。</b>パスコピー法は、更新するノードとルートまでの祖先だけを複製し、それ以外の(変更されていない)部分木は古い版と新しい版で共有する。平衡木ならこの経路の長さは $O(\\log n)$ なので、1 回の更新コストは $O(\\log n)$ に収まる。',
+      '違う。全体複製では $O(n)$ かかってしまい、永続化のコストとして非効率。パスコピー法はまさにこれを避けるための工夫。',
+      '違う。親ポインタが無い場合は、講義ノートにあるように「根から下向きに作業する」ことで実装できる。親ポインタの有無は実装の手順を変えるだけで、実現不可能にはならない。',
+      '違う。コストが $O(\\log n)$ になるのは木が平衡している前提があるため。平衡していない木では経路長が $O(n)$ になり得て、コストも悪化する。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 変更された経路だけ複製、残りは共有</h4><p>根からその葉までの経路だけが新しい版で複製される。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="path copying">'
+          + '<circle cx="150" cy="30" r="14" fill="#8fd6b4" stroke="#0f5132"/>'
+          + '<circle cx="110" cy="80" r="14" fill="#8fd6b4" stroke="#0f5132"/>'
+          + '<circle cx="190" cy="80" r="14" fill="#c7d9d0" stroke="#7a938a"/>'
+          + '<circle cx="90" cy="130" r="14" fill="#43b581" stroke="#0f5132"/>'
+          + '<line x1="150" y1="44" x2="110" y2="66" stroke="#0f5132" stroke-width="2"/>'
+          + '<line x1="150" y1="44" x2="190" y2="66" stroke="#7a938a" stroke-width="2" stroke-dasharray="3,2"/>'
+          + '<line x1="110" y1="94" x2="90" y2="116" stroke="#0f5132" stroke-width="2"/>'
+          + '<text x="330" y="40" font-size="12" fill="#0f5132">緑: 新しい版で複製された経路</text>'
+          + '<text x="330" y="60" font-size="12" fill="#7a938a">灰: 古い版と共有されたまま</text>'
+          + '</svg><p class="cap">図: 根から更新対象までの経路だけ複製し、変更されていない部分木は共有する</p></div>'
+    }
+  },
+  {
+    q: '部分レトロアクティブ性・完全レトロアクティブ性・非忘却的レトロアクティブ性の違いを最も正確に説明しているものはどれか。',
+    opts: [
+      '3 つとも過去の操作を挿入・削除できる点は同じだが、部分はクエリが常に現在 ($t=\\infty$) のみ、完全はクエリも任意の過去時刻で行える、非忘却的はさらにクエリもタイムライン上の操作として扱い、更新が原因で結果の変わった最初のクエリを教えてくれる',
+      '部分は過去を全く変更できない',
+      '完全は非忘却的よりも強力な性質を持つ',
+      '非忘却的は交換可能・可逆な更新にしか使えない',
+      '3 つは計算量のオーダーが異なるだけで、サポートする操作は同じである'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>部分レトロアクティブはクエリが常に「今」(=$t=\\infty$)に限定される。完全レトロアクティブはクエリも任意の過去時刻 $t$ で行える。非忘却的レトロアクティブはそれに加えてクエリ自体もタイムラインに乗せ、更新のあと「結果が変わった最初のクエリはどこか」を返す(アルゴリズム的な利用、例えばダイクストラ法の中で使う場合を想定した拡張)。',
+      '違う。部分レトロアクティブでも <code>Insert(t,update)</code> / <code>Delete(t)</code> によって過去の操作を変更できる。クエリの地点が「今」に限られるだけで、過去の編集自体は可能。',
+      '違う。強さの順序は非忘却的の方が完全より要求が多く(さらにクエリの変化点まで追跡する)、むしろ非忘却的の方が強い拡張という位置づけ。',
+      '違う。交換可能・可逆性は「簡単な特別ケース」の話で、非忘却的レトロアクティブ性自体の定義とは別の話題。非忘却的性は非可換な操作(例えば優先度キュー)にも対応することを目指す拡張。',
+      '違う。サポートする操作(クエリを任意時刻で行えるか、クエリの変化を追跡するか)自体が異なり、単なる速さの違いではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: クエリができる場所が段々広がる</h4><p>部分 → 完全 → 非忘却的で、クエリに関する能力が強くなる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 120" aria-label="retroactivity levels">'
+          + '<text x="80" y="30" font-size="12.5" fill="#0f5132" text-anchor="middle">部分: クエリは now のみ</text>'
+          + '<text x="280" y="30" font-size="12.5" fill="#0f5132" text-anchor="middle">完全: クエリも任意の t</text>'
+          + '<text x="470" y="30" font-size="12.5" fill="#0f5132" text-anchor="middle">非忘却的: 変化点も追跡</text>'
+          + '<line x1="40" y1="60" x2="520" y2="60" stroke="#43b581" stroke-width="6"/>'
+          + '<text x="280" y="90" font-size="12" fill="#4a5d54" text-anchor="middle">右に行くほどクエリに関する能力が強くなる</text>'
+          + '</svg><p class="cap">図: 部分 → 完全 → 非忘却的の順にクエリの扱いが拡張される</p></div>'
+    }
+  },
+  {
+    q: 'レトロアクティブ優先度キューにおいて「橋 (bridge)」を導入する目的として最も適切なものはどれか。',
+    opts: [
+      '優先度キューの最大値を高速に求めるため',
+      '削除された要素の連鎖反応を直接追跡する代わりに、「ある橋以降に挿入された要素」だけを調べれば答えが求まるように問題を言い換えるため',
+      '橋は優先度キューの実装に必須の物理的なデータ構造である',
+      'バージョン木の祖先判定を高速化するため',
+      '交換可能性を優先度キューに持たせるため'
+    ],
+    ans: 1,
+    exps: [
+      '違う。橋の目的は「最大値を求める処理そのもの」ではなく、Insert のレトロアクティブ処理を効率化するための補助概念。',
+      '<b>これが正解。</b>$t$ の直前の橋を $t_0$ とすると、「時刻 $t$ 以降に削除された要素の最大値」は「時刻 $t_0$ 以降に挿入され、かつ現在のキューに残っていない要素の最大値」と一致することが示せる。これにより、連鎖反応を起こす削除の追跡という難しい問題を、挿入だけを追跡する(augmented BBST で済む)問題に言い換えられる。',
+      '違う。橋は「$Q_{t_0} \\subseteq Q_{now}$ を満たす時刻」という<b>概念上の定義</b>であり、独立した物理的なデータ構造ではない。実際には「全更新を保持する木の部分和が 0 になる地点」として見つける。',
+      '違う。橋の話は L02 (レトロアクティブ性)の優先度キューの文脈で、完全永続化のバージョン木祖先判定(L01)とは別の問題設定。',
+      '違う。優先度キューの insert/delete-min は非交換的なので、橋の仕組みはむしろ「交換可能性が無い場合にどう対処するか」の答えであって、交換可能性を後から持たせるものではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 橋は「嵐が収まった地点」</h4><p>橋以降は、挿入を見るだけで十分な情報が手に入る。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 130" aria-label="bridge concept">'
+          + '<line x1="40" y1="70" x2="520" y2="70" stroke="#d9e5df" stroke-width="6"/>'
+          + '<line x1="220" y1="40" x2="220" y2="100" stroke="#198754" stroke-width="3" stroke-dasharray="2,2"/>'
+          + '<text x="220" y="30" font-size="12" fill="#198754" text-anchor="middle">橋 t0 (Q_t0 ⊆ Q_now)</text>'
+          + '<text x="120" y="115" font-size="11.5" fill="#c0492f" text-anchor="middle">連鎖反応が起きる領域</text>'
+          + '<text x="380" y="115" font-size="11.5" fill="#0f5132" text-anchor="middle">t0 以降は挿入だけ見ればよい</text>'
+          + '</svg><p class="cap">図: 橋より後ろは「挿入のうち現在残っていない最大値」を見るだけで削除の連鎖反応の結果が分かる</p></div>'
+    }
+  },
+  {
+    q: '完全レトロアクティブ性について、「分解可能探索問題」はセグメント木を使って $O(\\log m)$ 倍のオーバーヘッドで実現できる一方、一般の問題では $\\Omega(r)$ の下界が示されている。この違いが生じる理由として最も適切なものはどれか。',
+    opts: [
+      '分解可能探索問題の方が常にデータ量が少ないから',
+      '分解可能探索問題は $\\text{query}(x,A\\cup B)=f(\\text{query}(x,A),\\text{query}(x,B))$ という性質のおかげで、問い合わせを $O(\\log m)$ 個の部分の答えの合成に分解できるが、一般の問題(例: ホーナー法で多項式を評価するような逐次依存の強い計算)では、1 か所の変更が本質的に以降の計算全体をやり直すことを要求してしまうから',
+      'セグメント木は分解可能探索問題にしか実装できない特別な木だから',
+      '一般の問題には $O(\\log m)$ の解法が存在するが、まだ発見されていないだけである',
+      '分解可能探索問題は更新を一切サポートしないから簡単になる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。データ量の大小ではなく、クエリの<b>分解可能性</b>という構造的な性質が本質。データ量が同じでも分解可能性が無ければ $O(\\log m)$ は保証されない。',
+      '<b>これが正解。</b>分解可能探索問題は、2 つの部分集合に対する答えを $O(1)$ で合成できるため、時間軸のセグメント木で $O(\\log m)$ 個の節点を見るだけで答えが求まる。一方、ホーナー法で多項式を評価するような計算では、途中の 1 か所を変えると、そこから先の依存関係がすべて変わってしまい、合成では済まず再計算そのものが必要になる。これが $\\Omega(r)$ 下界(Frandsen–Miltersen の結果)の根拠になっている。',
+      '違う。セグメント木自体は汎用的なデータ構造で、分解可能探索問題以外にも広く使われる。分解可能探索問題に限定されるのは「レトロアクティブ化にそのまま使える」という文脈での話。',
+      '違う。講義ノートは明確に $\\Omega(r)$ という<b>下界</b>(どんな方法を使っても避けられない)を示しており、「まだ見つかっていない良い方法がある」という話ではない。',
+      '違う。分解可能探索問題も insert・delete という更新をサポートする(定義上「探索問題」自体が insert/delete/query を持つ)。更新をサポートしないから簡単というのは誤り。'
+    ],
+    why: {
+      html: '<h4>図で理解する: 合成できる問題と、やり直すしかない問題</h4><p>分解可能性があれば O(log m) 個の部分の答えを合成するだけで済む。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="decomposable vs general">'
+          + '<text x="140" y="30" font-size="12.5" fill="#0f5132" text-anchor="middle">分解可能探索問題</text>'
+          + '<rect x="40" y="45" width="80" height="26" fill="#8fd6b4"/><rect x="130" y="45" width="80" height="26" fill="#8fd6b4"/>'
+          + '<text x="150" y="90" font-size="11.5" fill="#4a5d54" text-anchor="middle">f(答えA, 答えB) で O(1) 合成 → O(log m)</text>'
+          + '<text x="420" y="30" font-size="12.5" fill="#c0492f" text-anchor="middle">一般の問題(逐次依存)</text>'
+          + '<rect x="360" y="45" width="40" height="26" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<rect x="410" y="45" width="40" height="26" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<rect x="460" y="45" width="40" height="26" fill="#fbeeea" stroke="#c0492f"/>'
+          + '<text x="420" y="90" font-size="11.5" fill="#c0492f" text-anchor="middle">1 か所変えると以降を再計算 → Ω(r)</text>'
+          + '</svg><p class="cap">図: 分解可能性がある問題は合成で済み、無い問題は再計算が本質的に必要</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
