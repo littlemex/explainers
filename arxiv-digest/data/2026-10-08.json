@@ -198,28 +198,38 @@
   ]
  },
  "trends": {
-  "headline": "強化学習の後学習でオンポリシー蒸留と重み同期・非同期化の基盤が一気に増え、推論側では KV キャッシュ圧縮と投機的デコードの工夫が数多く出た週。",
+  "headline": "今週は、KV キャッシュ（過去の計算結果をためておく記憶）を小さくする研究と投機的デコードの研究が大量に出ました。強化学習の後処理ではオンポリシー蒸留（生徒が自分で書いた答えに先生が点をつける学び方）が一気に増え、Muon 系の最適化手法の分析も続きました。",
   "themes": {
    "集団通信・ネットワーク": {
     "week": [
      {
-      "title": "MoE の All-to-All を、限られた回線の上で速くする",
-      "title_en": "Making MoE all-to-all fast on constrained links",
-      "body": "MoE (専門家を切り替えるモデル) の All-to-All (全員が全員とデータを交換する通信) は、回線の使い方が偏るとすぐ詰まります。RailWave は DeepEP の上で、送り手側の情報だけを使って通信を複数の回線 (レール) に均等に振り分けます。GLM-4.5-Air の学習から取った通信で、素の実装に比べて H800 で最大 5.84 倍、H20 で 4.36 倍速くなりました。CoMoE は逆に NVLink のない PCIe の家庭用 GPU を対象にし、ホスト CPU を中継役にして RTX 5090 で最大 1.46 倍速くなり、A800 に近い性能を 23.4% のハードウェア費用で出したとしています。",
-      "body_en": "Both papers attack the irregular all-to-all of expert parallelism, but at opposite ends of the hardware spectrum. RailWave, built on DeepEP, rebalances traffic across parallel network rails using only source-local information and a reusable topology-derived schedule, reporting up to 5.84x (H800) and 4.36x (H20) over Native on GLM-4.5-Air training-derived workloads. CoMoE targets PCIe consumer GPUs without P2P and turns the host into a routing hub with multicast dispatch and host-staged combine, reporting up to 1.46x throughput on RTX 5090 and near-A800 performance at 23.4% of the hardware cost.",
+      "title": "MoE の All-to-All 通信を、ふつうのネットワークや安い GPU でも速くする",
+      "title_en": "Making MoE All-to-All work on imperfect networks and cheap GPUs",
+      "body": "どちらも、エキスパート並列（専門家ごとに GPU を分けるやり方）で起きる All-to-All（全員が全員に送る通信）の詰まりを扱います。RailWave は DeepEP の上で、送る量を複数のレール（並列のネット回線）に均し、毎回作り直さない固定の送信順を使います。GLM-4.5-Air の通信で、Native 比で H800 では最大 5.84 倍、H20 では最大 4.36 倍速くなりました。CoMoE は P2P（GPU どうしの直結）がない RTX 5090 で、ホスト CPU を中継役にします。スループットは最大 1.46 倍で、ハード代 23.4% のまま NVLink 付き A800 に近づいたと報告しています。",
+      "body_en": "Both target the All-to-All bottleneck of expert parallelism. RailWave sits on DeepEP: it rebalances traffic across rails using only source-local information and reuses a topology-derived schedule, reaching up to 5.84x (H800) and 4.36x (H20) over Native on GLM-4.5-Air traces. CoMoE assumes PCIe consumer GPUs without P2P and turns the host into a routing hub. It reports up to 1.46x throughput on RTX 5090, approaching NVLink A800 performance at 23.4% of the hardware cost.",
       "ids": [
        "2610.03415",
        "2610.09424"
       ]
      },
      {
-      "title": "標準の集団通信では書けない通信を、配置とトポロジから組み立てる",
-      "title_en": "Deriving transfers from topology and layout instead of generic collectives",
-      "body": "Ofan は fat tree (木の形のネットワーク) で、上りの経路を選ぶと下りが一つに決まる性質に注目し、宛先を見て負荷を分けるスイッチ側の方式を作りました。Llama-3 405B の FSDP2 学習で、既存の方式に比べ通信完了時間の膨らみを 16-39 分の 1 に減らしています。NCCL M2N は、学習と rollout (試し生成) でテンソルの分け方が違うときの M 対 N の再分配を、送り手と受け手の配置から転送計画を導いて行います。256 GPU の DeepSeek-V3 で重み同期を 5.78 秒から 2.77 秒 (2.09 倍) に縮め、1 ステップの時間を 12.7% 減らしました。",
-      "body_en": "Both works argue that destination- or layout-oblivious communication leaves a lot on the table. Ofan performs destination-aware load balancing in switches (P4 prototype) and reports 16-39x lower CCT inflation than existing algorithms in an end-to-end FSDP2 run with Llama-3 405B. NCCL M2N derives transfer regions and a global schedule from source/destination meshes for train-to-rollout resharding, cutting DeepSeek-V3 weight sync on 256 GPUs from 5.78 s to 2.77 s and RL step time by 12.7%, versus legacy all-gather plus broadcast.",
+      "title": "強化学習で、学習側から生成側へ重みを速く運ぶ",
+      "title_en": "Moving weights from trainer to rollout faster in RL",
+      "body": "どちらも、学習用と生成用で重みの持ち方が違う RL（強化学習）で、重みの同期が一歩ごとの時間を食う問題を扱います。NCCL M2N は、送り元と送り先の配置から転送の計画を自動で作ります。256 GPU の DeepSeek-V3 では同期時間が 5.78 秒から 2.77 秒になり、一歩の時間は 12.7% 減りました。NeMo-DCR は、一歩で変わる重みが BF16 で約 1% しかない点に目をつけ、変わった分だけをビット単位で正確に送ります。1T モデルを 3% の変化率で送る場合、87.5 分かかっていたのが 150 秒になりました。",
+      "body_en": "Both address weight sync when training and rollout use different layouts or clusters. NCCL M2N derives a global transfer schedule from source and destination meshes. On 256-GPU DeepSeek-V3 it cuts weight sync from 5.78 s to 2.77 s and step time by 12.7%. NeMo-DCR exploits that only about 1% of BF16 weights change per step and ships bit-exact deltas, bringing a 1T relay-tree refit at a 3% change rate from 87.5 minutes down to 150 seconds.",
+      "ids": [
+       "2610.07516",
+       "2610.08430"
+      ]
+     },
+     {
+      "title": "経路の偏りを、送り先を見て直す",
+      "title_en": "Destination- and rail-aware load balancing",
+      "body": "Ofan はファットツリー型のネットワークで、上りの経路を選ぶと下りの経路が一つに決まってしまう点を指摘します。そのため、送り先を見ない負荷分散では偏りを後から直せません。そこで送り先を見て振り分けるスイッチ側の方式を P4 で作り、Llama-3 405B の FSDP2 学習で、通信完了時間の膨らみを既存方式の 16〜39 分の 1 にしました。RailWave も、GPU 側でレールの偏りを均すという同じ問題を扱っています。",
+      "body_en": "Ofan argues that on a fat tree, destination-oblivious balancing cannot undo the imbalance it creates, and proposes a switch-based, destination-aware scheme in P4. It cuts CCT inflation 16-39x versus existing algorithms in FSDP2 training of Llama-3 405B. RailWave tackles the same rail-imbalance problem from the GPU side.",
       "ids": [
        "2610.07230",
-       "2610.07516"
+       "2610.03415"
       ]
      }
     ]
@@ -227,20 +237,30 @@
    "分散学習": {
     "week": [
      {
-      "title": "GPU メモリの外側 (CPU メモリや SSD) を学習に使い切る",
-      "title_en": "Pushing training state beyond GPU memory: DRAM and SSDs",
-      "body": "TRANSIT は、アプリやフレームワークを一切変えずに、間に挟む層で CPU の DRAM を GPU メモリの延長として使います。最大 64 枚の H100 で、TorchTitan より最大 68%、ZeRO-Infinity より最大 42% 高い GPU あたり処理量を出し、GPU を半分にしても 90% 以上の処理量を保ちました。RetainZ はチェックポイント (途中保存) を ZNS SSD (区画ごとにまとめて消す SSD) に置くとき、いつ消すかの予定で置き場所を分けます。ZenFS に比べて p99 遅延を 47.5% 減らし、書き込み増幅を 1.165 から 1.003 に下げました。",
-      "body_en": "Two papers treat the memory hierarchy below HBM as part of the training system. TRANSIT transparently extends GPU memory with CPU DRAM via a user-space interposition layer and zero-copy path, reporting up to 68%/59%/42% higher per-GPU throughput than TorchTitan, ZeRO-Offload and ZeRO-Infinity on up to 64 H100s, and training with 50% fewer GPUs at over 90% of baseline per-GPU throughput. RetainZ turns checkpoint retention policies into explicit reclaim epochs on Zoned SSDs; on FEMU it cuts mean p99 checkpoint latency by 47.5% versus ZenFS's allocator and host write amplification from 1.165 to 1.003.",
+      "title": "MoE の「人気エキスパート」への集中をどう抑えるか",
+      "title_en": "Taming hotspot experts in MoE",
+      "body": "CIPHER-MoE は、ルーターの Top-K 選び（各トークンが上位 K 個の専門家を選ぶこと）はそのままにします。そのうえで専門家側からトークンを絞り込み、DeepSeek-V4-Pro などで Top-1 エキスパートの負荷を最大 64.9 ポイント下げ、学習を 1.10〜1.94 倍速くしました。推論側の AFORE は、次に来るマイクロバッチの割り振りを先に見て、エキスパートを NVLink で移し替えます。110B MoE で、最も強い比較相手よりスループットが 10.1〜17.6% 上がりました。",
+      "body_en": "CIPHER-MoE keeps token-side Top-K intact but filters from the expert side with explicit capacity. It cuts Top-1 expert load by up to 64.9 points and speeds training 1.10-1.94x on models including DeepSeek-V4-Pro. On the serving side, AFORE uses the visibility of upcoming microbatches in attention-FFN disaggregation to migrate experts over NVLink. It reports 10.1-17.6% higher throughput than the strongest baseline on a 110B MoE.",
+      "ids": [
+       "2610.05744",
+       "2610.03203"
+      ]
+     },
+     {
+      "title": "GPU の外にある記憶装置を学習に使う",
+      "title_en": "Using memory and storage beyond the GPU",
+      "body": "TRANSIT は、アプリにもドライバにも手を入れずに、CPU の DRAM を GPU メモリの延長として使います。64 台の H100 で、1 GPU あたりのスループットが TorchTitan より最大 68%、ZeRO-Infinity より最大 42% 高くなりました。また、GPU を半分にしても元の 90% 超の速さを保ちます。RetainZ は、チェックポイント（学習途中の保存）を Zoned SSD（区画ごとにまとめて消す SSD）に置くとき、いつ消すかの予定に合わせて置き場所を分けます。ZenFS と比べて p99 遅延が 47.5% 減り、書き込みの増幅も 1.165 から 1.003 に下がりました。",
+      "body_en": "TRANSIT transparently extends GPU memory with CPU DRAM via a user-space interposition layer. On up to 64 H100s it beats TorchTitan by up to 68% and ZeRO-Infinity by up to 42% in per-GPU throughput, and keeps over 90% of baseline throughput with half the GPUs. RetainZ places checkpoints on ZNS SSDs by planned reclaim epoch. Versus ZenFS's allocator it cuts p99 latency by 47.5% and write amplification from 1.165 to 1.003, though evaluation is on FEMU with manifests up to Pythia-1B.",
       "ids": [
        "2610.07593",
        "2610.05554"
       ]
      },
      {
-      "title": "連合学習で、送る量と偏りを同時に減らす",
-      "title_en": "Federated learning: less payload, less drift",
-      "body": "連合学習 (データを集めずに各所で学習して合わせる方法) の 2 本は、どちらも通信を増やさずに学習を進める工夫です。一方は隠れ層の活性 (途中の計算結果) を少しだけ共有して、データの偏りによるずれ (client drift) を抑え、FedProx や SCAFFOLD より同じ回数で高い精度を出しました。もう一方は物理的に安全な鍵配送を使う前提で、凍結した基盤モデル・蒸留・量子化を組み合わせて送る量を減らし、胸部 X 線分類で鍵の消費を約 35 分の 1 にしています。",
-      "body_en": "Both federated-learning papers trade a small, structured payload for faster or more sustainable training. One shares a small amount of hidden-layer activations across clients to counter heterogeneity-induced drift, reporting higher accuracy at a fixed round budget than FedProx, SCAFFOLD, FedPVR, FedProto and SplitFed. The other targets information-theoretically secure key exchange, whose key rate is scarce, and combines frozen backbones, distillation and quantization to cut key usage by roughly 35x on chest X-ray classification while keeping accuracy.",
+      "title": "連合学習で、通信量と鍵の消費を減らす",
+      "title_en": "Federated learning: less drift, fewer keys",
+      "body": "連合学習（データを手元に置いたまま各所で学ぶ方式）の論文が 2 本ありました。1 本は、隠れ層の出力を少しだけ共有して client drift（各所のデータの違いで学習がずれること）を抑えます。決められた回数の中で、FedProx や SCAFFOLD より高い精度を出しました。もう 1 本は、物理的な鍵配送の生成速度が遅いことに注目します。固定したバックボーン・蒸留・量子化を組み合わせ、胸部 X 線の分類で鍵の消費を約 35 分の 1 にしました。",
+      "body_en": "Two federated-learning papers. One shares a small amount of hidden-layer activations to counter client drift, reporting higher accuracy than FedProx, SCAFFOLD and others under a fixed round budget. The other targets the low generation rate of physics-based ITS keys and combines frozen backbones, distillation and quantization. It reports roughly 35x less key usage on chest X-ray classification while keeping accuracy.",
       "ids": [
        "2610.01126",
        "2610.06420"
@@ -251,37 +271,39 @@
    "推論・サービング": {
     "week": [
      {
-      "title": "KV キャッシュ圧縮: 「どれを捨てるか」から「何を残すか・どう残すか」へ",
-      "title_en": "KV-cache compression shifts from what to evict to what and how to keep",
-      "body": "KV キャッシュ (過去の計算結果の置き場) を小さくする論文が今週は特に多く、注意の量だけで捨てる従来法を見直す流れが共通しています。LORE-KV は短い続きを試しに生成して、答えるときに使われる記憶を予測し、予算 128 で Qwen2.5-14B の LongBench 平均を 45.49 から 48.24 に上げました (予算が大きいと差は縮むとしています)。BreadthKV は精度を下げて本数を増やす方針で、捨てるだけの方法に 18 設定中 17 で勝ちました。AbridgeKV は思考の塊を学習済みの「ポーズトークン」に詰め、生成キャッシュの 4 分の 1 で精度を保ち、vLLM でキャッシュ 3.5 倍小・H100 で 3.2 倍速としています。",
-      "body_en": "A large cluster of papers moves away from attention-mass heuristics. LORE-KV samples short continuations to estimate which prompt tokens will matter at answer time, lifting Qwen2.5-14B LongBench from 45.49 to 48.24 at B=128, with gains shrinking at larger budgets; a KL-based scorer similarly targets the next-token distribution directly. BreadthKV spends a fixed byte budget on more tokens at lower precision and beats eviction alone in 17 of 18 settings, while AttSVD and SlimKV compress along the feature axis instead (AttSVD on par with dense at up to 50% memory; SlimKV up to 3.38x end-to-end decode speedup at 128K). AbridgeKV trains the model to fold finished reasoning blocks into pause-token KV entries, matching full-KV accuracy with a quarter of the generated cache and finishing 3.2x faster on a saturated H100 in vLLM.",
+      "title": "KV キャッシュ圧縮: 「どのトークンを捨てるか」から、別の圧縮の軸へ",
+      "title_en": "KV-cache compression moves beyond which-token-to-evict",
+      "body": "多くの論文が、注意の重み（attention）だけで捨てるトークンを決める方法には限界があると見ています。LORE-KV は、答えの続きを試しに作って後で使われる度合いを見積もり、Qwen2.5-14B の LongBench を 45.49 から 48.24 に上げました。ただし予算が大きくなると効果は小さくなります。BreadthKV は、捨てる代わりに精度を下げて本数を残し、18 条件のうち 17 で「捨てるだけ」の方法に勝ちました。特徴の軸で圧縮する AttSVD はメモリ 50% で元と同等の性能を保ち、学習で圧縮する AbridgeKV は vLLM でキャッシュを 3.5 分の 1 にしました。",
+      "body_en": "Several papers question attention-mass heuristics. LORE-KV samples short continuations to estimate future utility, lifting Qwen2.5-14B LongBench from 45.49 to 48.24 at B=128, with gains shrinking at larger budgets. BreadthKV spends bytes on more tokens at lower precision and beats eviction alone in 17 of 18 settings. AttSVD compresses along the feature axis and stays on par with the dense cache at up to 50% memory. AbridgeKV learns pause tokens that shrink the cache 3.5x in vLLM.",
       "ids": [
        "2610.07643",
-       "2610.06479",
        "2610.05685",
        "2610.06927",
+       "2610.20641",
+       "2610.06479",
        "2610.02953",
-       "2610.20641"
+       "2610.02713"
       ]
      },
      {
-      "title": "投機的デコードは「固定」から「状況に合わせて切り替える」へ",
-      "title_en": "Speculative decoding becomes adaptive",
-      "body": "投機的デコード (小さな下書きを本体がまとめて確かめる高速化) で、下書きの長さや方式を固定しない工夫が並びました。APEX は EAGLE-3・n-gram・下書きモデルをリクエストごとに選び、深さも変えて Qwen3-8B で自己回帰に比べ最大 5.24 倍としています。AgSpec はコーディングエージェント向けに既存の文章から下書きを取り、長さを適応させて最大 4.76 倍 (バッチ 16) でした。DScout は拡散モデルを下書きに使い、受理数だけでなく 1 回あたりの遅延を割り算で考えることで Qwen3-8B で平均 4.14 倍、既存最良より 7.1% 上としています。",
-      "body_en": "Several papers argue that fixed proposal mechanisms and draft lengths waste work. APEX learns to pick among EAGLE-3, n-gram and draft-model speculation per request and adapt block depth, reporting up to 5.24x over autoregressive decoding with Qwen3-8B in vLLM. AgSpec adapts retrieval-based drafting to coding agents, with up to 4.37x (batch 1) and 4.76x (batch 16). DScout and D-Loop work on diffusion drafters: DScout factors throughput as accepted tokens over per-round latency and reports 3.84x/4.14x mean speedups on Qwen3-4B/8B (7.1-9.1% over the prior best), while a post-training MTP pass on ~2.5B tokens reportedly matches jointly trained MiMo-7B heads.",
+      "title": "投機的デコード: 下書きの作り方と長さを状況に合わせる",
+      "title_en": "Speculative decoding: adapt the drafter and the draft length",
+      "body": "投機的デコード（小さな下書きを大きなモデルがまとめて確かめる方法）で、固定の下書き長をやめる流れが目立ちます。APEX は EAGLE-3・n-gram・下書きモデルを学習で切り替え、Qwen3-8B で逐次生成の最大 5.24 倍になりました。AgSpec はコーディングエージェントの過去の文章から写して下書きを作り、最大 4.37 倍（バッチ 1）です。拡散モデルを下書きに使う DScout は、平均 3.84 倍と 4.14 倍を出し、最も強い比較相手を 9.1% と 7.1% 上回りました。また、凍結した Qwen3-8B に約 2.5B トークンで MTP ヘッド（複数トークン予測の部品）を後付けするだけで、同時に学習した MiMo-7B 並みの速さになるという報告もありました。",
+      "body_en": "A shared move away from fixed draft lengths. APEX learns to pick among EAGLE-3, n-gram and draft-model speculation and adapts depth, reaching up to 5.24x over autoregressive decoding with Qwen3-8B. AgSpec retrieves from session and workspace text for coding agents, up to 4.37x at batch 1. DScout (diffusion drafter) reports 3.84x/4.14x mean speedups, 9.1%/7.1% over the prior best. Separately, post-training MTP heads on about 2.5B tokens on a frozen Qwen3-8B reportedly matches jointly trained MiMo-7B.",
       "ids": [
        "2610.07780",
        "2610.01108",
        "2610.23935",
+       "2610.00888",
        "2610.06011",
-       "2610.00888"
+       "2610.04875"
       ]
      },
      {
-      "title": "エージェント向けサービング: 長い会話・中断・使い回しを前提にする",
-      "title_en": "Serving built around long-lived agent sessions",
-      "body": "エージェント (道具を呼びながら何度も推論する仕組み) の使い方に合わせたサービングが目立ちました。Coda は受け入れの順番を工夫し、vLLM などに比べ SLO (守るべき応答目標) を満たす処理量を平均 70.5% 上げました。ReFold は過去の履歴を元に戻せる形で畳み、トークンを最大 2.5 分の 1 にしています。一方で、先頭以外の KV を部分再利用すると、前に処理した依頼の順番で答えが変わる問題も示され、文書単位の再計算で答えのぶれを 69.0% から 26.1% に減らしました。Lachesis は KV の寿命に合わせて HBM と高帯域フラッシュに置き分け、フラッシュの寿命を 1.19-3.13 倍に延ばしたとシミュレーションで報告しています。",
-      "body_en": "Agent workloads—long sessions, tool calls, revisions—are now a design point of their own. Coda exploits admission flexibility across storage tiers and reports 70.5% average SLO-compliant throughput gains over coding-agent systems and vLLM; ReFold reversibly folds history and cuts tokens by up to 2.5x without hurting task success. A cautionary result shows selective non-prefix KV reuse can make answers depend on request order, with document-aligned recomputation reducing answer variation from 69.0% (CacheBlend token top-k) to 26.1% at the same ~5.7x TTFT speedup. Lachesis places KV by lifetime across HBM and high-bandwidth flash, extending flash lifetime 1.19-3.13x in trace-driven simulation.",
+      "title": "エージェントのための推論の受け入れ・記憶の扱い",
+      "title_en": "Serving agents: admission, context and KV lifetime",
+      "body": "エージェントの使い方（長いセッション、途中の中断、ツール呼び出し）を前提にした仕組みが増えています。Coda は、KV の状態に合わせて受け入れの順番を工夫し、vLLM などと比べて SLO（約束した応答時間）を守れたスループットを平均 70.5% 上げました。ReFold は、すでに見せた履歴を元に戻せる形で畳み、トークンを最大 2.5 分の 1 にしました。順番を変えて KV を再利用すると答えがぶれる問題では、文書単位で計算し直すことで、CacheBlend の 69.0% だったぶれを 26.1% に下げました。Lachesis は、寿命の短い KV を HBM に置くことでフラッシュの寿命を 1.19〜3.13 倍に延ばしました。",
+      "body_en": "Systems increasingly assume agent sessions. Coda exploits admission-order flexibility for coding agents and reports 70.5% average gain in SLO-compliant throughput over state-of-the-art systems and vLLM. ReFold reversibly folds history and cuts tokens up to 2.5x without hurting task success. Document-aligned recomputation reduces answer variation across request orders from 69.0% (CacheBlend) to 26.1%. Lachesis keeps short-lived KV in HBM to extend high-bandwidth-flash lifetime 1.19-3.13x, in simulation.",
       "ids": [
        "2610.03088",
        "2610.07863",
@@ -295,39 +317,38 @@
    "カーネル・低精度": {
     "week": [
      {
-      "title": "2 bit・1 bit・三値: 極端な低ビット化が重みから KV まで広がる",
-      "title_en": "Extreme low-bit spreads from weights to activations and KV",
-      "body": "CanonQ は重み 2 bit・活性 4 bit・KV 2 bit を同時に行い、回転と正規化で分布をそろえて共通の符号表を使い回し、LLaMA3 で従来最良よりパープレキシティを最大 14.28 分の 1 にしました。TaSQ は 1 bit の KV 量子化で、BF16 に比べ最大 14 倍のバッチと 1.87 倍の処理量を出しています。三値 (-1, 0, 1) では SSR が疎な構造を使って RSR++ より 2.1-11.3 倍速くしました。ただし三値モデルを bf16 経由で書き出すと学習の変更がほぼ消え、GSM8K が 58.79% から 0.78% に落ちる例も報告されています。",
-      "body_en": "Low-bit work now targets every tensor at once. CanonQ maps weights, activations and KV into canonical coordinates to reuse frozen codebooks and reports up to 14.28x lower WikiText-2 perplexity under W2A4KV2 than prior art on LLaMA3; TaSQ makes 1-bit KV viable with 1.87x peak throughput over BF16 in SGLang, and Dual-QK gives 2-bit prunable KV with up to 3.75x decode throughput. For ternary models, SSR exploits sparsity for 2.1-11.3x over RSR++, while a separate study warns that the standard bf16-cast export can revert most low-learning-rate code changes, dropping Falcon-E-1B GSM8K strict accuracy from 58.79% to 0.78%.",
+      "title": "KV キャッシュを 1〜2 bit まで落とす",
+      "title_en": "Pushing KV caches to 1-2 bits",
+      "body": "どれも KV キャッシュを極端に低いビット数にしつつ、精度の落ちを抑える工夫です。TaSQ は 1 bit のベクトル量子化で、BF16 と比べてバッチを最大 14 倍にし、ピークのスループットは 1.87 倍になりました。Dual-QK は、クエリとキーに別々の変換をかけて 2 bit と枝刈りを両立させ、SGLang で最大 3.75 倍です。ResidualQuant は、ループ型モデルの各ループの差だけを 2 bit で持ち、理論上の記憶量を 80.7% 減らしました。CanonQ は、重み・活性化・KV を同時に W2A4KV2 にする方法です。",
+      "body_en": "All push KV caches to extreme low bit-widths. TaSQ reshapes the VQ space for 1-bit, supporting up to 14x larger batches and 1.87x peak throughput over BF16. Dual-QK pairs non-orthogonal query and key transforms for prunable 2-bit caches, up to 3.75x decode throughput in SGLang. ResidualQuant stores 2-bit residuals across loops of looped Transformers, cutting theoretical storage 80.7%. CanonQ goes further with joint W2A4KV2.",
       "ids": [
-       "2610.09202",
        "2610.03027",
        "2610.09827",
-       "2610.08403",
-       "2610.07853"
+       "2610.10381",
+       "2610.09202"
       ]
      },
      {
-      "title": "GPU 以外の計算機へカーネルを移すコンパイラ",
-      "title_en": "Compilers that map kernels onto non-GPU hardware",
-      "body": "手で調整していた割り当てをコンパイラで自動化する論文が複数ありました。Tenstorrent Blackhole への CUDA 移植は MLIR (コンパイラの共通基盤) で注釈を使い、既定の変換より BF16 ガウス消去で 4.2 倍速くしました。ReDSEa は Kunpeng CPU と Ascend 910 の組み合わせで、48 コア CPU 実装よりコレスキー分解で最大 17 倍、SVD で最大 88 倍です。GenMLIR は 3D DRAM 内処理向けに動的計画法を変換し、最適化なしより最大 16.7 倍、コードも 300-500 行から 4-9 行に縮めました。GPU 向けでは Cleave が FlashInfer の手書き FA2/FA3 を幾何平均 1.4 倍・1.7 倍上回ったとしています。",
-      "body_en": "Several papers replace hand-tuned mapping with compiler passes. An annotation-driven MLIR compiler ports affine CUDA kernels to Tenstorrent Blackhole, with best configurations 4.2x faster than its own default for BF16 Gaussian elimination. ReDSEa maps dense factorizations onto Kunpeng 920 plus Ascend 910 for up to 17x (Cholesky) and 88x (SVD) over optimized 48-core CPU code, and GenMLIR lowers semi-ring DP to 3D-DRAM PIM at up to 16.7x over unoptimized lowering with 4-9 lines of source. On GPUs, Cleave decouples algebraic search from scheduling and reports 1.4x/1.7x geometric-mean speedups over FlashInfer's handwritten FA2/FA3 on serving traces.",
-      "ids": [
-       "2610.02658",
-       "2610.06291",
-       "2610.09156",
-       "2610.07742"
-      ]
-     },
-     {
-      "title": "低精度の「見かけの成功」と実際の失敗",
-      "title_en": "Low precision that looks fine but fails downstream",
-      "body": "数字の上では問題なく見える低精度化が、使う場面で壊れる例が続きました。LatentQuant は、NVFP4 (4 bit 浮動小数) にした動画 VAE が画質指標ではほぼ同じなのに、ロボット操作の成功率が 95.5% から 10.5% に落ちることを示し、2 段階の学習で 95.75% に戻しました。miniTE は 4 bit の強化学習で、学習側と生成側のエンジンの計算差が問題だとし、それを合わせて BF16 の 1.39 倍の処理量で安定させています。FP8 で FP64 を再現する方式の検討では、見落とされていた入力分解のコストを加えると、メモリ律速の処理では本来の 0.3-0.9 倍にとどまると指摘しています。",
-      "body_en": "A recurring lesson: matching an aggregate metric is not enough. LatentQuant shows NVFP4 VAE quantization nearly matches FP32 on VBench-7 while LIBERO success collapses from 95.5% to 10.5%, and its two-stage QAT restores 95.75%. miniTE finds that matching weights and formats across training and sampling engines is insufficient for native NVFP4 RL and, after cross-engine alignment, reaches 33,540 tokens/s on a B300 node, 1.39x BF16. A note on FP8-emulated FP64 adds a missing deconstruction-cost term and argues memory-bound kernels are limited to 0.3-0.9x of native, contradicting the original paper's claims.",
+      "title": "見た目の指標ではわからない、低精度の壊れ方",
+      "title_en": "Low-precision failures hidden by headline metrics",
+      "body": "LatentQuant は、NVFP4 にした VAE で画質の指標がほぼ同じ（0.7403 対 0.7409）なのに、ロボット操作の成功率が 95.5% から 10.5% に落ちることを示しました。三値（-1, 0, 1）の LLM では、bf16 に書き出す手順だけで GSM8K の正答率が 58.79% から 0.78% に下がる例がありました。miniTE は、学習と生成でエンジンが違うと NVFP4 の計算結果がずれる点を合わせ込み、BF16 の 1.39 倍の速さを出しました。どれも、「形式を合わせれば同じ」とは言えないことを示しています。",
+      "body_en": "LatentQuant shows NVFP4 VAEs can match FP32 on VBench (0.7403 vs 0.7409) while LIBERO success collapses from 95.5% to 10.5%. For ternary LLMs, the documented bf16 export can drop GSM8K strict accuracy from 58.79% to 0.78%. miniTE finds that matching formats across training and sampling engines is not enough, and its aligned NVFP4 learner reaches 1.39x BF16 throughput. Together they suggest format parity alone does not guarantee identical behavior.",
       "ids": [
        "2610.03959",
-       "2610.23928",
-       "2610.10924"
+       "2610.07853",
+       "2610.23928"
+      ]
+     },
+     {
+      "title": "カーネルを生成・移植・検証するコンパイラ",
+      "title_en": "Compilers that generate, port and verify kernels",
+      "body": "Cleave は、式の変形と実行順の決定を分けて探すことで、最も強い比較相手より平均 1.6 倍速いカーネルを作ります。本番の推論トレースでは、手書きの FlashInfer FA2/FA3 を幾何平均で 1.4 倍と 1.7 倍上回りました。RESOLVE は、AI が作った GPU カーネルを、タイミングを揺らすテスト・単純化・F* での証明で確かめ、これまで報告されていなかった問題を 4 件見つけました。MLIR を使った移植の例も 2 つあり、CUDA から Tenstorrent への移植で最大 4.2 倍、3D DRAM 内処理向けで最大 16.7 倍（未最適化の変換と比べて）でした。",
+      "body_en": "Cleave decouples algebraic search from scheduling, generating kernels 1.6x faster on average than the best baseline and beating FlashInfer's handwritten FA2/FA3 by 1.4x/1.7x geomean on serving traces. RESOLVE validates AI-generated kernels via timing perturbation, reduction and F* proofs, finding four unreported issues. Two MLIR compilers port code to new hardware: up to 4.2x for CUDA-to-Tenstorrent over default realizations, and up to 16.7x for 3D-DRAM PIM over unoptimized lowering.",
+      "ids": [
+       "2610.07742",
+       "2610.05683",
+       "2610.02658",
+       "2610.09156"
       ]
      }
     ]
@@ -335,10 +356,10 @@
    "モデル構造": {
     "week": [
      {
-      "title": "疎な注意と位置エンコーディングで長い文脈を安くする",
-      "title_en": "Cheaper long context via sparse attention and pruned RoPE",
-      "body": "注意 (どの単語を見るかの計算) の一部だけを使う工夫が、別々の場所を削っています。LatentIndex は DeepSeek-V3.2 で層をまたいで索引用のキャッシュを共有し、保存量を 61.1% 減らし、DSA よりデコード時の索引計算を 2.30-2.72 倍速くしました。SAGA はキーの頭数だけ減らして値の頭数を残し、長い文脈で GQA より 2 倍超速くしています。WavePrune は RoPE (回転で位置を表す方法) を 1 周期に限り、Qwen3-8B の HELMET を 35.7 から 40.0 に上げつつ 32K で FlashAttention-2 よりデコード 1.24 倍速としました。",
-      "body_en": "Each paper prunes a different part of attention. LatentIndex shares a latent indexer cache across layer groups on DeepSeek-V3.2, cutting logical indexer storage by 61.1% with 2.30-2.72x decode indexer speedups over DSA. SAGA shrinks key heads while keeping value heads, since QK becomes the bottleneck under sparse selection, and reports over 2x end-to-end decode speedup over full-attention GQA at long contexts for models up to 1.5B. WavePrune restricts RoPE channels to one period, raising Qwen3-8B HELMET from 35.7 to 40.0 and giving 1.24x decode over FlashAttention-2 at 32K; MC-Sparse brings training-free sparse attention to diffusion transformers (1.80x/2.32x).",
+      "title": "疎な注意（一部だけ見る注意）と位置エンコーディングの手直し",
+      "title_en": "Sparse attention and RoPE trimming",
+      "body": "LatentIndex は、どのトークンを見るかを決めるためのキャッシュを層どうしで共有し、DeepSeek-V3.2 でその保存量を 61.1% 減らしました。SAGA は、キーの頭数をバリューより少なくし、長い文脈で全部を見る GQA の 2 倍超の速さを出しました。WavePrune は RoPE（回転による位置の埋め込み）を 1 周期分に限り、Qwen3-8B の HELMET を 35.7 から 40.0 に上げました。MC-Sparse は動画や 3D の拡散モデルで、学習なしに 1.80〜2.32 倍速くしました。",
+      "body_en": "LatentIndex shares the sparse-attention indexer cache across layers, cutting it 61.1% on DeepSeek-V3.2. SAGA uses fewer key heads than value heads for over 2x decode speedup at long context versus full-attention GQA (models up to 1.5B). WavePrune limits each RoPE channel to one period, raising HELMET from 35.7 to 40.0 on Qwen3-8B. MC-Sparse gives 1.80-2.32x training-free speedups for video and 3D diffusion transformers.",
       "ids": [
        "2610.04635",
        "2610.04753",
@@ -347,22 +368,22 @@
       ]
      },
      {
-      "title": "MoE のルーターを「読む」「形を持たせる」",
-      "title_en": "MoE routers as signals and as structure",
-      "body": "MoE のルーター (専門家を選ぶ部分) を、計算の振り分け以外にも使う研究が並びました。ルーターの出力を言語間でそろえると多言語性能が上がり、ルーターの値を読むだけで画像と文章の組み合わせの危険を見分けられるという報告があります。BRANCH-MoE は専門家を二分木の葉に置き、補助の負荷分散損失なしで偏りを防ぎつつ、木の形に沿った配置で機器間通信を抑えられるとしています。Stepped MoE は 1 つのモデルで 1-4 B の規模を切り替え、同程度の遅延の密モデルより知識系で 2-5% 高い精度です。",
-      "body_en": "Router outputs are increasingly treated as meaningful. Aligning MoE router outputs across languages also aligns hidden states and improves multilingual performance, and reading router logits during prefill gives a lightweight unsafe-input detector for Qwen3-VL and Kimi-VL without touching the model. BRANCH-MoE gives expert indices a binary-tree topology, proving balance without an auxiliary loss and arguing tree-prefix placement bounds cross-device traffic, while matching flat routers on tabular tasks. Stepped MoE spans 1-4B parameter points in one model, 2-5% above dense counterparts on knowledge-heavy benchmarks.",
+      "title": "MoE のルーターを「読む」・形を変える",
+      "title_en": "Reading and reshaping MoE routers",
+      "body": "ルーター（各トークンをどの専門家に送るか決める部品）を、振り分け以外の目的にも使う研究が並びました。ルーターの出力を言語どうしでそろえると多言語の性能が上がる、という報告があります。ルーターの値を読むだけで画像と文章の組み合わせの危険を見抜ける、という報告もあります。BRANCH-MoE は専門家を二分木に並べ、補助の損失なしで偏りを防ぎつつ、通信を近くに収めやすくします。",
+      "body_en": "Routers are being used as signals, not just dispatchers. Aligning router outputs across languages improves multilingual transfer, and reading router logits during prefill detects unsafe multimodal inputs without touching parameters. BRANCH-MoE arranges experts on a binary tree, preventing routing collapse without an auxiliary loss and inducing a topology that can localize communication.",
       "ids": [
        "2610.01921",
        "2610.07774",
        "2610.06725",
-       "2610.07348"
+       "2610.05925"
       ]
      },
      {
-      "title": "再帰の記憶を鍛える: 線形注意とハイブリッド",
-      "title_en": "Getting more out of recurrent memory",
-      "body": "固定サイズの記憶を持つ再帰型の構造を、うまく使わせる工夫が続きました。Gated Slot Attention-2 は線形注意の記憶をキー側と値側の両方から訂正し、強い線形注意の基準を一貫して上回ったとしています。注意と再帰を混ぜたハイブリッドモデルは注意に頼りすぎるため、注意が見える範囲を補助損失で制限すると、長い文脈や集計の課題で特に伸びました。Continuous Memory Machine は短期と長期の記憶を行列として分け、従来の記憶付きネットワークより汎化が強いと報告しています。",
-      "body_en": "Three papers try to make fixed-size recurrent state carry more. GSA2 adds a Gated Oja Rule for key-side correction alongside value-side delta updates and reports consistent gains over strong linear-attention baselines with a chunkwise training kernel. A study of hybrid LMs finds they lean on attention far more than the recurrent state, and an auxiliary loss limiting attention's reach yields the largest gains on long-context and aggregation tasks. CMM separates matrix-valued short- and long-term memories and reportedly generalizes better than prior memory-augmented networks.",
+      "title": "再帰型・線形注意の記憶をうまく使う",
+      "title_en": "Better use of recurrent and linear-attention memory",
+      "body": "大きさが決まった再帰の記憶をどう管理するかが共通の問いです。GSA2 は、キー側とバリュー側の両方から記憶を直して、線形注意の比較相手を上回りました。ハイブリッド型（注意と再帰を混ぜた型）は注意に頼りすぎている、と指摘する論文もあります。補助の損失で再帰側も使わせると、長い文脈での性能が上がりました。CMM は、短期と長期の記憶を分けることで、記憶付きネットワークの比較相手より一般化しやすくなりました。",
+      "body_en": "Shared question: how to manage fixed-size recurrent memory. GSA2 corrects both key and value sides and improves over strong linear-attention baselines. Another paper finds hybrid LMs over-rely on attention and adds an auxiliary loss that pushes use of the recurrent state, helping long-context tasks. CMM splits short- and long-term matrix memories and reports stronger generalization than prior memory-augmented networks.",
       "ids": [
        "2610.02816",
        "2610.06750",
@@ -374,23 +395,24 @@
    "学習効率・スケーリング": {
     "week": [
      {
-      "title": "Muon の「なぜ効くか」と、その先の改良",
-      "title_en": "Why Muon works, and what comes after it",
-      "body": "Muon (更新を直交化する最適化手法) をめぐる論文が多く出ました。Spectrally Targeted Muon は、小さすぎる方向を学習可能にすることが主な効き目だと結論づけています。改良では、TensorChain が層をまとめて正規化し Muon より同じ損失で平均 9.6% 少ないトークンで済み、ORCA は最初だけ直交化を強め、Muon の Adam に対する改善と同じかそれ以上の差を Muon に対して付けたとしています。一方で、最適な手法はバッチサイズで入れ替わり、Muon に一貫して使えるスケーリング規則はないという報告もあります。",
-      "body_en": "Muon is now both a baseline and an object of study. Spectrally Targeted Muon finds that orthogonalizing all but the largest singular values nearly matches Muon, concluding it mainly works by making too-small directions trainable. TensorChain normalizes stacked layers as a 3D tensor and saves 9.6% of tokens over Muon at matched loss in Qwen3 0.6B/1.7B; ORCA anneals away early orthogonality regularization and claims an improvement over Muon at least as large as Muon's over Adam. Cautioning against simple rankings, another paper shows the best optimizer flips with batch size even after tuning, and AF-Muon removes the AdamW side-optimizer for tied embeddings at ~20% optimizer-memory savings.",
+      "title": "Muon は何が効いているのか、どう広げるか",
+      "title_en": "Why Muon works and how to extend it",
+      "body": "Muon（更新の行列を直交化する最適化手法）を分析したり、広げたりする論文がそろいました。Spectrally Targeted Muon は、Muon が効くのは小さすぎる方向を学べるようにするからだ、と結論づけています。TensorChain は層をまとめて正規化し、Muon と同じ損失に必要なトークンを平均 9.6% 減らしました。ORCA は学習の初めだけ直交化の制約をかけ、Muon が Adam に勝つのと同じかそれ以上の差で Muon に勝ちました。一方で、最良の最適化手法はバッチサイズで変わり、Muon に一貫して使えるスケーリング則はないという反論的な報告もあります。",
+      "body_en": "A cluster of Muon analyses and extensions. Spectrally Targeted Muon concludes Muon wins mainly by making too-small directions trainable. TensorChain normalizes stacked cross-layer tensors and saves 9.6% of tokens over Muon at matched loss. ORCA's early-only orthogonality beats Muon by a margin matching or exceeding Muon's gain over Adam. Pushing back, another paper finds no principled Muon scaling rule works consistently and the best optimizer flips with batch size.",
       "ids": [
        "2610.10965",
        "2610.10975",
        "2610.06116",
        "2610.08975",
-       "2610.01395"
+       "2610.01395",
+       "2610.03432"
       ]
      },
      {
       "title": "2 次の情報を、メモリを増やさずに使う",
-      "title_en": "Second-order curvature at first-order memory",
-      "body": "曲がり具合 (2 次の情報) を使う最適化を大きなモデルで現実的にする試みです。Clean は Nyström スケッチ (乱数で行列を小さく近似する方法) で SOAP を近似し、メモリをモデル次元に比例する量に抑えました。LLaMA-1.3B で AdamW と同じ性能に 26% 速く届き、80GB の GPU 1 枚で 13B の事前学習ができたとしています。SoftServe は準ニュートン法を深層学習向けにし、条件の悪い問題で Adam・Muon・SOAP より低い損失になることが多いと報告しています。Shampoo では、使う発散の選び方が近似の質を左右することが分析されました。",
-      "body_en": "Clean approximates SOAP's preconditioners with randomized Nyström sketches so optimizer memory scales linearly, reaching AdamW's final loss 26% faster in wall-clock on LLaMA-1.3B and enabling 13B pretraining on a single 80GB GPU; its Q-Clean variant uses over 50% less optimizer memory than Muon. SoftServe brings quasi-Newton methods to deep nets with Newton-Schulz iterations and often beats Adam, Muon and SOAP on ill-conditioned problems. A Bregman-divergence analysis of Shampoo explains how the divergence choice affects Kronecker approximation quality, validated with GPT-2.",
+      "title_en": "Second-order curvature at low memory",
+      "body": "Clean は、Nyström スケッチ（行列を小さく近似する方法）で SOAP の前処理を近似し、メモリを線形に抑えます。AdamW の最終性能に 26% 速く届き、13B を 80GB の GPU 1 枚で事前学習できました。SoftServe は、行列分解の代わりに GPU 向きの Newton-Schulz を使う準ニュートン法で、条件の悪い問題では Adam・Muon・SOAP より低い損失を出すことが多いと報告しています。Shampoo では、発散（ずれを測る関数）の選び方が近似の質を左右することが分析されました。",
+      "body_en": "Clean approximates SOAP's preconditioners with Nyström sketching at linear memory, reaching AdamW's final performance 26% faster and enabling 13B pretraining on one 80GB GPU. SoftServe is a quasi-Newton method using Newton-Schulz iterations that often reaches lower losses than Adam, Muon and SOAP on ill-conditioned problems. A Bregman-divergence framework explains how divergence choice shapes Shampoo's Kronecker approximation.",
       "ids": [
        "2610.04204",
        "2610.02182",
@@ -398,13 +420,13 @@
       ]
      },
      {
-      "title": "スケーリング則が言語以外の分野へ",
-      "title_en": "Scaling laws move into new domains",
-      "body": "計算量から性能を予測するスケーリング則を、言語モデル以外で確かめる研究がまとまって出ました。RoboJEPA は 12 種類のロボットのデータで、想像の誤差が計算量のべき乗則に従い、計画性能もそれと強く連動すると示しました。高エネルギー物理では約 110 億ジェットのデータで手順を作り、データが足りない領域でも最適なモデル規模や学習率を予測しています。故障しやすいハードウェアを模した学習では、モデルが大きいほど誤りに強くなるという修正則を導いています。",
-      "body_en": "Scaling-law methodology is being transplanted. RoboJEPA reports that latent rollout error follows a power law in compute across 12 embodiments and that planning performance tracks it, at 8B parameters. A HEP recipe on ~11 billion ATLAS jets jointly predicts model size, horizon, learning rate and batch size in the data-constrained regime and warns that below a dataset-size threshold the loss says little about high-compute scaling. A study on simulated faulty hardware (40,000 GPU-hours) derives modified laws in which error resilience grows with model size.",
+      "title": "LLM の外に広がるスケーリング則",
+      "title_en": "Scaling laws beyond language models",
+      "body": "高エネルギー物理では、約 110 億ジェットのデータで、計算量に対してモデルとデータをほぼ同じ割合（√C）で増やすのが最適だと出ました。RoboJEPA は、ロボットの世界モデルの予測誤差が計算量のべき乗則に従うことを示し、8B まで伸ばしました。故障しやすいハードでも、モデルが大きいほど誤りに強くなるというスケーリング則もあります。RL の計算量については、log-sigmoid と log-linear の法則に理論の裏付けが与えられました。",
+      "body_en": "On about 11B jets in HEP, compute-optimal scaling recovers a near-equal √C split between model and data. RoboJEPA finds robot world-model imagination error follows a power law in compute, up to 8B. Training on simulated faulty hardware suggests error resilience grows with scale. For RL compute, a two-stage policy model gives theoretical backing to log-sigmoid and log-linear scaling laws.",
       "ids": [
-       "2610.10515",
        "2610.06784",
+       "2610.10515",
        "2610.10311",
        "2610.04158"
       ]
@@ -414,40 +436,43 @@
    "強化学習の基盤": {
     "week": [
      {
-      "title": "オンポリシー蒸留が急増し、細部の設計と危険が見えてきた",
-      "title_en": "On-policy distillation surges, with design details and risks",
-      "body": "オンポリシー蒸留 (生徒が自分で書いた答えに先生が点を付けて教える方法) の論文が今週は 15 本以上ありました。速く・安くする方向では、Flash-OPD が軌跡ごとに途中で止めて通常の 2.2-7.5 倍速くし、ResOPD は先生の分布を一部しか送らなくても偏りのない勾配を得ます。教え方の改良では、FUW が目的関数からトークンの重要度を導いて一様な重みより 1.35-4.0 点、Δ-MOPD が先生の「差分」だけを送って 4.11 点上げました。一方、BF16 では更新の大半が丸めで消える (FP32 では約 97% の重みが変わるのに BF16 では 7-11%) ことや、裏口入りの先生から 3% の汚染で攻撃成功率 70% が移ることも示されています。",
-      "body_en": "On-policy distillation (OPD) dominated the theme this week. On cost, Flash-OPD stops each trajectory independently for 2.2-7.5x speedups over standard OPD, and ResOPD gives unbiased full-vocabulary reverse-KL gradients from sparse teacher payloads. On objectives, Fisher Utility Weighting derives token weights from the objective and improves on uniform OPD by 1.35-4.0 macro points (reverse-KL), and Δ-MOPD transfers only teacher-minus-base shifts, beating endpoint composition by 4.11 Math points. Diagnostics are sobering: in multi-teacher OPD, BF16 rounding hides most updates (~97% of FP32 master weights move versus 7-11% of BF16 weights), and a backdoored safety teacher can reach up to 70% attack success at a 3% poisoning rate.",
+      "title": "オンポリシー蒸留が急増: 速さ・偏り・安全の問題",
+      "title_en": "On-policy distillation surges: speed, bias and safety",
+      "body": "今週もっとも多かった流れです。生徒が自分で書いた答えに先生が点をつける方式を、さまざまな角度から改良しています。Flash-OPD は、答えごとに途中で打ち切って 2.2〜7.5 倍速くしました。ResOPD は、上位 K 個だけを見るときの偏りを、残りの部分の扱い方で取り除きます。Δ-MOPD は、先生が学んだ差分だけを移し、Math で 4.11 ポイント上回りました。一方で、裏口を仕込んだ先生からは、汚染率 3% でも攻撃成功率が最大 70% になるという警告もありました。",
+      "body_en": "The week's largest thread. Flash-OPD stops each rollout adaptively for 2.2-7.5x speedups over standard OPD. ResOPD removes Top-k bias with an exact tail gradient under the same sparse payload. Δ-MOPD transfers only teacher-minus-base shifts, beating endpoint composition by 4.11 Math points. A warning: a backdoored safety teacher can reach up to 70% attack success on the student at 3% poisoning.",
       "ids": [
        "2610.06105",
        "2610.04882",
-       "2610.18883",
        "2610.10460",
-       "2610.02179",
-       "2610.07654"
+       "2610.07654",
+       "2610.18883",
+       "2610.02703",
+       "2610.08448",
+       "2610.10447"
       ]
      },
      {
-      "title": "学習と rollout の間: 重み転送・非同期化・メモリ",
-      "title_en": "Between trainer and rollout: refit, asynchrony, memory",
-      "body": "強化学習の後学習で、学習側と生成側をつなぐ部分の論文が揃いました。NeMo-DCR は 1 ステップで変わる重みが約 1% しかないことを使い、変わった分だけをビット単位で正確に送って、1T モデルの地域間転送を 87.5 分から 150 秒にしました。ThunderSyncRL は入力がそろった軌跡から先に勾配計算を始め、同期学習と同じ更新のまま最大 1.9 倍速くしています。KLPO は KL 正則化の基準を生成側に置くことで重要度重みなしに古い軌跡から学べるとし、LoGRA は低ランクの勾配スケッチでメモリを最大 45.7% 減らして 8 GPU 1 台で 27B を学習しました。",
-      "body_en": "The plumbing between learner and rollout gets several concrete systems. NeMo-DCR exploits that only ~1% of BF16 weights change per step and sends bit-exact deltas, cutting a 1T relay-tree refit at a 3% change rate from 87.5 minutes to 150 seconds (12-40x over transport-only). ThunderSyncRL starts gradients as soon as inputs are fixed, provably matching batch-synchronous updates while reaching the same SWE-bench Verified and Terminal Bench performance up to 1.9x faster. KLPO anchors the KL at the sampler to drop importance weights for stale trajectories, async evolution strategies show little degradation even with all-stale fitness, and LoGRA's low-rank sketches cut memory up to 45.7% to train a 27B model on one 8-GPU node.",
+      "title": "同期・非同期の溝を埋めるパイプライン",
+      "title_en": "Closing the sync-async gap in RL pipelines",
+      "body": "ThunderSyncRL は、入力が決まったところからすぐ勾配を計算し始めます。同期式とまったく同じ更新を出しながら最大 1.9 倍速く、同じ予算なら非同期式より 2.47 ポイント高くなりました。KLPO は、KL 正則化（方針の変わりすぎを抑える項）の基準を生成側に置くことで、重要度重み（古い方針とのずれの補正）をなくしました。進化戦略では、古い評価ばかりでも精度の落ちは小さいという結果が出ています。LoGRA は、勾配を低ランクの形で持ってメモリを最大 45.7% 減らし、27B を 8 GPU で動かしました。",
+      "body_en": "ThunderSyncRL starts gradients as soon as inputs are fixed, provably matching synchronous updates while running up to 1.9x faster, and beats async by up to 2.47 points at fixed budget. KLPO anchors the KL at the sampler to drop importance weights. Async evolution strategies degrade only slightly even when all fitness is stale. LoGRA keeps low-rank gradient sketches, cutting memory up to 45.7% and fitting 27B on one 8-GPU node.",
       "ids": [
-       "2610.08430",
        "2610.05935",
        "2610.08963",
        "2610.04196",
-       "2610.06647"
+       "2610.06647",
+       "2610.08430"
       ]
      },
      {
-      "title": "4 bit の rollout で、学習側とのずれを詰める",
-      "title_en": "FP4 rollout and the train-inference mismatch",
-      "body": "rollout (試し生成) を FP4 (4 bit 浮動小数) にすると速くなる一方、学習側との数値のずれが問題になります。TRACE は生成側の量子化結果を学習側の丸めに反映させ、4 つの大きな MoE で BF16 と同程度の性能のまま rollout を最大 5.4 倍速くしました。miniTE は形式をそろえるだけでは足りず、エンジン間の計算差を合わせる必要があるとして、Qwen3-30B-A3B で BF16 に近い品質の長い学習を安定させています。",
-      "body_en": "Both papers locate the problem not in FP4 accuracy per se but in the gap between training and rollout paths. TRACE uses rollout-side quantization outcomes to guide training-side FP4 rounding and reports BF16-comparable RL on four large MoE models with up to 5.4x rollout speedup. miniTE finds cross-engine numerical execution gaps persist even with matched weights and formats, and after alignment reports stable long-horizon RL on Qwen3-30B-A3B close to BF16 quality.",
+      "title": "4 bit で RL を回す",
+      "title_en": "Running RL in 4-bit",
+      "body": "TRACE は、生成側で量子化した結果を学習側の FP4 の丸めに反映させます。MoE 4 モデルで BF16 並みの RL 性能を保ち、生成は最大 5.4 倍速くなりました。miniTE は、エンジン間の数値のずれを合わせ、Qwen3-30B-A3B で長い RL を安定させました。複数の先生から学ぶ蒸留の分析では、BF16 の丸めのせいで、更新が反映されて初期値から変わった重みが 7〜11% しかない（FP32 では約 97%）ことも示されています。",
+      "body_en": "TRACE uses rollout-side quantization outcomes to guide training-side FP4 rounding, keeping BF16-level RL quality on four MoE models with up to 5.4x rollout speedup. miniTE aligns cross-engine NVFP4 numerics for stable long-horizon RL on Qwen3-30B-A3B. A multi-teacher OPD study adds that BF16 rounding hides most updates: only 7-11% of BF16 weights move versus about 97% of FP32 masters.",
       "ids": [
        "2610.07767",
-       "2610.23928"
+       "2610.23928",
+       "2610.02179"
       ]
      }
     ]
@@ -456,40 +481,39 @@
   "pref": {
    "week": [
     {
-     "title": "RL の重み同期と非同期化を、正確さを保ったまま速くする",
-     "title_en": "Faster RL weight sync and asynchrony without losing exactness",
-     "body": "学習側から生成側へ重みを渡す部分を、2 つの方向から速くしています。NCCL M2N は配置の違う GPU 群の間の再分配を計画して 256 GPU の DeepSeek-V3 で同期を 2.09 倍速くし、NeMo-DCR は変わった約 1% の重みだけをビット単位で正確に送って 1T モデルの転送を 87.5 分から 150 秒にしました。非同期化では ThunderSyncRL が同期と同じ更新のまま最大 1.9 倍、KLPO が古い軌跡でも重要度重みなしで学べる形を示しています。TRACE は FP4 の生成と学習のずれを直接合わせ、rollout を最大 5.4 倍速くしました。",
-     "body_en": "Weight transfer from trainer to rollout is attacked both by smarter collectives and by sending less. NCCL M2N plans layout-aware M-to-N resharding for a 2.09x weight-sync speedup on 256-GPU DeepSeek-V3, while NeMo-DCR ships bit-exact deltas (~1% of weights per step) to cut a 1T cross-region refit from 87.5 minutes to 150 seconds. On asynchrony, ThunderSyncRL claims identical updates to synchronous training at up to 1.9x speed, and KLPO removes importance weights by anchoring the KL at the sampler. TRACE narrows the FP4 train-rollout mismatch for up to 5.4x faster rollout.",
+     "title": "KV キャッシュを精度・層・ヘッドの軸で削る",
+     "title_en": "Shrinking KV caches by precision, layer and head",
+     "body": "BreadthKV は、本数を残して精度を下げるほうが良いと示しました。最も厳しい予算では、上限の長さに届いてしまう AIME の実行が 91% から 40% に減りました。TaSQ（1 bit）と Dual-QK（2 bit・6.8 倍圧縮）は量子化の空間を工夫します。ResidualQuant はループ間の差を 2 bit で持ち、Coral-KV は動画生成で層をまたいだ予測の残りだけを量子化します。WakeKV は、読み方を途中で変えるヘッド（注意の頭）を CPU に退避させ、後で戻せるようにします。",
+     "body_en": "BreadthKV argues for more tokens at lower precision, cutting AIME length-cap hits from 91% to 40% at the tightest budget on Qwen3-8B. TaSQ (1-bit) and Dual-QK (2-bit, 6.8x compression) reshape the quantization space. ResidualQuant stores 2-bit residuals across loops, and Coral-KV quantizes only cross-layer prediction residuals in video KV caches. WakeKV parks cooling heads in a recoverable CPU reservoir instead of evicting them.",
      "ids": [
-      "2610.07516",
-      "2610.08430",
-      "2610.05935",
-      "2610.08963",
-      "2610.07767",
-      "2610.04196"
+      "2610.05685",
+      "2610.03027",
+      "2610.09827",
+      "2610.10381",
+      "2610.12514",
+      "2610.02713"
      ]
     },
     {
-     "title": "測り方を厳密にする: ばらつき・数値の非決定性・シミュレータ・検証",
-     "title_en": "Measurement rigor: variance, nondeterminism, simulators, verification",
-     "body": "推論ベンチマークの逐次分離手順は、A100 と vLLM で変動係数 (ばらつきの指標) を 15.2% から 2.2% に下げ、144 設定中 78.5% で 3% 未満にしました。分類モデルでも、バッチの形を変えるだけで bf16 では予測確率が最大 56.7 ポイント動くと示されています。ServeTwin は実機なしで InferenceX の処理量の前線を平均誤差 3.6% で再現しました。RESOLVE は AI が書いた GPU カーネルを、タイミングを揺らす試験・簡約・形式証明の 3 段で確かめ、未報告の問題を 4 件見つけています。",
-     "body_en": "A Sequential Isolation protocol on A100/vLLM 0.9.1 cuts average latency CV from 15.2% to 2.2%, with 78.5% of 144 configurations below 3%. Serving-context nondeterminism reaches classifiers too: batch shape alone changes no labels in fp32 but shifts up to 56.7 points of probability mass in bf16. ServeTwin reproduces InferenceX's throughput-interactivity frontier with 3.6% mean error without profiling target hardware, and RESOLVE validates AI-generated kernels via timing perturbation, reduction and F* proofs, finding four previously unreported issues in mega-kernels.",
+     "title": "拡散言語モデルの高速化と学習",
+     "title_en": "Diffusion language models: speed and training",
+     "body": "拡散言語モデル（文章を少しずつ書き直して作るモデル）の論文がそろいました。Clock Diffusion は、位置ごとにノイズの量を変えて半自己回帰型にし、KV キャッシュも使えるようにしました。SpecFold は、投機的デコードの枝どうしで重なる計算を使い回し、Spiffy の最大 1.64 倍になりました。Un-OPD は、ブロック境界のずれなどによる 2 つの偏りを直してオンポリシー蒸留を安定させ、学習時間をおよそ半分にしました。",
+     "body_en": "Clock Diffusion uses position-dependent noise schedules to make continuous diffusion LMs semi-autoregressive with KV-cache support. SpecFold reuses parent computation across speculative branches, up to 1.64x over Spiffy. Un-OPD fixes boundary misalignment and support-dependent bias in block-diffusion OPD, stabilizing training and cutting wall-clock time by roughly half.",
      "ids": [
-      "2610.09778",
-      "2610.09111",
-      "2610.02732",
-      "2610.05683"
+      "2610.00894",
+      "2610.04875",
+      "2610.05373"
      ]
     },
     {
-     "title": "Prefill/Decode・Attention/FFN の分離をどう動かすか",
-     "title_en": "Operating disaggregated prefill/decode and attention/FFN serving",
-     "body": "処理を分けて別の GPU で動かす構成で、割り当てを固定しない工夫が並びました。FluidPD は prefill (入力の読み込み) と decode (1 語ずつの生成) の役割を、モデルを読み直さずにその場で入れ替え、Azure の実トレースで静的な SGLang より SLO 達成を最大 94.6 ポイント上げました。AFORE は Attention と FFN を分けた MoE で、次の小バッチの専門家負荷が先に見えることを使って再配置を隠し、最強の基準より処理量を 10.1-17.6% 上げています。ECO は同じ分離構成で省エネの設定をベイズ最適化で探し、平均 40.5% の省エネを報告しました。",
-     "body_en": "FluidPD adds in-place elasticity to prefill-decode disaggregation—offloading bounded prefill to decode workers and reassigning roles without reload—and reports up to 94.6 points higher SLO attainment than static SGLang on Azure traces. In attention-FFN disaggregated MoE serving, AFORE uses advance visibility of microbatch expert loads to hide migrations, gaining 10.1-17.6% throughput over the strongest baseline on a 110B MoE, and ECO searches energy-efficient AFD configurations with constrained Bayesian optimization, reporting 40.5% average energy reduction.",
+     "title": "コーディングエージェントを速く・正しく扱う",
+     "title_en": "Serving and understanding coding agents",
+     "body": "AgSpec は、エージェントが同じコードやログを何度も書くことを利用した投機的デコードで、最大 4.76 倍（バッチ 16）になりました。Coda は、受け入れの順番を工夫して、SLO を守れたスループットを平均 70.5% 上げました。CABRA は、SWE-bench Verified では、編集した行数よりツールを呼んだ回数のほうがエージェントの正答率をよく予測すると報告しています。",
+     "body_en": "AgSpec exploits code and log repetition for retrieval-based speculation, up to 4.76x at batch 16. Coda exploits admission flexibility for 70.5% average SLO-compliant throughput gains. CABRA reports that on SWE-bench Verified, tool-call counts predict agent accuracy better than lines edited.",
      "ids": [
-      "2610.06917",
-      "2610.03203",
-      "2610.08373"
+      "2610.01108",
+      "2610.03088",
+      "2610.10610"
      ]
     }
    ]
@@ -497,38 +521,37 @@
   "blogs": {
    "week": [
     {
-     "title": "手書き CUDA/CUTLASS から、高水準のカーネル DSL へ",
-     "title_en": "From hand-written CUDA/CUTLASS to higher-level kernel DSLs",
-     "body": "PyTorch Blog の 3 本は、どれも Triton 系の書き方で既存の手書きカーネルを置き換えています。Meta は TLX (Triton の低レベル拡張) で書いた Jagged Flash Attention が、B200 で FA4 より順伝播で約 13%、逆伝播で約 50% 速く、コードは約 3 分の 1 だとしています。推薦の埋め込み検索 (TBE) も CUDA から Triton に移り、境界チェックだけで最大 1.24 倍でした。Helion は vLLM の量子化線形層を 1 つの実装と自動調整でまかない、一部で 10% 超の処理量改善です。論文の Cleave も、コンパイラが FlashInfer の手書き版を上回ると報告しています。",
-     "body_en": "Three PyTorch posts replace specialized kernels with Triton-family code. Meta's TLX Jagged Flash Attention is about 3.2K lines versus FA4's ~10K and reportedly beats FA4 on GEM's jagged shapes by ~13% forward and ~50% backward on B200. The FBTriton TBE rewrite outperforms legacy CUDA (bounds check alone up to 1.24x on B200), and a single autotuned Helion GEMM backend beats vLLM's CUTLASS/DeepGEMM defaults on Hopper with >10% throughput on some workloads. The Cleave paper makes a similar claim from the compiler side against FlashInfer's handwritten backends.",
+     "title": "手書き CUDA から高水準の DSL へ: カーネル実装の置き換え",
+     "title_en": "From hand-written CUDA to higher-level kernel DSLs",
+     "body": "Meta は TLX（Triton の低レベル拡張）で Jagged Flash Attention を書き直しました。B200 上で、行数が FA4 の約 3 分の 1 のまま、順伝播で約 13%、逆伝播で約 50% 上回りました。Helion は 1 つの GEMM の実装から形状ごとの自動調整で、vLLM の量子化線形層で最大 10% 超の改善を出しました。FBTriton は推薦の埋め込み検索を CUDA から Triton に移し、元の CUDA カーネルを上回ったと報告しています。論文の Cleave も、コンパイラが手書きの FA2/FA3 を上回ったと報告しています。",
+     "body_en": "Meta's TLX Jagged Flash Attention reportedly beats FA4 on B200 by about 13% forward and 50% backward with roughly a third of the code. Helion's single autotuned GEMM gives vLLM's quantized linear layers more than 10% throughput on some workloads over CUTLASS and DeepGEMM. FBTriton's TBE rewrite reportedly outperforms legacy CUDA. The Cleave paper similarly reports compiler-generated kernels beating handwritten FA2/FA3.",
      "ids": [
       "b:https://pytorch.org/blog/optimizing-jagged-flash-attention-with-tlx-the-road-toward-sota-fa4-on-blackwell/",
-      "b:https://pytorch.org/blog/modernizing-table-batched-embeddings-with-fbtriton/",
       "b:https://pytorch.org/blog/building-a-high-performance-and-portable-vllm-linear-backend-with-helion/",
+      "b:https://pytorch.org/blog/modernizing-table-batched-embeddings-with-fbtriton/",
       "2610.07742"
      ]
     },
     {
-     "title": "複数ノードの GPU クラスタを、再現でき・確かめられる形で動かす",
-     "title_en": "Running multi-node GPU clusters reproducibly and verifiably",
-     "body": "クラスタ運用の土台に関する記事がまとまりました。NVIDIA は Megatron Core でビット単位で同じ結果になる事前学習を大規模に行う方法を紹介し、障害の再現や修正の確認に役立つとしています。AICR v1.0 は、ドライバや Kubernetes など多数の部品の版の組み合わせをオープンに検証できるようにするものです。Modal Clusters は RDMA 対応の複数ノード GPU をデコレータ 1 つで使えるようにし、まとめて配置するために新しいスケジューラを作ったと述べています。DOCA GPUNetIO は GPU 自身が通信を始める仕組みの統一を掲げています。",
-     "body_en": "Several posts address the operational substrate. NVIDIA describes scaling bitwise-deterministic pretraining in Megatron Core to make failures reproducible and fixes verifiable at thousand-GPU scale, and AICR v1.0 aims to make the version matrix of drivers, runtimes and Kubernetes components open and verifiable. Modal made its RDMA-connected multi-node clusters generally available behind one decorator, saying gang scheduling required a new observe-plan-act scheduler, and DOCA GPUNetIO is pitched as unifying GPU-initiated networking that takes the CPU off the critical path.",
+     "title": "GPU クラスタを再現でき、検証でき、すぐ使えるものに",
+     "title_en": "Reproducible, verifiable GPU clusters",
+     "body": "NVIDIA は、Megatron Core でビット単位で同じ結果が出る（毎回まったく同じ結果になる）事前学習を大規模に回す方法を紹介しました。AICR v1.0 は、ドライバから各種フレームワークまでのバージョンの組み合わせを検証できる形にします。Modal Clusters は、最大 6.4 Tbps の InfiniBand で結ぶ複数ノードを一般提供しました。全ノードをまとめて確保するギャングスケジューリングのために、スケジューラを新しく作ったと述べています。",
+     "body_en": "NVIDIA describes scaling bitwise-deterministic pretraining in Megatron Core for easier debugging and resumption. AICR v1.0 aims to make the version stack of GPU Kubernetes clusters verifiable. Modal made multi-node clusters with up to 6.4 Tbps InfiniBand generally available, saying it built a new observe-plan-act scheduler for gang scheduling.",
      "ids": [
       "b:https://developer.nvidia.com/blog/scale-bitwise-deterministic-pretraining-with-nvidia-megatron-core/feed/",
       "b:https://developer.nvidia.com/blog/aicr-v1-0-open-stable-and-verifiable-gpu-cluster-configuration/feed/",
-      "b:https://modal.com/blog/modal-clusters-generally-available",
-      "b:https://developer.nvidia.com/blog/doca-gpunetio-gda-ki-unified-gpu-networking/feed/"
+      "b:https://modal.com/blog/modal-clusters-generally-available"
      ]
     },
     {
-     "title": "1 枚の GPU を分け合い、新しいモデルを速く配る",
-     "title_en": "Sharing a GPU and serving new models fast",
-     "body": "vLLM Blog は、DeepSeek-V4.1-Flash を公開から 3 週間で、低い同時実行で 1.9 倍、エージェント向けベンチマークで処理量 5.3 倍に速くしたと報告しています。スライド窓の KV を再構築する工夫だけで最初の応答までの時間が約 30% 縮みました。NVIDIA の Green Contexts は 1 枚の GPU 上で遅延重視の処理と裏の処理の資源配分を制御する仕組みで、論文の HALO も SM (GPU の演算ユニット群) を分けて LoRA と本体の計算を重ねる考え方をとっています。",
-     "body_en": "vLLM reports that within three weeks of release, DeepSeek-V4.1-Flash got 1.9x faster at low concurrency and 5.3x higher throughput under a 150 TPS constraint on the AgentX benchmark, with SWA bounded replay alone cutting TTFT by about 30%. NVIDIA's Green Contexts post addresses controlling resource sharing between latency-sensitive and background work in one process, a problem the HALO paper tackles for multi-LoRA serving by partitioning SMs between base and LoRA computation.",
+     "title": "1 枚の GPU を分け合う、推論エンジンを詰める",
+     "title_en": "Sharing one GPU and tuning a serving stack",
+     "body": "Green Contexts は、1 つのプロセスの中の複数の処理に GPU の資源をどう配るかを決める仕組みとして紹介されました。論文の HALO も、SM（GPU の計算ユニット）を分けてベースと LoRA の計算を重ね、SLO を守ります。vLLM は DeepSeek-V4.1-Flash で、発表から 3 週間でエージェント向けのスループットを 5.3 倍にしました。そのうち SWA の再構築の工夫だけで、TTFT（最初のトークンまでの時間）を約 30% 縮めています。",
+     "body_en": "NVIDIA presents Green Contexts for controlling how GPU resources are split among components in one process. The HALO paper similarly partitions SMs to overlap base and LoRA computation under SLOs. vLLM reports 5.3x agentic throughput on DeepSeek-V4.1-Flash within three weeks, with SWA bounded replay alone cutting TTFT about 30%.",
      "ids": [
-      "b:https://vllm.ai/blog/2026-10-07-deepseek-v41-flash",
       "b:https://developer.nvidia.com/blog/control-how-your-gpu-shares-work-with-green-contexts/feed/",
-      "2610.04956"
+      "2610.04956",
+      "b:https://vllm.ai/blog/2026-10-07-deepseek-v41-flash"
      ]
     }
    ]
