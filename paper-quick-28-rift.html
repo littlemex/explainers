@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>下書きモデルのメモを減らすときは、最近書いた語を残し、選び直すと当たりが続く — 論文クイックサマリー 第 28 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 28 回</span>
+<h1>下書きモデルのメモを減らすときは、最近書いた語を残し、選び直すと当たりが続く</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.31098" target="_blank" rel="noopener">Tsur, Ashkenazi et al., &quot;RIFT: KV Cache Compression for Draft Models with Complementary Compressibility Training&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「投機的デコードの下書き係は、メモ（KV キャッシュ）を決まった量しか持てないとき、最初に読んだ文章から大事な部分だけを選んで残すやり方だと、長く書くほど当たりが減っていく。RIFT は、メモの一部を最近書いた語に割り当て、書いている途中で残す部分を選び直す。さらに、メモが少ない状態に慣れさせる学習を足すと、Qwen3.5-4B が Qwen3.5-122B の下書きをする場合（入力 32K 語、出力 4K 語、メモ 8K 語分）、メモを減らさないときの採用語数の 98% 以上を保てた。学習なしで従来の SnapKV を使うと、同じ入出力の条件で 63.0% だった」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が問題だったのか</h2>
+<p>投機的デコード（小さな下書きモデルが先に何語か書き、大きな本体モデルがまとめて確かめて、合っていた分だけ採用するしくみ）では、下書き係の当たり具合を採用長（AL、1 回の確認で採用される語の平均数）で測ります。</p>
+<p>考える力を使うモデルは、長い入力を読んで長い答えを書きます。すると下書き係も、過去の語ごとのメモ（KV キャッシュ）が大きくなります。一部の層だけが Attention（過去の全部の語を見る部分）で、残りが別のしくみのハイブリッド型（混ぜた作り）でも同じです。たとえば Qwen3.5-4B は Attention の層が 25% だけなのに、64K 語の依頼を 4 本同時に扱うと、KV キャッシュが使用メモリの 51.1% を占めます。</p>
+<p>そこで、メモを決まった量（予算）までに減らします。よく使われる SnapKV は、プレフィル（最初に入力をまとめて読む段階）で大事そうな語を選んで残します。もう一つの SWA（スライディングウィンドウ、直近の決まった数の語だけ残す方法）は、大事さを考えません。</p>
+<p>ところが、Qwen3.5-4B の下書きでは SWA のほうが SnapKV より当たりました。書き進めるにつれて SnapKV の AL は 36.7% 下がり、SWA は 41% 上がりました。著者らは、最初に選んだメモがだんだん役に立たなくなるこの現象を「デコードの古びれ」と呼んでいます。理由として、最近の語は本体モデルが確かめた文章なので下書きにとって大事なこと、考える過程の文章が入力のまとめの役をしている可能性があることを挙げています。実際に、モデルが注意を向ける先は、入力から書いた文章のほうへ移っていきました。なお、全部の層が Attention の Llama3.1 では、SnapKV のほうが SWA より良いままでした。</p>
+
+<h2>RIFT のやり方</h2>
+<p>RIFT は手間の少ない順に 3 種類あり、それに学習を組み合わせられます。</p>
+<h3>1. RIFT-stat: 予算を分ける</h3>
+<p>メモの予算のうち決まった割合を直近の語（SWA の部分）に取っておき、残りを SnapKV などが選んだ大事な入力の語に使います。割合を変えると、遠くの情報と最近の流れのどちらを重く見るかを調整できます。実際のサーバーはメモをページ単位で持つので、メモをまとまり（ブロック）に分け、ブロックの中の点数の平均で選びます。</p>
+<h3>2. RIFT-dyn: 途中で選び直す</h3>
+<p>書いている途中、決まった語数ごとに、全部のメモに点数をつけ直して残す部分を選び直します。最近の語を使って点数を出すので、今の状態に合った選び方になります。そのため、全部のメモを GPU のメモリ（HBM、GPU に付いた高速メモリ）か別の場所に置いておく必要があります。選び直すほど当たりますが、そのぶん時間がかかります。</p>
+<h3>3. RIFT-ada: 必要なときだけ選び直す</h3>
+<p>一定間隔ではなく、最近の採用長が下がった、下書きの迷い具合（エントロピー）が上がった、質問側の向き（クエリ）が前回選び直したときから大きく変わった、などの合図で選び直します。連続しすぎないよう最短間隔を、古くなりすぎないよう最長間隔を決めます。合図の基準値は、モデルと温度（答えのばらつき）の組ごとに調整します。</p>
+<h3>4. メモが少ない状態に慣れさせる学習</h3>
+<p>本番と同じように「直近の語＋点数の高い入力の語」だけが見える目隠し（マスク）を作り、その状態で下書きモデルを知識蒸留（大きいモデルの答え方をまねさせる学習）します。追加部分は LoRA（少しの重みだけ足して学習する方法）で学習します。</p>
+
+<h2>測ったこと</h2>
+<p>主に SPEED-Bench（投機的デコード用の評価セット）で、下書きは 1 回 11 語、出力は最大 4K 語、メモ予算 8K 語分、温度 0 です。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>Qwen3.5 の AL（32K 入力）</td><td>RIFT-stat 5.62、RIFT-dyn 6.12、RIFT-ada 6.19</td><td>SnapKV 4.07、SWA 5.23</td><td>4B が 122B の下書き</td></tr>
+<tr><td>2</td><td>Qwen3.5 の AL（100K 入力）</td><td>RIFT-dyn 7.14、RIFT-ada 7.17</td><td>SnapKV 4.46、SWA 6.12</td><td>同上</td></tr>
+<tr><td>3</td><td>メモを減らさないときに比べた AL</td><td>RIFT-ada 95.8%、RIFT-dyn 94.6%</td><td>SnapKV 63.0%、SWA 80.9%</td><td>32K 入力、学習なし</td></tr>
+<tr><td>4</td><td>学習を足したときの AL</td><td>98% 以上</td><td>メモを減らさないとき</td><td>32K 入力、4K 出力、8K 予算</td></tr>
+<tr><td>5</td><td>Nemotron3.5-Lightning の自己下書き</td><td>RIFT-ada 8.71</td><td>SnapKV 4.83</td><td>本体自身がメモを減らして下書き（32K 入力）</td></tr>
+<tr><td>6</td><td>別の選び方に RIFT-stat を足す</td><td>CriticalKV 4.13 から 5.62（+36.2%）</td><td>CriticalKV だけ</td><td>32K 入力、8K 予算</td></tr>
+<tr><td>7</td><td>違う系統のモデルの下書き</td><td>RIFT-dyn 5.35</td><td>SnapKV 3.50</td><td>Qwen3.5-4B が DeepSeek-V4-Flash の下書き</td></tr>
+<tr><td>8</td><td>途中で選ぶ他の方法との比較</td><td>RIFT-ada 6.17</td><td>H2O 5.73、TriAttention 5.43</td><td>32K 入力</td></tr>
+<tr><td>9</td><td>投機的デコード以外（予備実験）</td><td>RIFT-stat 96.4%</td><td>SnapKV 67.2%</td><td>LongBench-v1、8K 予算、減らさないときに比べた得点</td></tr>
+</table>
+<p>RIFT-ada は、RIFT-dyn より少ない選び直し回数で、ほぼ同じかそれ以上の AL を出しました。</p>
+
+<h2>当てはまらないところ・残された課題</h2>
+<ul>
+<li>今の GPU だけの環境では、外付けの下書きモデルは、MTP や EAGLE、DFlash のように本体にくっつけた下書き部品より全体の速さで劣ると著者ら自身が書いている。この研究は、メモリの少ない SRAM 型の専用チップで下書きする将来の構成を想定している</li>
+<li>本体にくっつけた下書き部品は対象外。予備実験では、MTP は SWA だけでもメモを減らさないときの 94%（32K 入力）と 95%（100K 入力）を保てた</li>
+<li>途中で選び直すには全部のメモを HBM か別の場所に置く必要があり、予算が抑えるのは下書き側のメモリだけで、全体のメモ量は減らない</li>
+<li>選び直しの時間の負担は GPU で簡単に測っただけで、専用チップでは大きくなるかもしれず、まだ測っていない</li>
+<li>RIFT-ada の基準値はモデルと温度ごとに調整が必要で、結果には調整に使ったデータも含まれる</li>
+<li>出力を無理に長くした実験では文章がくり返しになりやすく、自然な長い答えとは違う可能性がある</li>
+<li>学習の効果は予算が大きいほど小さい。投機的デコード以外での効果はまだ予備的な結果</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>下書き係のメモを決まった量に抑えるときは、入力から選ぶだけでなく、最近の語の枠と途中での選び直しを用意すると当たりが保ちやすい、という結果です。特にハイブリッド型のモデルで差が大きく出ました。一方で、全部のメモをどこに置き、選び直しの時間をどこで払うかという設計が新しく必要になります。</p>
+
+<div class="note">このページは論文を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文で確かめてください。</div>
+<footer>元の論文: <a href="https://arxiv.org/abs/2610.31098" target="_blank" rel="noopener">https://arxiv.org/abs/2610.31098</a></footer>
+</div>
+</body>
+</html>

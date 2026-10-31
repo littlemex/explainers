@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2 ビットに縮めたモデルも、自分で書いた答えの上で教え直すと推論力がかなり戻る — 論文クイックサマリー 第 26 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 26 回</span>
+<h1>2 ビットに縮めたモデルも、自分で書いた答えの上で教え直すと推論力がかなり戻る</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.29378" target="_blank" rel="noopener">Zheng, Xiong et al., &quot;Right On Q: Recovering Reasoning under Quantization via Self-Generated Trajectories&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「重みを 2〜3 ビットに縮めたモデル（生徒）に、自分で書いた答えの途中を材料にして、元のモデル（先生）が次の語の確率を教える。さらに、確率を低く見積もりすぎた候補と高く見積もりすぎた候補で直し方を切り替える。これで 2 ビットの Qwen3-8B の 9 種類のテストの平均点が 70.68 点になり、いちばん強い比較手法（60.42 点）より 10.26 点高くなった」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が困っていたのか</h2>
+<p>大規模言語モデル（LLM）は、量子化（重みの数を少ないビット数で表して、メモリを小さくすること）をすると扱いやすくなります。でも 2〜3 ビットまで縮めると、長く考えて解く問題が急に解けなくなります。</p>
+<p>これを直す方法として QAT（量子化した状態のまま追加で学習させ、性能を取り戻すこと）があります。これまでの QAT は、あらかじめ用意した決まった答えの文章を使い、その途中の各位置で、元のモデルの次の語の確率に生徒を合わせる蒸留（大きいモデルの出力をまねさせる学習）をしていました。</p>
+<p>著者たちは、2 ビットの Qwen3-1.7B を調べて、2 つの問題を見つけました。</p>
+<ul>
+<li>道すじのずれ: 生徒は本番では自分が書いた文章の続きを書きます。答えが長くなるほど、学習で見た用意済みの文章とのずれが大きくなります。実際、元のモデルが長い答えを書く問題ほど、従来の QAT のモデルは正解率が戻らず、文字数の上限まで書いても終わらないことが多くありました。</li>
+<li>確率の見積もりの両方向のずれ: 自分の文章の同じ位置で、ある候補の確率は低すぎ、別の候補は高すぎる、ということが同時に起きます。これは生徒のエントロピー（次の語をどれだけ迷っているかの量）が高い位置ほど多くなりました。</li>
+</ul>
+
+<h2>OnQ のやり方</h2>
+<p>OnQ は、2 つの段階を順に行います。</p>
+<h3>1. まず動くモデルを作る（ブロックごとの調整）</h3>
+<p>重みを 128 個ずつのグループに分け、グループごとに目盛りの幅（スケール）とゼロの位置を決めて 2 または 3 ビットの整数に丸めます。ただ丸めただけ（RTN）では、2 ビットのモデルはほとんど何も解けません。そこで、Transformer のブロック（モデルを組み立てる 1 段分の部品）を 1 つずつ順に、元のブロックと同じ出力になるように学習させます。2,048 語の文章 4,096 本を使い、1 ブロックにつき 2 周します。これは EfficientQAT の方法にならったものです。</p>
+<h3>2. 自分の答えの上で教わる（オンポリシー蒸留）</h3>
+<ul>
+<li>生徒（量子化したモデル）が、数学・コード・科学・指示に従う問題などからなる 25,600 問の中から毎回 128 問を選び、1 問 1 つずつ答えを書きます。</li>
+<li>先生（元の BF16 のモデル。BF16 は 16 ビットの数の形式）は、生徒が書いたのと同じ途中の文章を見て、次の語の確率を出します。生徒が途中でまちがえた文章でも、その続きをどう書くべきかを教えます。</li>
+<li>生徒は、自分の確率を先生の確率に近づけるように重みとスケールを更新し、また新しい答えを書きます。これを Qwen3-1.7B では 400 回、4B と 8B では 300 回くり返します。</li>
+</ul>
+<h3>3. 直し方を候補ごとに切り替える（Dynamic KL）</h3>
+<p>確率のずれの測り方には、forward KL（先生の確率を重みにしてずれを測るやり方）と reverse KL（生徒の確率を重みにしてずれを測るやり方）があります。論文の調べ（エントロピーが高い位置だけを使ったもの）では、確率が 20 倍以上低すぎる候補を先生に近づけられた割合は forward KL が 99.7%、reverse KL が 70.9% でした。反対に、高すぎる候補では forward KL が 75.1%、reverse KL が 86.3% でした。つまり、得意な向きがちがいます。</p>
+<p>Dynamic KL は、候補ごとに先生と生徒の確率の比を見て、低すぎる候補には forward KL を、高すぎる候補には reverse KL を重く使います。同じ調べで、低すぎる候補は 95.1%、高すぎる候補は 84.7% を先生に近づけられました。計算は、先生と生徒それぞれの上位 20 個の候補と「その他」にまとめて行います。</p>
+<h3>4. 答えの長さの上限を少しずつのばす</h3>
+<p>調整した直後の生徒は、長い答えの後半で同じ文をくり返しがちです。2 ビットの Qwen3-1.7B では、くり返しの語の割合が最初の 4K 語では 6.7%、8K 語より後では 21.1% でした。くり返しは学習 100 回ほどで消えるので、答えの上限を最初の 50 回は 4,096 語、次の 50 回は 8,192 語、その後は 16,384 語にしています。</p>
+
+<h2>何を測ったのか</h2>
+<p>Qwen3 の 1.7B・4B・8B を、重み 2 ビットと 3 ビット（計算途中の値は BF16 のまま）にした 6 通りで、数学・コード・知識・指示に従う力の 9 種類のテストを行いました。点数は 3 回の評価の平均です（比較手法の AutoRound だけは 1 回）。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>9 テストの平均（Qwen3-8B、2 ビット）</td><td>70.68 点</td><td>いちばん強い比較手法 BitDistiller 60.42 点（元のモデルは 81.82 点）</td><td>差は 10.26 点。2 ビットでは、どの大きさでも全テストで OnQ が最高点</td></tr>
+<tr><td>2</td><td>9 テストの平均（Qwen3-4B、2 ビット）</td><td>64.95 点</td><td>2 ビットの Qwen3-8B での比較手法の最高 60.42 点</td><td>半分の大きさのモデルで、比較手法の 8B を上回った</td></tr>
+<tr><td>3</td><td>9 テストの平均（3 ビット）</td><td>4B: 76.29 点、8B: 79.19 点</td><td>元のモデル 4B: 79.93 点、8B: 81.82 点</td><td>元のモデルとの差は 4 点以内</td></tr>
+<tr><td>4</td><td>最高点をとった組み合わせ</td><td>54 組中 48 組</td><td>GPTQ、AutoRound（学習しない量子化）と EfficientQAT、BitDistiller、ReasoningQAT（QAT）</td><td>6 通りの設定 × 9 テスト</td></tr>
+<tr><td>5</td><td>LiveCodeBench（Qwen3-4B、2 ビット）</td><td>46.64%</td><td>ReasoningQAT 28.34%</td><td>答えの平均の長さも 5 分の 1 以上短くなった</td></tr>
+<tr><td>6</td><td>AIME（Qwen3-1.7B、3 ビット）</td><td>32.59%</td><td>ReasoningQAT 23.33%</td><td>答えの平均の長さは 6% 短くなった</td></tr>
+<tr><td>7</td><td>同じ文をくり返して失敗した問題（MATH-500、Qwen3-1.7B、2 ビット）</td><td>2.4%</td><td>従来の QAT 11.4〜54.0%（元のモデルは 0 問）</td><td>この減少が、ReasoningQAT との差の大部分を説明する</td></tr>
+<tr><td>8</td><td>上限まで書いても終わらなかった割合の平均（Qwen3-4B、2 ビット）</td><td>5.51%</td><td>ReasoningQAT 14.41%</td><td>6 通りすべての設定で、QAT の中でいちばん低い</td></tr>
+<tr><td>9</td><td>段階ごとの平均（Qwen3-1.7B、2 ビット）</td><td>丸めただけ 3.91 点 → 調整後 23.35 点 → OnQ 45.24 点</td><td>元のモデル 67.58 点</td><td>自分の答えの上での学習が、残りの差のおよそ半分を埋めた（6 通りの設定で、およそ半分かそれ以上）</td></tr>
+<tr><td>10</td><td>自分の答え vs 用意済みの答え（MATH-500、Qwen3-1.7B、2 ビット）</td><td>69.40%</td><td>用意済み + Dynamic KL 61.00%、用意済み + forward KL 59.00%</td><td>同じ出発点・同じ語数で比べた。3 テストで最大 8.40 点の差</td></tr>
+<tr><td>11</td><td>学習の目標どうしの比較（MATH-500、Qwen3-1.7B、2 ビット）</td><td>67.20%</td><td>forward KL（GKD）66.20%、reverse KL（Vanilla OPD）63.00%</td><td>数学の問題だけで 400 回学習させた別の条件</td></tr>
+</table>
+
+<h2>まだ届いていないところ</h2>
+<ul>
+<li>試したのは Qwen3 の 1.7B・4B・8B だけで、量子化したのは重みだけです（計算途中の値は BF16 のまま）。</li>
+<li>3 ビットでも、元のモデルの点にはまだ届いていません。54 組のうち 6 組では最高点ではなく、たとえば 3 ビットの Qwen3-8B の HumanEval+ では ReasoningQAT（88.01%）が OnQ（87.20%）を上回りました。</li>
+<li>終わらない答えは減りましたが、なくなってはいません。2 ビットの Qwen3-4B の AIME では 27.04% がまだ上限まで書いても終わりませんでした。</li>
+<li>答えが短くなったのは、2 ビットでは 9 例中 8 例、3 ビットでは 9 例中 6 例で、いつもではありません。</li>
+<li>学習の目標どうしの比較（表の 11）では、HumanEval+ は GKD（11.59%）のほうが OnQ（10.98%）より高い結果でした。また、学習のやり方や目標を比べる実験（表の 10・11）は、2 ビットの Qwen3-1.7B だけで行われています。</li>
+<li>くり返しによる失敗かどうかの判定は、別の AI（Claude Sonnet 5.5）に 2 回分類させ、意見が分かれたものなどを著者が読んで決めています。</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>この方法の学習では、生徒が毎回最大 16,384 語の答えを自分で書き、それと並行して元のモデルを動かして確率を出させる必要があります（論文では vLLM で先生を動かし、H100 と H200 の GPU を使いました）。用意済みの文章で学習するより、文章を作る仕組みと先生を動かす仕組みを一緒に回す設備が要ります。また、量子化したモデルを評価するときは、平均点だけでなく、長い問題での正解率や、上限まで書いても終わらない割合も見るべきだということを、この論文の数字は示しています。</p>
+
+<div class="note">このページは論文・記事を紹介した文章を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文・記事で確かめてください。</div>
+<footer>元の論文・記事: <a href="https://arxiv.org/abs/2610.29378" target="_blank" rel="noopener">https://arxiv.org/abs/2610.29378</a></footer>
+</div>
+</body>
+</html>

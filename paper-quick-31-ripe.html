@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>くり返し型の言語モデルでは、過去の語のメモは最後のほうの周回の分さえ正確なら足りる — 論文クイックサマリー 第 31 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 31 回</span>
+<h1>くり返し型の言語モデルでは、過去の語のメモは最後のほうの周回の分さえ正確なら足りる</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.34436" target="_blank" rel="noopener">Lu, Li et al., &quot;Prefix Keys and Values Matter Late: RIPE Caching for Self-Speculative Decoding in Looped Language Models&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「同じ層のかたまりを何周もくり返すモデルでは、過去の語のメモ（KV キャッシュ）を周回ごとに全部取っておくと非常に大きくなる。調べると、正確さが大事なのは最後のほうの周回が読むメモだけだった。そこで RIPE は、古い語には最後の周回のメモ 1 枚だけを残し、最近 64 語だけ全周回分を残す。Huginn-0125 では、全部取っておく場合の 11.9% の記憶量で、1 枚だけにしたときに大きな誤差が出た位置の 89% をなくせた（1024 語の文脈、記録した流れの再生で測定）」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が問題だったのか</h2>
+<p>ループ型言語モデル（同じ層のかたまりを、1 語ごとに何回もくり返して使うモデル）は、重み（モデルの中身の数）は小さくて済みます。さらに、少ない周回で回した結果を下書きに使えるので、別の下書き用モデルなしで自己投機的デコード（少ない周回で先に何語か下書きし、全周回で一度にまとめて確かめ、合っていた分だけ採用して速くするしくみ）ができます。</p>
+<p>ところが、KV キャッシュ（過去の語について計算したキーと値を取っておくメモ）は小さくありません。くり返し部分の層は 1 周ごとに自分のキーと値を書き出すので、周回の数だけメモが増えます。論文では、ある 1 周で全部の層が出したキーと値のひとまとまりをプレーン（plane）と呼びます。Huginn-0125 では、全プレーンを取っておくと 1 語あたり 2,788 KB、1 枚だけなら 169 KB です。</p>
+<p>では、どの周回のプレーンを取っておけばよいのか。著者たちはこれを 9 回の事前登録（実験の前に、判定の決まりと予想を固定しておくこと）つきの GPU 実験で直接測りました。外れた予想もすべて公開しています。最初の計画は「浅い周回のプレーンを残す」でしたが、これは逆だったと書いています。</p>
+
+<h2>RIPE のやり方</h2>
+<h3>わかったこと 1: 大事なのは深い周回のメモ</h3>
+<p>過去の語のキーと値に同じ大きさのずれを入れて比べると、周回 25〜32 にずれを入れたときのほうが、周回 2〜9 に入れたときより、予測の変化（KL: 2 つの予測の分布がどれだけ違うかを表す量）が何倍も大きくなりました。Huginn-0125 と Raven-Llama の 2 つのモデルで同じ傾向です。</p>
+<h3>わかったこと 2: プレーンは周回ごとに最後のプレーンへ近づく</h3>
+<p>各周回のプレーンと最後のプレーンとの差は、1 周ごとにほぼ一定の割合で縮みます（fp32 で周回 8 以降）。Huginn では 1 周ごとに 0.88 倍（半分になるまで 5.2 周）、Raven では 0.81 倍（3.3 周）です。著者たちは、深い周回のプレーンがすでに最後のプレーンとほぼ同じになっている状態を「熟している（ripe）」と表しています。Raven の深い周回は、bf16（桁数の少ない数の形式）の丸め誤差と同じくらいまで近づいていましたが、Huginn ではそこまで近づいていませんでした。</p>
+<h3>RIPE のしくみ（1 回の手順）</h3>
+<ul>
+<li>古い位置の語については、一番深いプレーン 1 枚だけを持つ。最近の W 個の位置の語については、全周回のプレーンを持つ（輪のように使い回す入れ物に入れる）</li>
+<li>下書き: 少ない周回で何語か書く。保存済みの位置は一番深いプレーンを読む</li>
+<li>確かめ: 全周回で、下書きの語をまとめて 1 回で通す。周回 j では、窓の中の位置なら周回 j のプレーンを読み、窓の外なら一番深いプレーンを読む</li>
+<li>下書きと合っていた分に、確かめ側の 1 語を加えて出力する</li>
+<li>出力した語のプレーンを追加し、窓から外れた位置は一番深いプレーン以外を捨てる</li>
+</ul>
+<p>著者たちは、窓の長さ W が確かめる語の数以上なら、まとめて確かめた結果が、1 語ずつ確かめた結果と（丸め誤差のない計算では）同じになることを示しました。まとめて確かめる語どうしは窓の中にいるので、同じ周回のプレーンをその場で使えるからです。一番深いプレーンだけを持つ方法（W = 0）ではこれが成り立たず、結果がどこで区切ってまとめたかに左右されます。</p>
+
+<h2>何を測ったか</h2>
+<p>実験は NVIDIA GH200（96 GB）1 台で、ことわりがない限り bf16、毎回いちばん確率の高い語を選ぶ書き方です。問題は GSM8K（算数の文章題）と AlpacaEval（指示文）を使いました。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>1 語あたりの KV キャッシュ</td><td>169 KB（6.1%）</td><td>全プレーン 2,788 KB</td><td>Huginn-0125 で 1 枚だけ持つ場合。Raven は 28.7 KB 対 410 KB（7.0%）</td></tr>
+<tr><td>2</td><td>95 GB に入る文章の本数</td><td>302 本</td><td>全プレーンで 36 本</td><td>Huginn、808 語の文章、記憶量の式からの計算</td></tr>
+<tr><td>3</td><td>同じ記憶量での一致率</td><td>0.990</td><td>最初の 4 周を残す方法 0.845</td><td>Huginn、書き始めの 1 語目が全プレーンと同じ語になる割合（bf16）</td></tr>
+<tr><td>4</td><td>一番深いプレーンだけの誤差の偏り</td><td>1% の位置が誤差の 74%</td><td>fp32 に変えただけの場合 21%</td><td>Huginn。平均 KL は fp32 に変えた場合の 5.7 倍。KL が 0.1 を超えた位置は 9 個（fp32 は 1 個）で、4 つの問題に集中</td></tr>
+<tr><td>5</td><td>Raven での一番深いプレーンだけの最大 KL</td><td>0.020</td><td>fp32 に変えた場合 0.014</td><td>bf16 から fp32 に変えた程度の差と区別できない。1 語目が変わった位置は 48（fp32 は 76）</td></tr>
+<tr><td>6</td><td>RIPE（W = 64）での大きな誤差の位置</td><td>9 個 → 1 個（89% 減）</td><td>一番深いプレーンだけ</td><td>Huginn、48 問題、記録した流れの再生で測定</td></tr>
+<tr><td>7</td><td>RIPE（W = 64）での最大 KL</td><td>5.05 → 0.13</td><td>fp32 の全プレーンでの再生 0.23</td><td>W = 16 では 0.97、W = 256 では 0.04</td></tr>
+<tr><td>8</td><td>RIPE（W = 64）の記憶量</td><td>341 MB（11.9%）</td><td>全プレーン 2,855 MB</td><td>Huginn、1024 語の文脈。一番深いプレーンだけより 168 MB 多い</td></tr>
+<tr><td>9</td><td>自己投機的デコードの速さ</td><td>2.09 倍 / 2.58 倍</td><td>1 語ずつ書く場合</td><td>Huginn、GSM8K、4 周の下書きを 4 語、32 周で確かめる。全プレーン / 一番深いプレーンだけ</td></tr>
+<tr><td>10</td><td>1 回の確かめで進む語の数</td><td>4.47 語</td><td>全プレーン 3.34 語</td><td>一番深いプレーンを読む下書きのほうが採用されやすい</td></tr>
+<tr><td>11</td><td>決まった記憶量での処理量</td><td>2.24 倍（487 対 218 語/秒）</td><td>プレーンを共有しない最良の設定</td><td>95 GB の予算、WaveFront のエミュレータ（まねて動かす実験用のしくみ）。別の回では 2.26 倍</td></tr>
+</table>
+<p>また、効かなかった工夫もはっきり書いています。頭（ヘッド）ごとに残す位置を選ぶ方法は、一番深いプレーンだけにする方法の 72 倍の KL がかかりました。最初の数語（アテンションシンク）を全周回分残すことや、2 枚目のプレーンを残すことでは、大きな誤差の位置は 1 つも減りませんでした。</p>
+<p>さらに、GH200 上では cuDNN（NVIDIA の計算ライブラリ）のアテンション計算のせいで、bf16 の同じ計算をやり直しても、ビット単位で一致したのは 30% の位置だけでした。これを切ると 100% 一致し、速さも落ちませんでした。</p>
+
+<h2>成り立たないところ・残された課題</h2>
+<ul>
+<li>調べたモデルは 2 つだけ（最初からくり返し型として学習したものと、あとからくり返し型に作り替えたもの）。熟しているかどうかで説明する考え方は、実験のあとで作ったもの</li>
+<li>W が 0 より大きい RIPE は、Huginn で記録した流れを再生する方法でしか測っていない。実際の投機的デコードの中では動かしていない</li>
+<li>速さの数は 1 本ずつ処理する簡単な実装で測ったもの。処理量の数は WaveFront のエミュレータによるもの。速さの式は 1 つの下書き長でしか時間を測っていない</li>
+<li>大きな誤差の統計は 4 つの問題にもとづく</li>
+<li>いちばん確率の高い語を選ぶ書き方、GSM8K と AlpacaEval だけ。ヘッドごとの選び方は 1 つの予算と 1 つの選び方だけで試した</li>
+<li>bf16 では計算の形を変えるだけで結果が変わるので、投機的デコードが「結果を変えない」と言うには、何と比べたかをはっきり書く必要がある、と著者たちは指摘している</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>ループ型モデルを動かすとき、記憶を食うのは重みではなく周回ごとの KV キャッシュです。最後のプレーンに寄せて共有すると、同じ記憶量で載せられる文章の数が増え、処理量が大きく上がりえます。ただし、それで正確さが保たれるかはモデルの熟し方しだいで、Huginn のように一部の位置で大きくずれることがあります。最近の位置だけ全周回分を残す窓を足すと、Huginn での再生実験ではその多くを防げ、まとめて確かめても 1 語ずつと（丸め誤差のない計算では）同じ結果になるように作れます。また、GPU の計算ライブラリの選び方で結果の再現性が変わる点にも注意が必要です。</p>
+
+<div class="note">このページは論文を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文で確かめてください。</div>
+<footer>元の論文: <a href="https://arxiv.org/abs/2610.34436" target="_blank" rel="noopener">https://arxiv.org/abs/2610.34436</a></footer>
+</div>
+</body>
+</html>

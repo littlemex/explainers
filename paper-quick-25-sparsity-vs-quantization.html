@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>下げられる精度が残っているうちは 2:4 スパース化より量子化が勝ち、2:4 が役立つのは精度の下限に来てから — 論文クイックサマリー 第 25 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 25 回</span>
+<h1>下げられる精度が残っているうちは 2:4 スパース化より量子化が勝ち、2:4 が役立つのは精度の下限に来てから</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.28947" target="_blank" rel="noopener">Qin, &quot;Is 2:4 Sparsity Still Worth It? Semi-Structured Sparsity versus Quantization in LLM Inference&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「NVIDIA の GPU は、4 つの数のうち 2 つを 0 にした行列（2:4 スパース）なら、掛け算を最大 2 倍速くできる。しかし、もっと低い精度がまだ使えるうちは、2:4 を足すより精度を 1 段下げるほうが、同じメモリならより正確で、同じ約束の速さならより正確で、しかも速かった。精度が下限（H100 なら FP8）まで来て初めて 2:4 が効き、再学習した 2:4 モデルは H100 1 台の vLLM 上で、密な FP8 モデルと比べて prefill の処理量が 27% 高く、GSM8K の正答率は同程度だった。ただし性能を取り戻すには再学習が必要になる」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が問題だったのか</h2>
+<p>2:4 スパース化（行列の掛け算で足し合わせる向きに並んだ 4 つの数ごとに、0 でない数を多くても 2 つだけ残すこと）は、NVIDIA のテンソルコア（行列の掛け算専用の計算回路）が Ampere 世代から対応している機能です。量子化（数を少ないビット数で表すこと）と組み合わせて使うこともできます。</p>
+<p>ところが、GPU を作る側と研究者はこの機能を使い続けている一方で、2026 年には vLLM（LLM を動かすために広く使われているソフト）と LLM Compressor（モデルを圧縮するソフト）が、使う人が少ないという理由で 2:4 への対応を取りやめました。本当に使う価値があるのか、決着がついていなかったのです。</p>
+<p>現場で実際に迷うのは、「今の精度から、2:4 を足すか、それとも 1 段低い精度に下げるか」という次の一手です。著者は、GPU のテンソルコアが LLM の推論向けに用意している、いちばん低い密な（0 で省かない）精度を「量子化の下限」と呼びます。Ada と Hopper（L40S や H100 の世代）では FP8（8 ビットの浮動小数点）、Blackwell では NVFP4（4 ビットの浮動小数点の一種）です。下限より上では、2:4 は「もう 1 段の量子化」に勝たなければなりません。</p>
+<p>これまでの比較は、2:4 が残した数の位置を記録する目印（インデックス）のビットを数えていない、実際の GPU で速さを比べていない、推論中にその場で 0 にする手間を数えていない、などの点で、この問いに答えられていませんでした。</p>
+
+<h2>比べ方と、2:4 が負ける理由</h2>
+<h3>手順 1: 同じビット数でそろえる</h3>
+<p>2:4 は数を半分に減らしますが、残した数それぞれに 2 ビットの位置インデックスが付くので、元の数 1 個あたり 1 ビット余分にかかります。そのため、2:4 で残した数を INT8（8 ビットの整数）で持つと、密な INT5 と同じビット数になります。2:4 と INT4 は INT3 と同じ、2:4 と FP16（16 ビット）は FP8 より多くかかります。比べたのは 9 ビットから 3.1 ビットまでの 4 つの予算です。</p>
+<h3>手順 2: 同じ「約束の速さ」でそろえる</h3>
+<p>仕様書の上では、精度を半分にしても、2:4 を使っても、掛け算の速さは 2 倍になります。そこで「2 倍の段」では 2:4 と FP16 を密な FP8 や INT8 と、「4 倍の段」では 2:4 と FP8 を密な NVFP4（Blackwell だけが動かせる）と比べました。仕様書の数字だけでなく、実際に出る速さも測りました。</p>
+<h3>手順 3: 6 種類の行列すべてを、ハードが決める向きで</h3>
+<p>Transformer の 1 層には、0 にできる候補の行列が 6 種類あります。重み、線形層への入力、Attention のクエリ・キー・値、Attention の確率です。1 回の掛け算で 2:4 にできるのは片方だけで、4 つの組は足し合わせる向きに並べる決まりです。重み以外は推論中に毎回作られるので、そのたびに 0 にして詰め直す手間も時間に含めました。</p>
+<h3>手順 4: たくさんの組み合わせで測る</h3>
+<p>Llama-3.1-8B-Instruct と Qwen3-8B（どちらも 80 億個の数でできたモデル）のすべての層で、合計 22 万通り以上の設定について、FP32（32 ビット）の正しい答えとの誤差を測りました。速さは L40S（Ada）、H100（Hopper）、RTX PRO 6000（Blackwell）の 3 種類の GPU で測っています。</p>
+<h3>なぜ 2:4 が負けるのか</h3>
+<p>量子化はすべての数を残して丸めるだけなので、ビットを 1 つ増やすごとに丸めの幅が半分になり、誤差の大きさ（2 乗の和）はおよそ 4 分の 1 になります。一方 2:4 は、4 つの組ごとに小さい 2 つを消します。消した数はどれだけビットをかけても戻りません。著者は、消した 2 つが行列全体の「2 乗の和」のうちどれだけを占めるかを「2:4 のエネルギー損失」と呼びます。</p>
+<p>正規分布のでたらめな数で試すと、2:4 側の誤差は 9 ビットの予算でも 3.1 ビットの予算でも約 36〜37% のままです。密な側は 8.1 ビットの INT8 で 0.6%、3.1 ビットの INT3 でも 27.4% でした。両者が並ぶのは 3 ビットより下で、そこは密なテンソルコアが対応していない精度です。</p>
+<p>この損失を行列だけから計算した予測値は、実際の差の大きさとよく一致しました（重み・入力・クエリ・キー・値で順位の相関 0.93、2:4 が勝つ点を見分ける AUC（見分ける力の指標。1 が満点）が 0.95）。これまで使われてきた尖度（値の分布の裾の重さ）は、結果とほとんど相関しませんでした。決め手は、ハードが 0 にする 4 つの組の中の形だということです。</p>
+
+<h2>測った結果</h2>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>2 倍の段での誤差</td><td>5〜16 倍</td><td>密な FP8</td><td>2:4 と FP16 の誤差。6 種類すべての行列、両モデルで</td></tr>
+<tr><td>2</td><td>計算の段で 2:4 が勝った数</td><td>108 のうち 6</td><td>MXFP4、Attention 確率の行ごと INT8</td><td>勝ったのは弱い相手だけ。FP8 と NVFP4 には 1 つも勝てなかった（MXFP4 は模擬計算）</td></tr>
+<tr><td>3</td><td>2 倍の段での速さ（重みを 2:4）</td><td>L40S 0.89、H100 0.74、RTX PRO 6000 0.84 倍</td><td>密な FP8</td><td>Llama-3.1-8B の線形層、2K〜16K トークンの中央値。1 より小さいので 2:4 のほうが遅い</td></tr>
+<tr><td>4</td><td>4 倍の段での速さ（重みを 2:4）</td><td>0.66 倍</td><td>密な NVFP4</td><td>RTX PRO 6000 で、2:4 と FP8 のほうが遅い</td></tr>
+<tr><td>5</td><td>下限の FP8 に 2:4 を足した速さ</td><td>L40S 1.65、H100 1.42、RTX PRO 6000 1.33 倍</td><td>密な FP8</td><td>prefill（入力をまとめて読む段階）の形の線形層。論文では 1.3〜1.7 倍とまとめている</td></tr>
+<tr><td>6</td><td>Blackwell の疎な FP4</td><td>1.40 倍</td><td>密な NVFP4</td><td>ペアで残す 4:8 の型。密な BF16 の 5 倍近い速さ</td></tr>
+<tr><td>7</td><td>vLLM での prefill の処理量</td><td>毎秒 74.6 千トークン（27% 高い）</td><td>密な FP8 の毎秒 58.9 千トークン</td><td>H100 1 台、再学習済みの Sparse-Llama を FP8 で。GSM8K（算数の文章題のテスト）は 0.612 と 0.568 で、意味のある差ではない。重みのメモリは 6.1 GiB と 8.5 GiB</td></tr>
+<tr><td>8</td><td>再学習なしで 2:4 にしたとき（FP8）</td><td>perplexity 17.82、GSM8K 0.028</td><td>密な FP8 の 6.36、0.552</td><td>perplexity は次の語の当てにくさで、小さいほど良い。Llama-3.1-8B、使いものにならない</td></tr>
+<tr><td>9</td><td>130 億トークン再学習した Sparse-Llama（FP8）</td><td>perplexity 8.19、GSM8K 0.632</td><td>密な FP8 の 6.36、0.552</td><td>正答率は元に戻った</td></tr>
+<tr><td>10</td><td>著者が 10 億トークン再学習したモデル</td><td>2:4 と FP8: 8.25、0.308。4:8 と NVFP4: 10.22、0.132</td><td>密な FP8 の 6.36、0.552。密な NVFP4 の 6.98、0.460</td><td>perplexity はかなり戻ったが、GSM8K は大きく下のまま</td></tr>
+</table>
+<p>まとめると、下限より上では、どの 2:4 の設定にも「もっと速く、しかも何倍も正確な密な形式」がありました。2:4 が「これより良いものがない」側に入るのは、下限の精度に重ねたときだけです。</p>
+
+<h2>成り立たないところ・残された課題</h2>
+<ul>
+<li>下限で 2:4 を使うには再学習（学習し直し）が必要。再学習なしでは、どの下限でも perplexity が 2 倍以上になり、GSM8K の正答率は数 % に落ちる</li>
+<li>perplexity は回復を大きく見せてしまう。著者の再学習では perplexity は 2.5 億トークン以内で戻ったが、GSM8K はその後ほとんど伸びなかった。13 倍長く、別のデータで再学習した Sparse-Llama では推論の力も戻っていた</li>
+<li>Blackwell の疎な FP4 はペアで残す 4:8 の型で、2:4 より多くの情報を捨てる。2:4 用に再学習したモデルは使い回せず、Sparse-Llama を変換すると学習済みの重みの 3 分の 1 が消えて壊れる。著者の予算の 10 億トークンでは、使える推論の正確さは戻らなかった</li>
+<li>1 語ずつ書く decode の段階は、掛け算よりメモリの読み出しが遅さを決めるので、2:4 は GPU によって速くなったり遅くなったりする。4 ビットの重みの下限は時間を測っていない</li>
+<li>予測値は差の大きさは説明できるが、きわどい勝ち負けは当てられない。2:4 が勝った点のうち 8 つに 1 つしか見つけられなかった。Attention の確率はこの説明の外にある</li>
+<li>層ごとの誤差で勝っていても、モデル全体の正確さでは負けることがある。最初の 2 層の誤差が大きいと、それが後ろの全部の層に伝わるため</li>
+<li>Hadamard 回転（量子化の前に行列を回して、飛び抜けた値をならす方法）を使うと、クエリ・キー・線形層の入力では差がおよそ 2 倍に広がる。実際の運用では、測った結果よりさらに 2:4 に不利になる</li>
+<li>一部の層だけ 2:4 にする方法は、線形層の計算の半分を 2:4 にしても 1.14〜1.25 倍の速さにとどまり、再学習なしで済ませる道にはならなかった</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>まだ下の精度が使える GPU では、2:4 に手間をかけるより、精度を 1 段下げるほうが先です。H100 のように FP8 が下限の GPU では、十分に再学習した 2:4 モデルと専用の疎な掛け算の部品を使えば、prefill の処理量を上げ、重みのメモリも 4 分の 1 以上減らせます。同じ重みを密な部品で動かすと速さの得は消えます。また、推論中に 0 にして詰め直す処理は、1 回読んで 1 回書く形にまとめないと、2:4 の得をほとんど打ち消してしまいます。再学習が終わったかどうかは、perplexity だけでなく推論のテストでも確かめる必要があります。</p>
+
+<div class="note">このページは論文を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文で確かめてください。</div>
+<footer>元の論文: <a href="https://arxiv.org/abs/2610.28947" target="_blank" rel="noopener">https://arxiv.org/abs/2610.28947</a></footer>
+</div>
+</body>
+</html>

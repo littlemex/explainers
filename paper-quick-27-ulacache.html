@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU と CPU のメモリに通し番号をつけ、同じ履歴の重複を減らして同時に書ける数を増やす — 論文クイックサマリー 第 27 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 27 回</span>
+<h1>GPU と CPU のメモリに通し番号をつけ、同じ履歴の重複を減らして同時に書ける数を増やす</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.29820" target="_blank" rel="noopener">Zhu, Cao et al., &quot;UlaCache: Unified Logical Addressing for Sparse LLM Serving&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「スパースアテンション（毎回、過去の語の一部だけを選んで読むしくみ）を使う LLM では、選ばれなかった過去の語のメモ（KV キャッシュ）も捨てられず、メモリを圧迫する。UlaCache は GPU と CPU のメモリ全体に変わらない通し番号（論理アドレス）をつけてまとめ、同じ履歴の写しを何か所にも持たないようにした。その結果、同じ量の GPU・CPU メモリで、投機的デコードを使ったときの最高の書き出し速度が、これまでで最も良いしくみ HiSparse を H200 と B300 の両方、DP と TP の両方で上回った（具体的な倍率は、今回読んだ本文のテキストからは数字が抜け落ちていたため、元の論文で確認してください）」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が困っていたのか</h2>
+<p>LLM が文章を書くとき、過去に読んだ語ごとに「キーと値」というメモを取っておきます。これが KV キャッシュです。たくさんの文章を同時に書く（バッチ処理、まとめて計算して効率を上げること）ほど速くなりますが、文章ごとに KV キャッシュが必要なので、文脈が長く、同時に書く数が多いと GPU のメモリが足りなくなります。</p>
+<p>スパースアテンションは、毎回読む KV の量を減らします。でも、次の語では別の過去の語が選ばれるかもしれないので、選ばれなかった履歴も残しておかなければなりません。つまり、読む量は減っても、しまっておく量は減りません。</p>
+<p>CPU のメモリを使って置き場所を増やす方法はすでにありましたが、論文は次の問題を指摘しています。</p>
+<ul>
+<li>HiCache や LMCache は、前に計算した文章の頭の部分（プレフィックス）を CPU にしまい、使うときに GPU に戻します。計算のやり直しは減りますが、書いている最中の文章の履歴は結局 GPU の場所を使うので、同時に書ける数は増えません</li>
+<li>HiSparse は、書いている文章の履歴を全部 CPU に置き、選ばれた分を GPU に写して使います。GPU にある分は CPU にあるものの写しなので、GPU の場所は「速く読むため」には役立っても、「しまえる履歴の量」は増やしません</li>
+<li>HiSparse は文章 1 本ごとに GPU の取り分を固定しています。同時に書く文章が少なく GPU が空いていても、その取り分を超えた分は CPU から取ってこなければなりません</li>
+<li>MLA（キーと値を、全部のヘッドで共有する小さな形に縮める方式）を使うモデルを TP（アテンションのヘッドを複数の GPU に分けて計算する方式）で動かすと、どの GPU も同じ履歴を丸ごと持ちます。8 台の TP では、履歴用の場所の大部分が写しで埋まっていたと論文は示しています</li>
+</ul>
+
+<h2>UlaCache のやり方</h2>
+<h3>手順 1: すべての置き場所に通し番号をつける</h3>
+<p>GPU の KV 置き場と、必要なら CPU の KV 置き場をひとまとめにし、論理アドレスという変わらない番号をつけます。推論エンジン（モデルを動かすソフト、ここでは SGLang）はこの番号だけを使います。実際のデータが GPU と CPU の間で移動しても、UlaCache が「番号から実際の場所への対応表」を書き換えるだけなので、エンジン側の番号は変わりません。</p>
+<h3>手順 2: DP と TP で置き方を変える</h3>
+<ul>
+<li>DP（GPU ごとに別々の文章を受け持つ方式）では、各 GPU が自分の GPU と CPU の置き場をまとめて使います。選ばれたデータが CPU にあれば、まず GPU に移してからアテンションで読みます</li>
+<li>TP では、グループ内の GPU が履歴を別々の部分に分けて持ちます。全部の GPU が同じ履歴を持たないので、GPU 全体でしまえる量が増えます。計算する GPU は、選ばれた KV を手元の小さな置き場（ローカル GPU バッファ）に写してから使います。前の語で写したものが残っていればそのまま使い、足りない分だけを自分や他の GPU から取ってきます</li>
+<li>同じ選び方を共有する層では、どれを取ってくるかの計画を 1 回だけ作って使い回し、今の層を計算している間に次の層のデータを先に取ってきます</li>
+<li>TP では、どの語を選ぶかを決める索引（インデクサー）のキーも GPU ごとに分け、それぞれが自分の分だけ点数をつけ、最後に点数を集めて上位を選びます</li>
+</ul>
+<h3>手順 3: PB-LRU で GPU に何を残すか決める</h3>
+<p>CPU も使うとき、GPU の置き場はすべての文章で共有されます。何を GPU に残し何を CPU に追い出すかは LRU（いちばん長く使われていないものから追い出すルール）に近い方法で決めます。続けて書く語では、同じ過去の語が何度も選ばれやすいからです。</p>
+<ul>
+<li>PB-LRU（並列バケット LRU）は、1 回ずつの使用順を正確に並べる代わりに、同じ回に使われた場所を同じ「バケット（入れ物）」にまとめます</li>
+<li>最近のバケットがいくつか輪のように並び、1 回ごとに進みます。古くなったバケットの中身は「コールド（しばらく使われていない）」バケットに移ります。このときデータ自体は GPU に残ったままで、印だけが変わります</li>
+<li>各バケットはビットマップ（GPU の場所 1 つにつき 1 ビットの、入っているかどうかの印の列）で表し、多数の GPU のスレッドで同時に調べ、更新します</li>
+<li>CPU から来るデータには、まず空いている場所、次にコールドバケット、次に古い順の最近のバケットから場所を選びます。今使っているバケットは選ばないので、今の計算に必要なデータは追い出されません。上の段のまとめのビットマップで、空の区域を飛ばして探します</li>
+</ul>
+<h3>手順 4: データを動かしてから対応表を書き換える</h3>
+<p>CPU から GPU にデータを入れるとき、追い出すデータはちょうど空いた CPU の場所に入れ替えで移します。新しい CPU の場所を用意しなくて済みます。全部の移動が終わってから対応表を書き換え、完了の合図を出します。アテンションはこの合図を待つので、まだ届いていないデータを読むことはありません。</p>
+
+<h2>何を測ったのか</h2>
+<p>GLM-5.3 を H200 と B300 の GPU で動かし、重みと KV キャッシュは FP8（8 ビットの数）で持ちました。比べる相手は、KV を全部 GPU に置くふつうの SGLang と、CPU も使う HiSparse です。投機的デコード（下書きを先に作り、本体がまとめて確かめるしくみ）には、2 歩先まで下書きする MTP（複数の語を一度に予想する方式）を使いました。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>投機的デコードありの最高の書き出し速度（H200、DP と TP）</td><td>HiSparse より速い（倍率は取得した本文から欠落）</td><td>HiSparse</td><td>GPU と CPU のメモリ量をそろえた条件。各方式が測ったバッチの大きさの中での最高値どうしを比べた</td></tr>
+<tr><td>2</td><td>投機的デコードありの最高の書き出し速度（B300、DP と TP）</td><td>HiSparse より速い（倍率は取得した本文から欠落）</td><td>HiSparse</td><td>同上</td></tr>
+<tr><td>3</td><td>同時に 1 本だけ書くときの 1 語あたりの時間（TPOT）</td><td>8 通りの設定すべてで HiSparse より速く、SGLang より遅い</td><td>HiSparse、SGLang</td><td>共有の GPU 置き場に履歴が収まり、CPU から取ってくる回数が減るため。SGLang との差は、探す・予定を立てる・TP の通信の分と論文は見ている</td></tr>
+<tr><td>4</td><td>CPU メモリの量</td><td>H200 は GPU 1 台あたり 128 GB、B300 は 192 GB</td><td>全方式で同じ</td><td>B300 はモデルとキャッシュ用に GPU 1 台あたり 272 GB を使う設定</td></tr>
+<tr><td>5</td><td>試した文章</td><td>入力 64K〜128K 語、各 2,048 語を書く</td><td>—</td><td>Multi-LexSum。H200 は 256 本（平均入力 98,125 語）、B300 は最大 578 本</td></tr>
+<tr><td>6</td><td>PB-LRU の予定を立てる時間</td><td>大きいバッチで速い（具体的な倍率は取得した本文から欠落）</td><td>GPU 上の時刻記録式のふつうの LRU</td><td>H200 の DP で、投機的デコードありとなしの両方について、同じアクセス記録を再生して比べた。データの移動時間は含まない</td></tr>
+<tr><td>7</td><td>GPU で見つかる割合（ヒット率）</td><td>ふつうの LRU との差はわずか（何ポイント未満かの値は欠落）</td><td>ふつうの LRU、HiSparse</td><td>まとめて扱っても再利用の度合いはほぼ同じ。HiSparse よりはヒット率が高い</td></tr>
+</table>
+<p>また、B300 の TP で投機的デコードなしのとき、UlaCache の最高速度は SGLang の最高速度の何倍かが示されていますが、この値も今回の本文テキストでは抜けていました。しまえる履歴が増えて同時に書ける本数が増え、1 回のモデル計算をより多くの文章で分け合えたことが速さの理由だと論文は説明しています。</p>
+
+<h2>うまくいかない場面・残された課題</h2>
+<ul>
+<li>同時に書く本数が少ないときは、KV を全部 GPU に置く SGLang より遅いままです</li>
+<li>TP で索引の点数を GPU 間で集める通信は、特に同時に書く本数が少ないときに負担になると論文は述べています</li>
+<li>追い出しがほとんど起きないときは、バケットの印を管理する手間がある分、ふつうの LRU のほうが速いです</li>
+<li>バケットを進めるとき、古くなるバケットの中身を処理するので、最悪の場合は GPU 置き場全体を調べることになります</li>
+<li>同時に書く本数が増えると、共有の GPU 置き場を取り合うのでヒット率は下がります</li>
+<li>投機的デコードは下書き用のメモリも使うため、速さと同時に書ける本数が一緒に増えるとは限りません</li>
+<li>試したのは GLM-5.3、Multi-LexSum の文章、毎回いちばん確からしい語を選ぶ書き方（グリーディ）に限られます。また、全部の文章の読み込み（prefill）を終えてから書き始める測り方です</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>CPU メモリを足すとき、それが「計算のやり直しを減らす」のか「しまえる履歴を増やす」のかで、同時に書ける本数への効き方がまったく違う、という点が大事です。GPU と CPU、複数の GPU の間で同じ履歴の写しを持たないように配置し、文章ごとの固定の取り分をやめて共有にすれば、同じメモリ量でより多くの文章を同時に扱えます。そのためには、データが動いても変わらない番号と、追い出しの判断を GPU 上で並列に速く行うしくみが必要になる、というのが論文の設計の考え方です。</p>
+
+<div class="note">このページは論文を、中学生でも読めるようにかみくだいたものです。今回読んだ本文のテキストでは、速さの倍率などいくつかの数字が抜け落ちていました。細かい数字や条件は、必ず元の論文で確かめてください。</div>
+<footer>元の論文: <a href="https://arxiv.org/abs/2610.29820" target="_blank" rel="noopener">https://arxiv.org/abs/2610.29820</a></footer>
+</div>
+</body>
+</html>

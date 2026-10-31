@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文章全体を何回かに分けて直していく言語モデルは、部品を組み合わせると実用的な速さと品質に届く — 論文クイックサマリー 第 30 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 30 回</span>
+<h1>文章全体を何回かに分けて直していく言語モデルは、部品を組み合わせると実用的な速さと品質に届く</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.33391" target="_blank" rel="noopener">Kuleshov, Arriola et al., &quot;How To Build A Modern Diffusion Language Model&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「ふつうの言語モデルは 1 語ずつ左から順に書く。拡散言語モデルは、全部が伏せ字の下書きから始めて、文章全体を何回かに分けて同時に直していく。この論文は、その作り方を部品ごとに説明した解説（サーベイ）で、紹介されている例では、NVIDIA の Nemotron Diffusion が同じくらいの 1 語ずつ書くモデルの約 2〜8 倍の処理量を、ほぼ同じ品質で出したと報告されている」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が問題だったのか</h2>
+<p>いまの大きな言語モデルの多くは自己回帰（左から右へ、それまでに書いた分だけを見て次の 1 トークンを予想するやり方）で文章を作ります。トークン（文章を区切った小さな単位。語や語のかけら）を N 個作るには、モデルを N 回順番に呼ぶ必要があります。そのため、たくさんの計算を同時にこなせる GPU（並列計算が得意な計算用の部品）が、書き出しのときには力を出し切れません。</p>
+<p>最近は、強化学習（ごほうびをもとにモデルを鍛えるやり方）や長い推論など、書き出しを大量に行う使い方が増えたので、この遅さがますます問題になっています。さらに、一度書いた語は書き直されないので、最初の方の間違いが最後まで残り、後ろの文脈を使って語を選ぶこともできません。</p>
+
+<h2>拡散言語モデルのしくみ</h2>
+<h3>基本: マスク拡散（伏せ字を埋めていく）</h3>
+<p>多くの公開モデルの土台になっているのが、マスク拡散（MDLM）です。</p>
+<ul>
+<li>学習のとき: 本物の文章のトークンを、ランダムな割合で特別な伏せ字の記号（マスク）に置きかえます（前向きの過程）。モデルは、伏せ字の部分に元の語を当てる練習をします（逆向きの過程）。BERT（伏せ字を当てる練習をする有名なモデル）の学習とほぼ同じですが、伏せ字にする割合を毎回ランダムに変える点が違います</li>
+<li>書き出しのとき: 全部が伏せ字の列から始め、モデルに全部の伏せ字を予想させ、そのうち少しだけを確定させます。これをくり返すと、伏せ字のない文章ができあがります</li>
+<li>1 回で何語も確定できるので、かかる時間は文章の長さではなく、直す回数（ステップ数）で決まります</li>
+</ul>
+<h3>実用のために足される部品</h3>
+<ul>
+<li>ブロック拡散: マスク拡散だけでは決まった長さの文章しか作れません。そこで、何十〜何千トークンかのかたまり（ブロック）を左から順に作り、各ブロックの中を拡散で作ります。前のブロックの計算結果を KV キャッシュ（一度計算した中間結果をためて使い回すしくみ）として再利用できます</li>
+<li>書き直し: ふつうのマスク拡散は、一度確定した語を書き直せません。リマスキング（確定した語の一部をもう一度伏せ字に戻して作り直す）か、一様状態拡散（伏せ字ではなく、ランダムな別の語に置きかえる壊し方で学習する）を使うと、間違いを直せます</li>
+<li>速い取り出し方（サンプラー）: 同じステップで決めた語どうしが食い違うことがあります（「she sell」のように）。そこで、モデルが自信のある語や、迷いの小さい語から確定させる工夫を使います。さらに蒸留（モデルに自分の出力を使って、ステップを飛ばすよう学ばせる）でステップ数を減らします</li>
+<li>エンコーダ・デコーダ構成: 重いエンコーダ（すでにできた部分を読み取る部分）は 1 回だけ動かし、軽いデコーダ（伏せ字の部分を直す部分）をステップごとに動かして、1 ステップの計算を軽くします</li>
+<li>自己条件づけ: 各ステップで確定した語だけでなく、モデル内部の情報も次のステップへ渡すことで、品質と速さが大きく良くなると報告されています</li>
+<li>学習: ゼロから学習する例（LLaDA）と、すでにある自己回帰モデルの重みから学習を続ける例（Gemma Diffusion など）があります。その後、指示に従う練習（SFT）と強化学習を行います</li>
+</ul>
+
+<h2>何を測ったか</h2>
+<p>この論文は自分で新しい実験をする論文ではなく、ほかの研究やモデルの報告をまとめた解説です。下の数は、論文の中で紹介されているものです。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>Mercury の書き出しの速さ</td><td>1 人あたり 1 秒に 1,000 トークン超</td><td>速さ重視の最先端モデル（品質は同程度）</td><td>ふつうの GPU で。これまでこの速さは、自己回帰の書き出し専用に作った特別なチップでしか出なかった</td></tr>
+<tr><td>2</td><td>拡散モデルの書き出しの速さ（図 9）</td><td>約 1,200 トークン/秒</td><td>品質が同じくらいの自己回帰モデル</td><td>相手より数倍速い。品質はエージェント作業のベンチマークをまとめた指標。図は Inception 提供</td></tr>
+<tr><td>3</td><td>Nemotron Diffusion の処理量</td><td>約 2〜8 倍</td><td>同じくらいの自己回帰モデル</td><td>品質はほぼ同じと報告。モデルは最大 350 億パラメータ（モデルの中の調整できる数）</td></tr>
+<tr><td>4</td><td>リマスキングの文章の質（MAUVE: 作った文章が本物にどれだけ近いかの指標。高いほど良い）</td><td>0.40 → 0.66</td><td>自己回帰 0.76、ふつうのマスク拡散 0.04</td><td>ステップ数を 1,024 から 4,096 に増やしたとき。計算を増やすほど質が上がる</td></tr>
+<tr><td>5</td><td>ブロックの大きさ</td><td>32 / 256 / 16 トークン</td><td>LLaDA / Gemma Diffusion / Nemotron Diffusion</td><td>GPU の使い方が最もよくなるように選ぶことが多い</td></tr>
+<tr><td>6</td><td>同じ perplexity（次の語の当てにくさ。低いほど良い）に届くまでの学習の計算量</td><td>16 倍</td><td>自己回帰モデル</td><td>一部の研究の報告。その後の研究で効率は改善しており、まだ研究が続いている</td></tr>
+<tr><td>7</td><td>タンパク質モデル ESM3 の大きさ</td><td>最大 1,000 億パラメータ</td><td>—</td><td>マスク拡散を大規模に使った最初の例。配列・構造・働きの 3 つを同時に扱う</td></tr>
+<tr><td>8</td><td>DNA モデル Nucleotide Transformer の学習量</td><td>1 兆トークン超の DNA</td><td>—</td><td>数十億パラメータ規模。遺伝子の働きを強めるなど、狙った性質の DNA を作るのにも使う</td></tr>
+</table>
+
+<h2>まだ成り立たないこと、残っている問題</h2>
+<ul>
+<li>どの壊し方がよいか決まっていない: マスク拡散は perplexity が良く、一様状態拡散は速く取り出せて狙いどおりにしやすい。トークンを連続した数の空間に移して拡散する第 3 の方法もあるが、大きなモデルでうまくいくかはまだ研究中</li>
+<li>速さと質の両立: 一度にたくさんの語を決めると質が落ちる。ゆっくり書けば正しく答えられる（答えは重みの中にある）のに、速く書くと失敗することがある。強化学習でも、どんな順番で伏せ字を外したかの確率を計算するのが難しい</li>
+<li>画像・音声などとの組み合わせ: 言葉（とびとびの値）と画像など（連続した値）をどう一つのモデルにまとめるのがよいかは、まだ決まっていない</li>
+<li>規模: 拡散モデルは、最先端の自己回帰モデルと同じだけのパラメータ・計算・データにはまだ広げられていない。この差を埋めることが今後の大きな課題</li>
+<li>著者は、拡散が単に速いだけでなく、賢さそのものでも自己回帰を上回れるかは中心的な問いだとし、研究がどれくらい速く進むかは「まだ言うには早い」としている</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>拡散モデルは 1 回の計算でブロック全体を直すので、Gemma Diffusion の説明では、書き出しの足かせがメモリの読み書きの速さから計算の量へ移るとされています。著者は、ブロックの大きさや構成を、使う機械の演算強度（データを 1 回読み出すあたりにできる計算の量）に合わせて決めるべきだと述べ、専用の計算用チップや、くり返し直す処理に合わせたカーネル（GPU 上で動く計算の部品）・推論の仕組みを一緒に設計する方向も挙げています。ブロック拡散なら KV キャッシュも使えるので、いまの推論の仕組みの多くを生かせる可能性があります。</p>
+
+<div class="note">このページは論文を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文で確かめてください。</div>
+<footer>元の論文: <a href="https://arxiv.org/abs/2610.33391" target="_blank" rel="noopener">https://arxiv.org/abs/2610.33391</a></footer>
+</div>
+</body>
+</html>

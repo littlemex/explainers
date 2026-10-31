@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ツールの結果がもうすぐ返るかも見て、待っている仕事をまとめて GPU に割り当てる — 論文クイックサマリー 第 33 回</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.9;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:36px 22px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+.kicker{display:inline-block;background:#8fd6b4;color:var(--gd);border-radius:6px;padding:2px 10px;font-size:12.5px;font-weight:700}
+h1{font-size:24px;margin:10px 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:19px;margin:40px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16px;margin:24px 0 6px;color:var(--gd)}
+.src{font-size:14px;color:var(--ink2);margin:0 0 18px}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px;font-size:17px}
+.lead b{color:var(--gd)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+ul{padding-left:1.4em} li{margin:4px 0}
+footer{margin-top:50px;font-size:13.5px;color:var(--ink2);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="nav"><a href="./paper-index.html">← 論文理解シリーズの一覧へ戻る</a></div>
+<span class="kicker">クイックサマリー 第 33 回</span>
+<h1>ツールの結果がもうすぐ返るかも見て、待っている仕事をまとめて GPU に割り当てる</h1>
+<p class="src">元の論文: <a href="https://arxiv.org/abs/2610.37230" target="_blank" rel="noopener">Li, Ye et al., &quot;TAO: Tool-Aware Joint Scheduling for LLM-Based Agentic Serving&quot;</a></p>
+
+<p class="lead"><b>ひとことで言うと、「AI エージェントは、GPU で考える時間と、外の CPU でツールを動かす時間を行ったり来たりする。TAO は、待っている作業ごとに、そのノードに残っている使い回せるメモの量、ツールの結果がもうすぐ返りそうか、文脈の長さ、の 3 つで価値をつけ、動的計画法で全員をまとめて GPU に割り当てる。報告された 12 の設定で、それぞれの指標でいちばん良かった既存の方式と比べて、作業全体の時間は最大 26.8% 短く、最初の 1 語が出るまでの時間は最大 36.3% 短く、書き出しの処理量は最大 29.5% 多くなった」という研究です。</b></p>
+<p>見つけた場所: <a href="./arxiv-digest/2026-10-29.html">arXiv 週報 2026-10-29</a></p>
+
+<h2>何が問題だったのか</h2>
+<p>AI エージェント（自分で考えて道具を使い、何段階もの作業をこなす AI）は、1 つの仕事（セッション）の中で、LLM（大規模言語モデル）に考えさせる段階と、コンパイラや検索などの外部ツール（道具となる別のプログラム）を動かす段階を交互にくり返します。考える部分は、まとめて置かれた GPU（AI の計算が得意な部品）のノード（1 台分のサーバー）で動き、ツールは別の場所の CPU（ふつうの計算をする部品）で動きます。論文はこの形を CGDC（まとめた GPU と、ばらばらの CPU）と呼んでいます。</p>
+<p>ツールが動いている間、そのセッションは GPU を使いません。そこで、ツールの間はセッションを一時停止して GPU を空け、待ち行列（ウェイティングプール）に入れておき、あとで再開させるやり方があります。問題は、誰を、いつ、どのノードで再開させるかです。論文は、これまでの仕組みに 2 つの弱点があると指摘します。</p>
+<ul>
+<li>評価の弱点: ツールの結果がもうすぐ返ってくるかどうか（ツール復帰の準備度）を、セッションの価値を決めるときにはっきり使っていない。ツールの時間は、KV キャッシュ（過去に読んだ文章の計算結果をとっておくメモ）をどれだけ残すかなどの代わりの目安として使われるだけだった</li>
+<li>決め方の弱点: セッションを 1 つずつ点数づけして、決まったルールで割り当てていた。でも全員が同じノードの容量を取り合うので、1 つを入れると、もっと価値の高い別の組み合わせが入れなくなることがある</li>
+</ul>
+
+<h2>TAO のやり方</h2>
+<p>TAO は「評価してから決める」という流れを保ちつつ、評価と決め方の両方を作り直しました。</p>
+<h3>1. ツールの間はセッションを止めて待ち行列へ</h3>
+<p>先行研究の ThunderAgent にならい、ツールを呼んでいる間はセッションを止め、GPU の場所を空けます。止めたセッションと新しく来たセッションが、同じ待ち行列に並びます。</p>
+<h3>2. セッションとノードの組ごとに 3 つの数をつける</h3>
+<p>待っているセッションと、入れられるノードの組ごとに、次の 3 つの数の組（トリプレット）を作ります。比べるときは、1 番目で差がつけばそれで決め、同じなら 2 番目、さらに同じなら 3 番目を見ます（辞書式の比較）。足し算の重みは使いません。</p>
+<ul>
+<li>1 番目 キャッシュの点数: そのノードに、このセッションの使い回せる KV キャッシュがどれだけ残っていそうか。使い回せれば、プレフィル（入力の文章を最初から読み直す計算）を省ける。ただし古い観測ほど当てにならないので、決まった時間（半減期）ごとに点数が半分になるように減らしていく。手がかりのないノードは 0 点</li>
+<li>2 番目 準備度（はい・いいえ）: ツールの結果が、次の短い時間のうちに返ってきそうか。ツールが出す進み具合や締め切りの情報（Claude Code の Monitor、OpenCode のタイムアウト通知など）、sleep 命令の読み取り、過去のツール実行時間の記録を使って予測する。直接の手がかりを優先し、なければ同じツールの記録、全体の記録、それもなければ 5 秒という決まった値を使う。予測は 30 秒以内に更新されたものだけを使い、予測時刻を過ぎたものは、ずっと準備済み扱いにせず一時的にためす機会だけ与える。本当に終わったという観測があれば、それを最優先する</li>
+<li>3 番目 トークン数: これまでにたまった文脈の長さ（トークンは文章を区切った小さな単位）</li>
+</ul>
+<p>キャッシュの点数は時間とともに減るので、しばらくすると 1 番目で差がつかなくなり、次に準備度が効いてくる、というように、時間がたつと効く手がかりが入れ替わります。</p>
+<h3>3. 動的計画法でまとめて選び、置き場所を決める</h3>
+<p>各ノードの残りの容量と、各セッションが必要とする容量をもとに、待っている全員について「入れない」か「どのノードに入れる」かを決めます。これはナップサック問題（容量の決まった袋に、価値の合計が最大になるよう物を詰める問題）を複数の袋に広げた形です。TAO は動的計画法（小さな部分問題の答えを表にためながら全体の最適解を求める方法）で、ある時点の状態を固めた写し（スナップショット）について、容量を一定の刻みに丸めた問題の中で最も良い組み合わせを正確に求めます。</p>
+<h3>4. 別の作業場で計算し、最後に確かめてから使う</h3>
+<p>この計算は、本体を止めないよう別の作業者で非同期に行います。使う直前に、選ばれたセッションの状態が変わっていないか確かめ、変わっていれば計画を捨てます。今の容量で入る範囲だけ、計画の先頭から順に適用します。計算が予算を超えたときは、BFD（大きいものから順に、いちばんぴったり入る場所へ詰める方法）の計画に切り替えます。</p>
+
+<h2>何を測ったか</h2>
+<p>モデルは DeepSeek-V4 Flash（H100 を積んだノード 2 台）、Qwen3-32B（同 4 台）、GLM-4.7（同 1 台）。課題は SWE-bench Lite、SWE-verified（プログラムの不具合を直す課題）、Terminal-Bench 2.0 などです。比べる相手（ベースライン）は、vLLM の順番回し（RR）とキャッシュ重視（CA）のスケジューラ、NVIDIA の Dynamo、ThunderAgent です。数字は論文の表にあるとおりです。</p>
+<table>
+<tr><th>#</th><th>項目</th><th>数</th><th>比べる相手</th><th>説明</th></tr>
+<tr><td>1</td><td>作業全体の平均時間（ツール時間も含む）</td><td>最大 26.8% 短縮（253.228 秒 → 185.410 秒）</td><td>その指標でいちばん良かった既存方式（vLLM CA）</td><td>DeepSeek-V4 Flash、SWE-Lite、同時に動かす作業者 64</td></tr>
+<tr><td>2</td><td>TTFT（最初の 1 語が出るまでの時間）の平均</td><td>最大 36.3% 短縮（0.351 秒 → 0.224 秒）</td><td>同上（Dynamo）</td><td>同じ設定</td></tr>
+<tr><td>3</td><td>デコード処理量（1 秒あたりに書き出すトークン数）</td><td>最大 29.5% 増加（1561.307 → 2021.523）</td><td>同上（vLLM CA）</td><td>同じ設定</td></tr>
+<tr><td>4</td><td>大きいモデルでの結果</td><td>時間 16.2〜18.9% 短縮、TTFT 15.7〜38.4% 短縮、処理量 22.8〜24.7% 増加</td><td>ThunderAgent（各指標で最良の既存方式）</td><td>GLM-4.7、ノード 1 台、SWE-verified、作業者 96〜160</td></tr>
+<tr><td>5</td><td>準備度をオンにした効果</td><td>処理量 4.03% 増加、ツール終了から最初の 1 語までの遅れ 10.88% 短縮、平均の待ち時間 1.067 秒 → 0.972 秒</td><td>準備度なしの同じ実行</td><td>DeepSeek-V4 Flash、SWE-Lite、作業者 32</td></tr>
+<tr><td>6</td><td>ツール時間の予測の誤差</td><td>平均 0.410 秒、82.9% が 0.5 秒以内</td><td>実際にかかった時間</td><td>終わったツール 10,967 回分</td></tr>
+<tr><td>7</td><td>動的計画法を BFD に置き換えた場合</td><td>処理量 1417.97 → 1233.72 トークン/秒</td><td>TAO の完全版</td><td>作業者 32 の部品ごとの比較。キャッシュ点数を外すと 1398.35、準備度を外すと 1363.06</td></tr>
+<tr><td>8</td><td>計画づくりにかかる手間</td><td>実行時間の 0.12% 未満</td><td>全体の実行時間</td><td>4 つのモデル複製を使った実験での記録</td></tr>
+<tr><td>9</td><td>TokenCake（KV キャッシュ管理の仕組み）と組み合わせた場合</td><td>処理量 12.9% 増加（作業者 16）、4.2% 増加（作業者 32）</td><td>同じエンジンで決まった振り分け（consistent-hash）</td><td>動いて組み合わせられることの確認</td></tr>
+</table>
+
+<h2>うまくいかない場面と、残された課題</h2>
+<ul>
+<li>いつも全部の指標で勝つわけではない。DeepSeek-V4 Flash の Terminal-Bench では処理量が作業者 16 で 8.8%、64 で 6.2% 下回った。Qwen3-32B の SWE-verified、作業者 128 では、作業全体の時間が ThunderAgent より 2.5% 長かった</li>
+<li>いろいろな作業での互換性を調べた実験のうち、AutomationBench で作業者 128 にすると、時間 7.0%、処理量 11.2% 悪く、TTFT は 504% も悪くなった</li>
+<li>同時に動かす数が少ないときは、良くする余地が小さい。DeepSeek-V4 Flash をノード 1 台で動かした確認では、作業者 4〜8 で、時間は最良の方式から 2.3% 以内、処理量は 92% 以上を保ち、TTFT は 15〜20 ミリ秒遅い程度だった</li>
+<li>まとめて決める動的計画法が、短いものを先に入れる単純なルールより良い答えを出したのは、候補が複数あった 23 回の写しのうち 6 回（26.1%）だけで、残りは同じ答えだった</li>
+<li>容量を刻みに丸めるので、丸める前なら入れられた組み合わせを外してしまうことがある</li>
+<li>ツール時間の見積もりはあくまで目安で、1 回ごとの呼び出しについて当たる確率を保証するものではない</li>
+<li>非同期で計画することによる損失の上限は示したが、作業全体の時間や、本当に最適な運用と比べた差までは保証しない</li>
+<li>TokenCake との組み合わせでは、一時停止・再開・移動が起きなかったので、改善が動的計画法によるものかどうかは、まだ言えない</li>
+</ul>
+
+<h2>インフラを作る人にとっての意味</h2>
+<p>エージェントの仕事では、GPU の外にあるツールの時間が遅さの大きな原因になります。TAO は、ツールがいつ戻るかという CPU 側の情報を、GPU にいつ誰を入れるかの判断に直接つなげました。価値のつけ方と、最適な組み合わせを解く部分を分けているので、新しい手がかりを足しても解き方はそのまま使えます。一方で、作業の種類や同時に動かす数によっては既存の方式に負ける場面もあるので、自分の環境で確かめてから使うのが大切です。</p>
+
+<div class="note">このページは論文を、中学生でも読めるようにかみくだいたものです。細かい数字や条件は、必ず元の論文で確かめてください。</div>
+<footer>元の論文: <a href="https://arxiv.org/abs/2610.37230" target="_blank" rel="noopener">https://arxiv.org/abs/2610.37230</a></footer>
+</div>
+</body>
+</html>
