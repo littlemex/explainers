@@ -66,11 +66,23 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <h1>ハーネスとキャッシュまで含めた振り分けと、0.8B の LLM 蒸留<br>Fable 5.2 の 5 名レビューを 1 つの設計にまとめる</h1>
 
 <div class="lead">
-<p><b>結論から。</b>perigraph は「実際に何が動いたか」の<b>記録と、食い違いを見つけて判定を拒む役</b>に使い、ハーネスの<b>版の管理と切り替えには使いません</b>。版は tierbook がもう持っている不透明な文字列 <code>arm_version</code> に、切り替えは vLLM Semantic Router (vSR) と stratoclave に任せます。0.8B の生徒を「何でもできる LLM」として蒸留する話には、まだ測った根拠がありません。根拠があるのは、<b>答えの形が決まった仕事ごとに生徒を作り、迷ったら先生に回す形</b>だけです。Leader が仕事を分けて小さなモデルに渡す形は、これまでの実験で一度、関門を通りませんでした。</p>
-<p style="margin-bottom:0"><b>この文書でやったこと。</b>perigraph の仕様、tierbook の現状、これまでの実験記録、過去のプロジェクトの知見を確かめてから同じ資料として渡し、Fable 5.2 に 5 つの観点 (測定と統計、システムと配信、学習、仕事の形、懐疑的な読み手) で独立にレビューさせました。5 名の立場がそろった点と分かれた点を並べ、1 つの設計と、関門つきの段階的な実験計画にまとめています。</p>
+<p><b>結論から。</b>小さな言語モデル (0.8B は部品の数が約 8 億という意味。以下「生徒」) に、大きなモデル (「先生」) のまねを学ばせる (蒸留) とき、ハーネス (モデルの周りで答えを左右する設定の全部) とキャッシュ (前の計算の使い回し) をどう扱うかを決めました。(1) perigraph (動いたハーネスを記録する、筆者の仕様) は、<b>記録と、食い違いを見つけて判定を断る役にだけ</b>使い、版の管理と切り替えには使いません。(2)「何でもできる生徒」には測った根拠がまだ無く、根拠があるのは、<b>答えの形が決まった仕事ごとに生徒を作り、迷ったら先生に回す形</b>だけです。(3) 大きなモデルが仕事を分けて生徒に渡す形 (Leader) は、過去の実験で一度、事前に決めた合格条件 (関門) を通りませんでした。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>perigraph の仕様、tierbook の現状、これまでの実験記録、過去のプロジェクトの知見を確かめてから同じ資料として渡し、Fable 5.2 に 5 つの観点 (測定と統計、システムと配信、学習、仕事の形、懐疑的な読み手) でレビューさせました。5 名の立場がそろった点と分かれた点を並べ、1 つの設計と、関門つきの段階的な実験計画にまとめています。</p>
 </div>
 
-<p>この文書では、根拠の種類を毎回書き分けます。<b>[実測]</b> はこのプロジェクトで測った値、<b>[引用]</b> は仕様や論文やモデルのページから写した値、<b>[提案]</b> はレビューか筆者の推論で、まだ確かめていないものです。</p>
+<table>
+<tr><th>登場するもの</th><th>何か</th></tr>
+<tr><td>tierbook</td><td>筆者の OSS。採点済みの記録から、合格ラインを満たす一番安い担当を統計的に決め、ルーターの設定に書き出す</td></tr>
+<tr><td>Prismyra</td><td>筆者の OSS。先生のモデルを動かし、その答えで生徒を学習させる仕組み (<code>prismyra.learn</code>) を持つ</td></tr>
+<tr><td>vSR</td><td>vLLM Semantic Router。リクエストを、決めた方針に従って自前のモデルへ振り分ける OSS</td></tr>
+<tr><td>stratoclave</td><td>筆者の OSS。Amazon Bedrock のモデルの前に立つゲートウェイで、料金を記録する</td></tr>
+<tr><td><code>arm_version</code></td><td>tierbook が「同じ担当か」を見分けるための、送り手が作る文字列。中身は tierbook が読まない</td></tr>
+<tr><td>判断用モード</td><td>文章を書かせず、モデルの中の数値から答えの札を直接読む使い方。この文書の主題は、その反対の、文章を生成させる使い方</td></tr>
+</table>
+
+<div class="warn"><p style="margin:0"><b>[注意] 5 名は独立の証拠ではありません。</b>5 名は同じモデル (Fable 5.2) に同じ資料を渡したものなので、「そろった」は 5 つの別々の証拠ではなく、同じ読み違いを 5 回くり返すこともありえます (2 節の <code>tool_schemas</code> の読みは、資料だけからは確かめられなかった例です)。そろった点も [提案] のままで、根拠になるのは [実測] と [引用] だけです。</p></div>
+
+<p>この文書では、根拠の種類を毎回書き分けます。<b>[実測]</b> はこのプロジェクトと過去のプロジェクトで測った値、<b>[引用]</b> は仕様や論文やモデルのページから写した値、<b>[提案]</b> はレビューか筆者の推論で、まだ確かめていないものです。</p>
 
 <h2>0. 要約表</h2>
 
@@ -78,71 +90,37 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
 <tr><td>1</td><td>perigraph で版を管理できるか</td><td>[引用] SPEC.md 2 節と 2.5 節、<code>spec/vocabularies.json</code> を読んだ</td><td>perigraph を版の正本にする</td><td>できない。版の識別子になるのは、リクエストの中に実物があり、モデルに見える部分だけ。くり返しの仕組みや再試行の決まりは識別子に入らず、重みの精度の違いも区別できないと仕様自体が書いている</td><td>2, 6</td></tr>
 <tr><td>2</td><td>キャッシュで 1 件の費用が変わるか</td><td>[引用] SPEC.md 5 節。同じ中身で、1 通の長いメッセージだとキャッシュ率 0%、会話として伸ばすと 99.9%</td><td>1 件の値段を固定とみなす</td><td>変わる。費用はリクエストの中身ではなく、その形と、前にどこへ送ったかで決まる</td><td>3</td></tr>
-<tr><td>3</td><td>自前の箱でもキャッシュが値段に効くか</td><td>[実測] 過去のプロジェクト。長い入力の処理が 1 件居座ると、短いリクエストの処理件数が 1 時間 225,730 件から 102,022 件に落ちた</td><td>API と同じ値段の付け方</td><td>自前の箱では、キャッシュは料金の項目ではなく、席と時間の取り合いとして効く</td><td>3, 6</td></tr>
-<tr><td>4</td><td>先生のラベルだけで生徒が先生に並ぶか</td><td>[実測] 1,200 件。先生のラベルで学習した 0.8B は 0.8733、先生は 0.8958</td><td>正解ラベルで学習する</td><td>並ばない (差 -2.25 ポイント、p = 0.008)。正解ラベル 8,100 件で学習すると 0.8983 で同じ水準 (差の区間 -1.5〜+2.0)</td><td>4</td></tr>
+<tr><td>3</td><td>自前の箱でもキャッシュが値段に効くか</td><td>[実測] 過去のプロジェクト。飽和した負荷で長い入力が 1 件同居すると、短いリクエストの処理件数が 1 時間 225,730 件から 102,022 件に落ちた。負荷が容量の 10% なら、設定次第で落ちなかった</td><td>API と同じ値段の付け方</td><td>[提案、B] 自前の箱では、キャッシュは料金の項目ではなく、席と時間の取り合いとして効く。測ったのは長い入力の同居で、キャッシュそのものではない</td><td>3, 6</td></tr>
+<tr><td>4</td><td>先生のラベルだけで生徒が先生に並ぶか</td><td>[実測] 1,200 件。先生のラベルで学習した 0.8B は 0.8733、先生は 0.8958</td><td>正解ラベルで学習する</td><td>並ばない (差 -2.25 ポイント、p = 0.008。p は差が偶然だけで出る確率の目安で、0.05 未満なら偶然とは考えにくい)。正解ラベル 8,100 件で学習すると 0.8983 で同じ水準 (差の区間 -1.5〜+2.0)</td><td>4</td></tr>
 <tr><td>5</td><td>強化学習が効くか</td><td>[実測] 正解なら報酬 1 の強化学習を 4 通り</td><td>素直な学習 (SFT)</td><td>効かなかった。学習率を上げると学習用の問題を覚えるだけで、確認用の 1,200 件では下がった</td><td>4</td></tr>
-<tr><td>6</td><td>先生の答えは長いか</td><td>[実測] 過去のプロジェクト。Qwen 系の先生の出力トークンの中央値 687、短く答えさせると 7.0 ポイント下がった</td><td>短い答えだけを学ばせる</td><td>長い。生徒が長い答えをまねると、CPU での安さ (先生の 0.30 倍、短い答えで測った値) が消えるおそれがある</td><td>4</td></tr>
+<tr><td>6</td><td>先生の答えは長いか</td><td>[実測] 過去のプロジェクト。Qwen 系の先生の出力トークンの中央値 687、短く答えさせると 7.0 ポイント下がった</td><td>短い答えだけを学ばせる</td><td>長い。生徒が長い答えをまねると、CPU での安さ (先生の 0.30 倍。16 問ずつまとめて常に全力で動かす前提で、短い答えで測った値) が消えるおそれがある</td><td>4</td></tr>
 <tr><td>7</td><td>Leader が分けて渡すと良くなるか</td><td>[実測] 過去のプロジェクト。計画を足した効き +15.0 ポイントのうち 59% は推論ゼロで得られた (答えの漏れ)</td><td>固定の型と、迷ったら先生に回す組み合わせ</td><td>前提が立っていない。残りの差は有意でなく (p = 0.1755)、分ける役の費用は答えの 3.93 倍だった。ただし 1 つのベンチマークでの結果</td><td>5</td></tr>
 <tr><td>8</td><td>組み合わせは単独より良いか</td><td>[実測] dbpedia_14 の 14 分類、合格ライン 0.90</td><td>先生単独、生徒単独</td><td>良い。単独はどちらも届かず (信頼下限 0.886 と 0.884)、組み合わせは 0.9325。2 つが別々の問題で間違えている</td><td>5</td></tr>
-<tr><td>9</td><td>2 人目の先生 LFM2.5 を使ってよいか</td><td>[引用] Hugging Face のライセンス lfm1.0 の 5 節を読んだ</td><td>Qwen だけを先生にする</td><td>商用で使えるのは、年間売上 1,000 万ドル未満の組織だけ。研究や非商用は使える。生徒を公開するなら、その前に確かめる関門にする</td><td>4, 7</td></tr>
+<tr><td>9</td><td>2 人目の先生 LFM2.5 を使ってよいか</td><td>[引用] <code>LiquidAI/LFM2.5-24B-A2B</code> の LICENSE (lfm1.0) の 1 節 (Threshold の定義) と 5 節を、筆者が 2026 年 11 月 13 日に読んだ。レビューの資料には入っていない</td><td>Qwen だけを先生にする</td><td>年間売上 1,000 万ドル以上の組織による商用利用は、このライセンスの対象外。出力で学習することを直接扱う条文は無く、学習した生徒が派生物 (Derivative Works) に当たるかは未確認。5 名とも、確かめるまで LFM のラベルは作らないとした</td><td>4, 7</td></tr>
 </table>
 
 <h2>1. 5 名がそろった点と、分かれた点</h2>
 
 <p>5 名は、渡した資料も問いも同じで、観点だけを変えて独立にレビューしました。観点は、測定と統計 (A)、システムと配信 (B)、学習 (C)、仕事の形 (D)、懐疑的な読み手と OSS の立場 (E) です。3 つの問いへの答えは、<b>5 名とも同じ向き</b>でした。違いが出たのは、次に何を作るか、最初の実験をどの題材にするか、のほうです。</p>
 
-<figure>
-<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img"
- aria-label="5 名のレビュアーの、3 つの問いへの答えの一覧。どの問いも 5 名が同じ向き">
-<defs><pattern id="hz1" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-<line x1="0" y1="0" x2="0" y2="8" stroke="#1f7a4d" stroke-width="2" opacity=".25"/></pattern>
-<pattern id="hz2" width="8" height="8" patternUnits="userSpaceOnUse">
-<circle cx="4" cy="4" r="1.4" fill="#8a5a12" opacity=".35"/></pattern></defs>
-<text x="20" y="34" font-size="12.5" font-weight="600" fill="#0f4a2e">レビュアー</text>
-<text x="300" y="34" font-size="12.5" font-weight="600" fill="#0f4a2e" text-anchor="middle">問 1 perigraph</text>
-<text x="530" y="34" font-size="12.5" font-weight="600" fill="#0f4a2e" text-anchor="middle">問 2 何でもできる 0.8B</text>
-<text x="760" y="34" font-size="12.5" font-weight="600" fill="#0f4a2e" text-anchor="middle">問 3 型か Leader か</text>
-<g font-size="12">
-<text x="20" y="74" fill="#12241c">A 測定と統計</text>
-<text x="20" y="118" fill="#12241c">B システムと配信</text>
-<text x="20" y="162" fill="#12241c">C 学習</text>
-<text x="20" y="206" fill="#12241c">D 仕事の形</text>
-<text x="20" y="250" fill="#12241c">E 懐疑的な読み手</text>
-</g>
-<g>
-<rect x="200" y="54" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="300" y="74" font-size="11.5" text-anchor="middle" fill="#0f4a2e">記録だけ・版と切替は別</text>
-<rect x="200" y="98" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="300" y="118" font-size="11.5" text-anchor="middle" fill="#0f4a2e">記録だけ・版と切替は別</text>
-<rect x="200" y="142" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="300" y="162" font-size="11.5" text-anchor="middle" fill="#0f4a2e">記録だけ・版は一部</text>
-<rect x="200" y="186" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="300" y="206" font-size="11.5" text-anchor="middle" fill="#0f4a2e">記録だけ・版と切替は別</text>
-<rect x="200" y="230" width="200" height="30" rx="6" fill="url(#hz2)" stroke="#8a5a12"/><text x="300" y="250" font-size="11.5" text-anchor="middle" fill="#8a5a12">記録だけ・存続に条件</text>
-</g>
-<g>
-<rect x="430" y="54" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="530" y="74" font-size="11.5" text-anchor="middle" fill="#0f4a2e">仕事の種類ごとなら可</text>
-<rect x="430" y="98" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="530" y="118" font-size="11.5" text-anchor="middle" fill="#0f4a2e">仕事の種類ごとなら可</text>
-<rect x="430" y="142" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="530" y="162" font-size="11.5" text-anchor="middle" fill="#0f4a2e">仕組みは可・主張は未証明</text>
-<rect x="430" y="186" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="530" y="206" font-size="11.5" text-anchor="middle" fill="#0f4a2e">型の決まった仕事なら可</text>
-<rect x="430" y="230" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="530" y="250" font-size="11.5" text-anchor="middle" fill="#0f4a2e">型の決まった仕事なら可</text>
-</g>
-<g>
-<rect x="660" y="54" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="760" y="74" font-size="11.5" text-anchor="middle" fill="#0f4a2e">型が先・Leader は未成立</text>
-<rect x="660" y="98" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="760" y="118" font-size="11.5" text-anchor="middle" fill="#0f4a2e">型が先・Leader は未成立</text>
-<rect x="660" y="142" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="760" y="162" font-size="11.5" text-anchor="middle" fill="#0f4a2e">設計時に固定の枠に分ける</text>
-<rect x="660" y="186" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="760" y="206" font-size="11.5" text-anchor="middle" fill="#0f4a2e">型が先・Leader は未成立</text>
-<rect x="660" y="230" width="200" height="30" rx="6" fill="url(#hz1)" stroke="#1f7a4d"/><text x="760" y="250" font-size="11.5" text-anchor="middle" fill="#0f4a2e">型が先・Leader は札付けだけ</text>
-</g>
-<text x="20" y="286" font-size="11.5" fill="#3c5a4c">斜線の緑: 同じ向きの答え。点の黄: 同じ向きだが、条件を付けた答え</text>
-</svg>
-<figcaption>3 つの問いへの答えは、5 名とも同じ向きでした。E だけが perigraph の存続に条件を付けています。2 回のうちに、別の実装が仕様だけから同じ識別子を作れるか、perigraph の拒否が判定を 1 つでも変えるかのどちらかが起きなければ、要の 2 つの属性を OpenInference に提案してしまい込む、という条件です。</figcaption>
-</figure>
+<table>
+<tr><th>レビュアー</th><th>問 1 perigraph</th><th>問 2 何でもできる 0.8B</th><th>問 3 型か Leader か</th></tr>
+<tr><td>A 測定と統計</td><td>記録だけ。版と切り替えは別</td><td>仕事の種類ごとなら可</td><td>型が先。Leader は未成立</td></tr>
+<tr><td>B システムと配信</td><td>記録だけ。版と切り替えは別</td><td>仕事の種類ごとなら可</td><td>型が先。Leader は未成立</td></tr>
+<tr><td>C 学習</td><td>記録だけ。版は一部</td><td>仕組みは可。主張は未証明</td><td>設計時に固定の枠に分ける</td></tr>
+<tr><td>D 仕事の形</td><td>記録だけ。版と切り替えは別</td><td>型の決まった仕事なら可</td><td>型が先。Leader は未成立</td></tr>
+<tr><td>E 懐疑的な読み手</td><td class="no">[注意] 拒否の引き金だけ。統合はまだ。存続に条件</td><td>型の決まった仕事なら可</td><td>型が先。Leader は札付けだけ</td></tr>
+</table>
+<p>3 つの問いへの答えは、5 名とも同じ向きでした。E だけが perigraph の存続に条件を付けています。2 回のうちに、別の実装が仕様だけから同じ識別子を作れるか、perigraph の拒否が判定を 1 つでも変えるかのどちらかが起きなければ、要の 2 つの属性を OpenInference に提案してしまい込む、という条件です。</p>
 
 <h3>分かれた点 (両方の言い分を並べる)</h3>
 
 <table>
 <tr><th>論点</th><th>一方の言い分</th><th>もう一方の言い分</th><th>この文書の扱い</th></tr>
 <tr><td>tierbook に「費用の条件」を書く欄を足すか</td><td>A: キャッシュの温まり具合などで費用の順位が入れ替わるなら、不透明な文字列の欄を 1 つ足し、条件の違う記録どうしで順位を比べるのを拒む</td><td>E: tierbook にハーネスやキャッシュの欄は要らない。足す実験の場面がまだ無い</td><td>[提案] 足さない。実験で順位の入れ替わりが測れたら、そのときに足す (A の条件付きの案と同じ結論)</td></tr>
-<tr><td>Prismyra に <code>harness.json</code> (配信するハーネスの正本) を作るか</td><td>B: 作り、その指紋を <code>arm_version</code> に混ぜる</td><td>E: 精度の変更などで答えが変わるのに識別子が変わらない、という実測が出たときだけ作る</td><td>[提案] 実験 R17a で「識別子が変わらないのに 3 ポイント以上動く」変更が見つかったら作る</td></tr>
-<tr><td>強化学習を続けるか</td><td>C: 3 ラベルでは答えが数トークンで、生成を続けるうちに誤りが積み重なる問題 (exposure bias) が起きない。長い出力では R16 の失敗は反証にならない</td><td>E: 自由な出力の報酬は正解との一致より雑音が多い。2 度目の失敗を待つだけ</td><td>[提案] 正解ラベルで学習した生徒に、生徒自身の出力を採点器で評価して学ぶ回 (on-policy) を 1 回だけ足し、差が 0 をまたげば打ち切る</td></tr>
-<tr><td>最初の実験の題材</td><td>A と E: banking77 を生成モードで。判断用モードが 0.36 だったので、生成に見せ場があり、採点も完全一致でできる</td><td>B: 合格済みの生徒でハーネスを少しずつ変える実験が一番安い (5 ドル未満)。C: 構造化した抽出のような生成の仕事。D: 3 つの題材を組み合わせた複合問題</td><td>[提案] 安い順に段を組む (7 節)。最初はハーネスの実験、次に banking77 の生成、最後に型か Leader か</td></tr>
+<tr><td>Prismyra に <code>harness.json</code> (配信するハーネスの正本) を作るか</td><td>B: 作り、その指紋を <code>arm_version</code> に混ぜる</td><td>E: 言い換えで学習済みの生徒が雑音を超えて動いたときだけ、指紋を <code>arm_version</code> に混ぜる。B 自身も、R17a のハーネスの変更 (7 節) で答えが動かなければ作らないと条件を付けた</td><td>[提案] 実験 R17a で「識別子が変わらないのに 3 ポイントを超えて動く」変更が見つかったら作る</td></tr>
+<tr><td>強化学習を続けるか</td><td>C: 3 ラベルでは答えが数トークンで、生成を続けるうちに誤りが積み重なる問題 (exposure bias) が起きない。長い出力では R16 の失敗は反証にならない</td><td>A、B、D、E: R16 で強化学習は何も足さなかった。E は、自由な出力の報酬は正解との一致より雑音が多いとした。A は強化学習の担当を置かないと明言</td><td>[提案、C の案を筆者が 1 回に絞った] 正解ラベルで学習した生徒に、生徒自身の出力を採点器で評価して学ぶ回 (on-policy) を 1 回だけ足し、差が 0 をまたげば打ち切る。C はこれを 2 回目の失敗なら打ち切ると書いた</td></tr>
+<tr><td>最初の実験の題材</td><td>A と E: banking77 を生成モードで。判断用モードが 0.36 だったので、生成に見せ場があり、採点も完全一致でできる</td><td>B: R16 の生徒でハーネスを少しずつ変える実験が一番安い (ハーネスの部分は 5 ドル未満、キャッシュの測定を含めた全体で 45〜65 ドル)。C: 構造化した抽出のような生成の仕事。D: 3 つの題材を組み合わせた複合問題</td><td>[提案] 安い順に段を組む (7 節)。最初はハーネスの実験、次に banking77 の生成、最後に型か Leader か</td></tr>
 </table>
 
 <h2>2. perigraph は記録と拒否に使い、版と切り替えには使わない</h2>
@@ -170,19 +148,19 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <rect x="376" y="124" width="96" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="424" y="146" font-size="11.5" text-anchor="middle">turn_budget</text>
 <rect x="478" y="124" width="96" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="526" y="146" font-size="11.5" text-anchor="middle">retry_policy</text>
 <rect x="580" y="124" width="150" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="655" y="146" font-size="11.5" text-anchor="middle">context_partitioning</text>
-<rect x="736" y="124" width="124" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="798" y="140" font-size="11.5" text-anchor="middle">tool_extension</text><text x="798" y="153" font-size="11.5" text-anchor="middle">tool_trace</text>
+<rect x="736" y="120" width="124" height="40" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="798" y="137" font-size="11.5" text-anchor="middle">tool_extension</text><text x="798" y="152" font-size="11.5" text-anchor="middle">tool_trace</text>
 <text x="20" y="196" font-size="12.5" font-weight="600" fill="#8f2f2f">そもそも 10 の部分に無い</text>
 <rect x="20" y="208" width="190" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="115" y="230" font-size="11.5" text-anchor="middle">重みと精度 (bf16 / int8)</text>
 <rect x="220" y="208" width="210" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="325" y="230" font-size="11.5" text-anchor="middle">チャットの型とトークナイザー</text>
 <rect x="440" y="208" width="190" height="34" rx="6" fill="url(#pn)" stroke="#8f2f2f"/><text x="535" y="230" font-size="11.5" text-anchor="middle">特徴量を作る部品の版</text>
 <rect x="640" y="208" width="220" height="34" rx="6" fill="#e6eef8" stroke="#1d4e8f"/><text x="750" y="224" font-size="11.5" text-anchor="middle" fill="#1d4e8f">arm_version (送り手が作る</text><text x="750" y="238" font-size="11.5" text-anchor="middle" fill="#1d4e8f">不透明な文字列) が受け持つ</text>
 <path d="M630 225 L640 225" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar2)"/>
-<path d="M800 158 L800 208" stroke="#3c5a4c" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+<path d="M300 166 L730 166" stroke="#1d4e8f" stroke-width="1.6"/><text x="515" y="180" font-size="11" text-anchor="middle" fill="#1d4e8f">申告で届く 4 つ</text><path d="M700 166 L720 206" stroke="#1d4e8f" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
 <rect x="20" y="268" width="840" height="46" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
-<text x="440" y="288" font-size="12.5" text-anchor="middle" fill="#0f4a2e" font-weight="600">arm_version = 重みの指紋 + 精度 + perigraph の識別子 + 申告されたハーネスの版 + 特徴量を作る部品の版</text>
+<text x="440" y="288" font-size="12.5" text-anchor="middle" fill="#0f4a2e" font-weight="600">arm_version = 重みの指紋 + 精度 + 型とトークナイザーの指紋 + perigraph の識別子 + 申告の版 + 特徴量の部品の版</text>
 <text x="440" y="305" font-size="11.5" text-anchor="middle" fill="#3c5a4c">[提案] 組み立てるのは Prismyra などの送り手。tierbook は文字列として比べるだけで、中身を読まない</text>
 </svg>
-<figcaption>ハーネスの 10 の部分のうち、参照実装 (<code>src/perigraph/collect.py</code>) で版の識別子に入るのは <code>instruction</code> の 1 つだけです。<code>tool_schemas</code>、<code>readout</code>、<code>decoding</code> もリクエストの中にありますが、モデルが読む文字ではなく取り決めの値 (<code>parsed</code>) として読むので、識別子に入りません。残りと、重みの精度やチャットの型は、Prismyra などの送り手が <code>arm_version</code> に混ぜます。tierbook はこの文字列が同じかどうかだけを見ます。</figcaption>
+<figcaption>ハーネスの 10 の部分のうち、参照実装 (<code>src/perigraph/collect.py</code>) で版の識別子に入るのは <code>instruction</code> の 1 つだけです。<code>tool_schemas</code>、<code>readout</code>、<code>decoding</code> もリクエストの中にありますが、モデルが読む文字ではなく取り決めの値 (<code>parsed</code>) として読むので、識別子に入りません。これは筆者が参照実装を読んで確かめたことで、レビューの資料には入っていませんでした。B は資料から、<code>tool_schemas</code> も識別子に入ると読んでいます。申告で届く部分 (<code>loop</code>、<code>turn_budget</code>、<code>retry_policy</code>、<code>context_partitioning</code>) と、重みの精度、チャットの型とトークナイザーの指紋 (C) は、Prismyra などの送り手が申告されたハーネスの版として <code>arm_version</code> に混ぜます。実行ごとに変わる <code>tool_trace</code> と、外から見えない <code>tool_extension</code> は版には入りません。tierbook はこの文字列が同じかどうかだけを見ます。</figcaption>
 </figure>
 
 <p>役割を分けると、次のようになります。</p>
@@ -192,22 +170,22 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <tr><td>実際に何が動いたかの記録</td><td>perigraph の属性を、既にある OpenTelemetry や OpenInference の記録に載せる</td><td>部分ごとの内容の指紋と、その部分をどこから知ったかの区別は、調べた 3 つの取り決めのどれにも無い [引用 tierbook TODO T19]</td></tr>
 <tr><td>食い違いを見つけて判定を拒む</td><td>記録を書く側 (観測の書き手)</td><td>状態が <code>complete</code> でない記録や、宣言した中身と指紋が違う記録からは、観測を書かない [提案]</td></tr>
 <tr><td>版</td><td><code>arm_version</code> (tierbook の観測の形式 3 に既にある)</td><td>dbpedia_14 の通し試験で、合格の記録、配信した生徒、配信後の記録が 1 つの版でつながった [実測]</td></tr>
-<tr><td>切り替え</td><td>自前のモデルは vSR、Bedrock のモデルは stratoclave</td><td>どちらも書き出された方針を実行するだけで、自分では決めない</td></tr>
+<tr><td>切り替え</td><td>自前のモデルは vSR。Bedrock のモデルは stratoclave [提案、B。E は vSR だけ]</td><td>どちらも書き出された方針を実行するだけで、自分では決めない</td></tr>
 </table>
 
 <div class="warn"><p style="margin:0"><b>落とし穴 (D の指摘)。</b>Leader が仕事ごとの指示を生徒のシステムプロンプトに書くと、<code>instruction</code> の中身が問題ごとに変わり、識別子も問題ごとに別物になります。そうなると、どの記録も他と比べられません。生徒のシステムプロンプトは固定の型にし、問題ごとの指示はユーザーの発言の側に入れます [提案]。</p></div>
 
-<div class="note"><p style="margin:0"><b>perigraph を続けるかの条件 (E の指摘)。</b>perigraph の実装はまだ 1 つしかありません [引用 SPEC.md 8 節]。続ける条件として、次の 2 回の実験のうちに、どちらかが起きることを置きます。1 つは、別の実装が仕様だけから同じ識別子を作れること。もう 1 つは、perigraph の拒否が、<code>arm_version</code> だけでは見逃したはずの判定を 1 つでも変えることです。どちらも起きなければ、要の 2 つの属性を OpenInference に提案して、perigraph はしまい込みます [提案]。</p></div>
+<div class="note"><p style="margin:0"><b>perigraph を続けるかの条件 (E の指摘)。</b>perigraph の実装はまだ 1 つしかありません [引用 SPEC.md 8 節]。続ける条件として、R17a と R17b のうちに、どちらかが起きることを置きます。1 つは、参照実装を読んでいない書き手に <code>SPEC.md</code> と <code>vocabularies.json</code> だけを渡し、仕様の識別子の例を全部再現できること。もう 1 つは、事前登録に無い食い違いを perigraph の拒否が見つけ、その記録を除くと合否か順位が変わることです。わざと作った担当 (H2 など) は数えません。どちらも起きなければ、要の 2 つの属性を OpenInference に提案して、perigraph はしまい込みます [提案]。</p></div>
 
 <h2>3. キャッシュがあると、1 件の費用は「その前に何をしたか」で決まる</h2>
 
 <p>キャッシュとは、前のリクエストと同じ先頭部分 (prefix) の計算結果を取っておき、次のリクエストで使い回す仕組みです。使い回せた分は、API なら安い料金になり、自前の GPU なら計算の時間が減ります。<b>同じ問いでも、直前にどこへ何を送ったかで値段が変わる</b>ので、「この担当は 1 件いくら」という固定の値段で振り分けを比べると、ずれます。</p>
 
-<p>perigraph の仕様は、同じ中身でも、1 通の長いメッセージとして送るとキャッシュ率 0%、会話として少しずつ伸ばすと 99.9% だった、と書いています [引用 SPEC.md 5 節]。そのため、やり取りの回数が違う 2 つの担当を「同じ仕事の 2 つの値段」として比べることを禁じています。料金の内訳も 4 つに分けています。新しく読んだ入力、キャッシュから読んだ入力、キャッシュに書いた入力、生成した出力です [引用 <code>billed_legs</code>]。</p>
+<p>perigraph の仕様は、同じ中身でも、1 通の長いメッセージとして送るとキャッシュ率 0%、会話として少しずつ伸ばすと 99.9% だった、と書いています [引用 SPEC.md 5 節]。そのため、やり取りの回数が違う 2 つの担当を「同じ仕事の 2 つの値段」として比べることを禁じています。料金の内訳も 4 つに分けています。新しく読んだ入力、キャッシュから読んだ入力、キャッシュに書いた入力、生成した出力です [引用 perigraph <code>spec/vocabularies.json</code> の <code>billed_legs</code>]。</p>
 
 <figure>
 <svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img"
- aria-label="会話の途中で生徒から先生へ切り替えると、先生は会話の履歴全部をキャッシュ無しで読み直す">
+ aria-label="会話の途中で生徒から先生へ切り替えると、履歴をそのまま渡す分け方では、先生は履歴全部をキャッシュ無しで読み直す">
 <defs><pattern id="cs" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
 <line x1="0" y1="0" x2="0" y2="8" stroke="#1f7a4d" stroke-width="2" opacity=".25"/></pattern>
 <pattern id="ct" width="8" height="8" patternUnits="userSpaceOnUse">
@@ -222,22 +200,22 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <path d="M560 84 L600 132" stroke="#8f2f2f" stroke-width="2" stroke-dasharray="6 4"/>
 <text x="610" y="112" font-size="11.5" fill="#8f2f2f">自信が足りず途中で切り替え</text>
 <rect x="20" y="196" width="400" height="84" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
-<text x="220" y="220" font-size="12.5" text-anchor="middle" font-weight="600" fill="#0f4a2e">会話ごと振り分ける</text>
-<text x="220" y="242" font-size="11.5" text-anchor="middle" fill="#3c5a4c">最初に生徒か先生かを決め、途中で替えない</text>
+<text x="220" y="220" font-size="12.5" text-anchor="middle" font-weight="600" fill="#0f4a2e">文脈の境目でだけ替える</text>
+<text x="220" y="242" font-size="11.5" text-anchor="middle" fill="#3c5a4c">文脈が切れるまで同じ担当を使う</text>
 <text x="220" y="262" font-size="11.5" text-anchor="middle" fill="#3c5a4c">キャッシュは同じ担当の中で効き続ける</text>
 <rect x="460" y="196" width="400" height="84" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
 <text x="660" y="220" font-size="12.5" text-anchor="middle" font-weight="600" fill="#8f2f2f">1 回ごとに振り分ける</text>
 <text x="660" y="242" font-size="11.5" text-anchor="middle" fill="#3c5a4c">替えるたびに履歴の分を先生がまた払う</text>
 <text x="660" y="262" font-size="11.5" text-anchor="middle" fill="#3c5a4c">1 件の値段が、それまでの経路で変わる</text>
 </svg>
-<figcaption>会話の途中で生徒から先生へ切り替えると、先生は会話の履歴全部をキャッシュ無しで読み直します。そのため 5 名のうち C は、<b>振り分けは会話の単位で行い、途中で替えない</b>ことを勧めました [提案]。1 回ごとに替える設計を比べたいなら、A が勧めるように、会話の単位で無作為に割り当てて、両方を実際に動かして測るしかありません。</figcaption>
+<figcaption>会話の途中で生徒から先生へ切り替えるとき、履歴をそのまま渡す分け方だと、先生は履歴全部をキャッシュ無しで読み直します [引用 SPEC.md 5 節]。そのため 5 名のうち C は、<b>振り分けは文脈の境目でだけ切り替える</b>ことを勧めました [提案]。1 回ごとに替える設計と比べるには、A が勧めるように、無作為に割り当てて両方を動かすか、記録を再生して測ります。会話の単位での実測はまだありません。</figcaption>
 </figure>
 
-<p>自前の GPU の箱では、事情が違います。料金の項目としてのキャッシュはなく、効くのは席と時間です。過去のプロジェクトでは、長い入力の処理が 1 件居座るだけで、短いリクエストを 1 秒以内に返せる件数が 1 時間 225,730 件から 102,022 件に落ちました [実測]。<b>API のキャッシュは料金表の話、自前の箱のキャッシュは席の話</b>なので、5 名のうち B は、この 2 つを 1 つの抽象にまとめないよう勧めています [提案]。</p>
+<p>自前の GPU の箱では、事情が違います。料金の項目としてのキャッシュはなく、効くのは席と時間です。過去のプロジェクトでは、飽和した負荷で長い入力が 1 件同居すると、短いリクエストを 1 秒以内に返せる件数が 1 時間 225,730 件から 102,022 件に落ちました [実測]。負荷が容量の 10% なら、長い入力を分けて処理する設定で落ちませんでした [実測]。測ったのは長い入力の同居で、キャッシュそのものではありません。<b>API のキャッシュは料金表の話、自前の箱のキャッシュは席の話</b>なので、5 名のうち B は、この 2 つを 1 つの抽象にまとめないよう勧めています [提案]。</p>
 
 <h3>振り分けの判断 1 回を、比べられる形で残す</h3>
 
-<p>後から「別の担当を選んでいたらどうだったか」を比べるには、判断の記録に次のものが要ります。5 名の提案をまとめると、次の表になります [提案]。</p>
+<p>後から「別の担当を選んでいたらどうだったか」を比べるには、判断の記録に次のものが要ります。主に A と B の提案をまとめると、次の表になります [提案]。</p>
 
 <table>
 <tr><th>記録するもの</th><th>なぜ要るか</th><th>書く場所</th></tr>
@@ -260,51 +238,30 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <table>
 <tr><th>モデル</th><th>パラメータ数 (全体)</th><th>語彙の大きさ</th><th>層の数</th><th>ライセンス</th></tr>
 <tr><td><code>Qwen/Qwen3.6-35B-A3B</code></td><td class="n">359.5 億</td><td class="n">248,320</td><td class="n">40</td><td>Apache-2.0</td></tr>
-<tr><td><code>LiquidAI/LFM2.5-24B-A2B</code></td><td class="n">239.7 億</td><td class="n">128,000</td><td class="n">40</td><td>lfm1.0 (商用は年間売上 1,000 万ドル未満の組織だけ)</td></tr>
+<tr><td><code>LiquidAI/LFM2.5-24B-A2B</code></td><td class="n">239.7 億</td><td class="n">128,000</td><td class="n">40</td><td>lfm1.0 (年間売上 1,000 万ドル以上の組織の商用利用は対象外、LICENSE 5 節)</td></tr>
 <tr><td><code>Qwen/Qwen3.5-0.8B</code> (生徒)</td><td class="n">8.7 億</td><td class="n">248,320</td><td class="n">24</td><td>Apache-2.0</td></tr>
+<tr><td colspan="5">語彙と層の数は各モデルの <code>config.json</code> の <code>vocab_size</code> と <code>num_hidden_layers</code>、パラメータ数は Hugging Face の API の値です [引用、筆者が 2026 年 11 月 13 日に取得。レビューの資料には入っていない]。1 回に動く重みは Qwen3.6 が約 3B、LFM2.5 が約 2B です [引用]。Prismyra の先生は 36 層に切り詰めた版 (<code>fp8-36l</code>) なので、元の 40 層とは違います。</td></tr>
 </table>
 
 <p>値はどれも 2026 年 11 月 13 日に Hugging Face の API とモデルの設定ファイルから読んだものです [引用]。Qwen の先生と生徒は語彙の大きさが同じなので、トークンごとの確率の分布を合わせる蒸留ができる見込みがあります。ただし、語彙の中身まで同じかはまだ確かめていません [提案]。LFM2.5 は語彙が違うので、生成した文章を目標にする使い方か、2 人の先生の答えがそろった問題だけを選ぶ使い方になります [提案]。</p>
 
-<figure>
-<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img"
- aria-label="3 ラベルの実験から持ち込めることと、持ち込めないこと">
-<defs><pattern id="ty" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-<line x1="0" y1="0" x2="0" y2="8" stroke="#1f7a4d" stroke-width="2" opacity=".25"/></pattern>
-<pattern id="tn" width="8" height="8" patternUnits="userSpaceOnUse">
-<circle cx="4" cy="4" r="1.4" fill="#8f2f2f" opacity=".35"/></pattern></defs>
-<text x="220" y="28" font-size="12.5" font-weight="600" text-anchor="middle" fill="#0f4a2e">持ち込める (仮説として)</text>
-<text x="660" y="28" font-size="12.5" font-weight="600" text-anchor="middle" fill="#8f2f2f">持ち込めない</text>
-<rect x="20" y="42" width="400" height="52" rx="7" fill="url(#ty)" stroke="#1f7a4d"/>
-<text x="220" y="64" font-size="12" text-anchor="middle">効くのはラベルの質で、生徒の大きさではない</text>
-<text x="220" y="82" font-size="11.5" text-anchor="middle" fill="#3c5a4c">先生のラベル 0.8733、正解ラベル 0.8983</text>
-<rect x="20" y="106" width="400" height="52" rx="7" fill="url(#ty)" stroke="#1f7a4d"/>
-<text x="220" y="128" font-size="12" text-anchor="middle">組み合わせは単独より良くなりうる</text>
-<text x="220" y="146" font-size="11.5" text-anchor="middle" fill="#3c5a4c">dbpedia_14 で信頼下限 0.9325 (1 題材だけ)</text>
-<rect x="20" y="170" width="400" height="52" rx="7" fill="url(#ty)" stroke="#1f7a4d"/>
-<text x="220" y="192" font-size="12" text-anchor="middle">配信と同じハーネスで学習させる</text>
-<text x="220" y="210" font-size="11.5" text-anchor="middle" fill="#3c5a4c">言い回し 1 文で 12.04 ポイント動いた</text>
-<rect x="460" y="42" width="400" height="52" rx="7" fill="url(#tn)" stroke="#8f2f2f"/>
-<text x="660" y="64" font-size="12" text-anchor="middle">短い答えでの安さと速さ</text>
-<text x="660" y="82" font-size="11.5" text-anchor="middle" fill="#3c5a4c">0.30 倍と 0.28 秒はラベル 1 語の値</text>
-<rect x="460" y="106" width="400" height="52" rx="7" fill="url(#tn)" stroke="#8f2f2f"/>
-<text x="660" y="128" font-size="12" text-anchor="middle">完全一致で採点できる前提</text>
-<text x="660" y="146" font-size="11.5" text-anchor="middle" fill="#3c5a4c">自由な文章には採点役のモデルが要る</text>
-<rect x="460" y="170" width="400" height="52" rx="7" fill="url(#tn)" stroke="#8f2f2f"/>
-<text x="660" y="192" font-size="12" text-anchor="middle">「強化学習は効かない」という結論</text>
-<text x="660" y="210" font-size="11.5" text-anchor="middle" fill="#3c5a4c">答えが数トークンでは、長い生成の問題が起きない</text>
-<rect x="20" y="240" width="840" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
-<text x="440" y="259" font-size="12.5" text-anchor="middle" font-weight="600" fill="#8a5a12">一番の壁: 先生の答えが長い (出力トークンの中央値 687、短くすると 7.0 ポイント下がる)</text>
-<text x="440" y="276" font-size="11.5" text-anchor="middle" fill="#3c5a4c">生徒がこの長さをまねると、CPU での安さが消えるおそれがある</text>
-</svg>
-<figcaption>3 ラベルの実験から持ち込めるのは「ラベルの質が効く」「組み合わせが効きうる」「配信と同じハーネスで学習させる」の 3 つで、どれもまだ仮説です。短い答えで測った安さと速さ、完全一致での採点、強化学習の否定は、長い文章を生成する仕事には持ち込めません。</figcaption>
-</figure>
+<table>
+<tr><th>3 ラベルの実験の結果</th><th>長い文章を生成する仕事に持ち込めるか</th><th>根拠</th></tr>
+<tr><td>効くのはラベルの質で、生徒の大きさではない</td><td class="y">仮説として持ち込める</td><td>[実測] 先生のラベル 0.8733、正解ラベル 0.8983</td></tr>
+<tr><td>組み合わせは単独より良くなりうる</td><td class="y">仮説として持ち込める</td><td>[実測] dbpedia_14 で信頼下限 0.9325。1 題材だけ</td></tr>
+<tr><td>配信と同じハーネスで学習させる</td><td class="y">別の測定からの仮説</td><td>[引用 perigraph SPEC.md 2.4 節] 指示 1 文で 12.04 ポイント動いた</td></tr>
+<tr><td>短い答えでの安さと速さ (0.30 倍、0.28 秒)</td><td class="no">持ち込めない</td><td>ラベル 1 語で測った値</td></tr>
+<tr><td>完全一致で採点できる前提</td><td class="no">持ち込めない</td><td>自由な文章には採点役のモデルが要る</td></tr>
+<tr><td>「強化学習は効かない」という結論</td><td class="no">C の見方では持ち込めない</td><td>答えが数トークンでは、長い生成の問題が起きない。A、B、D、E は強化学習を勧めていない</td></tr>
+<tr><td>一番の壁: 先生の答えが長い</td><td class="no">[注意]</td><td>[実測] 出力トークンの中央値 687、短くすると 7.0 ポイント下がる。生徒がこの長さをまねると CPU での安さが消えるおそれ</td></tr>
+</table>
+<p>3 ラベルの実験から持ち込めるのは「ラベルの質が効く」「組み合わせが効きうる」「配信と同じハーネスで学習させる」の 3 つで、どれもまだ仮説です。短い答えで測った安さと速さ、完全一致での採点、強化学習の否定は、長い文章を生成する仕事には持ち込めません。</p>
 
 <h3>学習の手順の案 (5 名の提案をまとめたもの)</h3>
 
 <ol>
 <li><b>先生の答えを、配信と同じハーネスで作る。</b>システムプロンプト、ツールの定義、答えの取り出し方、生成の設定を、配信するときのものと 1 バイトも変えません。チャットの型の中身を整えて書き直すこともしません [提案、C]。</li>
-<li><b>採点器を通った答えだけで学習させる。</b>正解ラベルで学習した生徒が先生に並んだので、生成の仕事でも、プログラムで確かめられる採点器 (JSON の形、抽出した値の完全一致など) を通った答えだけを目標にします。これが「正解ラベル」の代わりです [提案、C と E]。</li>
+<li><b>採点器を通った答えだけで学習させる。</b>正解ラベルで学習した生徒が先生に並んだので、生成の仕事でも、プログラムで確かめられる採点器 (JSON の形、抽出した値の完全一致など) を通った答えだけを目標にします。これが「正解ラベル」の代わりです [提案、C と D]。</li>
 <li><b>2 人目の先生は、答えを選ぶためにだけ使う。</b>2 人の答えがそろった問題だけを残す、そろわない問題を調べる、という使い方です。ただし、そろっていることは正しいことではありません。2 つのモデルが同じ誤りを言うと、それが 38% の割合で採用されたという報告があります [引用 arXiv:2608.03744、C の指摘]。</li>
 <li><b>キャッシュは、学習データの並べ方の決まりとして扱う。</b>変わらない部分 (指示とツールの定義) を前に、毎回変わる中身を後ろに置き、指示の言い換えでデータを増やすことはしません。その代わり、ハーネスを変えるたびに学習し直して、判定し直すことになります [提案、C]。</li>
 <li><b>生徒自身の答えで学ぶ回 (on-policy) は、1 回だけ試す。</b>生徒に答えさせ、採点器で報酬を付け、語彙が同じなら先生の確率の分布にも寄せます。差が 0 をまたげば打ち切ります [提案、C と E の折衷]。</li>
@@ -339,7 +296,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <text x="20" y="214" font-size="11.5" fill="#3c5a4c">指示文の費用は、測った値 1 Mtok あたり $1.67 (877 トークンの応答の箱) に 380 トークンを掛けた計算 [提案、D の計算]</text>
 <text x="20" y="232" font-size="11.5" fill="#3c5a4c">380 トークンは別のベンチマークと別の Leader での値なので、2 つの数字は条件がそろっていない</text>
 </svg>
-<figcaption>先生が判断用モードで答えるだけなら、受理 100 万件あたり $46.12 です [実測]。生成する Leader が 380 トークンの指示を書くと、指示だけで 100 万件あたり $635 かかります。判断用モードが使える仕事では、Leader の指示がおよそ 28 トークンより長いと元が取れません。Leader が得をするのは、大きなモデル自身の答えが長くなる仕事 (687 トークンなら 100 万件あたり約 $1,150) で、指示がそれよりずっと短いときだけです。</figcaption>
+<figcaption>先生が判断用モードで答えるだけなら、受理 100 万件あたり $46.12 です [実測]。生成する Leader が 380 トークンの指示を書くと、指示だけで 100 万件あたり $635 かかります。判断用モードが使える仕事では、Leader の指示がおよそ 28 トークンより長いと元が取れません。Leader が得をするのは、大きなモデル自身の答えが長くなる仕事 (687 トークンなら 100 万件あたり約 $1,150) で、指示がそれよりずっと短いときだけです。棒の単位はそろっていません。2 本目と 3 本目は指示を書く費用だけで、Leader が問題を読む費用と、生徒が答える費用は入っていません。生徒の費用 (R16 の正解ラベルの生徒で受理 100 万件あたり $11.86) を足すだけでも、境目は (46.12 − 11.86) ÷ 1.67 ≈ 20 トークンに下がります [提案、計算]。</figcaption>
 </figure>
 
 <p>そこで Leader を入れるなら、自由な計画を書かせず、<b>あらかじめ決めた型の中から仕事の種類を選び、短い指示を付けるだけ</b>にします [提案、B と D と E]。Leader の札付けが正しいかどうかは、今の証明書の外にあります。今の証明書は「データセットにある仕事の種類のラベル」を前提にしているので、Leader を入れるなら、その札付けの正しさも測る値に加わります。</p>
@@ -348,21 +305,21 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 
 <table>
 <tr><th>担当</th><th>中身</th><th>何を切り分けるか</th></tr>
-<tr><td>A0</td><td>0.8B (正解ラベルで学習)、問題をそのまま 1 つの型で</td><td>下限</td></tr>
-<tr><td>A1</td><td>決め打ちの表で K 個の型から 1 つを選び、分けられる型なら機械的に分け、0.8B がそれぞれ答える</td><td>型の決まった仕事で足りるか</td></tr>
-<tr><td>A2</td><td>Leader (Qwen3.6-35B-A3B) が K 個の型から指示を出し、0.8B が答え、機械的に組み立てる</td><td>分けることが要るか</td></tr>
-<tr><td>A3</td><td>学習していない 0.8B に、元の文章無しで指示だけを渡す (24 トークン以内)</td><td>Leader がもう答えてしまっていないか (漏れ)</td></tr>
-<tr><td>A4</td><td>A2 と同じだが、指示を同じ種類の別の問題から取ってくる</td><td>効いているのが問題ごとの指示か、種類ごとの型か</td></tr>
-<tr><td>A5</td><td>Leader がそのまま答える</td><td>今の担当 1</td></tr>
-<tr><td>A6</td><td>A1 から先生へ回す組み合わせ</td><td>今の担当 2 (Leader が要らない形)</td></tr>
+<tr><td>型 0</td><td>0.8B (正解ラベルで学習)、問題をそのまま 1 つの型で</td><td>下限</td></tr>
+<tr><td>型 1</td><td>決め打ちの表で K 個の型から 1 つを選び、分けられる型なら機械的に分け、0.8B がそれぞれ答える</td><td>型の決まった仕事で足りるか</td></tr>
+<tr><td>型 2</td><td>Leader (Qwen3.6-35B-A3B) が K 個の型から指示を出し、0.8B が答え、機械的に組み立てる</td><td>分けることが要るか</td></tr>
+<tr><td>型 3</td><td>学習していない 0.8B に、元の文章無しで指示だけを渡す (24 トークン以内)</td><td>Leader がもう答えてしまっていないか (漏れ)</td></tr>
+<tr><td>型 4</td><td>型 2 と同じだが、指示を同じ種類の別の問題から取ってくる</td><td>効いているのが問題ごとの指示か、種類ごとの型か</td></tr>
+<tr><td>型 5</td><td>Leader がそのまま答える</td><td>今の担当 1</td></tr>
+<tr><td>型 6</td><td>型 1 から先生へ回す組み合わせ</td><td>今の担当 2 (Leader が要らない形)</td></tr>
 </table>
 
-<p>関門は順番を事前に固定します。前回、きれいに見えた勝ちを止めたのは、この順番でした [実測]。</p>
+<p>関門は順番を事前に固定します。前回、きれいに見えた勝ちを止めたのは、この順番でした [実測]。題材と合格ラインは、試験用とは別のふるい分け用 300 件で型 0 と型 5 を流して決め、あとは変えません。関門 1〜3 は選ぶ半分 (選ぶのに使い、合格の確認には使わない半分) だけで判定し、確かめる半分を見るのは関門 4 の 1 回だけです [提案]。</p>
 <ol>
-<li><b>余地があるか。</b>A1 か A6 が確かめる半分で合格したら、型の決まった仕事で足りるので、A2 は走らせません。A5 が合格ラインに届かなければ、能力のある Leader がいないので止めます。</li>
-<li><b>漏れていないか。</b>A3 が A0 より 5 ポイント以上高ければ、Leader が答えを渡しているだけです。</li>
-<li><b>前提が立つか。</b>A2 と A4 の差、または A2 と A1 の差の 95% の下限が 0 以下なら、効いているのは種類ごとの型なので、決め打ちの表を使います。</li>
-<li><b>元が取れるか。</b>A2 が合格しない、または Leader の費用を全部含めた受理 1 件あたりの費用が、A5 と A6 のうち安いほう以上なら、分けることは効いても得になりません。</li>
+<li><b>余地があるか。</b>型 1 か 型 6 が確かめる半分で合格したら、型の決まった仕事で足りるので、型 2 は走らせません。型 5 が合格ラインに届かなければ、能力のある Leader がいないので止めます。</li>
+<li><b>漏れていないか。</b>型 3′ (学習していない 0.8B に、文章も指示も渡さない。当てずっぽうの水準) を足します。型 3 と型 3′ の差の 95% 下限が 5 ポイント以上なら、Leader の指示に答えが漏れているとして止めます。あわせて、Leader の効き (型 2 − 型 0) のうち型 3 だけで取れる割合を報告します (前回は 59%)。</li>
+<li><b>前提が立つか。</b>型 2 と 型 4 の差、または 型 2 と 型 1 の差の 95% の下限が 0 以下なら、効いているのは種類ごとの型なので、決め打ちの表を使います。</li>
+<li><b>元が取れるか。</b>型 2 が合格しない、または Leader の費用を全部含めた受理 1 件あたりの費用が、型 5 と 型 6 のうち合格したものの安いほう以上なら、分けることは効いても得になりません。</li>
 </ol>
 
 <h2>6. 統合した設計: 誰が何を受け持つか</h2>
@@ -377,9 +334,9 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <pattern id="t6" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#1d4e8f" stroke-width="2" opacity=".22"/></pattern></defs>
 <text x="20" y="26" font-size="12.5" font-weight="600" fill="#0f4a2e">太い実線: リクエストの経路 / 破線: 記録と設定</text>
 <rect x="20" y="50" width="110" height="46" rx="7" fill="#fff" stroke="#3c5a4c"/><text x="75" y="78" font-size="12" text-anchor="middle">利用者</text>
-<rect x="170" y="44" width="170" height="58" rx="7" fill="url(#s6)" stroke="#8a5a12"/><text x="255" y="68" font-size="12.5" text-anchor="middle" font-weight="600">vSR / stratoclave</text><text x="255" y="86" font-size="11.5" text-anchor="middle" fill="#3c5a4c">方針を実行するだけ</text>
+<rect x="170" y="44" width="170" height="58" rx="7" fill="url(#s6)" stroke="#8a5a12"/><text x="255" y="68" font-size="12.5" text-anchor="middle" font-weight="600">vSR</text><text x="255" y="86" font-size="11.5" text-anchor="middle" fill="#3c5a4c">方針を実行するだけ</text>
 <rect x="390" y="30" width="200" height="40" rx="7" fill="url(#s6)" stroke="#8a5a12"/><text x="490" y="55" font-size="12" text-anchor="middle">0.8B の生徒 (CPU / GPU)</text>
-<rect x="390" y="80" width="200" height="40" rx="7" fill="url(#s6)" stroke="#8a5a12"/><text x="490" y="105" font-size="12" text-anchor="middle">先生 (Qwen3.6 / LFM2.5)</text>
+<rect x="390" y="80" width="200" height="40" rx="7" fill="url(#s6)" stroke="#8a5a12"/><text x="490" y="105" font-size="12" text-anchor="middle">先生 (Qwen3.6)</text>
 <path d="M130 73 L168 73" stroke="#3c5a4c" stroke-width="3" marker-end="url(#ar6)"/>
 <path d="M340 64 L388 52" stroke="#3c5a4c" stroke-width="3" marker-end="url(#ar6)"/>
 <path d="M340 84 L388 98" stroke="#3c5a4c" stroke-width="3" marker-end="url(#ar6)"/>
@@ -396,15 +353,15 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <path d="M390 279 L255 279 L255 104" fill="none" stroke="#3c5a4c" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar6)"/>
 <text x="140" y="300" font-size="11.5" fill="#3c5a4c">合格した方針を書き出す</text>
 <rect x="20" y="150" width="210" height="58" rx="7" fill="#fff" stroke="#3c5a4c"/><text x="125" y="174" font-size="12" text-anchor="middle" font-weight="600">EKS の基盤</text><text x="125" y="192" font-size="11.5" text-anchor="middle" fill="#3c5a4c">箱の数え方とエンジンの設定</text>
-<path d="M125 150 L380 112" stroke="#3c5a4c" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M125 150 L388 112" stroke="#3c5a4c" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar6)"/>
 <text x="20" y="340" font-size="11.5" fill="#3c5a4c">tierbook はリクエストの経路に入らない。ハーネスとキャッシュの違いは、送り手が arm_version と料金の記録に入れる</text>
 </svg>
-<figcaption>リクエストは vSR か stratoclave を通って生徒か先生に届きます。答えの記録を利用者の採点器が採点し、Prismyra が学習した生徒の <code>arm_version</code> を組み立て、tierbook が文字列を比べて合格を決め、方針を書き出します。tierbook はリクエストの経路にも、ハーネスやキャッシュの中身にも入りません。</figcaption>
+<figcaption>リクエストは vSR を通って生徒か先生に届きます。Bedrock のモデルを stratoclave 経由で担当に加える案 (B) もありますが、tierbook にはまだその書き出し先が無いので、図には描いていません。LFM2.5 は配信の経路には入らず、ラベル作りと問題の絞り込みにだけ使う案です。答えの記録を利用者の採点器が採点し、Prismyra が学習した生徒の <code>arm_version</code> を組み立て、tierbook が文字列を比べて合格を決め、方針を書き出します。tierbook はリクエストの経路にも、ハーネスやキャッシュの中身にも入りません。</figcaption>
 </figure>
 
 <table>
 <tr><th>リポジトリ / 仕組み</th><th>受け持つこと</th><th>今変えること</th><th>変えるきっかけ (実験の場面)</th></tr>
-<tr><td>tierbook</td><td>合格の判定。不透明な文字列を比べる</td><td>無し</td><td>キャッシュの条件で費用の順位が入れ替わると測れたら、条件の文字列を 1 つ足し、条件の違う比較を拒む (A の案)</td></tr>
+<tr><td>tierbook</td><td>合格の判定。不透明な文字列を比べる</td><td>無し</td><td>キャッシュの条件で費用の順位が入れ替わると測れたら、条件の文字列を 1 つ足し、条件の違う比較を拒む (A の案)。学習データの 2 人目の書き手が出たら T22 (C、D、E)、料金制の Leader を使うなら T25 (D)、合格判定用の問題を drift に流すなら T21 と T24 (A)</td></tr>
 <tr><td>Prismyra (<code>prismyra.learn</code>)</td><td>先生の答えの生成、学習、<code>arm_version</code> の組み立て、観測とデータの記録の書き出し</td><td><code>arm_version</code> に精度とチャットの型の指紋を混ぜる。T23 (特徴量を作る部品の版) を実装する</td><td>R17a で、識別子が変わらないのに答えが動く変更が見つかったら、配信するハーネスの正本 <code>harness.json</code> を足す (B の案)</td></tr>
 <tr><td>perigraph</td><td>実際に何が動いたかの記録と、判定を拒む決まり</td><td>仕様は変えない。2 つ目の実装を作る</td><td>2 節の存続の条件</td></tr>
 <tr><td>vSR</td><td>自前のモデルの切り替え。自信度で先生に回す</td><td>判断の記録 (3 節の表) を出す</td><td>生成する生徒の組み合わせを初めて動かすとき</td></tr>
@@ -412,92 +369,84 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <tr><td>EKS の基盤</td><td>先生の答えの生成と学習のジョブ、CPU での評価</td><td>処理件数の値に、負荷の出し方、<code>max_num_seqs</code>、実際に有効なキャッシュの設定を必ず添える</td><td>費用を比べるすべての回</td></tr>
 </table>
 
-<h2>7. 実験の計画: 安い順に 3 段、それぞれ打ち切りの条件つき</h2>
+<div class="note"><p style="margin:0"><b>何が新しく、何が解決済みか (E の整理)。</b>E は、キャッシュが当たる送り先を選ぶことは llm-d などが既に扱っている、と書いています (筆者は llm-d のソースをまだ読んでいません。8 節)。新しいのは、選ぶのに使っていないデータでの合格判定と、判定した回数の台帳を、振り分けの方針に結び付けることです。E は、ここ以外を新しいと言うと誇張になると書いています [提案、E]。</p></div>
 
-<p>5 名が出した実験案を、安い順、手戻りしにくい順に 3 段に並べました。どの段も、測る前に事前登録し、合格判定は 1 回だけ、判定の回数は台帳に残します。<b>前の段で打ち切りの条件に当たったら、後の段は走らせません</b> [提案]。</p>
+<h2>7. 実験の計画: 手戻りの少ない順に 3 段、それぞれ打ち切りの条件つき</h2>
+
+<p><b>次に走らせるのは R17-0 と R17a だけで、R17b と R17c は前の段の結果を見てから事前登録します。</b>5 名が出した実験案を、前の段の結果が後の段の設計を決める順に並べました。見積もりの金額だけなら R17c (D の見積もり 50 ドル未満) のほうが R17b (上限 150 ドル) より安くなります。過去には、作る前に既存の記録だけで計算し、完璧な予測でも取り分が 1 件約 4 セントと分かって打ち切れた例があります (B と E)。R17a の打ち切りは作る部品を減らすだけで、R17b は走らせます。R17b で生徒が作れなければ、R17c は走らせません。どの段も、測る前に事前登録し、合格判定は 1 回だけ、判定の回数は台帳に残します。<b>前の段で打ち切りの条件に当たったら、後の段は走らせません</b> [提案]。</p>
 
 <figure>
-<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img"
- aria-label="3 段の実験。R17a ハーネスとキャッシュ、R17b banking77 の生成で蒸留、R17c 型か Leader か。各段に打ち切りの条件">
+<svg viewBox="0 0 880 150" width="100%" style="max-width:880px" role="img" aria-label="4 段の実験。R17-0 費用ゼロの下調べ、R17a ハーネスとキャッシュ、R17b 多クラスの札を文字で書かせる蒸留、R17c 型か Leader か">
 <defs><marker id="ar7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
 <pattern id="g7" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#1f7a4d" stroke-width="2" opacity=".25"/></pattern></defs>
-<rect x="20" y="40" width="260" height="120" rx="9" fill="url(#g7)" stroke="#1f7a4d"/>
-<text x="150" y="66" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17a ハーネスとキャッシュ</text>
-<text x="150" y="90" font-size="11.5" text-anchor="middle">合格済みの生徒で、ハーネスを 1 つずつ変える</text>
-<text x="150" y="110" font-size="11.5" text-anchor="middle">キャッシュの有無と負荷を変えて費用を測る</text>
-<text x="150" y="140" font-size="12" text-anchor="middle" font-weight="600" fill="#0f4a2e">見込み 45〜65 ドル</text>
-<rect x="310" y="40" width="260" height="120" rx="9" fill="url(#g7)" stroke="#1f7a4d"/>
-<text x="440" y="66" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17b 生成での蒸留</text>
-<text x="440" y="90" font-size="11.5" text-anchor="middle">banking77 で答えを意図の名前として生成</text>
-<text x="440" y="110" font-size="11.5" text-anchor="middle">2 人の先生、正解ラベル、組み合わせ</text>
-<text x="440" y="140" font-size="12" text-anchor="middle" font-weight="600" fill="#0f4a2e">上限 150 ドル</text>
-<rect x="600" y="40" width="260" height="120" rx="9" fill="url(#g7)" stroke="#1f7a4d"/>
-<text x="730" y="66" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17c 型か Leader か</text>
-<text x="730" y="90" font-size="11.5" text-anchor="middle">5 節の A0〜A6 を、漏れの関門つきで</text>
-<text x="730" y="110" font-size="11.5" text-anchor="middle">前提と元が取れるかを順に確かめる</text>
-<text x="730" y="140" font-size="12" text-anchor="middle" font-weight="600" fill="#0f4a2e">上限 100 ドル</text>
-<path d="M280 100 L308 100" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar7)"/>
-<path d="M570 100 L598 100" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar7)"/>
-<rect x="20" y="180" width="260" height="100" rx="9" fill="#fbeceb" stroke="#8f2f2f"/>
-<text x="150" y="202" font-size="12" text-anchor="middle" font-weight="600" fill="#8f2f2f">打ち切り</text>
-<text x="150" y="224" font-size="11.5" text-anchor="middle">識別子が変わらない変更で</text>
-<text x="150" y="242" font-size="11.5" text-anchor="middle">答えが動かなければ harness.json を作らない</text>
-<text x="150" y="262" font-size="11.5" text-anchor="middle">費用の差が 10% 未満ならキャッシュは対象外</text>
-<rect x="310" y="180" width="260" height="100" rx="9" fill="#fbeceb" stroke="#8f2f2f"/>
-<text x="440" y="202" font-size="12" text-anchor="middle" font-weight="600" fill="#8f2f2f">打ち切り</text>
-<text x="440" y="224" font-size="11.5" text-anchor="middle">先生の信頼下限が 0.80 未満なら止める</text>
-<text x="440" y="242" font-size="11.5" text-anchor="middle">生徒が先生より 5 ポイント超低く、</text>
-<text x="440" y="262" font-size="11.5" text-anchor="middle">組み合わせも先生より安くならなければ止める</text>
-<rect x="600" y="180" width="260" height="100" rx="9" fill="#fbeceb" stroke="#8f2f2f"/>
-<text x="730" y="202" font-size="12" text-anchor="middle" font-weight="600" fill="#8f2f2f">打ち切り</text>
-<text x="730" y="224" font-size="11.5" text-anchor="middle">型で足りるなら Leader は走らせない</text>
-<text x="730" y="242" font-size="11.5" text-anchor="middle">漏れが 5 ポイント以上なら止める</text>
-<text x="730" y="262" font-size="11.5" text-anchor="middle">元が取れなければ止める</text>
+<rect x="20" y="30" width="190" height="80" rx="9" fill="#fff" stroke="#1f7a4d"/><text x="115" y="62" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17-0 下調べ</text><text x="115" y="86" font-size="12" text-anchor="middle">0 ドル</text>
+<rect x="240" y="30" width="190" height="80" rx="9" fill="url(#g7)" stroke="#1f7a4d"/><text x="335" y="62" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17a ハーネスとキャッシュ</text><text x="335" y="86" font-size="12" text-anchor="middle">45〜65 ドル</text>
+<rect x="460" y="30" width="190" height="80" rx="9" fill="url(#g7)" stroke="#1f7a4d"/><text x="555" y="62" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17b 札を書く蒸留</text><text x="555" y="86" font-size="12" text-anchor="middle">上限 150 ドル + 追加分</text>
+<rect x="680" y="30" width="180" height="80" rx="9" fill="url(#g7)" stroke="#1f7a4d"/><text x="770" y="62" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">R17c 型か Leader か</text><text x="770" y="86" font-size="12" text-anchor="middle">上限 100 ドル</text>
+<path d="M210 70 L238 70" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar7)"/>
+<path d="M430 70 L458 70" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar7)"/>
+<path d="M650 70 L678 70" stroke="#3c5a4c" stroke-width="2" marker-end="url(#ar7)"/>
+<text x="440" y="136" font-size="11.5" text-anchor="middle" fill="#3c5a4c">金額はレビュアーの見積もりで、まだ払っていない。打ち切りの条件は本文の各段に書く</text>
 </svg>
-<figcaption>R17a は合格済みの生徒を使うので一番安く、ハーネスとキャッシュが本当に判断を変えるかを先に確かめます。R17b は生成での蒸留を、完全一致で採点できる banking77 で確かめます。R17c は、型の決まった仕事で足りるかと、Leader が要るかを分けます。金額はどれもレビュアーの見積もりで、まだ払っていません。</figcaption>
+<figcaption>次に走らせるのは R17-0 と R17a です。R17b と R17c は、前の段の結果を見てから事前登録します。</figcaption>
 </figure>
 
+<h3>R17-0: 費用ゼロの下調べ</h3>
+<p>既存の記録で、完璧に振り分けたときの節約を、決め打ちの表とキャッシュを有効にした形に対して計算します。節約の 95% 下限が 10% 未満なら、振り分けを学習する部分は作りません。あわせて、LFM2.5 のライセンス、2 つのモデルの語彙の中身、<code>prismyra.learn</code> が長い出力を扱えるかを読んで確かめます [提案、B と E]。</p>
+
 <h3>R17a: ハーネスを 1 つずつ変える (B の案)</h3>
-<p>正解ラベルで学習した合格済みの生徒 (r16 の <code>sft-gold-f100</code>) を、金融ニュースの 1,200 件で、学習したときと同じハーネス (H0) と比べます。この回は合格判定ではありませんが、台帳には 1 回として残します。</p>
+<p>R16 で正解ラベルで学習した生徒 (<code>sft-gold-f100</code>) を、金融ニュースの 1,200 件で、学習したときと同じハーネス (H0) と比べます。この生徒は単独では合格判定を受けていません。R16 で合格したのは、この生徒を 1 段目にした組み合わせ (<code>cascade-sft-gold-f100</code>) です。生徒単独は、確かめる半分の信頼下限 0.8735、受理 100 万件あたり $11.86 と組み合わせ ($21.82) より安いのに、高い順に確かめる検定が途中の段 (信頼下限 0.8492) で止まったため、調べられませんでした。B と E は、<b>金融ニュースで組み合わせが要るという結論は、検定の順番から出たもので、発見ではない</b>と指摘しています。今この生徒単独の値を合格として扱うと、台帳に載らない 2 回目の判定になります (E)。この回は合格判定ではありませんが、台帳には 1 回として残し、この 1,200 件では今後、この生徒とその変形の合格判定をしません。台帳には 8 担当ぶんを残します。</p>
 <table>
 <tr><th>担当</th><th>学習したときからの変更</th><th>perigraph の識別子は変わるか (予想)</th></tr>
-<tr><td>H0 と H0′</td><td>無し (H0′ は同じものの再実行で、雑音の大きさを測る)</td><td>変わらない</td></tr>
+<tr><td>H0 と H0′</td><td>無し (H0′ は別の箱で、問題の並びとまとめ方を変えて流し、雑音の大きさを測る)</td><td>変わらない</td></tr>
 <tr><td>H1</td><td>指示を言い換える</td><td>変わる</td></tr>
 <tr><td>H2</td><td>型をシステムからユーザーの発言に移す</td><td>識別子が無くなる</td></tr>
 <tr><td>H3</td><td>生成の形の制約を外す</td><td>変わらない</td></tr>
-<tr><td>H4</td><td>答えの取り出し方を、最初のトークンから、文章を読む形に</td><td>変わらない</td></tr>
+<tr><td>H4</td><td>H3 に加えて、答えの取り出し方を、最初のトークンから文章を読む形に (比べる相手は H3)</td><td>変わらない</td></tr>
 <tr><td>H5</td><td>重みを bf16 から int8 に</td><td>変わらない</td></tr>
-<tr><td>H6</td><td>形が崩れた答えを 1 回だけやり直す</td><td>変わらない</td></tr>
+<tr><td>H6</td><td>H3 に加えて、形が崩れた答えを 1 回だけやり直す (比べる相手は H3)</td><td>変わらない</td></tr>
 </table>
-<p>H3〜H6 のどれかが、識別子が変わらないまま 3 ポイント以上動けば (6 つの比較を Holm で補正)、識別子だけでは版を守れないと分かり、<code>arm_version</code> にハーネスの指紋を混ぜる理由ができます。どれも動かなければ、<code>harness.json</code> は作りません。費用のほうは、キャッシュの有無、指示の長さ (0、約 150、約 1,500 トークン)、先頭を安定させるか崩すかを、能力の 10%・50%・70% の負荷で測ります。生徒のどのセルでもキャッシュの有無で受理 1 件あたりの費用が 10% 未満しか変わらなければ、キャッシュを考えた振り分けは、型の決まった生徒では対象外にします [提案]。</p>
+<p>どの担当も、H0 と答えの文字が変わった件数と、やり直しが発動した件数を先に報告します。0 件の担当は「試せなかった」と書き、「動かない」に数えません。<code>harness.json</code> の判断に使うのは H3、H4、H6 です。H5 は、重みの精度を <code>arm_version</code> に入れる判断にだけ使います [提案]。</p>
+<p>判定は 3 通りです。<b>動いた</b>: H0 (H4 と H6 は H3) との、同じ問題どうしの差について、Holm の補正 (比べる数が多いぶん基準を厳しくする補正) をかけた 95% 区間が 0 を含まず、点推定の絶対値が 3 ポイント以上で、H0 と H0′ の差の 2 倍以上。<b>動かない</b>: 補正後の区間が丸ごと ±3 ポイントの内側。<b>決められない</b>: それ以外。「動いた」が 1 つでもあれば、識別子だけでは版を守れないと分かり、<code>arm_version</code> にハーネスの指紋を混ぜる理由ができます。「決められない」ときは <code>harness.json</code> を作らず、R17b の生徒で同じ変更をもう一度測ります。補正の対象は、判定に使う比較だけです [提案]。</p>
+<p>費用は、試した 1 件あたりと、1 秒以内に返せた件数で測ります。指示の長さ (約 150、約 1,500 トークン) は、H0 の指示の後ろに答えと関係ない固定の文を足して作り、長さごとの正解率も並べます。キャッシュの有無と、先頭を安定させるか崩すかを、能力の 10%・50%・70% の負荷で、ばらばらに届く形 (開ループ) で流し、負荷を出す側が詰まっていないことを先に確かめます。各セルを 3 回測り、配信で使う指示の長さのセルで、キャッシュの有無の差の 95% 区間の上限が 10% 未満なら、<b>この指示の長さの型の決まった生徒に限って</b>キャッシュを考えた振り分けを対象外にします。指示の長さ 0 のセルは、差が出ないことを確かめる点検用です [提案]。</p>
 
-<h3>R17b: banking77 を生成で蒸留する (A と E の案)</h3>
-<p>判断用モードで先生が 0.36 だった 53 分類を、答えを意図の名前として生成させる形でやり直します。採点は、決めた正規化のあとの完全一致です。2 人の先生 (Qwen3.6 と LFM2.5)、正解ラベルでの生徒、先生のラベルでの生徒、2 人の答えがそろった問題だけでの生徒、生徒から先生へ回す組み合わせを並べ、どの担当も 2 回ずつ流して、答えが入れ替わる割合を測ります。強化学習の担当は入れず、生徒自身の答えで学ぶ回は 1 回だけ足します。LFM2.5 は、ライセンスを確かめてからでないと使いません。</p>
+<h3>R17b: 多クラスの札を文字で書かせる蒸留 (A と E の案)</h3>
+<p>判断用モードで先生が 0.36 だった banking77 (77 種類の意図のうち、前回の実験で使った 53 種類) を、答えを意図の名前として生成させる形でやり直します。採点は、決めた正規化のあとの完全一致です。2 人の先生 (Qwen3.6 と LFM2.5)、正解ラベルでの生徒、先生のラベルでの生徒、2 人の答えがそろった問題だけでの生徒、生徒から先生へ回す組み合わせ、学習していない 0.8B (E) を並べます [提案]。</p>
+<p>ここで分かることには限りがあります。意図の名前は数トークンの短い答えなので、<b>長い文章を書く仕事については何も分かりません</b>。長さの壁 (4 節) は、先生の長い出力をそのまま目標にした生徒を 1 つ置き、答えだけを目標にした生徒と、出力トークン数と 1 件あたりの費用を並べて見ます (C)。長い出力での自信度の効きと強化学習の出番は、構造化した抽出を題材にした別の回 R17d (未計画) で確かめます。A と E の案には強化学習の担当がありません。筆者はここに、C が提案した、生徒自身の答えを採点器で評価して学ぶ回 (強化学習の一種) を 1 回だけ足しました。学習に使わない仕事の種類を 1 つ取っておき、そこでの伸びが学習した種類の半分未満なら「何でもできる」とは言いません (C)。乱数の種は 3 本にします [提案]。</p>
+<p>候補の数は事前登録に書きます。判定に使うのは 1 回目の実行だけで、2 回目は入れ替わりの測定にだけ使います。種 3 本は選ぶ半分で比べ、確かめる半分に進めるのは、高い順に確かめる検定 (ladder) に載せた候補だけです。打ち切りの条件は次の 3 つです [提案]。</p>
+<table>
+<tr><th>止める条件</th><th>中身</th></tr>
+<tr><td>1. 先生が弱い</td><td>Qwen の先生 (生成) の、選ぶ半分での 95% 下限が 0.80 未満</td></tr>
+<tr><td>2. 生徒が育たない</td><td>主役の生徒 (正解ラベル、種 1 番。事前に指名) が、選ぶ半分で先生より 5 ポイントを超えて低く (差の 95% 区間の上限が -5 未満)、しかも、しきい値 0.9 の組み合わせの試した 1 件あたりの費用が先生以上</td></tr>
+<tr><td>3. 答えが不安定</td><td>主役の生徒を別の箱と別の並びで 2 回流し、答えが入れ替わる割合が 10% を超える (A)</td></tr>
+</table>
+<p>費用は、A と E の案 (種 1 本、強化学習なし) で上限 150 ドルの見積もりです。筆者が足した分を入れた見積もりはまだありません。内訳 (先生 2 人のラベル作り、学習の回数と GPU 時間、評価 2 回分) を事前登録に書き、超えるなら種を 1 本に戻します。LFM2.5 は 239.7 億パラメータで、16 ビットの重みでは約 48 GB になり、48 GB の L40S 1 枚には載りません。どの箱とどの精度で動かすかは未定で、精度を落とすなら、その先生は別の版として記録します。ライセンスを確かめてからでないと使いません [提案、計算]。</p>
 
 <h3>R17c: 型か Leader か (D の案)</h3>
-<p>5 節の表と関門のとおりです。題材は「2 段以上ある」「0.8B 単独では合格ラインに届かず、Leader が直接答えると届く」「構造化した答えを完全一致で採点できる」を満たすものを、先に確かめてから選びます。一番安い作り方は、これまでの 3 つの題材を 1 つのリクエストに束ねた複合問題ですが、部分どうしが独立なので、手順に依存関係がある仕事に結果が当てはまるかは分かりません。</p>
+<p>5 節の表と関門のとおりです。費用は D の見積もりで 50 ドル未満、上限 100 ドルです。題材は「2 段以上ある」「0.8B 単独では合格ラインに届かず、Leader が直接答えると届く」「構造化した答えを完全一致で採点できる」を満たすものを、先に確かめてから選びます。束ねた複合問題は、機械的に分ける型 1 が通るように出来ているので、道具の動作確認にだけ使います。型か Leader かの判定には、前の部分の答えが次の部分に要る題材を使います [提案]。</p>
+<div class="note"><p style="margin:0"><b>この計画で測らないこと。</b>何回もやり取りする会話の途中で担当を替えたときの費用 (3 節)、長い文章の生成 (R17d)、本番での札付けの誤り。会話の測定は、vSR と stratoclave がキャッシュの読み書きの数を記録していると確かめてから計画します。</p></div>
 
 <div class="note"><p style="margin:0"><b>検出力の目安。</b>R16 では、同じ問題どうしで比べた差の 95% 区間の半分の幅が約 1.75 ポイントでした [実測]。確かめる半分が約 600 件なら、合格ラインを 80% の確率で超えるには、本当の正解率が合格ラインよりおよそ 4 ポイント上にある必要があります [提案、A の計算]。それより小さい差は、この件数では見分けられないと事前に書いておきます。</p></div>
 
 <h2>8. まだ分からないこと</h2>
 
-<p>5 名がそろって「分からない」と書いたものと、この文書を作る中で確かめられなかったものです。</p>
+<p>複数のレビュアーが「分からない」と書いたものと、この文書を作る中で確かめられなかったものです。</p>
 
 <table>
 <tr><th>分からないこと</th><th>なぜ効くか</th><th>どう確かめるか</th></tr>
 <tr><td><code>prismyra.learn</code> が、ラベル以外の長い出力の学習を扱えるか</td><td>扱えなければ、LLM としての蒸留は別の学習の仕組みを使うことになる</td><td>学習の仕組みの中身を読み、R17b の前に小さく試す</td></tr>
 <tr><td>Qwen3.5-0.8B と Qwen3.6-35B-A3B の語彙の中身が同じか</td><td>大きさは同じ 248,320 だが、中身まで同じでないと確率の分布を合わせる蒸留ができない</td><td>2 つのトークナイザーの指紋を比べる</td></tr>
-<tr><td>lfm1.0 のもとで、LFM2.5 の出力で学習した生徒を公開してよいか</td><td>商用は年間売上 1,000 万ドル未満の組織だけ。出力で学習することについての条文は、まだ読み切っていない</td><td>ライセンスの全文を読み、R17b の関門 G0 にする</td></tr>
-<tr><td>長い答えを生成させたときの 0.8B の CPU での費用とレイテンシー</td><td>0.30 倍と 0.28 秒は、ラベル 1 語で測った値</td><td>R17b で、締め切りの中で返せた件数として測る</td></tr>
-<tr><td>長い生成で、平均 logprob が正しい答えと間違った答えを分けられるか</td><td>組み合わせの切り替えはこの値に頼る。使えた信号 (AUC 0.838) は短い答えで測ったもの</td><td>R17b で AUC を測る</td></tr>
+<tr><td>lfm1.0 のもとで、LFM2.5 の出力で学習した生徒を公開してよいか</td><td>LICENSE には出力で学習することを直接扱う条文が無く、学習した生徒が派生物に当たるかは読んだだけでは決まらない</td><td>R17-0 でライセンスの全文を読む</td></tr>
+<tr><td>長い答えを生成させたときの 0.8B の CPU での費用とレイテンシー</td><td>0.30 倍と 0.28 秒は、ラベル 1 語で測った値</td><td>R17d (未計画) で、締め切りの中で返せた件数として測る</td></tr>
+<tr><td>長い生成で、平均 logprob が正しい答えと間違った答えを分けられるか</td><td>組み合わせの切り替えはこの値に頼る。使えた信号 (AUC 0.838) は短い答えで測ったもの</td><td>R17d (未計画) で AUC (正誤を見分ける力。0.5 は当てずっぽう、1 は完全) を測る</td></tr>
 <tr><td>0.8B の答えが、同じ条件で流し直すとどれだけ入れ替わるか</td><td>能力の低いモデルほど入れ替わりが多く、過去には 2.9〜22.3% だった</td><td>R17b と R17c で、どの担当も 2 回ずつ流す</td></tr>
 <tr><td>vSR や stratoclave が、キャッシュの読み書きの数と、組み合わせの 1 回目の失敗の費用を記録しているか</td><td>記録されていなければ、3 節の判断の記録が作れない</td><td>それぞれのソースとログを読む</td></tr>
 <tr><td>本番のリクエストで、仕事の種類の札付けがどれだけ間違うか</td><td>今の証明書は、データセットにある種類のラベルを前提にしている</td><td>札付けの誤りを測る回を足す</td></tr>
-<tr><td>llm-d、NVIDIA Dynamo、vSR が、キャッシュを考えた振り分けで何を記録しているか</td><td>「振り分けの判断を比べられる形で残す方法は確立していない」と言える範囲を決める</td><td>それぞれのソースを読む。この文書を書く時点では、調べたのは OpenTelemetry、OpenInference、OpenLLMetry の 3 つだけ</td></tr>
+<tr><td>llm-d、NVIDIA Dynamo (筆者が足した。レビューには出てこない)、vSR が、キャッシュを考えた振り分けで何を記録しているか</td><td>「振り分けの判断を比べられる形で残す方法は確立していない」と言える範囲を決める</td><td>それぞれのソースを読む。この文書を書く時点では、調べたのは OpenTelemetry、OpenInference、OpenLLMetry の 3 つだけ</td></tr>
 </table>
 
 <div class="lead">
-<p style="margin:0"><b>まとめ。</b>perigraph は実際に動いたものの記録と、食い違いがあれば判定を拒む役に使い、版は <code>arm_version</code>、切り替えは vSR と stratoclave が受け持ちます。0.8B の LLM としての蒸留は、答えの形が決まった仕事ごとに、採点器を通った答えで学習させ、迷ったら先生に回す形で進めます。Leader が分けて渡す形は、漏れと元が取れるかの関門を通ってから扱います。次の一歩は、合格済みの生徒でハーネスとキャッシュを 1 つずつ変える R17a で、見込みの費用は 45〜65 ドルです。</p>
+<p style="margin:0"><b>まとめ。</b>perigraph は実際に動いたものの記録と、食い違いがあれば判定を拒む役に使い、版は <code>arm_version</code>、切り替えは vSR が受け持ちます (Bedrock 側を stratoclave に持たせるのは B の案)。0.8B の LLM としての蒸留は、答えの形が決まった仕事ごとに、採点器を通った答えで学習させ、迷ったら先生に回す形で進めます。Leader が分けて渡す形は、漏れと元が取れるかの関門を通ってから扱います。次の一歩は、R16 の生徒でハーネスとキャッシュを 1 つずつ変える R17a で、見込みの費用は 45〜65 ドルです。</p>
 </div>
 
 <p class="foot">
