@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>perigraph の記録を差し込む: vLLM・vSR・stratoclave を改造せずに tierbook でつなぐ</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre .c{color:#8fd6b4} pre .r{color:#ffb3ac} pre .o{color:#ffd79a} pre .k{color:#9ecbff}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre code{background:none;color:inherit;padding:0;font-size:inherit}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.big{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+.big>div{flex:1 1 220px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:14px 10px;
+background:var(--card)}
+.big b{display:block;font-size:28px;line-height:1.15;color:var(--gd);font-variant-numeric:tabular-nums}
+.big span{font-size:12.5px;color:var(--ink2)}
+.who{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.who>div{flex:1 1 300px;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)}
+.who h4{margin:0 0 6px;font-size:15.5px;color:var(--gd)}
+.who p{margin:4px 0;font-size:14px;color:var(--ink2)}
+.who .t{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:20px;margin-bottom:6px;
+background:var(--g);color:#fff}
+.who .t.b{background:var(--b)}
+pre{position:relative}
+.copy{position:absolute;top:6px;right:6px;font:12px ui-monospace,Menlo,monospace;background:#1f7a4d;color:#fff;
+border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
+.copy:hover{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="index.html">全体の目次</a> &nbsp;/&nbsp; 記録の差し込み方</p>
+
+<h1>perigraph の記録を「差し込む」: vLLM・vSR・stratoclave を改造せずに tierbook でつなぐ<br>タグで運ぶのは目印だけ、記録はバイトを持つ場所で作る</h1>
+
+<div class="lead">
+<p><b>結論から。</b>stratoclave のタグや OTel で運んでよいのは「どのリクエストか」を示す目印 (リクエスト ID) だけで、<b>記録そのもの (何が周りにあり、何が答えたか) は、リクエストの中身と重みのバイトを実際に持っている場所で作らないと正しくならない</b>。その場所は vLLM の中にあり、vLLM には改造なしで差し込める公開の口が 3 つあった。だから vLLM・vSR (vLLM Semantic Router)・stratoclave のどれにもパッチは要らず、tierbook には「リクエスト ID で突き合わせて文字列を比べるだけ」の部品 <code>tierbook bind</code> を足した。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>4 つの案を Fable 5.2 と 6 往復で比べて設計を決め、vLLM 用のプラグイン・vSR の記録を読む変換器・<code>tierbook bind</code>・Prismyra の修正を作り、東京クラスタの L40S 1 枚で、改造していない vLLM 0.27.1 と改造していない vSR を通して確かめた。vSR を通った 40 件すべてで、vSR が送ったバイトの指紋と vLLM が受け取ったバイトの指紋が一致した。</p>
+</div>
+
+<table>
+<tr><th>#</th><th>なぜ</th><th>どう測った</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td class="n">1</td><td>vLLM の改造なしで重みの指紋を「読み込んだ本人」として取れるか</td><td>改造していない vLLM 0.27.1 に <code>--load-format perigraph</code> で起動し、出た指紋を重みファイルの sha256 から別に計算した値と比べた</td><td>読み込み後にフォルダを丸ごと hash する (読んでいないファイルまで混ざる)</td><td class="y">一致。重みの指紋、数値の型、実行環境がすべて「読み込んだ本人」(<code>loaded_by_us</code>) で取れた</td><td>2, 3</td></tr>
+<tr><td class="n">2</td><td>プラグインが答えを変えていないか</td><td>同じ 20 問を温度 0 で、プラグインあり・なし (<code>--load-format auto</code>、middleware なし) の 2 回で聞いた</td><td>確かめずに入れる</td><td class="y">20 問中 20 問で答えが一字一句同じ</td><td>1</td></tr>
+<tr><td class="n">3</td><td>再起動しても同じモデルが同じ名前になるか</td><td>止めて起動し直して同じ 20 問</td><td>名前 (モデル名の文字列) で同一とみなす</td><td class="y">再起動前後でモデル識別子が同じ (<code>fc726aad8b5d512f6e821de8</code>)</td><td>1</td></tr>
+<tr><td class="n">4</td><td>vSR を改造せずに「vSR が送ったものを vLLM が受け取った」と言えるか</td><td>vSR の既存の記録機能 (router_replay) が持つ送信バイトの sha256 と、vLLM 側で受け取ったバイトの sha256 を比べた</td><td>vSR にパッチを当てて中で記録を作る (追加約 1,000 行)</td><td class="y">1 回目 41 件中 41 件、修正後の 2 回目 40 件中 40 件で一致</td><td>5, 6</td></tr>
+<tr><td class="n">5</td><td>vSR は頼んでいないのにリクエストを書き換えるか</td><td>直接 vLLM に送った 20 件と、vSR 経由の 20 件で、記録の部品ごとの指紋を比べた</td><td>書き換えはないと仮定する</td><td class="no">書き換える。<code>max_tokens</code> を <code>max_completion_tokens</code> に名前を変えるので、中身は同じでも周りの識別子が別になる (<code>b4f1e119…</code> と <code>d3cc13ff…</code>)</td><td>4, 7</td></tr>
+<tr><td class="n">6</td><td>vSR を通すとき、部品の印 (<code>perigraph_template</code>) を付けられるか</td><td>印付きの 20 件を vSR に送った</td><td>vSR にパッチを当てて通す</td><td class="no">20 件すべて vSR が 400 で拒否。vLLM には届かず記録もない (予想どおり)</td><td>4</td></tr>
+<tr><td class="n">7</td><td>vSR が system 文を差し替えたら別の識別子になるか</td><td>vSR の system_prompt 機能で system 文を差し替えて 20 件</td><td>—</td><td class="y">別の識別子 (<code>19ea8f3f…</code>) になり、混ぜて 1 つの腕にすると tierbook が拒否した</td><td>5, 8</td></tr>
+<tr><td class="n">8</td><td><code>tierbook bind</code> が壊れた記録を通さないか</td><td>記録を 1 件消す、指紋を 1 件書き換える、記録を 1 件重複させる、印付き (vSR が拒否) の 20 件、の 4 通り</td><td>あるものだけ突き合わせて残りは黙って捨てる</td><td class="y">4 通りとも拒否し、ファイルを 1 行も書かなかった</td><td>4</td></tr>
+<tr><td class="n">9</td><td>LoRA (後から足す小さな重み) を使うとき、もとのモデルの名前を名乗らないか</td><td><code>--enable-lora</code> で起動した</td><td>もとのモデルの識別子のまま記録する</td><td class="y">モデル側の記録は「LoRA が有効なので書けない」という理由つきの空欄になった</td><td>1</td></tr>
+</table>
+
+<h2>1. タグで運べないもの</h2>
+
+<p>最初の問いは「stratoclave の既存のタグでよいのでは」だった。stratoclave には呼び出し側が付けるタグ (<code>x-sc-task-tag</code>、64 文字まで) や、呼び出しをまとめる ID (<code>x-sc-group-id</code> など) がすでにある。<b>運ぶ道はある。問題は、運ぶ中身を誰が作るか</b>だった。</p>
+
+<p>perigraph の記録は「その場でバイトを持っていた者が計算した指紋」でなければ識別子に使えない (perigraph の決まりでは <code>in_the_request</code> と <code>loaded_by_us</code> だけが識別子を作れる)。呼び出し側が計算してタグに載せた指紋は、途中の vSR が書き換えた後のリクエストを表さない。下の図の赤い箱がその場所で、実際に vSR は頼んでいなくても <code>max_tokens</code> の名前を変えた。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="呼び出し側から vLLM まで、リクエストが途中で書き換わる場所と、記録を作るべき場所">
+<defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="16" y="60" width="150" height="70" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="91" y="90" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="600">呼び出し側</text>
+<text x="91" y="110" font-size="11.5" fill="#3c5a4c" text-anchor="middle">x-request-id を付ける</text>
+<rect x="216" y="60" width="150" height="70" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="291" y="90" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="600">stratoclave</text>
+<text x="291" y="110" font-size="11.5" fill="#3c5a4c" text-anchor="middle">課金と目印</text>
+<rect x="416" y="60" width="170" height="70" rx="8" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="501" y="90" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">vSR</text>
+<text x="501" y="110" font-size="11.5" fill="#8f2f2f" text-anchor="middle">名前の変更・system 差し替え</text>
+<rect x="636" y="40" width="228" height="110" rx="8" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="750" y="68" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">vLLM (最後の 1 段)</text>
+<text x="750" y="92" font-size="11.5" fill="#3c5a4c" text-anchor="middle">受け取ったバイトを持つ</text>
+<text x="750" y="112" font-size="11.5" fill="#3c5a4c" text-anchor="middle">読み込んだ重みを持つ</text>
+<text x="750" y="134" font-size="11.5" fill="#1f7a4d" text-anchor="middle" font-weight="600">ここで記録を作る</text>
+<path d="M168 95 L212 95" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a1)"/>
+<path d="M368 95 L412 95" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a1)"/>
+<path d="M588 95 L632 95" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a1)"/>
+<path d="M91 140 L91 220 L750 220 L750 154" stroke="#1d4e8f" stroke-width="1.5" stroke-dasharray="5 4" fill="none" marker-end="url(#a1)"/>
+<text x="420" y="242" font-size="12" fill="#1d4e8f" text-anchor="middle">タグや ID は全区間を通して運べる (目印) ── でも中身の指紋は途中で古くなる</text>
+<text x="91" y="40" font-size="11.5" fill="#8f2f2f" text-anchor="middle">ここで計算した指紋は</text>
+<text x="91" y="54" font-size="11.5" fill="#8f2f2f" text-anchor="middle">vSR の後には合わない</text>
+<text x="501" y="160" font-size="11.5" fill="#8f2f2f" text-anchor="middle">実測: max_tokens → max_completion_tokens</text>
+</svg>
+<figcaption>目印は全区間を運べるが、中身の指紋は最後にバイトを持つ場所で取るしかない。赤は「途中で書き換わる」場所、緑は「記録を作る」場所。</figcaption>
+</figure>
+
+<p><code>x-sc-task-tag</code> を使わない理由はほかにもある。このタグは「どの仕事か」を表す課金の欄に入る。プロンプトを一語直すたびに変わる指紋を入れると課金の集計が細切れになる。形が崩れたタグは黙って捨てられる決まりなので、記録が欠けても気づけない。tierbook には「欠けているのに同じとみなす」ことが一番困る。</p>
+
+<h2>2. 比べた 4 つの案</h2>
+
+<p>Fable 5.2 と 6 往復した (設計 3 回、パッチを許す場合の組み合わせ 1 回、実装のレビュー 2 回)。表の「記録の確かさ」は、tierbook から見たときに perigraph のどの扱いになるかを書いた。</p>
+
+<table>
+<tr><th>案</th><th>やること</th><th>記録の確かさ</th><th>壊れる場面</th><th>判定</th></tr>
+<tr><td>(i) 呼び出し側で計算してタグに載せる</td><td>SDK で指紋を作り、ヘッダや OTel で運ぶ</td><td class="no">呼び出し側の申告にとどまる。途中の書き換えの後を表さない</td><td>vSR の書き換え、再送、キャッシュ</td><td>使わない (拒否のきっかけにだけ使える)</td></tr>
+<tr><td>(ii) 残っている記録から tierbook が計算し直す</td><td>vSR に本文を保存させ、tierbook が読み直す</td><td>保存した本文が送信後のものなら <code>in_the_request</code></td><td>プロンプトを保存する (秘密が残る)、長い本文は切られる</td><td>vLLM が置けない相手 (外部の API) のときだけ</td></tr>
+<tr class="y"><td>(iii) 最後の 1 段に差し込む</td><td>vLLM の公開の口にプラグインを入れる。vSR と stratoclave は設定だけ</td><td class="y">本文は <code>in_the_request</code>、重みは <code>loaded_by_us</code></td><td>LoRA と複数 GPU の分割 (理由つきの空欄にした)</td><td><b>採用</b></td></tr>
+<tr><td>(iv) 本体にパッチを当てる</td><td>vSR (追加約 1,000 行) と stratoclave (463 行のファイル) に記録を作るコードを足す</td><td>vSR のパッチは送信後なので正しい。stratoclave のパッチは vSR の手前なので古い</td><td>上流が動くたびにパッチの当て直しと自前の image の作り直し</td><td>vSR は不要になった。stratoclave は外部 API の最後の 1 段のときだけ残す</td></tr>
+</table>
+
+<p>途中で「決まった版に当てるパッチなら使ってよい」と方針が広がった。そこで「パッチは継ぎ目が本当にないところだけ」という条件で組み直した。<b>結果としてパッチは 0 本になった</b>。vSR には知らない項目を通す設定がなく、<code>perigraph_template</code> は 400 で拒否される。ただ、これを通すパッチを持つ費用は行数ではなく「自前の vSR の image を作り続けること」で、得られるのは部品の印 1 つだけだった。だから vSR を通る経路では印を送らない、と決めた (印は <code>not_provided</code> と記録される)。</p>
+
+<figure>
+<svg viewBox="0 0 880 250" width="100%" style="max-width:880px" role="img" aria-label="前の形と今の形: 本体へのパッチ 2 本から、プラグインと変換器と突き合わせに">
+<text x="210" y="26" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">前の形 (本体を改造)</text>
+<text x="660" y="26" font-size="13" fill="#1f7a4d" text-anchor="middle" font-weight="600">今の形 (改造なし)</text>
+<line x1="440" y1="10" x2="440" y2="240" stroke="#d5e3da" stroke-width="2"/>
+<rect x="30" y="45" width="360" height="50" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="210" y="67" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">stratoclave にパッチ 463 行</text>
+<text x="210" y="85" font-size="11.5" fill="#3c5a4c" text-anchor="middle">vSR の手前で指紋を取る (古くなる)</text>
+<rect x="30" y="110" width="360" height="50" rx="8" fill="#fbeceb" stroke="#8f2f2f"/>
+<text x="210" y="132" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">vSR にパッチ約 1,000 行 + 自前 image</text>
+<text x="210" y="150" font-size="11.5" fill="#3c5a4c" text-anchor="middle">上流の版が上がるたびに当て直し</text>
+<rect x="30" y="175" width="360" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12"/>
+<text x="210" y="197" font-size="12.5" fill="#8a5a12" text-anchor="middle" font-weight="600">重み側は別のもの (Prismyra) だけ</text>
+<text x="210" y="215" font-size="11.5" fill="#3c5a4c" text-anchor="middle">vLLM で動く腕は重みの記録なし</text>
+<rect x="490" y="45" width="360" height="50" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="670" y="67" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">vLLM: pip で入れるプラグイン</text>
+<text x="670" y="85" font-size="11.5" fill="#3c5a4c" text-anchor="middle">公開の口 3 つ。重みと本文の両方</text>
+<rect x="490" y="110" width="360" height="50" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="670" y="132" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">vSR: 純正の image + 設定 1 行</text>
+<text x="670" y="150" font-size="11.5" fill="#3c5a4c" text-anchor="middle">既存の記録を読む変換器 36 行</text>
+<rect x="490" y="175" width="360" height="50" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="670" y="197" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">tierbook: bind (突き合わせだけ)</text>
+<text x="670" y="215" font-size="11.5" fill="#3c5a4c" text-anchor="middle">リクエスト ID で結び、文字列を比べる</text>
+</svg>
+<figcaption>左はパッチで記録を作る形、右は差し込む形。右ではどの本体も改造していない。stratoclave のパッチは「外部 API に送る最後の 1 段」のときだけ意味があるので、その形に作り直す (未着手)。</figcaption>
+</figure>
+
+<h2>3. vLLM の改造なしの差し込み口</h2>
+
+<p>vLLM 0.27.1 のソースを読むと、外から足せる口が用意されていた。<b>どれも vLLM 自身が「外から足すための口」として公開しているもの</b>で、パッチではない。</p>
+
+<table>
+<tr><th>口</th><th>どこで動くか</th><th>使い道</th><th>ソース (vLLM v0.27.1, 6e448d0)</th></tr>
+<tr><td><code>vllm.general_plugins</code></td><td>すべてのプロセス (API サーバ、エンジン、ワーカー)</td><td>起動のたびに一度呼ばれ、下の読み込み器を登録する</td><td><a href="https://github.com/vllm-project/vllm/blob/6e448d0ea9bf3d88d898b65449ca6dc2aec170ac/vllm/plugins/__init__.py">vllm/plugins/__init__.py</a></td></tr>
+<tr><td><code>register_model_loader</code> と <code>--load-format perigraph</code></td><td>重みを読み込むワーカー</td><td>読み込み器を差し替え、読んだファイルとその型を、読み込んだその場で記録する</td><td><a href="https://github.com/vllm-project/vllm/blob/6e448d0ea9bf3d88d898b65449ca6dc2aec170ac/vllm/model_executor/model_loader/__init__.py#L69">model_loader/__init__.py#L69</a></td></tr>
+<tr><td><code>--middleware</code></td><td>API サーバ</td><td>受け取ったリクエストのバイトから周りの部品の指紋を取り、応答に記録の番号を 1 つ付ける</td><td><a href="https://github.com/vllm-project/vllm/blob/6e448d0ea9bf3d88d898b65449ca6dc2aec170ac/vllm/entrypoints/openai/cli_args.py#L301">cli_args.py#L301</a></td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 880 290" width="100%" style="max-width:880px" role="img" aria-label="vLLM のプロセスとプラグインの差し込み位置、そして 1 リクエスト 1 行の記録">
+<defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="16" y="20" width="400" height="120" rx="10" fill="#fff" stroke="#3c5a4c"/>
+<text x="30" y="42" font-size="12.5" fill="#10241b" font-weight="600">API サーバのプロセス</text>
+<rect x="36" y="56" width="170" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="121" y="82" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">Middleware</text>
+<text x="121" y="102" font-size="11.5" fill="#3c5a4c" text-anchor="middle">本文の指紋 (in_the_request)</text>
+<rect x="226" y="56" width="170" height="66" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="311" y="82" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">vLLM 本体</text>
+<text x="311" y="102" font-size="11.5" fill="#3c5a4c" text-anchor="middle">本文はそのまま渡す</text>
+<rect x="464" y="20" width="400" height="120" rx="10" fill="#fff" stroke="#3c5a4c"/>
+<text x="478" y="42" font-size="12.5" fill="#10241b" font-weight="600">ワーカーのプロセス (GPU)</text>
+<rect x="484" y="56" width="360" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="664" y="82" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">PerigraphModelLoader</text>
+<text x="664" y="102" font-size="11.5" fill="#3c5a4c" text-anchor="middle">重み・型・実行環境 (loaded_by_us)</text>
+<rect x="484" y="190" width="360" height="56" rx="8" fill="#f6faf7" stroke="#3c5a4c" stroke-dasharray="4 3"/>
+<text x="664" y="214" font-size="12" fill="#10241b" text-anchor="middle" font-weight="600">model-&lt;host&gt;-&lt;pid&gt;-&lt;時刻&gt;.json</text>
+<text x="664" y="232" font-size="11.5" fill="#3c5a4c" text-anchor="middle">読み込み 1 回につき 1 枚</text>
+<rect x="36" y="190" width="360" height="56" rx="8" fill="#f6faf7" stroke="#3c5a4c" stroke-dasharray="4 3"/>
+<text x="216" y="214" font-size="12" fill="#10241b" text-anchor="middle" font-weight="600">records-&lt;host&gt;-&lt;pid&gt;.jsonl</text>
+<text x="216" y="232" font-size="11.5" fill="#3c5a4c" text-anchor="middle">リクエスト 1 件につき 1 行 (両半分)</text>
+<path d="M664 124 L664 186" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a2)"/>
+<path d="M482 218 L400 218" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a2)"/>
+<text x="441" y="208" font-size="11" fill="#3c5a4c" text-anchor="middle">そのまま中継</text>
+<path d="M121 124 L121 186" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a2)"/>
+<path d="M208 89 L222 89" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a2)"/>
+<text x="216" y="275" font-size="11.5" fill="#1d4e8f" text-anchor="middle">応答に付けるのは x-perigraph-record (番号) だけ</text>
+</svg>
+<figcaption>重みの記録はワーカーが読み込んだその場で書き、API サーバ側の middleware がそれを中継して、本文の指紋と 1 行にまとめる。応答には中身の分からない番号だけを付ける。</figcaption>
+</figure>
+
+<p>重みの指紋は、読み込み器が読む直前に各ファイルを開いておき、その開いたものを通して後から計算する。途中でファイルが差し替わったら (同じ場所に別のファイルが置かれたら) 記録しない。<b>読み込んでいないファイル (古い分割ファイルなど) は指紋に入らない</b>。数値の型も、設定ではなく読み込み後の重みそのものから数える。</p>
+
+<p>応答のヘッダに識別子そのものは載せない。識別子は「この system 文を使ったか」を確かめる手がかりになる (候補を全部 hash して比べられる) ので、外から呼ぶ相手にはリクエストごとの番号だけを返す。</p>
+
+<h2>4. tierbook は突き合わせるだけ</h2>
+
+<p>tierbook に足した <code>tierbook bind</code> は、記録の中身を読まない。各システムの記録を、そのシステムの側にある変換器が「hop 行」(リクエスト ID・本文の指紋・識別子の文字列だけの 1 行) に直し、tierbook はそれをリクエスト ID で結んで、文字列が等しいかだけを見る。<b>tierbook がプロンプトや vSR の記録の形を知らないまま、腕の識別子が埋まる</b>。</p>
+
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="tierbook bind の入力と検査と出力">
+<defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="16" y="20" width="230" height="52" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="131" y="42" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">観測 (採点した結果)</text>
+<text x="131" y="60" font-size="11.5" fill="#3c5a4c" text-anchor="middle">item, arm, outcome</text>
+<rect x="16" y="86" width="230" height="52" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="131" y="108" font-size="12.5" fill="#1d4e8f" text-anchor="middle" font-weight="600">呼び出しの対応表</text>
+<text x="131" y="126" font-size="11.5" fill="#3c5a4c" text-anchor="middle">item → request_id, record</text>
+<rect x="16" y="152" width="230" height="52" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="131" y="174" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">vLLM の hop 行</text>
+<text x="131" y="192" font-size="11.5" fill="#3c5a4c" text-anchor="middle">perigraph_vllm.hops</text>
+<rect x="16" y="218" width="230" height="52" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="131" y="240" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">vSR の hop 行</text>
+<text x="131" y="258" font-size="11.5" fill="#3c5a4c" text-anchor="middle">replay_hops.py (指紋だけ)</text>
+<rect x="320" y="60" width="270" height="180" rx="10" fill="#10241b"/>
+<text x="455" y="88" font-size="13" fill="#dff1e6" text-anchor="middle" font-weight="600">tierbook bind</text>
+<text x="340" y="114" font-size="11.5" fill="#dff1e6">各 hop に記録がちょうど 1 件</text>
+<text x="340" y="136" font-size="11.5" fill="#dff1e6">本文の指紋がすべて等しい</text>
+<text x="340" y="158" font-size="11.5" fill="#dff1e6">2xx で最後まで返した</text>
+<text x="340" y="180" font-size="11.5" fill="#dff1e6">受け取った番号 = その記録</text>
+<text x="340" y="202" font-size="11.5" fill="#dff1e6">識別子が食い違わない</text>
+<text x="340" y="224" font-size="11.5" fill="#ffb3ac">1 つでも欠けたら何も書かない</text>
+<path d="M248 46 L316 110" stroke="#3c5a4c" stroke-width="1.5" marker-end="url(#a3)"/>
+<path d="M248 112 L316 130" stroke="#3c5a4c" stroke-width="1.5" marker-end="url(#a3)"/>
+<path d="M248 178 L316 170" stroke="#3c5a4c" stroke-width="1.5" marker-end="url(#a3)"/>
+<path d="M248 244 L316 200" stroke="#3c5a4c" stroke-width="1.5" marker-end="url(#a3)"/>
+<rect x="650" y="110" width="214" height="80" rx="8" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="757" y="136" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">観測 (識別子入り)</text>
+<text x="757" y="156" font-size="11.5" fill="#3c5a4c" text-anchor="middle">arm_harness, arm_version,</text>
+<text x="757" y="174" font-size="11.5" fill="#3c5a4c" text-anchor="middle">arm_artifact</text>
+<path d="M592 150 L646 150" stroke="#3c5a4c" stroke-width="2" marker-end="url(#a3)"/>
+</svg>
+<figcaption>左の 4 つを右の 1 つにするのが bind の仕事のすべて。検査はどれも「等しいか」「1 件か」だけで、記録の中身の意味は読まない。そのあと既存の決まり (1 つの腕に識別子は 1 つ) がそのまま効く。</figcaption>
+</figure>
+
+<p>「受け取った番号 = その記録」の検査は、レビューで足した。vSR が 1 つ目の行き先で失敗して別の行き先に回したとき、vLLM には「失敗した 1 件の記録」が残る。番号で結ばないと、その記録の識別子が別の行き先の答えに付いてしまう。呼び出し側は応答の <code>x-perigraph-record</code> を対応表に書くだけでよく、<code>--require-record</code> を付けると番号のない呼び出しを拒否する。</p>
+
+<h2>5. 実機で出た識別子</h2>
+
+<p>同じ 20 問を 3 通りの道で聞いた。モデル側の識別子は 3 つとも同じで、周りの識別子は 3 つとも違った。直接と vSR 経由の違いは <code>max_tokens</code> の名前だけで、vLLM はどちらも同じ上限として扱う。<b>分け過ぎは安全な側の誤り</b>だが (違うものを同じとみなすよりよい)、この分け方を続けると「直接測った腕」と「vSR 経由で測った腕」が永遠に比べられない。perigraph の提案 0005 に選択肢を書いた。</p>
+
+<figure>
+<svg viewBox="0 0 880 210" width="100%" style="max-width:880px" role="img" aria-label="3 つの道で出たモデル識別子と周りの識別子">
+<text x="200" y="28" font-size="12.5" fill="#10241b" text-anchor="middle" font-weight="600">道</text>
+<text x="520" y="28" font-size="12.5" fill="#10241b" text-anchor="middle" font-weight="600">周りの識別子 (harness)</text>
+<text x="780" y="28" font-size="12.5" fill="#10241b" text-anchor="middle" font-weight="600">モデル識別子</text>
+<rect x="40" y="44" width="320" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="200" y="69" font-size="12" fill="#1d4e8f" text-anchor="middle">直接 vLLM へ</text>
+<rect x="400" y="44" width="240" height="40" rx="6" fill="#e8f4ec" stroke="#1f7a4d"/>
+<text x="520" y="69" font-size="12" fill="#0f4a2e" text-anchor="middle" font-family="Menlo,monospace">b4f1e1197cc7…</text>
+<rect x="40" y="96" width="320" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="200" y="121" font-size="12" fill="#1d4e8f" text-anchor="middle">vSR 経由 (頼んだ変更なし)</text>
+<rect x="400" y="96" width="240" height="40" rx="6" fill="#fdf3e2" stroke="#8a5a12" stroke-dasharray="5 3"/>
+<text x="520" y="121" font-size="12" fill="#8a5a12" text-anchor="middle" font-family="Menlo,monospace">d3cc13ffb19b…</text>
+<rect x="40" y="148" width="320" height="40" rx="6" fill="#e6eef8" stroke="#1d4e8f"/>
+<text x="200" y="173" font-size="12" fill="#1d4e8f" text-anchor="middle">vSR 経由で system 文を差し替え</text>
+<rect x="400" y="148" width="240" height="40" rx="6" fill="#fbeceb" stroke="#8f2f2f" stroke-width="2"/>
+<text x="520" y="173" font-size="12" fill="#8f2f2f" text-anchor="middle" font-family="Menlo,monospace">19ea8f3f1355…</text>
+<rect x="680" y="44" width="190" height="144" rx="6" fill="#e8f4ec" stroke="#1f7a4d" stroke-width="2"/>
+<text x="775" y="112" font-size="12" fill="#0f4a2e" text-anchor="middle" font-family="Menlo,monospace">3 つとも同じ</text>
+<text x="775" y="132" font-size="11.5" fill="#3c5a4c" text-anchor="middle">同じ重み・同じ型</text>
+</svg>
+<figcaption>点線の枠は「名前の変更だけで分かれた」もの、赤の太枠は「本当に中身が変わった」もの。模様と線の太さでも区別している。モデル識別子は 1 回目の実行の <code>fc726aad…</code> (2 回目はレビューで実行環境の数え方を直したので <code>d6f7160a…</code>)。</figcaption>
+</figure>
+
+<h2>6. vSR の調査で見つかったことへの対応</h2>
+
+<table>
+<tr><th>見つかったこと</th><th>対応</th></tr>
+<tr><td>vSR が残すのは送信バイト全体の指紋だけ</td><td>それで足りた。vLLM 側の受信バイトの指紋と等しいかを見る「照合」に使う。識別子は vLLM 側で作る</td></tr>
+<tr><td>vSR は知らない項目を 400 で拒否する (<code>perigraph_template</code> が通らない)</td><td>設定で変えられないことをソースで確かめた (<code>DefaultPolicy()</code> が固定)。パッチは持たず、vSR を通る経路では印を送らない。上流への提案の材料にする</td></tr>
+<tr><td>Prismyra の chat の入口が system 文を無視する (60 問中 60 問が同じ答え)</td><td>無視は Prismyra の決まりどおり (学習した問いの文で答える作り) だった。<b>悪かったのは「無視した」と言わないこと</b>。応答に「使った部分」と「使わなかった部分」を必ず書くようにし、<code>Prefer: handling=strict</code> を付けると使わない system 文や tools を 422 で断るようにした。perigraph には提案 0004 (答えた側が「読まなかった部品」を宣言する) を書いた</td></tr>
+<tr><td>chart は <code>configMap.applyValuesRevision</code> を変えないと設定が入れ替わらない</td><td>今回も設定を変えるたびに値を変えて入れ替えた。vSR の記録は既定でメモリにしかなく、設定を入れ替えると消えるので、変える前に読み出した (vSR の README に書いた)</td></tr>
+</table>
+
+<h2>7. まだ残っていること</h2>
+
+<div class="warn"><p style="margin:0"><b>stratoclave のブランチは作り直していない。</b><code>feat/perigraph-harness</code> (push 済み、未マージ) は「vSR の手前で指紋を取る」ので vSR 経由では使えない。外部の API に送る最後の 1 段としてだけ働くよう、経路ごとの設定・JSONL への書き出し・送る前に <code>perigraph_template</code> を外す、の 3 点の作り直しが要る。今回は手を付けていない。</p></div>
+
+<table>
+<tr><th>残り</th><th>なぜ残ったか</th></tr>
+<tr><td>Prismyra の修正を main に入れる</td><td>ブランチまで push した。GPU のテスト (<code>tests/test_gpu.py</code> の 48 件) が、別のジョブが GPU を 15 GB 使っていて 33 GB を確保できず全部エラーになった。GPU 以外の 755 件は通った。全部が緑になるまで main に入れない</td></tr>
+<tr><td>サーバ側の既定値 (<code>--chat-template</code>、<code>generation_config.json</code> の既定) が識別子に入らない</td><td>リクエストにも重みの読み込みにも出てこないため。プラグインの README に「ここだけが違う 2 台は同じ識別子になる」と書いた。識別子に入れるには perigraph の版を上げる必要がある</td></tr>
+<tr><td>複数 GPU の分割 (tensor / pipeline parallel) と LoRA</td><td>どちらも理由つきの空欄にした。GPU 1 枚では分割を試せない</td></tr>
+<tr><td>image に焼いて動かす</td><td>今回は既存の vLLM の横に <code>pip install --target</code> で入れて動かした。distributed-ai の chart と image の経路ではまだ動かしていない</td></tr>
+<tr><td>直接と vSR 経由の識別子のずれ (提案 0005)</td><td>名前の別名を同じとみなすか、運用者が「同じ腕」と宣言するか、の判断が要る</td></tr>
+</table>
+
+<div class="lead">
+<p style="margin:0"><b>まとめ。</b>タグは目印を運ぶ道として使い、記録はバイトを持つ最後の 1 段で作る。vLLM は公開の口 3 つで改造なしに両方の半分を出せ、vSR は自分の記録の指紋で「同じものを送った」と示せ、tierbook は突き合わせて文字列を比べるだけで済んだ。パッチは 0 本。</p>
+</div>
+
+<p class="foot">
+commit: perigraph <a href="https://github.com/littlemex/perigraph/commit/9133866b554ae697980f7587edda5eba8918aad4">9133866</a> (main、<code>integrations/vllm/</code>、<code>integrations/vsr/</code>、提案 0004 と 0005)。tierbook <a href="https://github.com/littlemex/tierbook/commit/f52f1af1e4e60b2a96aabc50ca1df09995636164">f52f1af</a> (main、<code>src/tierbook/bind.py</code>)。Prismyra ブランチ <code>feat/chat-declares-ignored</code> 66c8dfe (main には未反映)。<br>
+テスト: tierbook 2,092 件通過・3 件スキップ (Linux の /proc を使うもの)。perigraph 本体 95 件、integrations 22 件、CI 緑。Prismyra は GPU 以外 755 件通過、GPU 48 件はメモリ不足でエラー (上記)。<br>
+実機: 東京の EKS、NVIDIA L40S 1 枚、vLLM 0.27.1、Qwen3.5-0.8B、vSR <code>ghcr.io/vllm-project/semantic-router/vllm-sr:8396cbbe</code> (純正)。検証の後、vSR の実験用の資源 (namespace、service 2 つ、ECR の image 2 つとその保存場所) は片付けた。
+</p>
+</div>
+<script>
+/* Every code block gets a copy button that copies the text exactly as shown. */
+document.querySelectorAll('pre').forEach(function (pre) {
+  var b = document.createElement('button');
+  b.className = 'copy'; b.type = 'button'; b.textContent = 'コピー';
+  var text = (pre.querySelector('code') || pre).textContent;
+  b.addEventListener('click', function () {
+    navigator.clipboard.writeText(text).then(function () {
+      b.textContent = 'コピーしました'; setTimeout(function () { b.textContent = 'コピー'; }, 1500);
+    });
+  });
+  pre.appendChild(b);
+});
+</script>
+</body>
+</html>
