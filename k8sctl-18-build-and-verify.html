@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 18 回 実装と実機検証 ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 18 回</p>
+  <h1>第 18 回 実装と実機検証</h1>
+  <p>4 つの層に分けた実装、3 層のテスト、本物の FSx で 39 項目</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">最終回。第 17 回の設計を Go(kubebuilder v4.15、controller-runtime v0.24)で実装し、単体テスト、envtest、本物のクラスタという 3 層で確かめた。EKS 1.35 のテスト用クラスタで、FSx for Lustre と FSx for OpenZFS の本物のファイルシステムを CPU ノードにマウントし、39 項目の検証を両方で通した。</p>
+  <div class="lead"><p style="margin:0"><b>結論から。</b>コードは約 1,700 行(空行を除き、テストを含まない)で、検証は Lustre と OpenZFS の両方で 39 項目中 39 項目が通り、その間コントローラーのエラーは 0 件だった。読み書きの Pod と読み取り専用の Pod を同じノードに置き、片方が書いた値をもう片方が読めて、読み取り専用の側は書き込みが拒否されることを、本物のマウントで確かめた。envtest と実機は、それぞれ別の欠陥を見つけた。</p></div>
+  <section>
+    <h2>1. コードの地図</h2>
+    <p>kubebuilder が作った骨組み(第 15 回)に 4 つの層を置き、<code>cmd/main.go</code> がそれらを組み立てて起動する。下の層は上の層を知らない。一番下の <code>api</code> は型と名前だけ、<code>driver</code> はドライバごとの事実だけ、<code>volume</code> は「この Claim ならこういう PV と PVC になる」を計算するだけで、API サーバーと一切話さない。API サーバーと話すのは <code>controller</code> だけだ。こうすると、間違えると危ない計算(名前、予約、読み取り専用の付け方、Released の判定)を、クラスタ無しの単体テストで全部確かめられる。</p>
+    <table>
+      <tr><th>ファイル</th><th>行数</th><th>中身</th></tr>
+      <tr><td><code>api/v1alpha1/sharedfilesystem_types.go</code></td><td class="n">134</td><td>SharedFilesystem の型。kubebuilder マーカーで CEL(変更不可、空のセレクタ禁止)、既定値、表示列を書く</td></tr>
+      <tr><td><code>api/v1alpha1/sharedfilesystemclaim_types.go</code></td><td class="n">90</td><td>Claim の型。spec 全体を <code>self == oldSelf</code> で変更不可にする</td></tr>
+      <tr><td><code>api/v1alpha1/conditions.go</code></td><td class="n">80</td><td>condition と reason の名前、ラベルと finalizer の名前(利用者が目にする約束)</td></tr>
+      <tr><td><code>internal/driver/driver.go</code></td><td class="n">81</td><td>対応ドライバ 2 つの表。各行にソースの確認先を書く</td></tr>
+      <tr><td><code>internal/volume/source.go</code>, <code>volume.go</code></td><td class="n">237</td><td>元の PV の読み取りと検査、生成する PV と PVC の形、所有の判定、Released の判定</td></tr>
+      <tr><td><code>internal/controller/sharedfilesystemclaim_controller.go</code></td><td class="n">655</td><td>許可の判定、作成、修復、取り上げ、片付け</td></tr>
+      <tr><td><code>internal/controller/sharedfilesystem_controller.go</code></td><td class="n">201</td><td>元の PV の表示と削除の見張り</td></tr>
+      <tr><td><code>internal/controller/orphan_controller.go</code>, <code>common.go</code></td><td class="n">211</td><td>孤児の回収と、3 つの経路(削除、取り上げ、孤児の回収)が共有する解放処理 <code>releaseVolumes</code>、索引</td></tr>
+    </table>
+    <p>行数は空行を除いたもので、テストは含まない。型の定義で必要な書き方は、マーカー数行で済む。たとえば Claim の spec を丸ごと変更不可にし、アクセスの既定値を読み取り専用にするのは次の 2 行だ。controller-gen(第 05 回)が、これを CRD の YAML の <code>x-kubernetes-validations</code> と <code>default</code> に変換する。</p>
+    <pre><code>// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable; delete and recreate the claim"
+// +kubebuilder:default=ReadOnly</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 860 200" role="img" aria-label="api、driver、volume、controller、cmd の層と依存の向き">
+        <g font-size="14" text-anchor="middle">
+          <rect x="20" y="70" width="140" height="56" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="90" y="96">api</text><text x="90" y="114" font-size="12" fill="#4a5d54">型と名前</text>
+          <rect x="190" y="70" width="140" height="56" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="260" y="96">driver</text><text x="260" y="114" font-size="12" fill="#4a5d54">ドライバの事実</text>
+          <rect x="360" y="70" width="140" height="56" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="430" y="96">volume</text><text x="430" y="114" font-size="12" fill="#4a5d54">形の計算</text>
+          <rect x="530" y="70" width="150" height="56" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="605" y="96">controller</text><text x="605" y="114" font-size="12" fill="#4a5d54">API サーバーと話す</text>
+          <rect x="710" y="70" width="130" height="56" rx="8" fill="#fff" stroke="#4a5d54"/><text x="775" y="96">cmd/main</text><text x="775" y="114" font-size="12" fill="#4a5d54">組み立て</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a18)"><path d="M188 98 L164 98"/><path d="M358 98 L334 98"/><path d="M528 98 L504 98"/><path d="M708 98 L684 98"/></g>
+        <text x="260" y="170" font-size="13" text-anchor="middle" fill="#198754">ここまでは単体テストで全部確かめられる</text>
+        <path d="M20 150 L500 150" stroke="#198754" stroke-width="2"/>
+        <text x="430" y="40" font-size="13" text-anchor="middle" fill="#4a5d54">矢印は「使う」の向き(右が左を使う)</text>
+        <defs><marker id="a18" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 危ない計算を、API サーバーと話さない層に閉じ込めた。</p>
+    </div>
+  </section>
+  <section>
+    <h2>2. Claim の reconcile 1 回で起きること</h2>
+    <p>Claim のコントローラーの <code>Reconcile</code> は、第 09 回で見たとおり「Claim の名前」だけを受け取り、今の状態を読み直して判断する。流れは次の図の通りで、どの分かれ道を通っても最後に必ず <code>Bound</code> を「今ある PVC と PV の事実」から作り直し、status を差分だけ送る。最初の実装では、取り上げた後にも、削除を待っている間にも、古い <code>Bound=True</code> が残っていた。削除中の経路も含めて全部の経路で事実から作り直すことで、古い値が残る余地を無くした。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 400" role="img" aria-label="Claim の reconcile の流れ">
+        <g font-size="13" text-anchor="middle">
+          <rect x="330" y="10" width="200" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="430" y="33">Claim を読む</text>
+          <rect x="330" y="66" width="200" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="430" y="89">削除中?</text>
+          <rect x="590" y="66" width="260" height="36" rx="6" fill="#fdf3e2" stroke="#8a5a12"/><text x="720" y="89" font-size="12">PVC、PV の順に解放し finalizer を外す</text>
+          <rect x="330" y="122" width="200" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="430" y="145">許可を判定(admit)</text>
+          <rect x="60" y="192" width="300" height="36" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="210" y="215" font-size="12">許可あり: 名前を確認、PV を SSA、PVC を作る</text>
+          <rect x="60" y="244" width="300" height="36" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="210" y="267">PV が Released なら uid を消す</text>
+          <rect x="500" y="192" width="320" height="36" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="660" y="215">許可が無い: 猶予を待ち、読み直して解放</text>
+          <rect x="500" y="244" width="320" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="660" y="267">一時的な理由: 何も消さない</text>
+          <rect x="230" y="318" width="400" height="36" rx="6" fill="#e6eef8" stroke="#1d4e8f"/><text x="430" y="341">Bound を事実から作り、Ready を導き、status を差分で送る</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" fill="none" marker-end="url(#a18b)">
+          <path d="M430 48 L430 62"/><path d="M532 84 L586 84"/><path d="M430 104 L430 118"/>
+          <path d="M380 160 L240 188"/><path d="M480 160 L640 188"/><path d="M210 230 L210 240"/>
+          <path d="M210 282 L360 314"/><path d="M660 282 L520 314"/>
+        </g>
+        <text x="558" y="76" font-size="12" fill="#4a5d54" text-anchor="middle">はい</text>
+        <defs><marker id="a18b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 行き先は 4 つ(削除中、許可あり、許可が無い、それ以外の理由)。削除中は解放の後に、残りは最後の箱で、Bound を事実から作り直す。</p>
+    </div>
+    <p>PVC を作るときは、キャッシュ(第 09 回)の古さにも気を付ける。作った直後の reconcile では、キャッシュがまだ新しい PVC を知らず「無い」と答えることがある。そこで作成が <code>AlreadyExists</code>(もうある)で失敗したら、キャッシュではなく API サーバーから直接読み直して、それが自分の PVC かを確かめる。消す判断(Released の修復、取り上げ、孤児の回収)の直前も、同じく直接読む。元に戻せない操作は、古いかもしれない情報では行わない、という一つの方針だ。</p>
+  </section>
+  <section>
+    <h2>3. テストの 3 層と、それぞれが見つけたもの</h2>
+    <p>第 15 回の 3 層をそのまま使った。層ごとに「見えるもの」が違うので、見つかる欠陥も違った。</p>
+    <table>
+      <tr><th>層</th><th>数</th><th>見えるもの</th><th>見えないもの</th><th>この層で見つかった欠陥</th></tr>
+      <tr><td>単体テスト</td><td class="n">13 関数</td><td>名前、予約、ro の付け方、容量の申し込み、Released の判定、ドライバの表</td><td>API サーバーの振る舞い</td><td>(設計どおりに書けていることの確認が主)</td></tr>
+      <tr><td>envtest(本物の API サーバーと etcd だけ)</td><td class="n">19 件</td><td>CEL と既定値、作られる PV と PVC、condition、削除の順番、猶予、孤児の回収</td><td>PV の bind、GC、pvc-protection、マウント</td><td>孤児の PVC を消した後、PV に何も変化が起きないので回収が止まる。Claim と PVC の削除も孤児の回収のきっかけにして直した</td></tr>
+      <tr><td>実機(EKS 1.35 + 本物の FSx)</td><td class="n">39 項目 × 2</td><td>bind、マウント、読み取り専用の強制、取り上げ中の Pod の振る舞い、名前を指定した横取りの防止</td><td>(この題材で見たいものは全部見える)</td><td>finalizer の付け外しと status の書き込みが楽観的排他でぶつかり続けていた(status を差分で送る形に変えて 0 件にした)。Claim を作ってから使えるまで 25 秒かかっていた(PVC を先に作っていたのが原因で、PV を先にして縮めた)。テスト自身の誤りも 1 つ見つかった(下)</td></tr>
+    </table>
+    <p>envtest には PV を bind する役も、保護用の finalizer を外す役(どちらも kube-controller-manager の中にある)も居ない。だからテストの中で「bind された」状態を手で書き(status を直接更新する)、保護用の finalizer はテストが代わりに外し、「Pod が使っている」状態は自前の finalizer を PVC に付けて真似した。こうして作った状態に、コントローラーが正しく反応するかを見る。逆に、bind やマウントそのものが正しく起きるかは、envtest では原理的に確かめられないので、実機の層に任せる。</p>
+    <p>実機では、テストの期待のほうが間違っていた例もあった。コントローラーを止めた状態で Claim を finalizer ごと消すと「PVC と PV が残る」と期待したが、PVC は消えていた。PVC には Claim を親とする ownerReference があるので、Kubernetes の GC(第 10 回)が消したのだ。親を持てないクラスタ全体の PV だけが残り、再起動したコントローラーの孤児の回収がそれを片付けた。期待を「PV が残る」に直すと、孤児の回収が本当に働いたことを示すテストになった。</p>
+    <p>テストが揺れる(ときどき失敗する)原因も 1 つ見つかった。condition の時刻(<code>lastTransitionTime</code>)は秒単位で保存されるので、3 秒の猶予がテストの中では 2 秒台に縮むことがあった。今は取り上げの期限を <code>withdrawAfter</code> に書いており、これも秒単位で保存されるので、期限は秒に切り上げて書くようにした。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 200" role="img" aria-label="3 層のテストが見える範囲">
+        <g font-size="13">
+          <rect x="20" y="20" width="820" height="160" rx="10" fill="#e6eef8" stroke="#1d4e8f"/><text x="36" y="44" fill="#1d4e8f">実機: bind、マウント、ro の強制、Pod の振る舞い</text>
+          <rect x="40" y="58" width="560" height="110" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="56" y="82" fill="#0f5132">envtest: CEL、既定値、PV と PVC の形、condition、順番、猶予</text>
+          <rect x="60" y="96" width="320" height="60" rx="10" fill="#fff" stroke="#4a5d54"/><text x="76" y="120">単体: 名前、予約、ro、Released の判定</text><text x="76" y="142" fill="#4a5d54">API サーバー無し</text>
+        </g>
+      </svg>
+      <p class="cap">図: 外側の層ほど見える範囲が広く、遅く、高い。内側で確かめられることは内側で確かめる。</p>
+    </div>
+  </section>
+  <section>
+    <h2>4. 実機検証の結果</h2>
+    <p>検証は 1 本のスクリプト(<code>test/e2e-eks/run.sh</code>)にまとめ、元になる PV の名前とノード名を渡すだけで、namespace の用意から後片付けまでを行う。ファイルシステムに書くのは確認用の小さなディレクトリ 1 つだけで、最後に消す。FSx for Lustre(元の PV は <code>Released</code> のまま)と FSx for OpenZFS の両方で流した。</p>
+    <table>
+      <tr><th>手順</th><th>確かめたこと</th><th>Lustre</th><th>OpenZFS</th></tr>
+      <tr><td>準備</td><td>元の PV の状態(Lustre は Released、OpenZFS は別の namespace に Bound)に関係なく SharedFilesystem が Ready になる</td><td class="y">1/1</td><td class="y">1/1</td></tr>
+      <tr><td>1</td><td>読み書きと読み取り専用の Claim が同じノードでマウントでき、書いた値を読めて、読み取り専用の側は書けない</td><td class="y">7/7</td><td class="y">7/7</td></tr>
+      <tr><td>2</td><td>許可の無い namespace には何も作られず、予約済みの PV を名前で指名しても Pending のまま</td><td class="y">3/3</td><td class="y">3/3</td></tr>
+      <tr><td>3</td><td>PVC を消すと、人の手無しで作り直されて bind され、書いた値がまだ読める(Released の罠)</td><td class="y">2/2</td><td class="y">2/2</td></tr>
+      <tr><td>4</td><td>reconcile をもう一度起こしても PV の resourceVersion が変わらない(無駄な書き込みが無い)</td><td class="y">1/1</td><td class="y">1/1</td></tr>
+      <tr><td>4b</td><td>許可のある使用中の Claim を消すと Pod を待ち、Pod を止めると Claim、PVC、PV が消える</td><td class="y">5/5</td><td class="y">5/5</td></tr>
+      <tr><td>5</td><td>許可を外すと、猶予の間は PVC が残り、その後に取り上げられる。動いている Pod は読み続け、新しい Pod は起動しない。Pod を止めると PVC と PV が消える</td><td class="y">7/7</td><td class="y">7/7</td></tr>
+      <tr><td>5b</td><td>コントローラーを止めている間に Claim を finalizer ごと消すと PV が残り、再起動後に孤児の回収が消す</td><td class="y">3/3</td><td class="y">3/3</td></tr>
+      <tr><td>6, 6b</td><td>SharedFilesystem は生成 PV が残る間は消えず、削除中でも許可を外せば取り上げが効き、使用中の Pod の名前が表示される</td><td class="y">6/6</td><td class="y">6/6</td></tr>
+      <tr><td>7</td><td>Pod を止めると PVC と PV が消え、Claim も消え、SharedFilesystem も自分で消え、元の PV は残っている</td><td class="y">4/4</td><td class="y">4/4</td></tr>
+    </table>
+    <p>どちらも 39 項目中 39 項目が通り、検証の間、コントローラーのログに reconcile のエラーは 1 件も出なかった。Claim を作ってから使えるまでの時間は、PV を先に作るように直す前の e2e では 25 秒、直した後は 19〜20 秒だった。e2e とは別に、namespace・SharedFilesystem・Claim 2 つを新しく作って Ready になるまでを 1 秒ごとに直接確かめると 5.8 秒(2 回とも同じ。kubectl を呼ぶ時間を含む)で、e2e の数字との差の理由はまだ確かめていない。読み取り専用の Pod の中で <code>/proc/mounts</code>(今のマウントの一覧)を見ると、Lustre のマウントは <code>ro,...,flock,...</code> になっていた。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 250" role="img" aria-label="1 つのノードで読み書きと読み取り専用の Pod が同じファイルシステムをマウントする">
+        <rect x="20" y="20" width="560" height="200" rx="12" fill="#fff" stroke="#4a5d54"/><text x="40" y="44" font-size="14">CPU ノード 1 台</text>
+        <rect x="50" y="64" width="230" height="64" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="165" y="92" font-size="13" text-anchor="middle">Pod w(読み書き)</text><text x="165" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">値を書く</text>
+        <rect x="320" y="64" width="230" height="64" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="435" y="92" font-size="13" text-anchor="middle">Pod r(読み取り専用)</text><text x="435" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">読める・書くと拒否</text>
+        <rect x="50" y="154" width="230" height="44" rx="8" fill="#fff" stroke="#198754"/><text x="165" y="181" font-size="12" text-anchor="middle">PV sfc-…(flock)</text>
+        <rect x="320" y="154" width="230" height="44" rx="8" fill="#fff" stroke="#1d4e8f"/><text x="435" y="181" font-size="12" text-anchor="middle">PV sfc-…(flock, ro)</text>
+        <rect x="640" y="90" width="200" height="70" rx="12" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/><text x="740" y="120" font-size="14" text-anchor="middle">FSx</text><text x="740" y="142" font-size="12" text-anchor="middle" fill="#4a5d54">同じ 1 つ</text>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a18c)"><path d="M165 130 L165 150"/><path d="M435 130 L435 150"/><path d="M165 200 L165 232 L740 232 L740 164" fill="none"/><path d="M435 200 L435 228" fill="none"/></g>
+        <defs><marker id="a18c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: PV は Claim ごとに 1 本ずつ別に作る(名前、volumeHandle、予約はそれぞれ別)。指す先は同じファイルシステムで、マウントのされ方の違いは ro の有無だけ。flock はファイルのロックを使えるようにするオプション。</p>
+    </div>
+  </section>
+  <section>
+    <h2>5. distributed-ai への取り込み案</h2>
+    <p>コードはまだ distributed-ai には入れていない。独立したディレクトリで作り、実機で確かめたところまでだ。取り込むときに置き換わるもの、足すものは次のとおりで、どれも distributed-ai の実ファイルを読んで決めた。</p>
+    <table>
+      <tr><th>今あるもの</th><th>取り込んだ後</th></tr>
+      <tr><td><code>infra/eks/manifests/fsx-lustre-shared-pv/</code> の README と PV / PVC のテンプレート(値を 4 つ読んで埋める手順)</td><td>管理者が SharedFilesystem を 1 つ、各チームが Claim を 1 つ書くだけになる。テンプレートは不要になる</td></tr>
+      <tr><td><code>infra/eks/scripts/05-release-pv.sh</code> の、配った PV の解放</td><td>コントローラーが自動で直す。元の PV そのものを渡し直す用途には、スクリプトがそのまま残る</td></tr>
+      <tr><td>OpenZFS の PV を手で複製(同じ volumeHandle の 2 本)</td><td>handle が PV ごとに別になり、同じノードでの取り違えが起きない</td></tr>
+      <tr><td><code>infra/eks/scripts/04-teardown.sh</code></td><td>Claim、SharedFilesystem、コントローラー、CRD の順に消す手順を足す。順番を逆にすると finalizer が残って namespace が消えなくなる</td></tr>
+      <tr><td>コンテナイメージ</td><td>distributed-ai の、クラスタ内でイメージを焼く仕組み(<code>image-builder-lib</code> の ConfigMap 方式)で作れることを確かめた。今回の検証イメージもこれで作った</td></tr>
+    </table>
+    <p>コントローラーは AWS の権限を一切持たない。読み書きするのは Kubernetes のオブジェクトだけなので、IAM(AWS の権限の仕組み)の設定を増やさずに入れられる。公開しているのは、認証付きの metrics の口(クラスタ内だけから見える)だけだ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 170" role="img" aria-label="手順書とスクリプトが 2 つの宣言に置き換わる">
+        <g font-size="13" text-anchor="middle">
+          <rect x="20" y="20" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="45">README の手順とテンプレート</text>
+          <rect x="20" y="70" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="95">05-release-pv.sh(配った PV)</text>
+          <rect x="20" y="120" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="145">手で複製した PV</text>
+          <rect x="520" y="40" width="320" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="680" y="67">SharedFilesystem(管理者が 1 つ)</text>
+          <rect x="520" y="100" width="320" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="680" y="127">Claim(チームごとに 1 つ)</text>
+        </g>
+        <path d="M290 90 L500 90" stroke="#4a5d54" stroke-width="2" marker-end="url(#a18d)"/>
+        <defs><marker id="a18d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 人の手順(左)を、保ち続けられる宣言(右)に置き換える。</p>
+    </div>
+  </section>
+  <section>
+    <h2>6. まだ残っていること</h2>
+    <p>やっていないことと、できないことを分けて書く。隠すと、出来上がったように見えて実際より悪くなる。</p>
+    <table>
+      <tr><th>種類</th><th>内容</th></tr>
+      <tr><td>仕様として残る限界</td><td>読み書きを許した namespace は、ファイルシステム全体を書き換えられる(隔離ではなく配布)。取り上げても、動いている Pod は止まるまでマウントを使い続ける。許可は namespace のラベルで選ぶので、テナントがそのラベルを書き換えられない運用が前提</td></tr>
+      <tr><td>v1alpha1 で対応しないもの</td><td>EFS(volumeHandle からマウントするので handle を変えられない)、サブディレクトリだけのマウント、手で作った既存の PV の引き取り、元の PV の変更への自動追従、取り上げ時の Pod の退去、複数バージョン</td></tr>
+      <tr><td>まだ確かめていないこと</td><td>Claim が数百個ある規模での動き、コントローラーの台数を増やしたときの leader election(複数台のうち 1 台だけが働く仕組み、第 15 回)の切り替わり(設定は有効にしてあるが、実機で切り替えてはいない)</td></tr>
+      <tr><td>これからの作業</td><td>リポジトリの作成と公開、distributed-ai への取り込み(第 5 節の表)</td></tr>
+    </table>
+    <div class="fig">
+      <svg viewBox="0 0 860 140" role="img" aria-label="済み、未確認、未対応の 3 区分">
+        <g font-size="13" text-anchor="middle">
+          <rect x="20" y="30" width="260" height="80" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="150" y="62">確かめた</text><text x="150" y="84" fill="#4a5d54">39 項目 × 2 ドライバ</text>
+          <rect x="300" y="30" width="260" height="80" rx="10" fill="#fdf3e2" stroke="#8a5a12"/><text x="430" y="62">まだ確かめていない</text><text x="430" y="84" fill="#4a5d54">規模、台数の切り替わり</text>
+          <rect x="580" y="30" width="260" height="80" rx="10" fill="#fbeeea" stroke="#c0492f"/><text x="710" y="62">対応しない</text><text x="710" y="84" fill="#4a5d54">EFS、隔離、Pod の退去</text>
+        </g>
+      </svg>
+      <p class="cap">図: 結果は 3 つに分けて持つ。真ん中を左と混ぜない。</p>
+    </div>
+  </section>
+  <section>
+    <h2>まとめ: シリーズを通して</h2>
+    <p>第 01 回の「Kubernetes は望む状態の台帳」から始めて、最後は本物の FSx を配るコントローラーまでたどり着いた。振り返ると、CRD は台帳に新しい欄を足すだけで、それだけでは何も動かない(第 04 回)。動かすのはコントローラーで、それは「今の状態を読み直し、差を埋め、何度やっても同じ結果になる」ループだった(第 03・09 回)。スキーマ、CEL、既定値、status、finalizer、所有関係、SSA、admission、バージョンは、どれもそのループを安全にするための部品だった。そして部品の使い分けは、規則が「1 つの CR だけで決まるか」「他のオブジェクトに依存して後から変わるか」「誰が書けるかの問題か」で決まった(第 17 回)。</p>
+    <p>作ってみて一番効いたのは、コードの前に実機で前提を確かめたこと、元に戻せない操作ほど条件を絞り直接読み直してから行ったこと、そしてテストの層ごとに「見えないもの」を自覚したことだ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 120" role="img" aria-label="シリーズの 5 つの段階">
+        <g font-size="13" text-anchor="middle">
+          <rect x="20" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="95" y="65">地図 01〜04</text>
+          <rect x="190" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="265" y="65">CRD 05〜08</text>
+          <rect x="360" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="435" y="65">制御 09〜11</text>
+          <rect x="530" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="605" y="65">拡張 12〜15</text>
+          <rect x="700" y="36" width="140" height="48" rx="8" fill="#0f5132"/><text x="770" y="65" fill="#fff">実践 16〜18</text>
+        </g>
+      </svg>
+      <p class="cap">図: 18 回の道のり。</p>
+    </div>
+    <p style="display:flex;justify-content:space-between"><a href="./k8sctl-17-design.html">← 第 17 回 設計</a><a href="./k8sctl-index.html">シリーズ目次へ →</a></p>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (10 問に拡張すること)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: '名前・予約・ro の付け方・Released の判定を、API サーバーと話さない volume パッケージに閉じ込めた一番の利点は？',
+    opts: [
+      'ビルドが速くなる',
+      'controller-gen が CRD を作れるようになる',
+      'コントローラーの台数を増やせる',
+      'RBAC の権限が減る',
+      '間違えると危ない計算を、クラスタ無しの単体テストで全部確かめられる'
+    ],
+    ans: 4,
+    exps: [
+      'ビルド時間はほとんど変わらない。',
+      'controller-gen が読むのは api パッケージのマーカー。',
+      '台数は leader election の話で、パッケージの分け方とは関係ない。',
+      'RBAC はコントローラーが実際に呼ぶ API で決まる。',
+      '<b>これが正解。</b>入力(Claim と元の PV)から出力(PV と PVC の形)を計算するだけの関数にすると、envtest も実機も要らずに境界の値まで確かめられる。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="純粋な計算と API 呼び出しの分離"><rect x="20" y="25" width="240" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="140" y="55" font-size="13" text-anchor="middle">volume: 計算だけ</text><rect x="300" y="25" width="240" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="420" y="55" font-size="13" text-anchor="middle">controller: API と話す</text></svg><p class="cap">図: 左は単体テストだけで確かめられる。</p></div>' }
+  },
+  {
+    q: 'reconcile のどの経路を通っても(削除を待っている間も)、Bound 条件を「今ある PVC と PV の事実」から作り直す理由は？',
+    opts: [
+      '古い値が残らないようにするため。経路ごとに書くと、書き忘れた経路で前の状態が残る',
+      'status は毎回全部書き直さないと API サーバーに拒否されるから',
+      'Bound は spec の一部なので毎回必要だから',
+      'conditions は 1 つずつしか書けないから',
+      'Ready を true にするために必ず必要だから'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実際に、最初の実装では取り上げた後も Bound=True が残っていた。事実から毎回作れば、どの経路でも正しい値になる。',
+      '差分だけ送っても拒否されない(実際に merge patch で送っている)。',
+      'Bound は status の condition。',
+      'conditions は配列で、いくつでも一度に書ける。',
+      'Ready の材料ではあるが、毎回作り直す理由は「古い値を残さない」こと。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="どの経路も最後の 1 か所を通る"><g font-size="13" text-anchor="middle"><rect x="20" y="20" width="140" height="30" rx="6" fill="#fff" stroke="#4a5d54"/><text x="90" y="40">許可あり</text><rect x="20" y="60" width="140" height="30" rx="6" fill="#fff" stroke="#4a5d54"/><text x="90" y="80">許可なし</text><rect x="300" y="38" width="240" height="34" rx="6" fill="#e6eef8" stroke="#1d4e8f"/><text x="420" y="60">事実から Bound を作る</text></g><path d="M162 35 L296 52 M162 75 L296 58" stroke="#4a5d54" stroke-width="2"/></svg><p class="cap">図: 合流点を 1 つにする。</p></div>' }
+  },
+  {
+    q: 'envtest のテストで、PVC を「Pod が使っている」状態にしたいとき、どうした？',
+    opts: [
+      '本物の Pod を作った',
+      'kubelet を envtest に追加した',
+      'テスト用の finalizer を PVC に付けて、消えないようにした',
+      'PVC の status を Terminating に書き換えた',
+      'envtest では確かめられないので諦めた'
+    ],
+    ans: 2,
+    exps: [
+      'envtest には Pod を動かすノードが無いので、Pod を作っても誰も動かさない。',
+      'envtest は API サーバーと etcd だけで、kubelet は足せない。',
+      '<b>これが正解。</b>pvc-protection は、作成時に全 PVC へ保護用の finalizer を付けておき、削除を頼まれても使っている Pod が居る間はそれを外さない仕組み。同じ「消えずに残る」状態をテスト用の finalizer で真似し、その間 PV が消されないことを確かめた。',
+      'Terminating は status ではなく、削除の時刻(deletionTimestamp)が付いた状態のこと。',
+      '真似をすれば確かめられる。確かめられないのは bind やマウントそのもの。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="本物の仕組みと真似"><rect x="20" y="25" width="240" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="140" y="55" font-size="13" text-anchor="middle">実機: pvc-protection</text><rect x="300" y="25" width="240" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="420" y="55" font-size="13" text-anchor="middle">envtest: テスト用 finalizer</text></svg><p class="cap">図: どちらも「消えずに残る」状態を作る。</p></div>' }
+  },
+  {
+    q: '最初の実装では、Claim を作ってから Ready になるまで 25 秒かかっていた。原因として正しいものは？',
+    opts: [
+      'コントローラーが 25 秒ごとにしか動かないから',
+      'FSx のマウントに時間がかかるから',
+      'CEL の評価に時間がかかるから',
+      'PVC を先に作り PV を後から作っていたので、PV コントローラーが PVC を見たときに PV が無く、次の定期的な見直しまで待たされたから',
+      'イメージのダウンロードに時間がかかるから'
+    ],
+    ans: 3,
+    exps: [
+      'コントローラーは変化の通知ですぐ動く。',
+      'Ready は PVC が Bound になった時点で出る。マウントは Pod を起動したときで、別の時間。',
+      'CEL の評価はミリ秒単位。',
+      '<b>これが正解。</b>PV と PVC を結ぶのは kube-controller-manager の PV コントローラー。PVC ができたときに結ぶ相手の PV がまだ無いと、後から PV が現れても PVC 側は次の定期的な見直しまで待つ。名前の衝突を確かめてから PV を先に作るように直し、e2e の数字は 19〜20 秒、直接測ると 5.8 秒になった。',
+      'Claim の Ready にコンテナイメージは関係しない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="作成から bind までの待ち"><line x1="20" y1="60" x2="540" y2="60" stroke="#4a5d54" stroke-width="2"/><circle cx="40" cy="60" r="6" fill="#198754"/><text x="40" y="40" font-size="13" text-anchor="middle">PVC 作成</text><rect x="60" y="50" width="400" height="20" fill="#fdf3e2" stroke="#8a5a12"/><text x="260" y="95" font-size="13" text-anchor="middle">PV が無かったので次の見直しまで待つ</text><circle cx="480" cy="60" r="6" fill="#198754"/><text x="480" y="40" font-size="13" text-anchor="middle">Bound</text></svg><p class="cap">図: 待っているのは別のコントローラー。</p></div>' }
+  },
+  {
+    q: '実機の検証で、許可を外した namespace について確かめた振る舞いとして正しいものは？',
+    opts: [
+      '許可を外した瞬間に、動いている Pod が強制終了された',
+      '猶予の間は PVC が残り、その後 PVC が削除中になり、動いている Pod は読み続け、新しい Pod は起動しなかった',
+      'PVC はすぐ消え、PV だけが残った',
+      'PV が先に消え、PVC が Lost になった',
+      '何も起きなかった'
+    ],
+    ans: 1,
+    exps: [
+      'Pod は止めない。止めるのは管理者の判断で、限界として README に書いた。',
+      '<b>これが正解。</b>猶予 30 秒の間は何も消さず、その後に PVC を削除する。pvc-protection が使用中の PVC を残すので、既存の Pod は使い続け、新しい Pod はマウントできずに起動しない。Pod を止めると PVC と PV が順に消えた。',
+      '使用中の PVC はすぐには消えない。',
+      'PV は PVC が消えてから消す順番にしている。',
+      '猶予の後に取り上げが起きた。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="取り上げの段階"><g font-size="13" text-anchor="middle"><rect x="20" y="35" width="120" height="40" rx="6" fill="#fdf3e2" stroke="#8a5a12"/><text x="80" y="60">猶予</text><rect x="160" y="35" width="160" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="240" y="60">PVC 削除中</text><rect x="340" y="35" width="200" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="440" y="60">Pod 停止で全部消える</text></g></svg><p class="cap">図: 3 段階で進む。</p></div>' }
+  },
+  {
+    q: 'このシリーズの題材で、規則の置き場所を決めた基準として正しい組み合わせは？',
+    opts: [
+      'すべての規則を validating webhook に置く',
+      'すべての規則をコントローラーの reconcile に置く',
+      '1 つの CR だけで決まる規則はスキーマと CEL、他のオブジェクトに依存し後から変わる規則は reconcile、誰が書けるかは RBAC',
+      '1 つの CR だけで決まる規則は reconcile、他のオブジェクトに依存する規則は CEL',
+      '規則はすべて README に書き、利用者に守ってもらう'
+    ],
+    ans: 2,
+    exps: [
+      'webhook はその CR への書き込みが来たときにしか呼ばれないので、namespace のラベルのような他のオブジェクトの変化には追いつけない。',
+      'reconcile だと、enum や変更不可のような規則を「保存する前に拒否する」ことができない。',
+      '<b>これが正解。</b>規則の性質ごとに、それを一番確実に守れる場所に置く。この題材では webhook が必要な規則が残らなかった。',
+      '逆。1 つの CR で決まる規則は保存前に拒否できる CEL が向き、他のオブジェクトに依存する規則は CEL では書けない。',
+      '守ってもらうだけの規則は守られない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="規則と置き場所"><g font-size="13" text-anchor="middle"><rect x="10" y="30" width="170" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="95" y="60">CEL</text><rect x="195" y="30" width="170" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="280" y="60">reconcile</text><rect x="380" y="30" width="170" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="465" y="60">RBAC</text></g></svg><p class="cap">図: 3 つの置き場所の使い分け。</p></div>' }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

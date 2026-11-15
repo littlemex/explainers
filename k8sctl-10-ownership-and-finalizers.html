@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ============================================================
+  explainers クイズ付き解説ページ 共通テンプレート
+  - このファイルをコピーして各シリーズのサンプルを作る
+  - 単一 HTML・inline CSS/JS・ビルド不要・MathJax は CDN
+  - QUIZ 配列は 6 問で確定済み
+  ============================================================ -->
+<title>第 10 回 所有と後片付け ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 10 回</p>
+  <h1>所有と後片付け</h1>
+  <p>ownerReferences が自動で消し、finalizer が消える前に足止めする</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">第 09 回で、Reconcile は名前だけを受け取り今の状態を読み直す関数だと見た。この回は、コントローラーが作った子のオブジェクトをどう親に結びつけ(ownerReferences)、消すときにどう後片付けの時間を確保するか(finalizer)を、実測した事実を交えて見る。</p>
+
+  <div class="lead">この章の結論: ownerReferences を付けておけば、親を消すと子も自動で消える(ガベージコレクション)。ただし namespace に属する親はクラスタ全体のオブジェクトを所有できない(実測で確認)。すぐに消えては困る後片付けがあるときは finalizer(ファイナライザ: 後片付けが済むまで削除を待たせる印)を付け、後片付けが終わったら自分でその印を外す。外し忘れるとオブジェクトは deletionTimestamp が付いたまま永遠に残り続ける。</div>
+
+  <section>
+    <h2>1. ownerReferences と GC の基本</h2>
+    <p>コントローラーが Widget のために ConfigMap を作ったとき、「この ConfigMap は Widget の子だ」と API サーバーに教えておくと、Widget を消すだけで子も自動的に消える。この仕組みを使うには、作った子の <code>metadata.ownerReferences</code> に親の情報(apiVersion, kind, name, uid)を入れる。手で書くのではなく <code>controllerutil.SetControllerReference(owner, controlled, scheme, opts...)</code>(controller-runtime v0.24.1 のソースで確認)を使うのが普通で、これが owner の GroupVersionKind(GVK、第 02 回)を正しく埋め、<code>controller: true</code> を立てる。</p>
+    <p><code>controller: true</code> は「このオブジェクトの主要な所有者はこれだ」という印で、1 つの子につき <code>controller: true</code> の親は 1 つだけに制限されている。これは単なる推奨ではなく、API サーバー自身が検証で強制する(確認済み: <code>k8s.io/apimachinery</code> の <code>pkg/api/validation/objectmeta.go</code> の <code>ValidateOwnerReferences</code> が、2 つ目の <code>controller: true</code> を見つけると「Only one reference can have Controller set to true」で拒否する)。詳しい設計意図は<a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/" target="_blank" rel="noopener">公式ドキュメント</a>も参照。もう 1 つのフィールド <code>blockOwnerDeletion</code> は、後述する foreground 削除の時だけ効く「この子が消えるまで親を消させない」という印。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 190" role="img" aria-label="ownerReferencesによる親子関係">
+        <defs><marker id="a10-1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="260" y="24" width="180" height="56" rx="10" fill="#0f5132" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="350" y="48" text-anchor="middle" font-size="14" fill="#fff">Widget a</text>
+        <text x="350" y="66" text-anchor="middle" font-size="12" fill="#dbefe4">(親)</text>
+        <path d="M300,82 L150,130" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-1)"/>
+        <path d="M400,82 L550,130" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-1)"/>
+        <rect x="60" y="132" width="180" height="50" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="150" y="153" text-anchor="middle" font-size="13" fill="#0f5132">ConfigMap(子)</text>
+        <text x="150" y="171" text-anchor="middle" font-size="11.5" fill="#4a5d54">controller:true</text>
+        <rect x="460" y="132" width="180" height="50" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="550" y="153" text-anchor="middle" font-size="13" fill="#0f5132">Secret(子)</text>
+        <text x="550" y="171" text-anchor="middle" font-size="11.5" fill="#4a5d54">controller:true</text>
+      </svg>
+      <p class="cap">図: 親を消すと GC が ownerReferences をたどって子も消す。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 消し方の 3 つ: background / foreground / orphan</h2>
+    <p>親を削除するとき、どの順番で子を消すかは <code>propagationPolicy</code> で選ぶ(<a href="https://kubernetes.io/docs/concepts/architecture/garbage-collection/" target="_blank" rel="noopener">公式ドキュメント</a>)。既定は background。</p>
+    <table>
+      <tr><th>方式</th><th>親の消え方</th><th>子の消え方</th></tr>
+      <tr><td>Background(既定)</td><td>すぐに消える</td><td>ガベージコレクタが裏で後から掃除する</td></tr>
+      <tr><td>Foreground</td><td><code>deletionTimestamp</code> と <code>foregroundDeletion</code> finalizer が付き、<code>blockOwnerDeletion:true</code> の子が全部消えるまで残る(それ以外の子は親より先に消えるとは限らない)</td><td><code>blockOwnerDeletion:true</code> の子は親より先に消え、完了をブロックする</td></tr>
+      <tr><td>Orphan</td><td>GC が子の ownerReferences を外し終えるまで残り、その後消える</td><td>消えずに残る(ownerReferences だけ失われ孤立する)</td></tr>
+    </table>
+    <div class="fig">
+      <svg viewBox="0 0 720 150" role="img" aria-label="background削除とforeground削除の順番の違い">
+        <text x="20" y="24" font-size="13" fill="#4a5d54">Background(既定): 親が先に消える</text>
+        <rect x="20" y="36" width="90" height="34" rx="7" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>
+        <text x="65" y="58" text-anchor="middle" font-size="12" fill="#c0492f">親: 即消滅</text>
+        <rect x="130" y="36" width="130" height="34" rx="7" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.4"/>
+        <text x="195" y="58" text-anchor="middle" font-size="12" fill="#8a5a12">子: 裏で後から掃除</text>
+        <text x="400" y="24" font-size="13" fill="#4a5d54">Foreground: 子が先に消える</text>
+        <rect x="400" y="36" width="130" height="34" rx="7" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.4"/>
+        <text x="465" y="58" text-anchor="middle" font-size="12" fill="#8a5a12">子: 先に全部消滅</text>
+        <rect x="550" y="36" width="130" height="34" rx="7" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>
+        <text x="615" y="58" text-anchor="middle" font-size="12" fill="#0f5132">親: 最後に消える</text>
+      </svg>
+      <p class="cap">図: 子を先に消すか後に消すかが Foreground と Background の違い。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. namespace の壁</h2>
+    <p>ownerReferences には 1 つ、見落としやすい制約がある。namespace に属する(namespaced な)オブジェクトは、クラスタ全体に属する(cluster-scoped な)オブジェクトを所有できない。EKS 1.35 のテスト用クラスタで実測した: namespace 付きの Widget d を親にして、同じ namespace の ConfigMap と、クラスタ全体のオブジェクトである ClusterRole の両方を子として作り、Widget d を削除した。ConfigMap は GC で消えたが、ClusterRole は残った。ClusterRole 上のイベントには次の警告が出ていた。</p>
+    <pre><code>Warning OwnerRefInvalidNamespace clusterrole/crd-lab-d-child
+ownerRef [lab.crd-series.example/v1/Widget, namespace: , name: d, uid: ...]
+does not exist in namespace ""</code></pre>
+    <p>namespace に属する親から PersistentVolume や ClusterRole のようなクラスタ全体のオブジェクトを所有させようとしても、GC はそれを「存在しない参照」として無視し、自動削除の対象にしない。クラスタ全体のオブジェクトを後片付けしたいなら、ownerReferences に頼らず、次のセクションの finalizer で自分のコードから明示的に消す必要がある。今回の実測はこの ownerReferences を直接セットして再現したもので、<code>controllerutil.SetControllerReference</code>(1 節で見たヘルパー)を使っていれば、この組み合わせはクラスタに書き込む前にクライアント側でエラーになっていた。制約はもう 1 つあり、どちらも namespace に属する場合でも、親と子の namespace が違うと(両方 namespaced でも)所有は成立しない(これも <code>SetControllerReference</code> がクライアント側で拒む)。クラスタ全体を所有できないのと、namespace をまたげないのは別々の制約で、どちらも同じ理由(所有は同じ namespace の中でしか意味を持たない)から来ている。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 180" role="img" aria-label="namespaceの壁">
+        <rect x="40" y="20" width="280" height="140" rx="12" fill="#f3f9f6" stroke="#8fd6b4" stroke-width="1.4" stroke-dasharray="5,4"/>
+        <text x="180" y="40" text-anchor="middle" font-size="12.5" fill="#4a5d54">namespace: lab</text>
+        <rect x="70" y="56" width="110" height="46" rx="8" fill="#0f5132" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="125" y="84" text-anchor="middle" font-size="12.5" fill="#fff">Widget d</text>
+        <rect x="190" y="110" width="110" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="245" y="134" text-anchor="middle" font-size="12" fill="#0f5132">ConfigMap(子)</text>
+        <path d="M180,80 L188,120" stroke="#4a5d54" stroke-width="1.5" fill="none"/>
+        <text x="480" y="40" text-anchor="middle" font-size="12.5" fill="#4a5d54">クラスタ全体</text>
+        <rect x="420" y="56" width="140" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="490" y="78" text-anchor="middle" font-size="12.5" fill="#c0492f">ClusterRole(子)</text>
+        <text x="490" y="96" text-anchor="middle" font-size="11" fill="#c0492f">所有は無効・残る</text>
+        <path d="M180,80 L418,78" stroke="#c0492f" stroke-width="1.6" fill="none" stroke-dasharray="4,3"/>
+        <text x="300" y="68" font-size="11.5" fill="#c0492f">OwnerRefInvalidNamespace</text>
+      </svg>
+      <p class="cap">図: namespace の中の親はクラスタ全体の子を所有できない(EKS 1.35 のテスト用クラスタで実測)。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. finalizer: 削除を待たせる仕組み</h2>
+    <p>ConfigMap のような Kubernetes 内部のオブジェクトの後片付けは GC に任せられるが、「外部のクラウドリソースを先に消してから、このオブジェクトを消させたい」という場合は GC では届かない。そこで使うのが finalizer(ファイナライザ: 後片付けが済むまで削除を待たせる印。deletionTimestamp が「削除してほしいと頼まれた印」なのに対し、finalizer は「まだ終わっていない後片付けがある」という印で、両方そろって初めて実際に消える)。<code>metadata.finalizers</code> に文字列(例: <code>lab.crd-series.example/cleanup</code>)を入れておくと、削除リクエストが来ても API サーバーは即座には消さない。finalizer は削除が始まってから慌てて付けるのではなく、オブジェクトを初めて見た Reconcile(後片付けが必要になる前)で付けておく。削除要求が来てから付けようとしても、次のセクションで見るとおり削除予約中は新しい finalizer を追加できない。</p>
+    <p>EKS 1.35 のテスト用クラスタで実測した流れ: finalizer を付けた Widget を <code>kubectl delete</code> すると、オブジェクトは消えずに <code>deletionTimestamp</code> が付いた状態で残った。削除中でも spec の変更はできたが、削除中に新しい finalizer を追加しようとすると拒否された。</p>
+    <pre><code>metadata.finalizers: Forbidden: no new finalizers
+can be added if the object is being deleted</code></pre>
+    <p>finalizer を <code>controllerutil.RemoveFinalizer(obj, name)</code>(戻り値 bool は変更があったかどうか)で外してから Update すると、Widget は即座に消えた(NotFound)。付け外しには <code>controllerutil.AddFinalizer</code> / <code>RemoveFinalizer</code> / <code>ContainsFinalizer</code>(すべて controller-runtime v0.24.1 のソースで確認)を使うのが普通で、コントローラーの Reconcile は「deletionTimestamp が付いているか」で後片付けの処理に分岐する。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 210" role="img" aria-label="finalizerのライフサイクル">
+        <defs><marker id="a10-4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="10" y="80" width="140" height="48" rx="9" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="80" y="108" text-anchor="middle" font-size="12.5" fill="#0f5132">finalizer 付きで存在</text>
+        <path d="M152,104 L228,104" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-4)"/>
+        <rect x="230" y="80" width="150" height="48" rx="9" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="305" y="100" text-anchor="middle" font-size="12" fill="#8a5a12">delete 要求</text>
+        <text x="305" y="118" text-anchor="middle" font-size="11.5" fill="#4a5d54">deletionTimestamp 付与</text>
+        <path d="M382,104 L458,104" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-4)"/>
+        <rect x="460" y="80" width="150" height="48" rx="9" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="535" y="100" text-anchor="middle" font-size="12" fill="#1d4e8f">コントローラーが</text>
+        <text x="535" y="118" text-anchor="middle" font-size="12" fill="#1d4e8f">外部の後片付け</text>
+        <path d="M612,104 L688,104" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-4)"/>
+        <rect x="610" y="150" width="120" height="42" rx="9" fill="#0f5132" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="670" y="176" text-anchor="middle" font-size="12" fill="#fff">finalizer 除去</text>
+        <path d="M670,148 L670,128" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-4)"/>
+        <text x="300" y="40" font-size="12.5" fill="#c0492f">この間、新しい finalizer の追加は拒否される(実測)</text>
+      </svg>
+      <p class="cap">図: finalizer が無くなった時点で実際に削除される(EKS 1.35 のテスト用クラスタで実測)。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. finalizer が外れず namespace が Terminating で固まる典型と対策</h2>
+    <p>finalizer を付けたコントローラーを、Reconcile のロジックのバグや RBAC 不足で外部の後片付けに失敗したまま放置したり、クラスタから削除してしまったりすると、finalizer を外す側のプログラムがいなくなる。その Widget は <code>deletionTimestamp</code> が付いたまま永遠に残り、その Widget を含む namespace も <code>kubectl delete namespace</code> で Terminating のまま固まる(namespace は中のオブジェクトが全部消えるまで消えない)。</p>
+    <p>対策は 2 段構えにする。1 つは、finalizer を付けるコントローラー自身を、外部リソースが既に無い場合にも必ず成功で終わるように書く(後片付け対象が既に存在しない時は成功として finalizer を外す。第 03 回で触れた冪等性と同じ考え方)。もう 1 つは応急処置として、固まったオブジェクトの finalizer を手動で空配列にする。<code>metadata.finalizers</code> は status サブリソースの対象ではないので、<code>--subresource=status</code> を付けずに本体への patch で書き換えられる(<code>kubectl patch widget b --type=merge -p '{"metadata":{"finalizers":[]}}'</code>)。ただし手動で外すのは、後片付けをあきらめることと同義なので、外部リソースが残らないか確認してから行う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 170" role="img" aria-label="固まったfinalizerの典型">
+        <rect x="30" y="30" width="200" height="54" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.6"/>
+        <text x="130" y="52" text-anchor="middle" font-size="12.5" fill="#c0492f">finalizer 付き Widget</text>
+        <text x="130" y="70" text-anchor="middle" font-size="11.5" fill="#c0492f">deletionTimestamp 残留</text>
+        <rect x="280" y="30" width="200" height="54" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.6"/>
+        <text x="380" y="52" text-anchor="middle" font-size="12.5" fill="#8a5a12">外す役のコントローラー</text>
+        <text x="380" y="70" text-anchor="middle" font-size="11.5" fill="#8a5a12">いない / 失敗し続ける</text>
+        <rect x="530" y="30" width="150" height="54" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="605" y="52" text-anchor="middle" font-size="12.5" fill="#1d4e8f">namespace</text>
+        <text x="605" y="70" text-anchor="middle" font-size="11.5" fill="#1d4e8f">Terminating で固まる</text>
+        <text x="350" y="120" text-anchor="middle" font-size="12.5" fill="#4a5d54">対策: 後片付け処理を冪等にする、または finalizers を手動で空にする</text>
+      </svg>
+      <p class="cap">図: 外す側がいなくなると、下流の namespace まで固まる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. まとめと次の回</h2>
+    <p>ownerReferences は Kubernetes 内部のオブジェクト同士の後片付けを GC に任せる仕組みで、namespace をまたぐ所有はできない。finalizer は GC が届かない外部リソースの後片付けに時間を確保する仕組みで、外し忘れるとオブジェクトも namespace も固まる。次の第 11 回では、こうして作った・消したオブジェクトに安全に書き込むための resourceVersion・Patch・Server-Side Apply の使い分けを見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 140" role="img" aria-label="章全体のまとめ">
+        <defs><marker id="a10-6" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="40" width="190" height="50" rx="9" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="115" y="62" text-anchor="middle" font-size="12.5" fill="#0f5132">ownerReferences</text>
+        <text x="115" y="79" text-anchor="middle" font-size="11.5" fill="#4a5d54">内部オブジェクトを GC</text>
+        <path d="M212,65 L278,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-6)"/>
+        <rect x="280" y="40" width="190" height="50" rx="9" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="375" y="62" text-anchor="middle" font-size="12.5" fill="#8a5a12">finalizer</text>
+        <text x="375" y="79" text-anchor="middle" font-size="11.5" fill="#4a5d54">外部の後片付けを待つ</text>
+        <path d="M472,65 L538,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a10-6)"/>
+        <rect x="540" y="40" width="150" height="50" rx="9" fill="#0f5132" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="615" y="62" text-anchor="middle" font-size="12.5" fill="#fff">第 11 回</text>
+        <text x="615" y="79" text-anchor="middle" font-size="11.5" fill="#dbefe4">安全な書き込み</text>
+      </svg>
+      <p class="cap">図: この章で見た関係と次回の橋渡し。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <p style="display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px">
+    <a class="back" href="./k8sctl-09-reconcile-loop.html" style="margin:0">← 第 09 回 Reconcile ループの中身</a>
+    <a class="back" href="./k8sctl-11-writing-safely.html" style="margin:0">第 11 回 書き込みの作法 →</a>
+  </p>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (6 問)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'Widget a を親にして ConfigMap(同じ namespace)を子として作り、controllerutil.SetControllerReference で ownerReferences を付けた。この後 Widget a を background 方式(既定)で削除すると何が起きるか。',
+    opts: [
+      '親はすぐ消え、ConfigMap はガベージコレクタが後から裏で消す',
+      '親と ConfigMap は全く独立していて、何も連動しない',
+      'ConfigMap が先に消えないと親は消えない',
+      '親は消えるが ConfigMap は孤立したまま永久に残る',
+      'ConfigMap に finalizer を付けていない限り何も起きない'
+    ],
+    ans: 0,
+    exps: [
+      'これが正解。background はガベージコレクション(GC)の既定方式で、親オブジェクトは即座に消え、子はガベージコレクタが裏で後から掃除する。',
+      '違う。ownerReferences を付けた時点で、GC はその関係をたどって子の削除を自動で行う。独立ではない。',
+      '違う。それは Foreground 方式の挙動。既定の Background は逆に親が先に消える。',
+      '違う。「孤立したまま残る」のは propagationPolicy を明示的に Orphan にした場合の挙動。既定の Background では子も消される。',
+      '違う。この Background 方式の削除に、finalizer を自分で付けたかどうかは関係しない。子(ConfigMap)に finalizer が無くても GC はそのまま消す(foregroundDeletion finalizer は GC 自身が内部で使う特別な finalizer で、2 節で見た Foreground 方式のときだけ登場する)。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>既定の Background 削除は「親を先に消し、子は後で掃除」という順番。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="background削除の順番"><defs><marker id="qa10-1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="30" y="40" width="150" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="105" y="67" text-anchor="middle" font-size="12.5" fill="#c0492f">親: 即消滅</text>'
+          + '<path d="M182,63 L280,63" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa10-1)"/>'
+          + '<rect x="290" y="40" width="200" height="46" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="390" y="67" text-anchor="middle" font-size="12.5" fill="#8a5a12">子: GC が裏で後から掃除</text>'
+          + '</svg><p class="cap">図: 親が先、子は後。</p></div>'
+    }
+  },
+  {
+    q: 'namespace 付きの Widget d を親にして、同じ namespace の ConfigMap と、クラスタ全体に属する ClusterRole の両方に ownerReferences を設定し、Widget d を削除した。EKS 1.35 のテスト用クラスタでの実測結果として正しいものはどれか。',
+    opts: [
+      'ConfigMap と ClusterRole はどちらも消える',
+      'ConfigMap と ClusterRole はどちらも残る(所有関係ごと無視される)',
+      'ClusterRole は消えるが、ConfigMap は残る',
+      'ConfigMap は消えるが、ClusterRole は OwnerRefInvalidNamespace という警告イベントが出て残る',
+      'Widget d の削除自体がエラーになり、何も消えない'
+    ],
+    ans: 3,
+    exps: [
+      '違う。ClusterRole はクラスタ全体に属するため、namespace に属する親からの所有が成立せず消えない。',
+      '違う。ConfigMap 側の所有関係は正しく成立するので消える。',
+      '違う。逆。同じ namespace 内の子(ConfigMap)の所有は成立して消える。',
+      'これが正解。実測では ConfigMap(同じ namespace の子)は GC で消えたが、ClusterRole(クラスタ全体の子)は OwnerRefInvalidNamespace イベントとともに残った。namespace に属する親はクラスタ全体のオブジェクトを所有できない。',
+      '違う。Widget d 自体の削除は成功する。問題が起きるのは ClusterRole 側の GC だけ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>namespace の中と外で所有が成立するかどうかが分かれる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="namespaceの壁"><defs><marker id="qa10-2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="20" width="220" height="110" rx="10" fill="#f3f9f6" stroke="#8fd6b4" stroke-width="1.3" stroke-dasharray="5,4"/>'
+          + '<text x="130" y="38" text-anchor="middle" font-size="11.5" fill="#4a5d54">namespace</text>'
+          + '<rect x="50" y="50" width="80" height="36" rx="7" fill="#0f5132" stroke="#0f5132" stroke-width="1.4"/>'
+          + '<text x="90" y="72" text-anchor="middle" font-size="11.5" fill="#fff">Widget d</text>'
+          + '<rect x="150" y="96" width="80" height="30" rx="7" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>'
+          + '<text x="190" y="116" text-anchor="middle" font-size="11" fill="#0f5132">消える</text>'
+          + '<path d="M90,88 L150,100" stroke="#4a5d54" stroke-width="1.3" fill="none" marker-end="url(#qa10-2)"/>'
+          + '<rect x="320" y="60" width="180" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>'
+          + '<text x="410" y="84" text-anchor="middle" font-size="12" fill="#c0492f">ClusterRole: 残る</text>'
+          + '</svg><p class="cap">図: 枠の外にある子には所有が効かない。</p></div>'
+    }
+  },
+  {
+    q: 'finalizer lab.crd-series.example/cleanup を付けた Widget b を kubectl delete したところ、EKS 1.35 のテスト用クラスタでの実測では即座には消えなかった。このときの正しい説明はどれか。',
+    opts: [
+      'delete コマンドがエラーで失敗し、何も変化しない',
+      '5 分経つと自動的に finalizer が外れて削除される',
+      'Widget b はキャッシュ上だけ消え、API サーバー上はまだ存在する(表示が矛盾する)',
+      'finalizer があると spec の変更も一切できなくなる',
+      'deletionTimestamp が付いた状態でオブジェクトは残り、finalizer が外れるまで実際には削除されない'
+    ],
+    ans: 4,
+    exps: [
+      '違う。delete コマンド自体は成功として受理される(エラーにはならない)。見た目の削除が完了しないだけ。',
+      '違う。finalizer には自動的なタイムアウトは無い。外す側のプログラムが外さない限り、何年でもそのまま残る。',
+      '違う。キャッシュだけの矛盾ではなく、API サーバー自身がオブジェクトを deletionTimestamp 付きで保持している。',
+      '違う。実測では「削除中でも spec の変更はできた」ことを確認している。finalizer は spec の変更を禁止しない。',
+      'これが正解。実測では delete 後も deletionTimestamp が付いた状態で残り、finalizer を誰か(通常はコントローラー)が外すまで実際の削除は保留される。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>finalizer は「消す」操作を受理した後、実際の削除を保留する印。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="finalizerによる削除保留"><defs><marker id="qa10-3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="40" width="150" height="46" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="95" y="60" text-anchor="middle" font-size="12" fill="#8a5a12">delete 要求</text>'
+          + '<text x="95" y="76" text-anchor="middle" font-size="11" fill="#8a5a12">(受理される)</text>'
+          + '<path d="M172,63 L260,63" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa10-3)"/>'
+          + '<rect x="270" y="40" width="200" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="370" y="60" text-anchor="middle" font-size="12" fill="#c0492f">deletionTimestamp 付きで残留</text>'
+          + '<text x="370" y="76" text-anchor="middle" font-size="11" fill="#c0492f">finalizer が外れるまで</text>'
+          + '</svg><p class="cap">図: 受理されても実削除は finalizer が外れるまで保留。</p></div>'
+    }
+  },
+  {
+    q: 'deletionTimestamp が付いた(削除予約中の) Widget b に対して、別のコントローラーが新しい finalizer をもう 1 つ追加しようとした。EKS 1.35 のテスト用クラスタでの実測結果はどれか。',
+    opts: [
+      '問題なく追加できる',
+      '追加はできるが無視されて消える',
+      '拒否される: metadata.finalizers: Forbidden: no new finalizers can be added if the object is being deleted',
+      'Widget b 自体が即座に強制削除される',
+      'namespace 全体が Terminating になる'
+    ],
+    ans: 2,
+    exps: [
+      '違う。削除予約中のオブジェクトに新しい finalizer を追加することは API サーバーに拒否される。',
+      '違う。追加操作自体が拒否(Forbidden)されるので、リクエストは通らない。',
+      'これが正解。実測で得られたエラーメッセージそのもの。削除が始まった後に新しい後片付けを横から追加して、削除が永久に終わらなくなることを防ぐための制約。',
+      '違う。拒否されるのは finalizer の追加リクエストだけで、Widget b 自体の状態(deletionTimestamp 付きで残留)は変わらない。',
+      '違う。この制約は単一オブジェクトの finalizers フィールドに関するものであり、namespace の状態には直接影響しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>削除予約が始まったら、後片付けの「予約リスト」はそれ以上増やせない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="削除中の新規finalizer拒否"><defs><marker id="qa10-4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="40" width="160" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="100" y="60" text-anchor="middle" font-size="12" fill="#c0492f">削除予約中の Widget b</text>'
+          + '<path d="M182,63 L270,63" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa10-4)"/>'
+          + '<rect x="280" y="40" width="200" height="46" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>'
+          + '<text x="380" y="60" text-anchor="middle" font-size="12" fill="#1d4e8f">新しい finalizer を追加</text>'
+          + '<text x="380" y="76" text-anchor="middle" font-size="11" fill="#1d4e8f">→ Forbidden</text>'
+          + '</svg><p class="cap">図: 予約リストは削除開始後に増やせない。</p></div>'
+    }
+  },
+  {
+    q: '削除予約中で deletionTimestamp が付いた Widget b から、残っている finalizer を controllerutil.RemoveFinalizer で外して Update した。EKS 1.35 のテスト用クラスタでの実測結果はどれか。',
+    opts: [
+      'Widget b は即座に消え、以後の Get は NotFound になる',
+      '何も変わらず deletionTimestamp が付いたまま残る',
+      '新しい世代(generation)としてもう一度作り直される',
+      'finalizer を外すとエラーになる',
+      '別の finalizer が自動的に代わりに付く'
+    ],
+    ans: 0,
+    exps: [
+      'これが正解。実測では finalizer を外した直後に Widget b は実際に削除され、以後の取得は NotFound になった。',
+      '違う。finalizers が空になった瞬間、API サーバーは保留していた削除を実行する。残り続けることはない。',
+      '違う。finalizer を外すのは削除の最後の足止めを外す操作であり、作り直しとは無関係。',
+      '違う。削除予約中でも finalizers フィールド自体の更新(finalizer を外す操作)はむしろ想定された正常な操作で、エラーにはならない。',
+      '違う。finalizer の自動付与は無い。付け外しは明示的にコードで行う操作。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>finalizers が空になることが、保留されていた削除の実行条件そのもの。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="finalizer除去後の即時削除"><defs><marker id="qa10-5" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="40" width="160" height="46" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="100" y="60" text-anchor="middle" font-size="12" fill="#8a5a12">finalizers: []</text>'
+          + '<text x="100" y="76" text-anchor="middle" font-size="11" fill="#8a5a12">(除去して Update)</text>'
+          + '<path d="M182,63 L270,63" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa10-5)"/>'
+          + '<rect x="280" y="40" width="200" height="46" rx="8" fill="#0f5132" stroke="#0f5132" stroke-width="1.5"/>'
+          + '<text x="380" y="63" text-anchor="middle" font-size="12.5" fill="#fff">即削除 → NotFound</text>'
+          + '</svg><p class="cap">図: 最後の finalizer が外れた瞬間に削除が実行される。</p></div>'
+    }
+  },
+  {
+    q: 'finalizer を付けるコントローラーが、外部クラウドリソースの削除に失敗し続けるバグを持ったまま稼働を止めた(誰も finalizer を外さない)。この Widget を含む namespace を kubectl delete namespace した場合に起きることとして正しいものはどれか。',
+    opts: [
+      'namespace は問題なく削除される(finalizer は無視される)',
+      'namespace は Terminating の状態のまま残り続ける',
+      'Widget だけが強制的に削除され、namespace は消える',
+      'Kubernetes が自動でそのコントローラーを再起動して解決する',
+      '1 時間後に自動的に finalizer が無効化される'
+    ],
+    ans: 1,
+    exps: [
+      '違う。namespace は中のすべてのオブジェクトが消えるまで消えない。finalizer が外れない Widget が 1 つでも残っていれば namespace も残る。',
+      'これが正解。finalizer を外す役目のコントローラーがいなくなると、Widget も namespace も Terminating のまま固まる。対策は、後片付け処理を冪等にして確実に finalizer を外す、または応急処置として手動で finalizers を空にすること。',
+      '違う。Kubernetes は自動的に finalizer を無視して強制削除するような機能を標準では持たない。',
+      '違う。finalizer が外れない原因であるコントローラー自体を Kubernetes が検知して再起動する仕組みは無い。',
+      '違う。finalizer には時間切れで自動的に無効化される仕組みは無い。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>外す役がいなくなると、下流の namespace まで連鎖して固まる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="namespace固まりの連鎖"><defs><marker id="qa10-6" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="40" width="140" height="46" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="90" y="60" text-anchor="middle" font-size="12" fill="#c0492f">外す役がいない</text>'
+          + '<path d="M162,63 L240,63" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa10-6)"/>'
+          + '<rect x="250" y="40" width="140" height="46" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="320" y="63" text-anchor="middle" font-size="12" fill="#8a5a12">Widget 残留</text>'
+          + '<path d="M392,63 L460,63" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa10-6)"/>'
+          + '<rect x="470" y="40" width="80" height="46" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>'
+          + '<text x="510" y="63" text-anchor="middle" font-size="11.5" fill="#1d4e8f">ns 固まる</text>'
+          + '</svg><p class="cap">図: 1 つの外れない finalizer が namespace まで連鎖する。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

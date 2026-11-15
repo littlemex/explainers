@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 01 回 Kubernetes は「望む状態」の台帳 ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --warn:#8a5a12; --warnbg:#fdf3e2; --other:#1d4e8f; --otherbg:#e6eef8;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+  .navlinks{display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px}
+  .navlinks a{color:var(--g2);text-decoration:none}
+  .navlinks a:hover{text-decoration:underline}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 01 回</p>
+  <h1>Kubernetes は「望む状態」の台帳</h1>
+  <p>API サーバーと etcd、コントローラー、kubelet はそれぞれ何を見て動いているのか</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">このシリーズは全 18 回。「CRD (Custom Resource Definition: Kubernetes に新しい種類の物を登録するための宣言) とコントローラーの違いすら分からない」ところから始めて、最後には自分で CRD とコントローラーを設計・実装できるようになることを目指す。第 01 回では、細かい文法より先に、Kubernetes 全体がどういう仕組みで動いているかの地図を描く。</p>
+
+  <div class="lead">Kubernetes に何かを頼むというのは、作業の手順を渡すことではない。「こうなっていてほしい」という希望を台帳(etcd)に書き込むことに等しい。頼んだ瞬間には何も動いていない。希望を実現するのは、台帳を見ている別のプログラム(コントローラーや kubelet)であり、それらは頼んだ人とは無関係に、台帳を見ては動き、また見ては動く、という繰り返しをずっと続けている。</div>
+
+  <section>
+    <h2>1. 命令型と宣言型</h2>
+    <p>ソフトウェアに仕事をさせる方法は大きく 2 つある。1 つは<b>命令型</b>(imperative: どう動くかを 1 手順ずつ指示する)で、「コンテナ(container: アプリとその実行環境を 1 つにまとめた、起動の最小単位)を 1 つ起動せよ」「もう 1 つ起動せよ」「もう 1 つ起動せよ」と、やることを順番に命令する。もう 1 つは<b>宣言型</b>(declarative: どうなっていてほしいかを記述する)で、「コンテナが 3 つある状態にせよ」と結果だけを伝え、そこへ至る手順は相手に任せる。</p>
+    <p>Kubernetes の <code>kubectl</code> にも実は両方の顔がある。公式ドキュメントは <code>kubectl run</code>・<code>kubectl scale</code> のように、その都度「起動せよ」「台数を変えよ」と操作を直接指示するコマンドを「命令型コマンド」と呼ぶ(<a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/imperative-command/" target="_blank" rel="noopener">Managing Kubernetes Objects Using Imperative Commands</a>)。YAML ファイル(YAML: 人が読み書きしやすい、インデントで構造を表すデータ形式)を使う場合でも、<code>kubectl create -f file.yaml</code> のように「作成せよ」と操作そのものを指定する使い方は、公式には「命令型のオブジェクト管理」に分類され、まだ命令型の側にいる。これに対して <code>kubectl apply -f file.yaml</code> は、ファイルの内容を正としたうえで「作成するか更新するか」の判断そのものを kubectl 自身に委ねる使い方で、これが「宣言型のオブジェクト管理」と呼ばれる理由だ。ただし Kubernetes というシステム全体の設計思想は宣言型が土台で、このシリーズで作るコントローラーも「今の状態を見て、望む状態に近づける」という宣言型の考え方をそのまま使う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 240" role="img" aria-label="命令型と宣言型の比較図">
+        <rect x="20" y="20" width="340" height="200" rx="12" fill="#fbeeea" stroke="#c0492f"/>
+        <text x="190" y="46" text-anchor="middle" font-size="15" font-weight="700" fill="#c0492f">命令型 (手順を 1 つずつ指示)</text>
+        <g font-size="13.5" fill="#12211a">
+          <rect x="45" y="64" width="290" height="30" rx="6" fill="#fff" stroke="#c0492f"/>
+          <text x="190" y="84" text-anchor="middle">① コンテナを 1 つ起動せよ</text>
+          <rect x="45" y="104" width="290" height="30" rx="6" fill="#fff" stroke="#c0492f"/>
+          <text x="190" y="124" text-anchor="middle">② もう 1 つ起動せよ</text>
+          <rect x="45" y="144" width="290" height="30" rx="6" fill="#fff" stroke="#c0492f"/>
+          <text x="190" y="164" text-anchor="middle">③ もう 1 つ起動せよ</text>
+        </g>
+        <text x="190" y="198" text-anchor="middle" font-size="12.5" fill="#4a5d54">手順を忘れると結果が狂う</text>
+        <rect x="400" y="20" width="340" height="200" rx="12" fill="#e7f6ee" stroke="#198754"/>
+        <text x="570" y="46" text-anchor="middle" font-size="15" font-weight="700" fill="#0f5132">宣言型 (結果だけを記述)</text>
+        <rect x="430" y="70" width="280" height="50" rx="8" fill="#fff" stroke="#198754"/>
+        <text x="570" y="99" text-anchor="middle" font-size="14">コンテナが <tspan font-weight="700">3 つ</tspan> ある状態にせよ</text>
+        <path d="M 570 128 C 500 150, 500 180, 570 185 C 640 180, 640 150, 570 128" fill="none" stroke="#198754" stroke-width="2"/>
+        <text x="570" y="205" text-anchor="middle" font-size="12.5" fill="#4a5d54">足りなければ補い、多ければ減らす(繰り返し)</text>
+      </svg>
+      <p class="cap">図: 命令型は手順の列、宣言型は結果の状態とそれを維持する繰り返しの矢印。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 誰が何を見ているか(全体の地図)</h2>
+    <p>Kubernetes クラスタには主に 4 種類の役が登場する。<b>API サーバー</b>(kube-apiserver: HTTP(ウェブなどで使われる通信の約束事)の API を外に公開する窓口。公式には「The core component server that exposes the Kubernetes HTTP API」(Kubernetes の HTTP API を外に公開する中核のコンポーネントサーバー)と説明されている)、<b>etcd</b>(API サーバーが持つ全データの、一貫性が保たれた key-value(名前と値を対にして保存する単純な方式)の保存場所)、<b>コントローラー</b>(controller: API サーバーが持つ情報を見て、現実をそれに近づけるプログラム)、<b>kubelet</b>(各ノード(node: クラスタを構成する 1 台のマシン)で「Pod(1 つ以上のコンテナをまとめて動かす、Kubernetes の最小の実行単位)が確実に動いている状態」を保つプログラム)だ(<a href="https://kubernetes.io/docs/concepts/overview/components/" target="_blank" rel="noopener">Kubernetes Components</a>)。</p>
+    <p>重要なのは、コントローラーも kubelet も、API サーバーから最初に一覧をまとめて受け取り、その後は変更だけを流してもらう(list + watch という方式。詳しくは第 09 回)という形で、常に台帳の中身を把握し続けている点だ。一定時間おきに尋ね直しているわけではなく、彼らは誰かから直接指示を受けるのでもなく、台帳の中身を見て自分の判断で動く。</p>
+    <div class="fig">
+      <svg viewBox="0 0 800 300" role="img" aria-label="API サーバーを中心にした全体地図">
+        <rect x="320" y="20" width="160" height="56" rx="10" fill="#fff" stroke="#4a5d54"/>
+        <text x="400" y="54" text-anchor="middle" font-size="14">あなた (kubectl)</text>
+        <rect x="300" y="110" width="200" height="60" rx="10" fill="#0f5132"/>
+        <text x="400" y="135" text-anchor="middle" font-size="14" fill="#fff" font-weight="700">API サーバー</text>
+        <text x="400" y="155" text-anchor="middle" font-size="12" fill="#cfe8da">HTTP の窓口</text>
+        <rect x="330" y="210" width="140" height="50" rx="10" fill="#1d4e8f"/>
+        <text x="400" y="240" text-anchor="middle" font-size="13.5" fill="#fff">etcd (台帳)</text>
+        <rect x="40" y="110" width="170" height="60" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="125" y="135" text-anchor="middle" font-size="13.5" fill="#0f5132" font-weight="700">コントローラー</text>
+        <text x="125" y="155" text-anchor="middle" font-size="11.5" fill="#4a5d54">今の状態を見て動く</text>
+        <rect x="590" y="110" width="170" height="60" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="675" y="135" text-anchor="middle" font-size="13.5" fill="#0f5132" font-weight="700">kubelet (各ノード)</text>
+        <text x="675" y="155" text-anchor="middle" font-size="11.5" fill="#4a5d54">Pod を確実に動かす</text>
+        <path d="M400 76 L400 108" stroke="#4a5d54" stroke-width="2" marker-end="url(#a1)"/>
+        <path d="M400 170 L400 208" stroke="#4a5d54" stroke-width="2" marker-end="url(#a1)"/>
+        <path d="M300 150 L212 150" stroke="#198754" stroke-width="2" marker-end="url(#a2)"/>
+        <path d="M500 150 L588 150" stroke="#198754" stroke-width="2" marker-end="url(#a2)"/>
+        <defs>
+          <marker id="a1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker>
+          <marker id="a2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#198754"/></marker>
+        </defs>
+        <text x="400" y="280" text-anchor="middle" font-size="12.5" fill="#4a5d54">コントローラーと kubelet は「見ては動く」を自分のペースで繰り返す</text>
+      </svg>
+      <p class="cap">図: あなたは API サーバーにしか話しかけない。実際に動くのはコントローラーと kubelet。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. <code>kubectl apply</code> は何をして、何をしないか</h2>
+    <p><code>kubectl apply -f deployment.yaml</code> を実行すると、何が起きるだろうか。実際に起きるのは「YAML の内容を API サーバーに送り、API サーバーがそれを検証して etcd に保存する」ことだけだ。Pod が実際に起動する、コンテナイメージが取得される、といった現実の変化は、この 1 回の呼び出しの中では<b>起きていない</b>。</p>
+    <p>保存された情報を見て「Deployment(deployment: 同じ Pod を指定した数だけ動かし続けることを宣言する、組み込みの型)が 3 レプリカ欲しいと言っている、今は 0 個しかない」と気づき、ReplicaSet(replicaset: 指定した数だけ Pod のコピーを保つことだけを担当する、Deployment の下請けの型)や Pod を作るのは別のプログラム(コントローラー、第 03 回)だ。その Pod をどのノードに置くか割り当てるのは kube-scheduler、Pod の中でコンテナイメージを取得して実際に起動するのはさらに別のプログラム(kubelet)だ。<code>kubectl apply</code> の呼び出しは、その両方よりずっと先に、しかも一瞬で終わっている。</p>
+    <div class="note">このズレがあるからこそ、<code>kubectl apply</code> が成功しても Pod が Running になるまでには数秒から数十秒のタイムラグがある。この間、Pod は Pending という状態で、kube-scheduler によるノードの割り当てや、kubelet によるコンテナイメージの取得を待っている。コマンドの成功は「台帳への書き込みが受理された」ことしか保証しない。</div>
+    <div class="fig">
+      <svg viewBox="0 0 760 220" role="img" aria-label="kubectl apply の射程の図">
+        <line x1="50" y1="60" x2="740" y2="60" stroke="#d9e5df" stroke-width="2"/>
+        <circle cx="80" cy="60" r="6" fill="#198754"/>
+        <text x="80" y="40" text-anchor="middle" font-size="13">apply 実行</text>
+        <circle cx="230" cy="60" r="6" fill="#198754"/>
+        <text x="230" y="40" text-anchor="middle" font-size="13">etcd に保存完了</text>
+        <rect x="40" y="90" width="260" height="36" rx="8" fill="#e7f6ee" stroke="#198754"/>
+        <text x="170" y="113" text-anchor="middle" font-size="13">ここまでが kubectl apply の仕事</text>
+        <circle cx="440" cy="60" r="6" fill="#1d4e8f"/>
+        <text x="440" y="40" text-anchor="middle" font-size="13">コントローラーが Pod を作成</text>
+        <circle cx="650" cy="60" r="6" fill="#1d4e8f"/>
+        <text x="650" y="40" text-anchor="middle" font-size="13">kubelet がコンテナを起動</text>
+        <rect x="350" y="140" width="360" height="36" rx="8" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="530" y="163" text-anchor="middle" font-size="13">ここは別のプログラムが、別のタイミングで行う</text>
+      </svg>
+      <p class="cap">図: コマンドが返ってきた時点では、現実はまだ何も変わっていない。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>まとめと次の回</h2>
+    <p>Kubernetes を操作するとは、台帳(etcd)に望む状態を書き込むことであり、実現は別のプログラムに委ねられている。この「見る・比べる・近づける」という繰り返しの型は、このシリーズ全体を貫く最重要の前提になる。第 02 回では、台帳に書き込む「物」の住所(Group / Version / Kind)と型の仕組みを見ていく。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="まとめの図">
+        <rect x="30" y="30" width="200" height="90" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="130" y="65" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f5132">望む状態を書く</text>
+        <text x="130" y="88" text-anchor="middle" font-size="12" fill="#4a5d54">(あなた・kubectl apply)</text>
+        <path d="M240 75 L300 75" stroke="#4a5d54" stroke-width="2" marker-end="url(#a3)"/>
+        <rect x="310" y="30" width="200" height="90" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="410" y="65" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1d4e8f">現実を近づける</text>
+        <text x="410" y="88" text-anchor="middle" font-size="12" fill="#4a5d54">(コントローラー・kubelet)</text>
+        <defs><marker id="a3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 「書く人」と「実現する人」は別。このシリーズではその両方を作る。</p>
+    </div>
+  </section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック(全 6 問)</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <div class="navlinks">
+    <a href="./k8sctl-index.html">← シリーズ目次</a>
+    <a href="./k8sctl-02-api-objects.html">第 02 回 API の住所と型 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: 'チームメイトが「<code>kubectl apply -f deploy.yaml</code> を実行したら、コマンドが正常終了(exit code 0)したのに Pod がまだ Pending だった。おかしい」と言っている。最も適切な説明は?',
+    opts: [
+      'apply は望む状態を etcd に保存するところまでの仕事。Pod オブジェクト自体はもう作られていて、Pending はノードへの割り当てやコンテナイメージの取得を待っている状態なので、時間差があるのは正常',
+      'apply が失敗している。exit code 0 でも Pod が無ければバグ',
+      'kubectl のキャッシュが古いだけで、もう一度 apply すれば直る',
+      'Pending のまま固まっているので etcd が壊れている',
+      'kubelet が apply コマンドを直接受け取るはずなのに受け取れていないので kubelet の設定ミス'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>apply が保証するのは「望む状態が台帳(etcd)に保存されたこと」と、その後すぐにコントローラーが ReplicaSet と Pod のオブジェクトを作ることまで。Pod が Pending のままなのは、どのノードに置くかを決める kube-scheduler の割り当てや、kubelet によるコンテナイメージの取得を待っているからで、これも apply の呼び出しの外で、別のタイミングで進む処理。',
+      '違う。apply の exit code は「API サーバーに受理されたか」を示すだけで、Pod の起動状況とは無関係。exit code 0 は想定どおりの挙動。',
+      '違う。問題はキャッシュではなく、そもそも「書き込み」と「実現」が別のプログラムの仕事だという設計上の分離にある。再実行しても同じタイムラグは起きる。',
+      '違う。保存自体が成功している(apply が正常終了している)ので etcd は正しく機能している。',
+      '違う。kubelet は kubectl コマンドを直接受け取らない。kubelet が見るのは API サーバーが持つ Pod の情報であり、kubectl はそこに書き込むだけ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>apply の終了は「保存完了」の地点。Pod が Running になるまでの間は Pending で、ノード割り当てとイメージ取得を待っている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="apply後のタイムライン"><line x1="40" y1="80" x2="520" y2="80" stroke="#d9e5df" stroke-width="2"/><circle cx="80" cy="80" r="6" fill="#198754"/><text x="80" y="60" text-anchor="middle" font-size="13">apply 完了 (exit 0)</text><circle cx="300" cy="80" r="6" fill="#1d4e8f"/><text x="300" y="60" text-anchor="middle" font-size="13">kube-scheduler が割り当て</text><circle cx="470" cy="80" r="6" fill="#1d4e8f"/><text x="470" y="60" text-anchor="middle" font-size="13">kubelet が起動</text><text x="280" y="120" text-anchor="middle" font-size="12.5" fill="#4a5d54">この間、Pod は Pending。apply の「外」で起きる</text></svg><p class="cap">図: exit 0 は保存の成功。起動の成功ではない。</p></div>'
+    }
+  },
+  {
+    q: '「宣言型」の説明として最も正確なものは?',
+    opts: [
+      '実行する手順を 1 行ずつ、順番に書くこと',
+      'どうなっていてほしいかという結果の状態だけを書き、そこへ至る手順は相手に任せること',
+      'YAML ファイルでしか書けない操作のこと',
+      'コマンドを 1 回も使わずに操作すること',
+      'etcd に直接書き込む操作のこと'
+    ],
+    ans: 1,
+    exps: [
+      '違う。それは命令型(imperative)の説明。「コンテナを起動せよ」「次にこれをせよ」と手順を 1 つずつ指示するのが命令型。',
+      '<b>これが正解。</b>宣言型は「コンテナが 3 つある状態にせよ」のように結果だけを記述し、そこへ至る手順(何を作る・何を消す)はシステム側が判断する。',
+      '違う。宣言型かどうかはファイル形式では決まらない。<code>kubectl create -f</code> のように YAML ファイルを使っても、「作成せよ」と操作を自分で指定するなら命令型。<code>kubectl apply</code> が宣言型なのは、ファイルの内容を正にして、作成か更新かの判断そのものを kubectl に委ねるからだ。',
+      '違う。コマンドを使うかどうかではなく、操作の判断をユーザーが下すか kubectl に委ねるかが宣言型かどうかを決める。',
+      '違う。etcd への書き込みは API サーバー経由で行われ、ユーザーが直接触ることはない。これは宣言型/命令型の区別とは別の話。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>命令型は矢印が 1 本の手順の列、宣言型は 1 つの状態の箱と、そこへ戻ろうとする繰り返しの矢印。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="宣言型の図"><rect x="200" y="40" width="160" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="280" y="70" text-anchor="middle" font-size="13.5">3 つある状態</text><path d="M280 95 C 220 120, 220 145, 280 150 C 340 145, 340 120, 280 95" fill="none" stroke="#198754" stroke-width="2"/><text x="280" y="140" text-anchor="middle" font-size="11" fill="#4a5d54" dy="25">保ち続ける</text></svg><p class="cap">図: 結果の状態を保ち続けるのが宣言型。</p></div>'
+    }
+  },
+  {
+    q: '次のうち、「etcd」の説明として最も正確なものはどれか?',
+    opts: [
+      'Pod の中でコンテナを実際に起動するプログラム',
+      'クラスタの外からアクセスする HTTP の窓口そのもの',
+      'API サーバーが持つ全データを保存する、一貫性のある key-value ストア',
+      'YAML ファイルを人間が編集するためのエディタ',
+      '望む状態と現在の状態の差分を計算するアルゴリズムの名前'
+    ],
+    ans: 2,
+    exps: [
+      '違う。それは kubelet の役割。etcd はデータを保存するだけで、コンテナを起動する能力は持たない。',
+      '違う。HTTP の窓口は API サーバー(kube-apiserver)。etcd はその窓口の裏側にあるデータの保存場所であり、外部から直接話しかける対象ではない。',
+      '<b>これが正解。</b>公式ドキュメントも etcd を「Consistent and highly-available key value store for all API server data」と説明している。API サーバーが扱うすべてのオブジェクトの実体はここに保存される。',
+      '違う。etcd はソフトウェアのコンポーネントであり、人間が使うエディタではない。',
+      '違う。差分を計算して近づけるのはコントローラーの仕事。etcd 自身は差分計算をしない、ただの保存場所。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>API サーバーが窓口、etcd はその奥にある保存場所。外から直接 etcd を触ることはない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="etcdの位置"><rect x="180" y="30" width="200" height="50" rx="8" fill="#0f5132"/><text x="280" y="60" text-anchor="middle" font-size="13.5" fill="#fff">API サーバー(窓口)</text><path d="M280 85 L280 115" stroke="#4a5d54" stroke-width="2" marker-end="url(#a4)"/><rect x="200" y="120" width="160" height="40" rx="8" fill="#1d4e8f"/><text x="280" y="145" text-anchor="middle" font-size="13" fill="#fff">etcd(保存場所)</text><defs><marker id="a4" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs></svg><p class="cap">図: etcd は窓口の奥にある。</p></div>'
+    }
+  },
+  {
+    q: 'kubelet の役割として最も正確な説明は?',
+    opts: [
+      '複数のノードにまたがる Pod のスケジューリング先を決める',
+      'YAML の構文エラーを検証して拒否する',
+      'etcd に保存されたすべてのオブジェクトの一覧を表示する',
+      '自分が動いているノードで、Pod(とその中のコンテナ)が確実に動いている状態を保つ',
+      '複数のクラスタ間で Pod の設定を同期する'
+    ],
+    ans: 3,
+    exps: [
+      '違う。どのノードに Pod を割り当てるかを決めるのは kube-scheduler の仕事。kubelet は割り当てられたあとの、自分のノード内の実行を担当する。',
+      '違う。YAML の構文エラー(インデント崩れなど)は kubectl が読み込む時点で検出され、そもそも送信されない。フィールドの型や値の検証は API サーバーが行う(admission: 保存する前に許可するかどうかを判定する仕組み、を含む。第 12・13 回)。どちらも kubelet の仕事ではない。',
+      '違う。それは <code>kubectl get</code> のようなクライアントの仕事で、kubelet は自分のノードの Pod しか見ない。',
+      '<b>これが正解。</b>公式ドキュメントも kubelet を「Ensures that Pods are running, including their containers」と説明している。各ノードに 1 つ動き、自分のノードに割り当てられた Pod だけを見る。',
+      '違う。kubelet はクラスタをまたいだ同期のような仕事はしない。見るのは自分が動いている 1 つのノードの中だけ。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>kubelet はノードごとに 1 つ。自分のノードに割り当てられた Pod だけを見ている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="kubeletの範囲"><rect x="40" y="30" width="220" height="120" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="150" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">ノード A</text><text x="150" y="80" text-anchor="middle" font-size="12.5">kubelet</text><text x="150" y="105" text-anchor="middle" font-size="12">自分の Pod だけを見る</text><rect x="300" y="30" width="220" height="120" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/><text x="410" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="#4a5d54">ノード B</text><text x="410" y="80" text-anchor="middle" font-size="12.5">別の kubelet</text><text x="410" y="105" text-anchor="middle" font-size="12">ノード A は見えない</text></svg><p class="cap">図: kubelet の視野は自分のノードの中だけ。</p></div>'
+    }
+  },
+  {
+    q: '「コントローラー」が行っていることを最もよく表しているのは?',
+    opts: [
+      'ユーザーからの HTTP リクエストを直接受け取って処理する',
+      'ノードの OS やカーネルを直接操作する',
+      '新しい CRD の型を定義する',
+      'kubectl コマンドの実行結果を画面に表示する',
+      '台帳(API サーバー経由で etcd の内容)を見て、今の状態と望む状態の差を見つけ、現実をそれに近づける'
+    ],
+    ans: 4,
+    exps: [
+      '違う。ユーザーからの HTTP リクエストを直接受け取るのは API サーバー。コントローラーは API サーバーのクライアントの 1 つにすぎない。',
+      '違う。OS やカーネルを直接操作するのは kubelet やコンテナランタイムの領域。コントローラーが働きかける先は API サーバー越しのオブジェクトだけに限らず、クラウドの API を呼ぶなど外の世界に働きかけることもある(第 04 回)が、ノードの OS やカーネルを直接触ることはない。',
+      '違う。CRD の定義は人間(あるいは manifest)が書いて API サーバーに登録するもので、コントローラー自身が定義を作るわけではない(第 04・05 回)。',
+      '違う。それは kubectl というクライアント側の表示処理であり、コントローラーの仕事ではない。',
+      '<b>これが正解。</b>コントローラーは「見る・比べる・近づける」を繰り返すプログラム。ユーザーからの直接の指示ではなく、台帳の中身を自分の判断で見て動く。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>コントローラーの中身は「見る → 比べる → 近づける」のループ(詳細は第 03 回・第 09 回)。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="コントローラーのループ"><rect x="60" y="60" width="130" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="125" y="90" text-anchor="middle" font-size="13">見る</text><rect x="220" y="60" width="130" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="285" y="90" text-anchor="middle" font-size="13">比べる</text><rect x="380" y="60" width="130" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="445" y="90" text-anchor="middle" font-size="13">近づける</text><path d="M190 85 L218 85" stroke="#4a5d54" stroke-width="2" marker-end="url(#a5)"/><path d="M350 85 L378 85" stroke="#4a5d54" stroke-width="2" marker-end="url(#a5)"/><path d="M445 112 C 445 150, 125 150, 125 112" fill="none" stroke="#4a5d54" stroke-width="2" marker-end="url(#a5)"/><defs><marker id="a5" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs></svg><p class="cap">図: このループはシリーズ全体で何度も出てくる。</p></div>'
+    }
+  },
+  {
+    q: 'ある新人が「<code>kubectl apply</code> を実行した瞬間に、もう Pod の中でアプリが起動しているはずだ」と思い込んでいる。この誤解を正すのに最も有効な説明はどれか?',
+    opts: [
+      'kubectl apply は etcd に保存するだけで、Pod を実際に作りコンテナを起動するのはコントローラーと kubelet という別のプログラムの仕事であり、時間差がある',
+      'kubectl apply は Pod を作るところまでは一瞬で終わるが、コンテナの起動だけ遅れる',
+      'kubectl apply は何もしておらず、人間が手動で Pod を作らない限り何も起きない',
+      'kubectl apply は命令型コマンドなので、手順どおりに即座に全部実行される',
+      'Pod が起動するまでの時間は etcd の応答速度だけで決まる'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>apply が保証するのは望む状態の保存のみ。Pod の作成(コントローラー)とコンテナの起動(kubelet)はどちらも別のプログラムが、保存の後で、それぞれ別のタイミングで行う。これが新人の思い込みを正す最も正確な説明。',
+      '違う。Pod オブジェクト自体を作るのも、apply の呼び出しの中では起きていない(Deployment の場合、ReplicaSet と Pod を作るのはコントローラー)。「Pod 作成は一瞬」という前提自体が誤り。',
+      '違う。apply は仕事をしている(望む状態を台帳に保存している)。何もしていないわけではなく、「保存」と「実現」の役割が分かれているだけ。',
+      '違う。apply は宣言型のオブジェクト管理であり、命令型コマンドではない。また宣言型でも「即座に全部実行される」わけではなく、実現は別プログラムに委ねられる。',
+      '違う。etcd の応答速度は保存の速さにしか関係せず、Pod が Running になるまでの時間はコントローラーの処理やコンテナイメージの取得など、etcd とは別の要因で決まる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>「保存」「Pod 作成」「コンテナ起動」は 3 つの別の地点であり、それぞれ別のプログラムが担当する。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="3段階の図"><rect x="30" y="60" width="150" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="105" y="90" text-anchor="middle" font-size="12.5">保存(apply)</text><rect x="205" y="60" width="150" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="280" y="90" text-anchor="middle" font-size="12.5">Pod 作成(コントローラー)</text><rect x="380" y="60" width="150" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="455" y="90" text-anchor="middle" font-size="12.5">起動(kubelet)</text><path d="M180 85 L203 85" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6)"/><path d="M355 85 L378 85" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6)"/><defs><marker id="a6" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs></svg><p class="cap">図: 3 つの箱はそれぞれ別のプログラムの仕事。</p></div>'
+    }
+  }
+];
+
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+});
+</script>
+</body>
+</html>

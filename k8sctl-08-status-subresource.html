@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ============================================================
+  explainers クイズ付き解説ページ 共通テンプレート
+  - このファイルをコピーして各シリーズのサンプルを作る
+  - 単一 HTML・inline CSS/JS・ビルド不要・MathJax は CDN
+  - {{PLACEHOLDER}} を埋め、QUIZ 配列を 10 問に拡張する
+  ============================================================ -->
+<title>第 08 回 status と scale のサブリソース ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+  .nav2{display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px}
+  .nav2 a{color:var(--g2);text-decoration:none}
+  .nav2 a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 08 回</p>
+  <h1>status と scale のサブリソース</h1>
+  <p>望む状態と観測した状態を分け、別々の書き込み口を作る仕組み</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">Mid パートの最後となるこの回では、CRD の spec(望む状態)と status(観測した状態)という 2 つの領域が、なぜ分かれているべきで、サブリソースという仕組みがどうそれを支えているかを見る。ここで整理した generation・observedGeneration・conditions という道具は、第 09 回以降のコントローラーの実装でずっと使い続ける。</p>
+
+  <div class="lead">spec は利用者が書く「望む状態」、status はコントローラーが書く「観測した状態」。status サブリソースを有効にすると、この 2 つの書き込み口が API レベルで分かれ、RBAC も分けられる。generation は spec の変更を数え、observedGeneration はコントローラーが「どの版の spec まで見たか」を status に書き込む、2 つの数字の対比になっている。</div>
+
+  <section>
+    <h2>spec と status という 2 つの領域</h2>
+    <p>Kubernetes のオブジェクトの多くは、<code>spec</code>(利用者が書く望む状態)と <code>status</code>(コントローラーが観測して書く今の状態)の 2 つに分かれる。この分け方は Kubernetes の API の約束事(<a href="https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md" target="_blank" rel="noopener">API conventions</a>)として広く守られている。第 03 回で見た「望む状態と今の状態の差を埋め続ける」という調整ループの話を、オブジェクト 1 つのレベルに落とし込んだものがこの分離と言える。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 200" role="img" aria-label="specとstatusの分離を示す図">
+        <defs>
+          <marker id="a1b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d4e8f"/></marker>
+          <marker id="a1g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+        </defs>
+        <rect x="30" y="30" width="260" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.8"/>
+        <text x="160" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4e8f">利用者</text>
+        <text x="160" y="75" text-anchor="middle" font-size="12" fill="#1d4e8f">spec を書く(望む状態)</text>
+
+        <rect x="420" y="30" width="250" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="545" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">コントローラー</text>
+        <text x="545" y="75" text-anchor="middle" font-size="12" fill="#0f5132">status を書く(観測した状態)</text>
+
+        <rect x="200" y="130" width="300" height="50" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="350" y="160" text-anchor="middle" font-size="13" fill="#12211a">Widget オブジェクト (spec + status)</text>
+
+        <line x1="160" y1="90" x2="280" y2="128" stroke="#1d4e8f" stroke-width="2" marker-end="url(#a1b)"/>
+        <line x1="545" y1="90" x2="420" y2="128" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+      </svg>
+      <p class="cap">図: spec は利用者から、status はコントローラーから、別々の方向に書き込まれる</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>status サブリソースを有効にすると何が変わるか</h2>
+    <p>CRD の <code>subresources.status: {}</code> を有効にすると、本体(<code>/widgets/{name}</code>)への更新で status フィールドへの変更が<b>無視</b>されるようになり、<code>/widgets/{name}/status</code> という別の URL だけが status を書ける窓口になる。逆方向も対になっていて、<code>/status</code> への書き込みは status 以外(spec など)への変更を無視する。2 つの窓口はそれぞれ自分の担当フィールドしか見ない。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): 本体に対して <code>{"status":{"replicas":3}}</code> を merge patch(マージパッチ: 送った部分だけを今のオブジェクトに重ね書きする、全体を送り直さない更新方法。第 11 回で詳しく扱う)すると <code>patched (no change)</code> が返り、status は無視された。<code>--subresource=status</code> を付けて同じ内容を patch すると、今度は status が実際に書けた。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 210" role="img" aria-label="statusサブリソースの書き込み口の違いを示す図">
+        <defs>
+          <marker id="a2r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0492f"/></marker>
+          <marker id="a2g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+        </defs>
+        <rect x="20" y="20" width="300" height="60" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="170" y="45" text-anchor="middle" font-size="13" fill="#12211a">本体 /widgets/a へ</text>
+        <text x="170" y="63" text-anchor="middle" font-size="12" fill="#12211a">{"status":{"replicas":3}} を patch</text>
+
+        <rect x="20" y="120" width="300" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>
+        <text x="170" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="#c0492f">patched (no change)</text>
+        <text x="170" y="163" text-anchor="middle" font-size="12" fill="#c0492f">status は無視された</text>
+
+        <rect x="440" y="20" width="300" height="60" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="590" y="45" text-anchor="middle" font-size="13" fill="#12211a">/widgets/a/status へ</text>
+        <text x="590" y="63" text-anchor="middle" font-size="12" fill="#12211a">--subresource=status で patch</text>
+
+        <rect x="440" y="120" width="300" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="590" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">status が書けた</text>
+        <text x="590" y="163" text-anchor="middle" font-size="12" fill="#0f5132">generation は変化しない</text>
+
+        <line x1="170" y1="80" x2="170" y2="118" stroke="#c0492f" stroke-width="2" marker-end="url(#a2r)"/>
+        <line x1="590" y1="80" x2="590" y2="118" stroke="#198754" stroke-width="2" marker-end="url(#a2g)"/>
+      </svg>
+      <p class="cap">図: 本体への patch は status を無視し、/status という別の窓口だけが status を書ける(実測)</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>RBAC で status を分ける</h2>
+    <p>status サブリソースが有効だと、<code>widgets</code> と <code>widgets/status</code> は RBAC(Role-Based Access Control: 役割ごとの権限制御)の上で別々の resource として扱われる。ただし RBAC が区別できるのは resource 単位(<code>widgets</code> か <code>widgets/status</code> か)までで、「<code>spec</code> だけ書ける」のようなフィールド単位の権限は存在しない。<code>widgets/status</code> への write を利用者に与えないことで、「status を書けるのはコントローラーだけ」という分担を実現できる。たとえば「spec は書けるが status は書けない」利用者と、「status だけ書けるが spec は書けない」コントローラー用のサービスアカウントを、別々の Role で分けられる。これは「誰が望む状態を決め、誰が観測結果を書くか」という責任の分離を、権限の上でも裏付ける仕組みになっている。</p>
+    <p class="note">コントローラーが実際に動くには、<code>widgets/status</code> の get・update・patch だけでは足りない。informer が一覧と監視を行うための <code>widgets</code> の get・list・watch も必要になる。さらに第 10 回で見る finalizer の付け外しは本体(<code>widgets</code>)への update・patch で行うので、finalizer を使うコントローラーは <code>widgets</code> の update・patch も持つ(その権限があれば spec も書けてしまう。フィールド単位の制限ができない以上、ここは「信頼してよいコントローラーにだけ渡す」運用で守るしかない)。</p>
+    <table>
+      <tr><th>resource</th><th>権限の例</th><th>想定する主体</th></tr>
+      <tr><td><code>widgets</code></td><td>get, list, watch, update, patch (spec を含む全体)</td><td>利用者、kubectl</td></tr>
+      <tr><td><code>widgets</code></td><td>get, list, watch(+ finalizer を使うなら update, patch も)</td><td>コントローラーのサービスアカウント</td></tr>
+      <tr><td><code>widgets/status</code></td><td>get, update, patch (status だけ)</td><td>コントローラーのサービスアカウント</td></tr>
+    </table>
+    <div class="fig">
+      <svg viewBox="0 0 640 190" role="img" aria-label="RBACでspecとstatusの権限を分ける図">
+        <rect x="20" y="30" width="280" height="130" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="160" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4e8f">利用者 Role</text>
+        <text x="160" y="80" text-anchor="middle" font-size="12" fill="#1d4e8f">widgets: 読み書き可</text>
+        <text x="160" y="100" text-anchor="middle" font-size="12" fill="#1d4e8f">widgets/status: 書けない</text>
+        <rect x="340" y="30" width="280" height="130" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="480" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">コントローラー Role</text>
+        <text x="480" y="80" text-anchor="middle" font-size="12" fill="#0f5132">widgets: get/list/watch(必須)</text>
+        <text x="480" y="100" text-anchor="middle" font-size="12" fill="#0f5132">widgets/status: 書き込み可</text>
+        <text x="480" y="120" text-anchor="middle" font-size="12" fill="#0f5132">finalizer を使うなら widgets の update/patch も</text>
+      </svg>
+      <p class="cap">図: resource 単位で分かれた責任。「status だけ書ける」はフィールド単位ではなく resource 単位の権限で表現する</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>generation と observedGeneration</h2>
+    <p><code>metadata.generation</code> は spec が変わるたびに増える番号で、API サーバーが自動管理する。<code>status.observedGeneration</code> はコントローラー自身が書く番号で、「どの版の spec まで見て反映したか」を表す。2 つを比べれば、コントローラーが最新の spec にまだ追いついていないかどうかが分かる。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): status サブリソースが有効な状態で status だけを patch しても generation は 1 のまま変化しなかった。spec.replicas を変更すると generation が 1 から 2 に増えた。つまり status サブリソースが有効な間は、generation は spec の変更だけを数える(status サブリソースを持たない CRD では、本体への更新が status も一緒に書き換えるため、その場合は status の変更でも generation が増える)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 190" role="img" aria-label="generationとobservedGenerationの対比を示す図">
+        <rect x="30" y="30" width="300" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.8"/>
+        <text x="180" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4e8f">metadata.generation = 2</text>
+        <text x="180" y="75" text-anchor="middle" font-size="12" fill="#1d4e8f">作成後、spec が 1 回変更された(作成時 1 → 2)</text>
+
+        <rect x="400" y="30" width="300" height="60" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>
+        <text x="550" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#8a5a12">status.observedGeneration = 1</text>
+        <text x="550" y="75" text-anchor="middle" font-size="12" fill="#8a5a12">コントローラーはまだ 1 回目の版しか見ていない</text>
+
+        <text x="380" y="135" text-anchor="middle" font-size="14" fill="#c0492f" font-weight="700">2 ≠ 1 → 最新の spec にまだ追いついていない</text>
+      </svg>
+      <p class="cap">図: generation と observedGeneration を比べると、反映の遅れが分かる</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>conditions の作法</h2>
+    <p>status の中でも、オブジェクトの状態を表す定番の形が <code>conditions</code>(配列)。Kubernetes の API conventions と、確認済みの <code>k8s.io/apimachinery</code> の <code>metav1.Condition</code> 型(<code>pkg/apis/meta/v1/types.go</code>)では、1 つの condition が <code>type</code>(種類。例: Ready)、<code>status</code>(True/False/Unknown のいずれか)、<code>reason</code>(機械で読める理由)、<code>message</code>(人が読む説明)、<code>lastTransitionTime</code>(最後に変わった時刻)、<code>observedGeneration</code> を持つ、という形に揃っている。実験用 Widget の Ready 列(第 05 回)もこの type: Ready を見ていた。</p>
+    <p>Go で condition を更新するときは、自分で配列を 1 件ずつ書き換えるのではなく、<code>k8s.io/apimachinery/pkg/api/meta</code> パッケージの <code>meta.SetStatusCondition(&status.Conditions, newCondition)</code>(確認済み: ソース <code>pkg/api/meta/conditions.go</code>)を使うのが定石。同じ type の条件があれば更新し、status が変わったときだけ <code>lastTransitionTime</code> を更新してくれる。</p>
+    <p class="note"><code>observedGeneration</code> は 2 箇所に出てくるので混同しやすい。<code>status.observedGeneration</code>(前の節)はオブジェクト全体として「コントローラーがどの版の spec まで反映したか」を表すのに対し、<code>status.conditions[].observedGeneration</code> はその condition 1 件が「どの版の spec を見て判定したか」を表す。Ready の判定に使った spec の版と、status 全体を最後に反映した版がずれることもあるので、分けて持つ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 170" role="img" aria-label="conditionの構造を示す図">
+        <rect x="30" y="30" width="640" height="110" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="350" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">status.conditions[0]</text>
+        <text x="130" y="80" text-anchor="middle" font-size="12" fill="#0f5132">type: Ready</text>
+        <text x="280" y="80" text-anchor="middle" font-size="12" fill="#0f5132">status: True</text>
+        <text x="420" y="80" text-anchor="middle" font-size="12" fill="#0f5132">reason: AllReplicasReady</text>
+        <text x="600" y="80" text-anchor="middle" font-size="12" fill="#0f5132">message: ...</text>
+        <text x="200" y="110" text-anchor="middle" font-size="12" fill="#0f5132">lastTransitionTime: ...</text>
+        <text x="480" y="110" text-anchor="middle" font-size="12" fill="#0f5132">observedGeneration: 2</text>
+      </svg>
+      <p class="cap">図: condition 1 件が持つ 6 つの項目</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>scale サブリソースと kubectl scale</h2>
+    <p><code>subresources.scale</code> は、どのフィールドが「望むレプリカ数」で、どのフィールドが「今のレプリカ数」かを <code>specReplicasPath</code>・<code>statusReplicasPath</code> で指定する仕組み。実験用 Widget は <code>specReplicasPath: .spec.replicas</code>、<code>statusReplicasPath: .status.replicas</code> を使っていた(第 05 回の CRD YAML)。これを有効にすると <code>kubectl scale</code> が Widget にも使えるようになる。Deployment などで使われる HPA(Horizontal Pod Autoscaler)まで使うには、さらに <code>labelSelectorPath</code> を指定し、コントローラーがそこにレプリカを選ぶラベルセレクタを書く必要がある(HPA は対象の Pod 数を数えるのにこのセレクタを使う)。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): <code>kubectl scale widget a --replicas=4</code> を実行すると、scale サブリソース経由で <code>spec.replicas</code> が 4 に変わった。<code>kubectl get wdg</code> の表示は <code>a small 4 True</code> になった。scale サブリソースは「レプリカ数という 1 つの値を、汎用の道具(kubectl scale や HPA)から触れるようにする」ための小さな窓だと言える。</p>
+    <div class="fig">
+      <svg viewBox="0 0 640 150" role="img" aria-label="scaleサブリソースの窓を示す図">
+        <defs>
+          <marker id="a6g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0f5132"/></marker>
+        </defs>
+        <rect x="20" y="40" width="220" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="130" y="65" text-anchor="middle" font-size="13" fill="#0f5132">kubectl scale --replicas=4</text>
+        <rect x="400" y="40" width="220" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="510" y="65" text-anchor="middle" font-size="13" fill="#0f5132">spec.replicas = 4</text>
+        <text x="510" y="83" text-anchor="middle" font-size="11.5" fill="#4a5d54">(specReplicasPath が指す先)</text>
+        <line x1="240" y1="70" x2="396" y2="70" stroke="#0f5132" stroke-width="2.2" marker-end="url(#a6g)"/>
+      </svg>
+      <p class="cap">図: scale は specReplicasPath が指すフィールドだけを書き換える(実測)</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>まとめと次の回</h2>
+    <p>spec と status は役割が違うので書き込み口も分け、RBAC でも resource 単位で分けられる(フィールド単位の権限は無い)。generation は spec の版番号(作成時 1、status サブリソースが有効なら spec が変わるたびに +1)、observedGeneration はコントローラーがどこまで追いついたかを表し、両者を比べると遅れが分かる。conditions は type・status・reason・message・lastTransitionTime・observedGeneration という決まった形を持ち、scale サブリソースはレプリカ数だけを汎用の道具に差し出す窓になっている。</p>
+    <p>Mid パートはここまで。次の第 09 回からは Mid-Senior パートとして、コントローラー自身の中身(Reconcile ループ)を見ていく。informer・workqueue・そして名前だけを受け取る <code>Reconcile(ctx, req)</code> がなぜそういう形をしているかを扱う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="この回のまとめの図">
+        <defs>
+          <marker id="a7g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5d54"/></marker>
+        </defs>
+        <rect x="20" y="40" width="190" height="55" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="115" y="72" text-anchor="middle" font-size="12.5" fill="#1d4e8f">spec / status の分離</text>
+        <rect x="245" y="40" width="190" height="55" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>
+        <text x="340" y="72" text-anchor="middle" font-size="12.5" fill="#8a5a12">generation・conditions</text>
+        <rect x="490" y="40" width="190" height="55" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="585" y="72" text-anchor="middle" font-size="12.5" fill="#0f5132">Reconcile ループ(次回)</text>
+        <path d="M210 67 L243 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a7g)"/>
+        <path d="M435 67 L488 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a7g)"/>
+      </svg>
+      <p class="cap">図: Mid パートの道具を使って、次回からコントローラー本体を書く</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <div class="nav2">
+    <a href="./k8sctl-07-defaulting.html">← 第 07 回 既定値 (defaulting)</a>
+    <a href="./k8sctl-09-reconcile-loop.html">第 09 回 Reconcile ループの中身 →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (10 問に拡張すること)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'status サブリソースが有効な Widget の本体(/widgets/a)に対して {"status":{"replicas":3}} を merge patch した。実測ではどうなったか。',
+    opts: [
+      'status.replicas が 3 に書き換わった',
+      'spec.replicas が 3 に書き換わった',
+      'リクエストがエラーで拒否された',
+      '"patched (no change)" が返り、status は無視された。generation も変わらなかった',
+      'Widget オブジェクト全体が削除された'
+    ],
+    ans: 3,
+    exps: [
+      '違う。status サブリソースが有効な間は、本体への更新は status を一切見ない。書き換わらない。',
+      '違う。patch の内容は status.replicas であり、spec.replicas には触れていない。',
+      '違う。エラーにはならず、正常応答としては「変化なし」が返る。',
+      '<b>これが正解。</b>実測(EKS 1.35 のテスト用クラスタ)では、本体への patch は "patched (no change)" を返し、status は無視された。generation も 1 のままだった。',
+      '違う。patch はオブジェクトの一部を更新する操作で、削除とは別物。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>status サブリソースが有効なら、本体への書き込みは status の扉を素通りする。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="本体patchがstatusを無視する図">'
+          + '<rect x="30" y="50" width="220" height="60" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>'
+          + '<text x="140" y="75" text-anchor="middle" font-size="13" fill="#12211a">本体への patch</text>'
+          + '<text x="140" y="93" text-anchor="middle" font-size="12" fill="#4a5d54">status: {replicas:3}</text>'
+          + '<rect x="350" y="50" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>'
+          + '<text x="460" y="75" text-anchor="middle" font-size="13" fill="#c0492f">patched (no change)</text>'
+          + '<text x="460" y="93" text-anchor="middle" font-size="12" fill="#c0492f">status は無視</text>'
+          + '<line x1="250" y1="80" x2="346" y2="80" stroke="#c0492f" stroke-width="2"/>'
+          + '</svg><p class="cap">図: 本体への patch は status サブリソースの扉を通らない(実測)</p></div>'
+    }
+  },
+  {
+    q: 'spec.replicas を変更したときと、status だけを変更したときで、metadata.generation の増え方はどう違うか(実測)。',
+    opts: [
+      'spec を変更すると generation が増え、status だけの変更では増えない',
+      'どちらを変更しても generation は同じだけ増える',
+      'status を変更すると generation が増え、spec の変更では増えない',
+      'generation は時間経過で自動的に増え、どちらの変更とも無関係',
+      'generation は常に 1 で固定されている'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>実測では、status サブリソース経由の patch は generation=1 のまま、spec.replicas の変更で generation が 1 から 2 に増えた。generation は「望む状態(spec)が何回変わったか」(status サブリソースが有効な間)を数える。',
+      '違う。実測では status だけの patch で generation は増えなかった。同じだけ増えるわけではない。',
+      '違う。これは実測結果と逆。status の変更では increment しない。',
+      '違う。generation は時間では増えず、spec の変更のたびに増える仕組み。',
+      '違う。spec を変更すれば実測のとおり 2 以上に増える。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>generation は「望む状態が何回変わったか」のカウンター。status は観測結果であり、望む状態ではない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="generationが増える条件を示す図">'
+          + '<rect x="30" y="40" width="250" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.8"/>'
+          + '<text x="155" y="65" text-anchor="middle" font-size="13" fill="#1d4e8f">spec.replicas を変更</text>'
+          + '<text x="155" y="85" text-anchor="middle" font-size="12" fill="#1d4e8f">generation: 1 → 2</text>'
+          + '<rect x="320" y="40" width="250" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>'
+          + '<text x="445" y="65" text-anchor="middle" font-size="13" fill="#0f5132">status だけ変更</text>'
+          + '<text x="445" y="85" text-anchor="middle" font-size="12" fill="#0f5132">generation: 1 のまま</text>'
+          + '</svg><p class="cap">図: generation が反応するのは spec の変更だけ(実測)</p></div>'
+    }
+  }
+  ,
+  {
+    q: 'widgets/status を widgets とは別の RBAC resource として権限を分けられることの利点として最も適切なものは。',
+    opts: [
+      '別の resource に分けると、kubectl のコマンド自体の実行速度が速くなる',
+      'widgets/status は widgets とは無関係の、全く別の種類のオブジェクトである',
+      'widgets/status を分けると、CEL による検証が自動で追加される',
+      'widgets/status を分けると、additionalPrinterColumns の表示列が増える',
+      'spec を決める利用者の権限と、status を書くコントローラーの権限を別々の Role に分けられ、「誰が何を書けるか」という責任分担を権限レベルでも裏付けられる'
+    ],
+    ans: 4,
+    exps: [
+      '違う。RBAC の設定は実行速度とは関係が無い。これは権限の分離の話。',
+      '違う。widgets/status は widgets と同じオブジェクトの一部(status フィールド)に対する別の書き込み口であって、別の種類のオブジェクトではない。',
+      '違う。CEL の検証はスキーマの x-kubernetes-validations で決まるもので、RBAC の resource 分割とは無関係(第 06 回)。',
+      '違う。表示列は additionalPrinterColumns の設定で決まり、RBAC の分割とは無関係(第 05 回)。',
+      '<b>これが正解。</b>status サブリソースが resource として分かれているおかげで、「利用者は widgets を書けるが widgets/status は書けない」「コントローラーは widgets/status を書けるし、widgets 側は get/list/watch(必要なら finalizer 用の update/patch も)だけ持つ」という Role を別々に用意できる。これは第 03 回で見た「誰が望む状態を決め、誰が観測結果を書くか」という役割分担を、権限の上でも裏付ける仕組みになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>RBAC が分けられるのは resource 単位(widgets / widgets/status)まで。その単位を使って、誰が spec を、誰が status を書けるかという責任分担を表現する。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 170" aria-label="RBACでspecとstatusの権限を分ける図">'
+          + '<rect x="20" y="30" width="280" height="110" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="160" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4e8f">利用者 Role</text>'
+          + '<text x="160" y="80" text-anchor="middle" font-size="12" fill="#1d4e8f">widgets: 読み書き可</text>'
+          + '<text x="160" y="100" text-anchor="middle" font-size="12" fill="#1d4e8f">widgets/status: 書けない</text>'
+          + '<rect x="340" y="30" width="280" height="110" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.8"/>'
+          + '<text x="480" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">コントローラー Role</text>'
+          + '<text x="480" y="80" text-anchor="middle" font-size="12" fill="#0f5132">widgets/status: 書き込み可</text>'
+          + '<text x="480" y="100" text-anchor="middle" font-size="12" fill="#0f5132">widgets: get/list/watch のみ(既定)</text>'
+          + '</svg><p class="cap">図: resource 単位の権限で責任を表現する(spec フィールドだけを禁止する権限は無い)</p></div>'
+    }
+  },
+  {
+    q: 'Go のコントローラーのコードで status.conditions を更新するとき、自分で配列をループして書き換えるのではなく、meta.SetStatusCondition(&status.Conditions, newCondition) を使うことが定石とされる理由は何か。',
+    opts: [
+      'SetStatusCondition は status サブリソースを自動で有効化してくれるから',
+      'SetStatusCondition を使わないと generation が増えなくなるから',
+      '同じ type の条件があれば更新し、status の値が実際に変わったときだけ lastTransitionTime を更新するという、conditions の作法を正しく守ってくれるから',
+      'SetStatusCondition は CEL の検証ルールを自動生成してくれるから',
+      'SetStatusCondition を使うと additionalPrinterColumns の設定が不要になるから'
+    ],
+    ans: 2,
+    exps: [
+      '違う。status サブリソースの有効化は CRD 側(第 05 回で見たスキーマの subresources)で決まるもので、Go のコードの関数呼び出しとは無関係。',
+      '違う。generation は spec の変更によって API サーバー側で増えるもので、status を書く関数の呼び方とは無関係(本回の前のセクション)。',
+      '<b>これが正解。</b>確認済み(k8s.io/apimachinery の pkg/api/meta/conditions.go のソース)では、同じ type の既存の条件を探して更新し、status が変わらなければ lastTransitionTime をそのままにする、という conditions の作法どおりの処理を行う。自分で配列操作を書くと、この細かい約束を忘れやすい。',
+      '違う。CEL の検証ルールは CRD のスキーマに書くもので、Go の関数が自動生成するものではない(第 06 回)。',
+      '違う。additionalPrinterColumns は CRD 側の設定で、Go のコードとは別の層の話(第 05 回)。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>SetStatusCondition は「同じ type を探す→値が変わったかを見る→変わっていれば時刻を更新する」という決まった手順を代わりにやってくれる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 180" aria-label="SetStatusConditionの処理手順を示す図">'
+          + '<rect x="20" y="20" width="180" height="50" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.4"/>'
+          + '<text x="110" y="50" text-anchor="middle" font-size="12.5" fill="#0f5132">同じ type を探す</text>'
+          + '<rect x="230" y="20" width="180" height="50" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.4"/>'
+          + '<text x="320" y="50" text-anchor="middle" font-size="12.5" fill="#0f5132">status が変わったか</text>'
+          + '<rect x="440" y="20" width="180" height="50" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.4"/>'
+          + '<text x="530" y="50" text-anchor="middle" font-size="12.5" fill="#0f5132">変わっていれば時刻更新</text>'
+          + '<line x1="200" y1="45" x2="226" y2="45" stroke="#0f5132" stroke-width="2"/>'
+          + '<line x1="410" y1="45" x2="436" y2="45" stroke="#0f5132" stroke-width="2"/>'
+          + '</svg><p class="cap">図: この一連の手順を自分で書くより関数に任せる方が安全</p></div>'
+    }
+  }
+  ,
+  {
+    q: '実験用 Widget の scale サブリソースは specReplicasPath: .spec.replicas、statusReplicasPath: .status.replicas を指定している。kubectl scale widget a --replicas=4 を実行すると、実測ではどこが書き換わったか。',
+    opts: [
+      'status.replicas だけが 4 になり、spec.replicas は変わらない',
+      'scale サブリソース経由で spec.replicas が 4 に変わった',
+      'Widget オブジェクトが新しく複製され、4 個の Widget になる',
+      'minReplicas が自動的に 4 に変わる',
+      'additionalPrinterColumns の Replicas 列の定義そのものが書き換わる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。scale サブリソースの specReplicasPath が指しているのは spec.replicas なので、kubectl scale はそこを書き換える。',
+      '<b>これが正解。</b>実測では、kubectl scale widget a --replicas=4 が scale サブリソース経由で spec.replicas を 4 に変え、kubectl get wdg の表示は a small 4 True になった。',
+      '違う。scale はレプリカ数という 1 つの値を変えるだけで、オブジェクトを複製する機能ではない(Widget という CRD は Pod を複製する仕組みを自分で持たない)。',
+      '違う。minReplicas と replicas は別のフィールドで、scale サブリソースが触れるのは specReplicasPath で指定した replicas だけ。',
+      '違う。additionalPrinterColumns の定義は CRD のスキーマの一部であり、kubectl scale のような通常の操作で書き換わることはない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>scale サブリソースは、specReplicasPath が指すフィールドだけを、kubectl scale のような汎用の道具から触れるようにする窓。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 170" aria-label="scaleサブリソースの窓を示す図">'
+          + '<rect x="20" y="40" width="220" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>'
+          + '<text x="130" y="65" text-anchor="middle" font-size="13" fill="#0f5132">kubectl scale --replicas=4</text>'
+          + '<rect x="400" y="40" width="220" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>'
+          + '<text x="510" y="65" text-anchor="middle" font-size="13" fill="#0f5132">spec.replicas = 4</text>'
+          + '<text x="510" y="83" text-anchor="middle" font-size="12" fill="#4a5d54">(specReplicasPath が指す先)</text>'
+          + '<line x1="240" y1="70" x2="396" y2="70" stroke="#0f5132" stroke-width="2.2"/>'
+          + '</svg><p class="cap">図: scale は specReplicasPath が指すフィールドだけを書き換える(実測)</p></div>'
+    }
+  },
+  {
+    q: 'spec と status を分け、サブリソースで書き込み口まで分けることの一番の意味は何か。第 03 回で学んだ調整ループの話と結びつけて考えると、どれが正しいか。',
+    opts: [
+      '利用者が「望む状態」(spec)を決め、コントローラーが世界を観測して「今の状態」(status)を書く、という調整ループの 2 つの役を、1 つのオブジェクトの中でも分けて表現している',
+      '単にデータベースの容量を節約するための分割であり、調整ループとは無関係',
+      'spec と status を分けると、API サーバーの応答速度が自動的に速くなるから',
+      'status サブリソースは Kubernetes のバグを回避するための応急処置であり、本質的な意味は無い',
+      'spec と status の分離は Widget という CRD 固有の工夫で、組み込みのリソースには存在しない仕組みである'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>第 03 回で見た調整ループは「望む状態と今の状態の差を埋め続ける」仕組みだった。spec/status の分離と、サブリソースによる書き込み口の分離は、まさにこの「望む」側と「観測した」側を 1 つのオブジェクトの中でも明確に分け、誤って混ざらないようにする仕組み。',
+      '違う。容量の節約は結果として起こり得るが、この分け方の本質はデータ量ではなく、役割の分離にある。',
+      '違う。応答速度への影響は主目的ではなく、この分割の意味を正しく説明していない。',
+      '違う。spec/status の分離は Kubernetes の API conventions として設計段階から意図されたパターンで、バグ回避の応急処置ではない。',
+      '違う。Deployment や Pod など組み込みのリソースも spec/status の分離と status サブリソースを持っており、Widget 固有の工夫ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>調整ループの「望む」と「観測した」という 2 つの役が、1 つのオブジェクトの中で spec と status という形に落ちている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 180" aria-label="調整ループとspec/statusの対応を示す図">'
+          + '<rect x="20" y="20" width="270" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.8"/>'
+          + '<text x="155" y="45" text-anchor="middle" font-size="13" fill="#1d4e8f">調整ループ: 望む状態</text>'
+          + '<text x="155" y="65" text-anchor="middle" font-size="12" fill="#1d4e8f">→ オブジェクトの spec</text>'
+          + '<rect x="340" y="20" width="270" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.8"/>'
+          + '<text x="475" y="45" text-anchor="middle" font-size="13" fill="#0f5132">調整ループ: 今の状態 (観測)</text>'
+          + '<text x="475" y="65" text-anchor="middle" font-size="12" fill="#0f5132">→ オブジェクトの status</text>'
+          + '<text x="320" y="130" text-anchor="middle" font-size="13" fill="#4a5d54">第 03 回の調整ループが、1 つのオブジェクトの構造にそのまま映っている</text>'
+          + '</svg><p class="cap">図: spec/status の分離は調整ループの縮図</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

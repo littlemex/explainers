@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 05 回 CRD の骨格 ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+  .nav2{display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px}
+  .nav2 a{color:var(--g2);text-decoration:none}
+  .nav2 a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 05 回</p>
+  <h1>CRD の骨格</h1>
+  <p>group・names・scope・versions という 4 つの決め事と、構造的スキーマが API サーバーに新しい型を教える</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">CustomResourceDefinition(CRD)は 1 枚の YAML で「新しい種類のモノ」を API サーバーに登録する。この回では、その YAML のどの部分が何を決めているかを、実験で使った Widget という型(第 04 回で登場)を題材に見ていく。</p>
+
+  <div class="lead">CRD は group(住所)・names(呼び名)・scope(持ち場)・versions(見せ方と保存の仕方)の 4 つを決める。さらに structural schema(構造的スキーマ: 全フィールドに型が決まっている形)によって、知らないフィールドを刈り込み(pruning)、表示列を増やせる。これは全部「保存のされ方」の話で、まだ誰も世界を動かしていない。</div>
+
+  <section>
+    <h2>CRD が決めるもの: 住所・呼び名・持ち場</h2>
+    <p>CRD オブジェクト自体は <code>apiextensions.k8s.io/v1</code> の <code>CustomResourceDefinition</code> という型で、その <code>spec</code> に 4 つの決め事を書く。<code>group</code> は新しい型が属する住所(例: <code>lab.crd-series.example</code>)、<code>names</code> は複数形・単数形・Kind 名・短縮名(<code>shortNames</code>)・分類名(<code>categories</code>)、<code>scope</code> は namespace に属するか(<code>Namespaced</code>)クラスタ全体か(<code>Cluster</code>)。第 02 回で学んだ GVK(Group/Version/Kind)と GVR(Group/Version/Resource)は、この CRD の中身がそのまま材料になっている。</p>
+    <p>実験で使った Widget は、<code>group: lab.crd-series.example</code>、<code>names: {plural: widgets, singular: widget, kind: Widget, shortNames: [wdg]}</code>、<code>scope: Namespaced</code> という決め事を持つ。これが決まると、API サーバーの中に新しい REST の住所が 1 本生える。</p>
+    <div class="fig">
+      <svg viewBox="0 0 820 300" role="img" aria-label="CRDの決め事からRESTパスが生まれる図">
+        <defs>
+          <marker id="a1g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+          <marker id="a1b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d4e8f"/></marker>
+        </defs>
+        <rect x="290" y="16" width="240" height="54" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="410" y="38" text-anchor="middle" font-size="14.5" font-weight="700" fill="#0f5132">CustomResourceDefinition</text>
+        <text x="410" y="57" text-anchor="middle" font-size="12.5" fill="#0f5132">(widgets.lab.crd-series.example)</text>
+
+        <rect x="30" y="118" width="190" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="125" y="140" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1d4e8f">group</text>
+        <text x="125" y="160" text-anchor="middle" font-size="12.5" fill="#1d4e8f">lab.crd-series.example</text>
+
+        <rect x="250" y="118" width="190" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="345" y="140" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1d4e8f">names</text>
+        <text x="345" y="160" text-anchor="middle" font-size="12.5" fill="#1d4e8f">widgets / widget / Widget</text>
+
+        <rect x="470" y="118" width="150" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="545" y="140" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1d4e8f">scope</text>
+        <text x="545" y="160" text-anchor="middle" font-size="12.5" fill="#1d4e8f">Namespaced</text>
+
+        <rect x="650" y="118" width="140" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="720" y="140" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1d4e8f">versions</text>
+        <text x="720" y="160" text-anchor="middle" font-size="12.5" fill="#1d4e8f">v1 (次の節)</text>
+
+        <line x1="380" y1="70" x2="170" y2="116" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+        <line x1="400" y1="70" x2="370" y2="116" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+        <line x1="420" y1="70" x2="540" y2="116" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+        <line x1="440" y1="70" x2="715" y2="116" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+
+        <rect x="30" y="236" width="760" height="46" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="410" y="264" text-anchor="middle" font-size="13" fill="#0f5132" font-family="Menlo,Consolas,monospace">/apis/lab.crd-series.example/v1/namespaces/{ns}/widgets/{name}</text>
+
+        <line x1="125" y1="176" x2="200" y2="234" stroke="#1d4e8f" stroke-width="1.6" marker-end="url(#a1b)"/>
+        <line x1="345" y1="176" x2="330" y2="234" stroke="#1d4e8f" stroke-width="1.6" marker-end="url(#a1b)"/>
+        <line x1="545" y1="176" x2="470" y2="234" stroke="#1d4e8f" stroke-width="1.6" marker-end="url(#a1b)"/>
+        <line x1="720" y1="176" x2="620" y2="234" stroke="#1d4e8f" stroke-width="1.6" marker-end="url(#a1b)"/>
+      </svg>
+      <p class="cap">図: CRD の 4 つの決め事(group・names・scope・versions)が合体して 1 本の REST パスになる</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>バージョン: served と storage</h2>
+    <p><code>spec.versions</code> には複数のバージョンを並べられる。各バージョンには <code>served</code>(クライアントに見せて使わせるか)と <code>storage</code>(etcd に実際に保存する形かどうか)という、別々の役目を持つフラグがある。<code>storage: true</code> は必ずちょうど 1 つだけで、クラスタが実際に持つデータの実体を決める。<code>served</code> は「API としてお客に見せる顔」で、複数のバージョンを同時に served にできる(例: v1 と v1beta1 を両方使えるようにしておき、徐々に v1beta1 を外す)。</p>
+    <p>実験用 Widget は <code>v1</code> だけを持ち、<code>served: true</code>・<code>storage: true</code> という一番単純な形だった。複数バージョンを同時に served にしたときにデータがどう変換されるか(そして変換しない場合に何が起きるか)は、第 14 回で実測結果とともに扱う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 220" role="img" aria-label="servedとstorageの関係を示す図">
+        <defs>
+          <marker id="a2g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+          <marker id="a2b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d4e8f"/></marker>
+        </defs>
+        <rect x="30" y="20" width="230" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="145" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="#0f5132">v1</text>
+        <text x="145" y="64" text-anchor="middle" font-size="12.5" fill="#0f5132">served: true / storage: true</text>
+
+        <rect x="30" y="110" width="230" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="145" y="134" text-anchor="middle" font-size="14" font-weight="700" fill="#1d4e8f">v1beta1 (例)</text>
+        <text x="145" y="154" text-anchor="middle" font-size="12.5" fill="#1d4e8f">served: true / storage: false</text>
+
+        <rect x="470" y="65" width="200" height="90" rx="12" fill="#eef6f1" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="570" y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#0f5132">etcd</text>
+        <text x="570" y="122" text-anchor="middle" font-size="12.5" fill="#0f5132">新しく書き込む形は 1 つ</text>
+        <text x="570" y="140" text-anchor="middle" font-size="12.5" fill="#0f5132">(storage: true の形)</text>
+
+        <line x1="260" y1="50" x2="465" y2="95" stroke="#198754" stroke-width="2.2" marker-end="url(#a2g)"/>
+        <line x1="260" y1="140" x2="465" y2="115" stroke="#1d4e8f" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#a2b)"/>
+      </svg>
+      <p class="cap">図: served は複数あってよいが、storage(新しく書き込む形)は常に 1 つ。v1beta1 は変換されて v1 の形で保存される。storage を切り替えても、切り替え前の古い形のデータはすぐには書き直されない(第 14 回)</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>構造的スキーマと刈り込み (pruning)</h2>
+    <p><code>apiextensions.k8s.io/v1</code> では「構造的スキーマ(structural schema: すべてのフィールドに型が決まっている形)」が必須になっている(確認済み: <a href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/" target="_blank" rel="noopener">Kubernetes 公式ドキュメント</a>)。これにより、スキーマに書いていないフィールドは保存のときに自動で刈り込まれる(pruning)。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): Widget の spec に存在しない <code>unknownField</code> を入れて <code>kubectl apply</code>(既定)すると、<code>strict decoding error: unknown field "spec.unknownField"</code> で<b>拒否</b>された(kubectl の既定が <code>--validate=strict</code> のため)。<code>--validate=warn</code> を付けると警告だけ出て作成され、保存された spec は <code>{"image":"nginx","minReplicas":0,"replicas":1,"size":"small"}</code> で、<code>unknownField</code> は刈り込まれて消え、既定値 3 つが埋まっていた。</p>
+    <p>刈り込みを止めたいときは <code>x-kubernetes-preserve-unknown-fields: true</code> を使う。これを付けてもスキーマ自体は構造的なままだが、付けた箇所だけはスキーマに無いフィールドが検証されずにそのまま保存されるようになる。表示や他のフィールドの検証、バージョン変換には影響しないが、検証をすり抜ける穴を作ることになるので、使う場所は狭い。</p>
+    <div class="fig">
+      <svg viewBox="0 0 780 240" role="img" aria-label="未知フィールドの扱いを示す図">
+        <defs>
+          <marker id="a3g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a5a12"/></marker>
+          <marker id="a3r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0492f"/></marker>
+        </defs>
+        <rect x="20" y="20" width="300" height="70" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="170" y="44" text-anchor="middle" font-size="13" fill="#12211a">kubectl apply (spec に</text>
+        <text x="170" y="62" text-anchor="middle" font-size="13" fill="#12211a">unknownField を含む)</text>
+        <text x="170" y="80" text-anchor="middle" font-size="12" fill="#4a5d54">既定 = --validate=strict</text>
+
+        <rect x="20" y="130" width="300" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>
+        <text x="170" y="155" text-anchor="middle" font-size="13.5" font-weight="700" fill="#c0492f">拒否 (strict decoding error)</text>
+        <text x="170" y="174" text-anchor="middle" font-size="12" fill="#c0492f">unknown field "spec.unknownField"</text>
+
+        <rect x="430" y="125" width="340" height="100" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>
+        <text x="600" y="147" text-anchor="middle" font-size="13" font-weight="700" fill="#8a5a12">--validate=warn なら作成</text>
+        <text x="600" y="166" text-anchor="middle" font-size="12" fill="#8a5a12">unknownField は刈り込まれ消え</text>
+        <text x="600" y="184" text-anchor="middle" font-size="12" fill="#8a5a12">image は送った値のまま残り</text>
+        <text x="600" y="202" text-anchor="middle" font-size="12" fill="#8a5a12">size・replicas・minReplicas に既定値が入る</text>
+
+        <line x1="170" y1="92" x2="170" y2="128" stroke="#c0492f" stroke-width="2" marker-end="url(#a3r)"/>
+        <line x1="320" y1="60" x2="600" y2="123" stroke="#8a5a12" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a3g)"/>
+        <text x="420" y="50" text-anchor="middle" font-size="12" fill="#8a5a12">(--validate=warn なら)</text>
+      </svg>
+      <p class="cap">図: kubectl の既定は strict decoding で拒否、--validate=warn なら刈り込まれて作成される(実測)</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>追加の表示列 (additionalPrinterColumns)</h2>
+    <p><code>kubectl get</code> の表示は既定で NAME と AGE だけ。<code>additionalPrinterColumns</code> に <code>jsonPath</code>(jsonPath: オブジェクトの中の 1 つの値を指し示す書き方)を指定すると、好きな列を増やせる。これは表示だけの機能で、保存データや検証には影響しない。</p>
+    <p>実験用 Widget は Size(<code>.spec.size</code>)・Replicas(<code>.spec.replicas</code>)・Ready(<code>.status.conditions[?(@.type=="Ready")].status</code>)の 3 列を持つ。実測(EKS 1.35 のテスト用クラスタ): <code>kubectl scale widget a --replicas=4</code>(scale サブリソース: <code>spec.replicas</code> の増減だけを専用の操作で行える仕組み、第 08 回)で spec.replicas を変えた後、<code>kubectl get wdg</code>(<code>wdg</code> は Widget の <code>shortNames</code> に設定した短縮名)の表示は次のとおりだった。</p>
+    <table>
+      <tr><th>NAME</th><th>SIZE</th><th>REPLICAS</th><th>READY</th></tr>
+      <tr><td>a</td><td>small</td><td>4</td><td>True</td></tr>
+    </table>
+    <p class="note">Ready 列の値 <code>True</code> は、誰か(ここでは実験で手動で書いた status)が <code>status.conditions</code> に <code>type: Ready</code> の要素を実際に書き込んでいたから表示された。CRD に列の定義を書くだけでは、値は出てこない。第 04 回で見た「CRD だけでは何も動かない」という話がここにもつながる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 170" role="img" aria-label="jsonPathから表示列が生まれる図">
+        <defs>
+          <marker id="a4g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+        </defs>
+        <rect x="20" y="40" width="280" height="90" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="160" y="65" text-anchor="middle" font-size="13" fill="#12211a">オブジェクトの実データ</text>
+        <text x="160" y="85" text-anchor="middle" font-size="12" font-family="Menlo,Consolas,monospace" fill="#4a5d54">.spec.replicas</text>
+        <text x="160" y="103" text-anchor="middle" font-size="12" font-family="Menlo,Consolas,monospace" fill="#4a5d54">.status.conditions[...]</text>
+
+        <rect x="420" y="40" width="260" height="90" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="550" y="65" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">kubectl get の表示列</text>
+        <text x="550" y="85" text-anchor="middle" font-size="12" fill="#0f5132">REPLICAS: 4</text>
+        <text x="550" y="103" text-anchor="middle" font-size="12" fill="#0f5132">READY: True</text>
+
+        <line x1="300" y1="85" x2="416" y2="85" stroke="#198754" stroke-width="2.2" marker-end="url(#a4g)"/>
+        <text x="358" y="70" text-anchor="middle" font-size="11.5" fill="#4a5d54">jsonPath</text>
+      </svg>
+      <p class="cap">図: additionalPrinterColumns は jsonPath を通して既にある値を列に写すだけ</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>kubebuilder マーカーから CRD YAML が生まれる流れ</h2>
+    <p>ここまでの YAML は人間が手で書いたものだが、<a href="https://book.kubebuilder.io/" target="_blank" rel="noopener">kubebuilder</a> を使う場合は少し違う道筋をたどる。Go の型(構造体)や、そのフィールドの直前に、<code>+kubebuilder:...</code> から始まるマーカー(1 つのマーカーは必ず 1 行のコメント)を書き、<a href="https://github.com/kubernetes-sigs/controller-tools" target="_blank" rel="noopener">controller-gen</a> というツールがそのマーカーを読んで CRD の YAML や RBAC(Role-Based Access Control: 誰が何を操作できるかを役割で決める仕組み)の YAML を自動生成する。人間は Go の型とマーカーだけを管理すればよく、型とスキーマが食い違う心配が減る。</p>
+    <p>実在するマーカーの例(確認済み: <a href="https://book.kubebuilder.io/reference/markers" target="_blank" rel="noopener">kubebuilder book のマーカー一覧</a>と controller-tools v0.21.0 のソース <code>pkg/crd/markers/</code>): <code>+kubebuilder:validation:Enum=small;large</code>(<code>size</code> フィールドの直前に 1 行で書く、列挙の制約)、<code>+kubebuilder:resource:path=widgets,shortName=wdg,scope=Namespaced</code>(フィールドではなく、<code>Widget</code> 型の構造体定義そのものの直前に書く、names と scope を決めるマーカー)。検証・既定値・サブリソースのマーカーは第 06〜08 回で 1 つずつ実例とともに見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 800 180" role="img" aria-label="マーカーからCRD YAMLが生まれる流れ">
+        <defs>
+          <marker id="a5g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+        </defs>
+        <rect x="10" y="40" width="330" height="90" rx="10" fill="#0b2e20" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="26" y="65" font-size="10.5" fill="#8fd6b4" font-family="Menlo,Consolas,monospace">// +kubebuilder:validation:Enum=small;large</text>
+        <text x="26" y="88" font-size="12" fill="#dbefe4" font-family="Menlo,Consolas,monospace">Size string `json:"size"`</text>
+        <text x="175" y="118" text-anchor="middle" font-size="11.5" fill="#8fd6b4">Go の構造体 + マーカー(1 行)</text>
+
+        <rect x="350" y="55" width="140" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="420" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">controller-gen</text>
+        <text x="420" y="99" text-anchor="middle" font-size="11.5" fill="#0f5132">マーカーを読む</text>
+
+        <rect x="520" y="30" width="270" height="110" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="540" y="55" font-size="12" fill="#12211a" font-family="Menlo,Consolas,monospace">size:</text>
+        <text x="560" y="73" font-size="12" fill="#12211a" font-family="Menlo,Consolas,monospace">type: string</text>
+        <text x="560" y="91" font-size="12" fill="#12211a" font-family="Menlo,Consolas,monospace">enum: [small, large]</text>
+        <text x="655" y="123" text-anchor="middle" font-size="11.5" fill="#4a5d54">CRD の YAML (自動生成)</text>
+
+        <line x1="342" y1="85" x2="348" y2="85" stroke="#198754" stroke-width="2.2" marker-end="url(#a5g)"/>
+        <line x1="490" y1="85" x2="516" y2="85" stroke="#198754" stroke-width="2.2" marker-end="url(#a5g)"/>
+      </svg>
+      <p class="cap">図: マーカーのコメントを controller-gen が読み、CRD の YAML を自動で組み立てる</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>まとめと次の回</h2>
+    <p>CRD は group・names・scope・versions という住所と呼び名と持ち場を決め、構造的スキーマが型の形を固め、刈り込みが知らないフィールドを消し、additionalPrinterColumns が表示を増やす。ここまでは全部「保存のされ方と見え方」の話で、第 04 回で見たとおり、CRD だけでは誰も世界を動かさない。</p>
+    <p>次の第 06 回では、CRD のスキーマが持つ 2 種類の検証(OpenAPI の制約と CEL による検証)を、実際に拒否されたエラーメッセージとともに見ていく。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="この回のまとめの図">
+        <defs>
+          <marker id="a6g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5d54"/></marker>
+        </defs>
+        <rect x="20" y="40" width="150" height="55" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="95" y="72" text-anchor="middle" font-size="12.5" fill="#1d4e8f">住所・呼び名・持ち場</text>
+        <rect x="200" y="40" width="150" height="55" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="275" y="72" text-anchor="middle" font-size="12.5" fill="#1d4e8f">構造的スキーマ</text>
+        <rect x="380" y="40" width="150" height="55" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="455" y="72" text-anchor="middle" font-size="12.5" fill="#1d4e8f">刈り込み・表示列</text>
+        <rect x="560" y="40" width="120" height="55" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="620" y="72" text-anchor="middle" font-size="12.5" fill="#0f5132">検証(次回)</text>
+        <path d="M170 67 L198 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6g)"/>
+        <path d="M350 67 L378 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6g)"/>
+        <path d="M530 67 L558 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6g)"/>
+      </svg>
+      <p class="cap">図: この回で決めた「保存のされ方」の上に、次回の検証が乗る</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <div class="nav2">
+    <a href="./k8sctl-04-crd-cr-controller.html">← 第 04 回 CRD・CR・コントローラー・オペレーターの違い</a>
+    <a href="./k8sctl-06-validation.html">第 06 回 検証 (validation) →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (6 問)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: '実験用 Widget の spec に存在しない unknownField を入れて <code>kubectl apply</code>(オプション無し、既定の設定)を実行すると何が起きるか。',
+    opts: [
+      'kubectl の既定 (strict decoding) によって作成自体が拒否される',
+      'サーバーに受理され、unknownField がそのまま保存される',
+      '警告だけが表示され、unknownField は刈り込まれて作成される',
+      'CRD に x-kubernetes-preserve-unknown-fields が無くても、そのまま保持される',
+      'etcd への保存時にエラーになり、Widget は Pending 状態で残る'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>kubectl の既定は <code>--validate=strict</code> で、これは「未知フィールドがあれば拒否してほしい」という指示を API サーバーに送るものだ。拒否の判定自体は API サーバー側で行われ、実測(EKS 1.35 のテスト用クラスタ)では <code>strict decoding error: unknown field "spec.unknownField"</code> で拒否された。',
+      '違う。構造的スキーマの下では、定義していないフィールドは既定で刈り込まれる。stored データにそのまま残ることはない。',
+      '違う。この「警告だけ出て作成される」挙動は <code>--validate=warn</code> を明示したときの話。既定(オプション無し)では警告の前に拒否される。',
+      '違う。<code>x-kubernetes-preserve-unknown-fields</code> は刈り込みを止める特別な指定で、既定では付いていない。付けていなければ刈り込まれる(または strict decoding で拒否される)。',
+      '違う。Widget は Pod を作る型ではないし、ここで起きているのは API サーバーでの検証(拒否)であって、etcd 書き込み後の話ではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>kubectl は「拒否してほしい(strict)」か「警告だけでいい(warn)」かを API サーバーに伝えるだけで、拒否するかどうかを判断するのは API サーバー側だ。未知フィールドの刈り込み(pruning)と既定値埋めは、strict でも warn でもどちらでも常に行われる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 180" aria-label="strict decodingとpruningの段階を示す図">'
+          + '<rect x="20" y="20" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>'
+          + '<text x="130" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="#c0492f">kubectl → strict</text>'
+          + '<text x="130" y="65" text-anchor="middle" font-size="12" fill="#c0492f">API サーバーが拒否</text>'
+          + '<rect x="360" y="20" width="220" height="60" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>'
+          + '<text x="470" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="#8a5a12">kubectl → warn</text>'
+          + '<text x="470" y="65" text-anchor="middle" font-size="12" fill="#8a5a12">API サーバーが警告+作成</text>'
+          + '<text x="300" y="130" text-anchor="middle" font-size="13" fill="#4a5d54">刈り込みと既定値埋めは、どちらの道でも API サーバーが常に行う</text>'
+          + '</svg><p class="cap">図: strict/warn は kubectl から API サーバーへの指示。判定は API サーバー側。</p></div>'
+    }
+  },
+  {
+    q: 'spec.versions の served と storage について正しいものは。',
+    opts: [
+      'served は etcd に保存するかどうかを決めるフラグである',
+      '複数のバージョンで storage: true を同時に指定できる',
+      'storage: true は常にちょうど 1 つで、実際に etcd に保存される形を決める。served は API として見せるかどうかの別の軸である',
+      'served: false にすると、そのバージョンの既存データも etcd から消える',
+      'served と storage は同じ意味なので、どちらか一方だけ書けばよい'
+    ],
+    ans: 2,
+    exps: [
+      '違う。保存の実体を決めるのは storage で、served は API として受け付けるかどうかの話。別々の軸。',
+      '違う。storage: true は定義上ちょうど 1 つにしなければならない。複数あると CRD の作成自体が拒否される。',
+      '<b>これが正解。</b>storage は「実際に etcd へ保存する 1 つの形」を決め、served は「クライアントに API として見せるかどうか」を決める。2 つは独立に組み合わせられる。',
+      '違う。served: false は新しいリクエストをそのバージョンで受け付けなくするだけで、既存データ(別バージョンの形で保存されている)が消えるわけではない。',
+      '違う。両方書く必要があり、意味も役割も異なる。実験用 Widget でも両方を明示していた。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>served は「窓口を開けるかどうか」、storage は「金庫に入れる実際の形」。窓口は複数開けられるが、金庫の実体は 1 つ。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 170" aria-label="servedとstorageの違いを示す図">'
+          + '<rect x="20" y="20" width="220" height="50" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>'
+          + '<text x="130" y="50" text-anchor="middle" font-size="13" fill="#0f5132">v1 (served+storage)</text>'
+          + '<rect x="20" y="90" width="220" height="50" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="130" y="120" text-anchor="middle" font-size="13" fill="#1d4e8f">v1beta1 (served のみ)</text>'
+          + '<rect x="380" y="55" width="200" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.8"/>'
+          + '<text x="480" y="90" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">etcd の実体は 1 つ</text>'
+          + '</svg><p class="cap">図: served は複数可、storage はちょうど 1 つ</p></div>'
+    }
+  }
+  ,
+  {
+    q: 'additionalPrinterColumns を CRD に設定する目的として正しいものは。',
+    opts: [
+      'etcd に保存する実データの形式を変える',
+      'kubectl get の表示列を増やす。保存データや検証のルールには影響しない',
+      'CEL による検証ルールを追加する',
+      'スキーマの刈り込み(pruning)の対象フィールドを増やす',
+      'RBAC の権限を列ごとに分けて制御する'
+    ],
+    ans: 1,
+    exps: [
+      '違う。additionalPrinterColumns はあくまで jsonPath で既存のデータを読んで表示するだけで、保存される実データの形式(スキーマ)には関与しない。',
+      '<b>これが正解。</b>kubectl get の NAME/AGE だけの表示に、好きな jsonPath の値を列として追加できる。表示専用の機能である。',
+      '違う。検証ルールを追加するのは x-kubernetes-validations (CEL) で、別の仕組み。第 06 回で扱う。',
+      '違う。刈り込みはスキーマの properties に書いていないフィールドを消す話で、printer columns とは無関係。',
+      '違う。RBAC は resource 単位(例: widgets や widgets/status)で権限を分けるもので、表示列ごとには分けられない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>additionalPrinterColumns は「既にある値をどう見せるか」だけを決める。元データや検証には手を出さない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="printerColumnsは表示専用であることを示す図">'
+          + '<rect x="30" y="20" width="220" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>'
+          + '<text x="140" y="45" text-anchor="middle" font-size="13" fill="#0f5132">保存データ (spec/status)</text>'
+          + '<text x="140" y="65" text-anchor="middle" font-size="12" fill="#4a5d54">変化なし</text>'
+          + '<rect x="350" y="20" width="220" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="460" y="45" text-anchor="middle" font-size="13" fill="#1d4e8f">kubectl get の表示列</text>'
+          + '<text x="460" y="65" text-anchor="middle" font-size="12" fill="#1d4e8f">ここだけ増える</text>'
+          + '<line x1="250" y1="50" x2="346" y2="50" stroke="#1d4e8f" stroke-width="2"/>'
+          + '</svg><p class="cap">図: additionalPrinterColumns は表示だけを変える</p></div>'
+    }
+  },
+  {
+    q: '実験用 Widget の CRD は <code>group: lab.crd-series.example</code>、<code>names: {plural: widgets, singular: widget, kind: Widget, shortNames: [wdg]}</code>、<code>scope: Namespaced</code> を持つ。これらの決め事から生まれる REST パスとして正しいものはどれか。',
+    opts: [
+      '/apis/Widget/v1/namespaces/{ns}/lab.crd-series.example/{name}',
+      '/api/v1/namespaces/{ns}/widgets/{name}',
+      '/apis/lab.crd-series.example/v1/widgets/{name}',
+      '/apis/lab.crd-series.example/v1/namespaces/{ns}/widgets/{name}',
+      '/widgets/lab.crd-series.example/v1/{ns}/{name}'
+    ],
+    ans: 3,
+    exps: [
+      '違う。パスの中で使うのは Kind(単数・大文字)ではなく、<code>names.plural</code> の Resource(複数形の呼び名)。group の名前が Kind の位置に入ることも無い。',
+      '違う。<code>/api/v1</code> は Group 名を持たない core グループ専用のパス。<code>lab.crd-series.example</code> のような名前付き Group は、必ず <code>/apis/GROUP/VERSION/...</code> の形になる。',
+      '違う。<code>scope: Namespaced</code> の CR が持つパスには namespace の仕切りが必要。これは cluster-scoped の場合の形に近い。',
+      '<b>これが正解。</b>group(<code>lab.crd-series.example</code>)・version(<code>v1</code>)・namespace の仕切り・names.plural(<code>widgets</code>)の順に並ぶのが、namespaced な CRD の REST パスの形。',
+      '違う。group・version が Resource の前に来る順序が逆になっている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>group・version・namespace・names.plural の 4 つが、この順番で組み立てられて 1 本のパスになる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 700 150" aria-label="RESTパスの組み立て方を示す図">'
+          + '<rect x="20" y="20" width="140" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="90" y="40" text-anchor="middle" font-size="12" fill="#1d4e8f">group</text>'
+          + '<text x="90" y="58" text-anchor="middle" font-size="10.5" fill="#1d4e8f">lab.crd-series.example</text>'
+          + '<rect x="180" y="20" width="90" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="225" y="40" text-anchor="middle" font-size="12" fill="#1d4e8f">version</text>'
+          + '<text x="225" y="58" text-anchor="middle" font-size="10.5" fill="#1d4e8f">v1</text>'
+          + '<rect x="290" y="20" width="140" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="360" y="40" text-anchor="middle" font-size="12" fill="#1d4e8f">namespace</text>'
+          + '<text x="360" y="58" text-anchor="middle" font-size="10.5" fill="#1d4e8f">namespaces/{ns}</text>'
+          + '<rect x="450" y="20" width="140" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="520" y="40" text-anchor="middle" font-size="12" fill="#1d4e8f">names.plural</text>'
+          + '<text x="520" y="58" text-anchor="middle" font-size="10.5" fill="#1d4e8f">widgets</text>'
+          + '<rect x="30" y="95" width="640" height="40" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>'
+          + '<text x="350" y="120" text-anchor="middle" font-size="12" fill="#0f5132" font-family="Menlo,Consolas,monospace">/apis/lab.crd-series.example/v1/namespaces/{ns}/widgets/{name}</text>'
+          + '</svg><p class="cap">図: 4 つの決め事が、この順番で合体して 1 本の REST パスになる</p></div>'
+    }
+  }
+  ,
+  {
+    q: 'kubebuilder のマーカーと controller-gen の関係として正しいものは。',
+    opts: [
+      'マーカーは実行時に Pod の中で評価されるコメントである',
+      'マーカーは CRD の値を書き換える admission webhook の一種である',
+      'マーカーは kubectl が実行時に解釈する、オブジェクトに付くアノテーションの一種である',
+      'マーカーを一切書かなくても、controller-gen は型の名前から enum や最小値などの制約をすべて正しく推測できる',
+      'controller-gen は Go のソースコードのマーカーコメントを読み、CRD の YAML や RBAC の YAML などを生成する'
+    ],
+    ans: 4,
+    exps: [
+      '違う。マーカーは Go のソースコード上のコメントで、ビルド(コード生成)の時点で controller-gen が読む。Pod が動いている実行時には関係しない。',
+      '違う。admission webhook は実行時に API サーバーを通るリクエストを見る別の仕組みで、第 12 回で扱う。マーカーはコード生成の時点の話。',
+      '違う。これは第 02 回で学んだ metadata.annotations(オブジェクトに付く追加情報)と名前が似ているだけで、別の仕組み。マーカーはソースコードのコメント。',
+      '違う。enum や minimum/maximum などの制約は、マーカーで明示しない限り推測されない。書かなければ CRD のスキーマにその制約は入らない。',
+      '<b>これが正解。</b>確認済み(controller-tools v0.21.0 のソースおよび kubebuilder book のマーカー一覧): controller-gen はソース中の <code>+kubebuilder:...</code> コメントを解析し、CRD・RBAC などの YAML を自動生成する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>マーカーは「コード生成の時点」で読まれる。Pod が動く「実行時」とは別の時間軸にある。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 170" aria-label="マーカーが働く時間軸を示す図">'
+          + '<rect x="20" y="20" width="260" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>'
+          + '<text x="150" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">コード生成の時点</text>'
+          + '<text x="150" y="65" text-anchor="middle" font-size="12" fill="#0f5132">controller-gen がマーカーを読む</text>'
+          + '<rect x="360" y="20" width="260" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="490" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4e8f">実行時 (クラスタの中)</text>'
+          + '<text x="490" y="65" text-anchor="middle" font-size="12" fill="#1d4e8f">webhook・admission が働く(第12回)</text>'
+          + '<text x="320" y="120" text-anchor="middle" font-size="13" fill="#4a5d54">マーカーは左側だけの話。実行時の値の変更には関わらない</text>'
+          + '</svg><p class="cap">図: マーカーが働くのはコード生成の時点だけ</p></div>'
+    }
+  },
+  {
+    q: 'additionalPrinterColumns の Ready 列は <code>.status.conditions[?(@.type=="Ready")].status</code> を見ている。この列に値が表示されるために本当に必要なことは何か。',
+    opts: [
+      'CRD の additionalPrinterColumns に Ready を書くことだけで十分である',
+      '誰か(たとえばコントローラー)が実際に status.conditions に type: Ready の要素を書き込んでいること。CRD の定義だけでは値は入らない',
+      'kubectl get に --show-ready という特別なオプションを付けること',
+      'scale サブリソースを有効にすること',
+      'RBAC で conditions という名前のリソースへの権限を付与すること'
+    ],
+    ans: 1,
+    exps: [
+      '違う。列の定義(jsonPath)を書くのは「どこを見るか」を決めるだけで、見る先のデータが無ければ空欄になる。第 04 回の「CRD だけでは何も動かない」話がここにも当てはまる。',
+      '<b>これが正解。</b>additionalPrinterColumns はあくまで既にある値を表示するだけなので、status.conditions に Ready の要素を実際に書き込む誰か(コントローラーなど)が必要。実験では手動で status を書いて初めて値が出た。',
+      '違う。そのようなオプションは存在しない。表示列は CRD 側の定義で決まり、kubectl 側に特別なフラグは要らない。',
+      '違う。scale サブリソースは replicas の増減の仕組みで、conditions の表示とは無関係。',
+      '違う。conditions は status フィールドの中の一部分であり、widgets/status とは別に conditions という名前の RBAC リソースは存在しない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>列の定義(どこを見るか)と、値を書き込む主体(誰が書くか)は別物。前者だけでは空欄のまま。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 170" aria-label="表示列の定義と値を書く主体が別であることを示す図">'
+          + '<rect x="20" y="20" width="260" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="150" y="43" text-anchor="middle" font-size="13" fill="#1d4e8f">CRD: Ready 列の定義</text>'
+          + '<text x="150" y="62" text-anchor="middle" font-size="12" fill="#1d4e8f">「どこを見るか」だけ決める</text>'
+          + '<rect x="360" y="20" width="260" height="56" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>'
+          + '<text x="490" y="43" text-anchor="middle" font-size="13" fill="#8a5a12">status.conditions への書き込み</text>'
+          + '<text x="490" y="62" text-anchor="middle" font-size="12" fill="#8a5a12">これが無いと空欄のまま</text>'
+          + '<text x="320" y="120" text-anchor="middle" font-size="13" fill="#4a5d54">両方揃って初めて Ready 列に値が出る</text>'
+          + '</svg><p class="cap">図: 表示列の定義と、実際に値を書く主体は別</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

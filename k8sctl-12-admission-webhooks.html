@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ============================================================
+  explainers クイズ付き解説ページ 共通テンプレート
+  - このファイルをコピーして各シリーズのサンプルを作る
+  - 単一 HTML・inline CSS/JS・ビルド不要・MathJax は CDN
+  - K8S カスタムコントローラー自作シリーズ第12-15回。QUIZ 配列は 6 問に拡張済み
+  ============================================================ -->
+<title>第 12 回 Admission と webhook ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+  .navlinks{display:flex;justify-content:space-between;gap:12px;margin:28px 0 8px;font-size:14.5px}
+  .navlinks a{color:var(--g2);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 12 回</p>
+  <h1>Admission と webhook ― API サーバーの関所</h1>
+  <p>リクエストは保存される前に、もう一段の審査を通る。</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">第 11 回までは、CRD の形(スキーマ・検証・既定値)と、コントローラー自身の書き方(Reconcile・所有・楽観的排他)を見てきた。この回は視点を変え、API サーバーがリクエストを受け取ってから etcd(Kubernetes がすべての状態を保存する場所)に書き込むまでの間に、誰がどんな審査をしているかを追う。</p>
+  <div class="lead">API サーバーは、認証と認可を通った後に「admission(受け入れ判定)」という関所を通す。admission には、内容を書き換える mutating(変更系)と、合否だけを判定する validating(検証系)の 2 段階があり、ここに割り込むのが webhook(API サーバーが外部のプログラムに「これを許可してよいか」を問い合わせる仕組み)。webhook の設定を 1 つ間違えると、クラスタ全体の操作が止まることがある。</div>
+
+  <section id="s1">
+    <h2>1. リクエストはどこを通って etcd に着くか</h2>
+    <p><code>kubectl apply</code> を打った瞬間、リクエストは一直線に保存されるわけではない。<a href="https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/" target="_blank" rel="noopener">公式ドキュメント</a>によれば、admission controller(受け入れ判定を行う部品)は「リソースが保存される前、ただしリクエストが認証(authentication: あなたは誰か)と認可(authorization: あなたにその操作をする権限があるか)を通った後」に割り込む。admission はさらに 2 段階に分かれており、最初に mutating(変更系: 内容を書き換えてよい。拒否もできる)admission が全部走り、その後に validating(検証系: 書き換えは禁止で合否だけ判定する)admission が走る。どちらの段階でも、1 つでも拒否すれば即座にリクエスト全体が拒否され、利用者にエラーが返る。</p>
+    <p>CRD(第 05〜07 回)の構造的スキーマ検証・既定値埋め(defaulting)・未知フィールドの刈り込み(pruning)は、admission の 2 段階が始まる前の「デコード」の段階で行われる。だから mutating admission(webhook を含む)が受け取るオブジェクトは、すでに刈り込みと既定値が入った後の姿であり、第 07 回で見た「既定値は読み出し時にも入る」(EKS 1.35 のテスト用クラスタで実測)も、同じデコードの仕組みが読み出しのたびに働いている証拠。CEL(<code>x-kubernetes-validations</code>)による検証は、この構造的スキーマの検証の一部として行われ、mutating admission の後・validating admission の前に挟まる。第 06 回で見た「enum 違反があると CEL は評価されない」(同じく実測)は、この検証の中の話。</p>
+    <div class="fig">
+      <svg viewBox="0 0 920 220" role="img" aria-label="API サーバーのリクエスト処理順序">
+        <rect x="10" y="30" width="95" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="57" y="53" font-size="12.5" text-anchor="middle" fill="#1d4e8f">kubectl</text>
+        <text x="57" y="70" font-size="12.5" text-anchor="middle" fill="#1d4e8f">apply</text>
+        <rect x="115" y="30" width="95" height="56" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="162" y="53" font-size="12.5" text-anchor="middle" fill="#0f5132">認証</text>
+        <text x="162" y="70" font-size="11" text-anchor="middle" fill="#4a5d54">authn</text>
+        <rect x="220" y="30" width="95" height="56" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="267" y="53" font-size="12.5" text-anchor="middle" fill="#0f5132">認可</text>
+        <text x="267" y="70" font-size="11" text-anchor="middle" fill="#4a5d54">authz</text>
+        <rect x="325" y="30" width="110" height="56" rx="10" fill="#fff" stroke="#d9e5df"/>
+        <text x="380" y="53" font-size="12.5" text-anchor="middle" fill="#12211a">デコード</text>
+        <text x="380" y="70" font-size="11" text-anchor="middle" fill="#4a5d54">刈り込み+default</text>
+        <rect x="445" y="30" width="110" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="500" y="53" font-size="12.5" text-anchor="middle" fill="#1d4e8f">mutating</text>
+        <text x="500" y="70" font-size="11" text-anchor="middle" fill="#1d4e8f">admission</text>
+        <rect x="565" y="30" width="120" height="56" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="625" y="53" font-size="12.5" text-anchor="middle" fill="#0f5132">スキーマ検証</text>
+        <text x="625" y="70" font-size="11" text-anchor="middle" fill="#4a5d54">構造+CEL</text>
+        <rect x="695" y="30" width="110" height="56" rx="10" fill="#fdf3e2" stroke="#8a5a12"/>
+        <text x="750" y="53" font-size="12.5" text-anchor="middle" fill="#8a5a12">validating</text>
+        <text x="750" y="70" font-size="11" text-anchor="middle" fill="#8a5a12">admission</text>
+        <rect x="815" y="30" width="95" height="56" rx="10" fill="#0f5132"/>
+        <text x="862" y="53" font-size="12.5" text-anchor="middle" fill="#fff">etcd</text>
+        <text x="862" y="70" font-size="11" text-anchor="middle" fill="#dbefe4">保存場所</text>
+        <path fill="none" d="M105 58 H115" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <path fill="none" d="M210 58 H220" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <path fill="none" d="M315 58 H325" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <path fill="none" d="M435 58 H445" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <path fill="none" d="M555 58 H565" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <path fill="none" d="M685 58 H695" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <path fill="none" d="M805 58 H815" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12)"/>
+        <text x="500" y="108" font-size="11.5" text-anchor="middle" fill="#c0492f">拒否も可</text>
+        <text x="625" y="108" font-size="11.5" text-anchor="middle" fill="#c0492f">違反なら拒否</text>
+        <text x="750" y="108" font-size="11.5" text-anchor="middle" fill="#c0492f">拒否も可</text>
+        <path fill="none" d="M500 86 V98" stroke="#c0492f" stroke-width="1.4"/>
+        <path fill="none" d="M625 86 V98" stroke="#c0492f" stroke-width="1.4"/>
+        <path fill="none" d="M750 86 V98" stroke="#c0492f" stroke-width="1.4"/>
+        <defs>
+          <marker id="arrow12" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4a5d54"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: 認証・認可の後、デコード(刈り込み+既定値埋め)を経て、mutating admission → スキーマ検証(構造+CEL) → validating admission の順に etcd へ向かう。mutating・validating のどちらの admission も拒否でき、スキーマ検証の違反も拒否になる。</p>
+    </div>
+  </section>
+
+  <section id="s2">
+    <h2>2. mutating webhook と validating webhook</h2>
+    <p>webhook は、API サーバーが自分の中で判定を終わらせず、HTTPS で外部のプログラムに「このオブジェクトをどう扱うべきか」を問い合わせる仕組み。<code>MutatingWebhookConfiguration</code> と <code>ValidatingWebhookConfiguration</code> という 2 つの API で登録する。mutating webhook は JSON Patch でオブジェクトを書き換えて返せる(第 07 回の既定値埋めの一種とも言える)が、validating webhook と同じく <code>allowed: false</code> で拒否もできる。validating webhook は書き換えられず、許可(<code>allowed: true</code>)か拒否(<code>allowed: false</code>)だけを返す(1 節で見た順序のとおり、mutating が先、validating が後)。同じ段階に複数の webhook が登録されていれば、それらは直列に(順番に)呼ばれ、前の webhook が書き換えた結果を後の webhook が見られる場合がある。ただし呼ばれる順序そのものは保証されない。mutating webhook が何かを書き換えると、設定に <code>reinvocationPolicy: IfNeeded</code> があれば、それより前に呼ばれた mutating webhook がもう一度呼び直される(既定は <code>Never</code>)。</p>
+    <table>
+      <tr><th></th><th>mutating webhook</th><th>validating webhook</th></tr>
+      <tr><td>できること</td><td>書き換え + 拒否</td><td>許可 / 拒否の判定のみ</td></tr>
+      <tr><td>実行順序</td><td>先(スキーマ検証より前)</td><td>後(スキーマ検証より後)</td></tr>
+      <tr><td>典型例</td><td>サイドカー注入、既定値の補完</td><td>命名規則の強制、他オブジェクトを読んでの相関チェック</td></tr>
+    </table>
+    <div class="fig">
+      <svg viewBox="0 0 760 220" role="img" aria-label="mutating と validating の違い">
+        <rect x="20" y="20" width="330" height="80" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="185" y="48" font-size="13.5" text-anchor="middle" fill="#1d4e8f">spec.image: "nginx"</text>
+        <path fill="none" d="M70 60 H300" stroke="#1d4e8f" stroke-width="2" marker-end="url(#arrow12b)"/>
+        <text x="185" y="85" font-size="12.5" text-anchor="middle" fill="#1d4e8f">mutating webhook が書き換える</text>
+        <rect x="410" y="20" width="330" height="80" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="575" y="48" font-size="13.5" text-anchor="middle" fill="#1d4e8f">spec.image: "nginx:1.27"</text>
+        <text x="575" y="85" font-size="12.5" text-anchor="middle" fill="#4a5d54">書き換えられた後の姿</text>
+        <path fill="none" d="M350 60 H410" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12b)"/>
+        <rect x="20" y="130" width="330" height="80" rx="10" fill="#fdf3e2" stroke="#8a5a12"/>
+        <text x="185" y="158" font-size="13.5" text-anchor="middle" fill="#8a5a12">size: "large"</text>
+        <text x="185" y="178" font-size="12.5" text-anchor="middle" fill="#8a5a12">validating webhook が判定</text>
+        <rect x="410" y="130" width="140" height="80" rx="10" fill="#fbeeea" stroke="#c0492f"/>
+        <text x="480" y="165" font-size="13" text-anchor="middle" fill="#c0492f">拒否</text>
+        <text x="480" y="182" font-size="12" text-anchor="middle" fill="#c0492f">allowed:false</text>
+        <rect x="580" y="130" width="160" height="80" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="660" y="165" font-size="13" text-anchor="middle" fill="#198754">許可</text>
+        <text x="660" y="182" font-size="12" text-anchor="middle" fill="#198754">allowed:true・内容不変</text>
+        <path fill="none" d="M350 170 H410" stroke="#8a5a12" stroke-width="2" marker-end="url(#arrow12o)"/>
+        <path fill="none" d="M350 170 C440 170, 500 170, 580 170" stroke="#8a5a12" stroke-width="2" marker-end="url(#arrow12o)" stroke-dasharray="4 3"/>
+        <defs>
+          <marker id="arrow12b" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#1d4e8f"/></marker>
+          <marker id="arrow12o" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8a5a12"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: mutating webhook は内容を書き換えて次に渡す。validating webhook は内容を変えず、通すか止めるかだけを決める。</p>
+    </div>
+  </section>
+
+  <section id="s3">
+    <h2>3. webhook の設定フィールド</h2>
+    <p>webhook は外部プロセスへの呼び出しなので、落ちたとき・遅いときにどう振る舞うかを明示的に設定する。</p>
+    <ul>
+      <li><code>failurePolicy</code>: <code>Fail</code>(既定。呼び出しに失敗したらリクエストを拒否する)か <code>Ignore</code>(失敗しても通す)。<a href="https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/" target="_blank" rel="noopener">公式ドキュメント</a>の既定は <code>Fail</code>。</li>
+      <li><code>sideEffects</code>: <code>admissionregistration.k8s.io/v1</code> で指定できるのは <code>None</code>(副作用なし)と <code>NoneOnDryRun</code>(通常は副作用があるが dry-run 時は webhook 側で抑制する)の 2 つだけ(<a href="https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/" target="_blank" rel="noopener">公式ドキュメント</a>で確認)。dry-run(本当には保存しない試し実行)でも admission は走るが、webhook が <code>None</code>/<code>NoneOnDryRun</code> のどちらでも副作用を安全に扱えないと申告されている場合、dry-run リクエストはその webhook には送らず、呼び出さずに API 呼び出し自体を失敗させる。</li>
+      <li><code>timeoutSeconds</code>: 1〜30 秒の範囲でしか指定できず(0 や 31 は登録時に拒否される)、既定は 10 秒。超えると <code>failurePolicy</code> に従って扱われる。webhook の応答が遅いほどリクエストが etcd に書き込まれるまでの時間が延び、その間に別のクライアントが先に書き込んで resourceVersion がずれる(第 11 回の楽観的排他で見た 409 Conflict)可能性も上がる。</li>
+      <li><code>matchConditions</code>: CEL 式で「このリクエストのときだけ webhook を呼ぶ」を絞り込む。<code>rules</code> や <code>objectSelector</code> より細かい条件を書ける。</li>
+    </ul>
+    <pre><code>webhooks:
+  - name: widget-defaulter.example.com
+    sideEffects: None
+    timeoutSeconds: 5
+    failurePolicy: Fail
+    matchConditions:
+      - name: "exclude-system"
+        expression: "!request.userInfo.username.startsWith('system:')"</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 820 240" role="img" aria-label="failurePolicy の分岐">
+        <rect x="20" y="90" width="180" height="60" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="110" y="113" font-size="13" text-anchor="middle" fill="#0f5132">webhook へ送信</text>
+        <text x="110" y="130" font-size="11.5" text-anchor="middle" fill="#4a5d54">timeoutSeconds=10</text>
+        <path fill="none" d="M200 120 H260" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12f)"/>
+        <polygon points="260,90 340,120 260,150 180,120" fill="#fdf3e2" stroke="#8a5a12" transform="translate(20,0)"/>
+        <text x="300" y="116" font-size="12" text-anchor="middle" fill="#8a5a12">10 秒以内に</text>
+        <text x="300" y="131" font-size="12" text-anchor="middle" fill="#8a5a12">応答した？</text>
+        <path d="M380 110 C440 70, 500 60, 540 60" stroke="#198754" stroke-width="2" fill="none" marker-end="url(#arrow12f)"/>
+        <text x="460" y="52" font-size="12" fill="#198754">はい</text>
+        <rect x="540" y="30" width="230" height="56" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="655" y="54" font-size="13" text-anchor="middle" fill="#198754">webhook の判定どおりに進む</text>
+        <text x="655" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">(許可 or 書き換え)</text>
+        <path d="M380 130 C440 170, 500 180, 540 180" stroke="#c0492f" stroke-width="2" fill="none" marker-end="url(#arrow12f)"/>
+        <text x="460" y="200" font-size="12" fill="#c0492f">いいえ(timeout)</text>
+        <rect x="540" y="155" width="110" height="56" rx="10" fill="#fbeeea" stroke="#c0492f"/>
+        <text x="595" y="178" font-size="12.5" text-anchor="middle" fill="#c0492f">Fail なら</text>
+        <text x="595" y="195" font-size="12" text-anchor="middle" fill="#c0492f">拒否する</text>
+        <rect x="670" y="155" width="130" height="56" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="735" y="178" font-size="12.5" text-anchor="middle" fill="#0f5132">Ignore なら</text>
+        <text x="735" y="195" font-size="12" text-anchor="middle" fill="#0f5132">素通りする</text>
+        <path fill="none" d="M650 183 H670" stroke="#4a5d54" stroke-width="1.6" marker-end="url(#arrow12f)"/>
+        <defs><marker id="arrow12f" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: webhook の呼び出しが timeoutSeconds を超えて失敗したとき、failurePolicy=Fail なら拒否、Ignore なら素通りする。</p>
+    </div>
+  </section>
+
+  <section id="s4">
+    <h2>4. TLS が要る理由と、webhook が落ちたときの危険</h2>
+    <p>API サーバーは webhook サービスに HTTPS で接続する。<code>clientConfig.caBundle</code> に証明書の発行元(CA: Certificate Authority)を渡し、証明書は <code>&lt;service&gt;.&lt;namespace&gt;.svc</code> という名前に対して発行されていなければならない。この証明書の発行・更新を手作業でやるのは煩雑なため、cert-manager(証明書の発行・自動更新を行うクラスタ内のソフト)を使い、証明書の更新で webhook が突然認証エラーを起こす事故を防ぐのが定石。</p>
+    <div class="warn">webhook の Pod が全部落ちている状態で <code>failurePolicy: Fail</code> のままだと、その webhook の対象になるすべてのリソース(Pod 作成など広く設定していれば、ほぼ全操作)が admission で拒否され続ける。webhook 自身の Pod を更新するときに、自分自身を対象にした webhook で止まる「自己ロック」はよくある事故。</div>
+    <div class="fig">
+      <svg viewBox="0 0 760 230" role="img" aria-label="TLS と webhook ダウン時の影響">
+        <rect x="30" y="30" width="180" height="60" rx="10" fill="#f3f9f6" stroke="#8fd6b4"/>
+        <text x="120" y="55" font-size="13" text-anchor="middle" fill="#0f5132">API サーバー</text>
+        <text x="120" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">caBundle で検証</text>
+        <path fill="none" d="M210 60 H290" stroke="#1d4e8f" stroke-width="2" marker-end="url(#arrow12t)"/>
+        <text x="250" y="48" font-size="11.5" fill="#1d4e8f">HTTPS</text>
+        <rect x="290" y="30" width="200" height="60" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="390" y="55" font-size="13" text-anchor="middle" fill="#1d4e8f">webhook Service</text>
+        <text x="390" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">webhook-svc.ns.svc 宛の証明書</text>
+        <path fill="none" d="M390 90 V120" stroke="#4a5d54" stroke-width="1.6" marker-end="url(#arrow12t)"/>
+        <rect x="290" y="120" width="200" height="50" rx="10" fill="#fff" stroke="#d9e5df"/>
+        <text x="390" y="150" font-size="12" text-anchor="middle" fill="#4a5d54">cert-manager が発行・自動更新</text>
+        <rect x="540" y="30" width="190" height="90" rx="10" fill="#fbeeea" stroke="#c0492f"/>
+        <text x="635" y="54" font-size="13" text-anchor="middle" fill="#c0492f">webhook Pod が全滅</text>
+        <text x="635" y="73" font-size="12" text-anchor="middle" fill="#c0492f">failurePolicy=Fail のとき</text>
+        <text x="635" y="92" font-size="12" text-anchor="middle" fill="#c0492f">対象リソース全体が拒否され続ける</text>
+        <path fill="none" d="M490 60 H540" stroke="#c0492f" stroke-width="2" marker-end="url(#arrow12tr)" stroke-dasharray="4 3"/>
+        <defs>
+          <marker id="arrow12t" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4a5d54"/></marker>
+          <marker id="arrow12tr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#c0492f"/></marker>
+        </defs>
+      </svg>
+      <p class="cap">図: API サーバーは caBundle で webhook サービスの証明書を検証する。webhook が応答しないと、failurePolicy=Fail の設定ではその対象リソース全体が止まる。</p>
+    </div>
+  </section>
+
+  <section id="s5">
+    <h2>5. webhook でしかできないこと・やってはいけないこと</h2>
+    <p>CRD のスキーマ検証や CEL(第 06 回)は、送られてきたオブジェクト自身(<code>self</code>/<code>oldSelf</code>)の中だけで判定する。webhook は外部プロセスなので、<strong>他のオブジェクトを読んでから</strong>判定できる(例: 「同じ namespace に同名の Secret があるか」「クラスタ全体の利用量が上限を超えていないか」)。第 13 回で見る VAP(ValidatingAdmissionPolicy)もパラメータリソースや namespace オブジェクトを読めるので、これは webhook だけの強みではないが、VAP が読めるのは決められたパラメータと namespace だけで、任意の名前のオブジェクトを自由に読みに行ける分だけ webhook のほうが広い。その代わり webhook は呼び出しごとにネットワーク越しの処理が走るため、リクエストの速度と可用性(落ちていないか)がクラスタ全体の速度と可用性に直結する。やってはいけないのは、webhook の中で重い処理(大きな一覧取得、別クラスタへの問い合わせなど)を行い <code>timeoutSeconds</code> を使い切ること、そして webhook 自身が作る・変更するリソースを webhook の対象に含めて無限ループを作ることの 2 つ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 210" role="img" aria-label="webhook の強みと注意点">
+        <rect x="30" y="30" width="200" height="70" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="130" y="55" font-size="13" text-anchor="middle" fill="#1d4e8f">このリクエストの Widget</text>
+        <text x="130" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">(CEL が読めるのはここだけ)</text>
+        <rect x="280" y="30" width="200" height="70" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="380" y="55" font-size="13" text-anchor="middle" fill="#0f5132">他の namespace の Secret</text>
+        <text x="380" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">webhook ならここまで読める</text>
+        <rect x="530" y="30" width="180" height="70" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="620" y="55" font-size="13" text-anchor="middle" fill="#0f5132">クラスタ全体の利用量</text>
+        <text x="620" y="72" font-size="11.5" text-anchor="middle" fill="#4a5d54">外部 API への問い合わせも可</text>
+        <path fill="none" d="M230 65 H280" stroke="#198754" stroke-width="2" marker-end="url(#arrow12w)"/>
+        <path fill="none" d="M480 65 H530" stroke="#198754" stroke-width="2" marker-end="url(#arrow12w)"/>
+        <rect x="150" y="140" width="440" height="50" rx="10" fill="#fdf3e2" stroke="#8a5a12"/>
+        <text x="370" y="170" font-size="12.5" text-anchor="middle" fill="#8a5a12">読める範囲が広いほど、呼び出し1回ごとの時間とクラスタへの依存が増える</text>
+        <defs><marker id="arrow12w" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#198754"/></marker></defs>
+      </svg>
+      <p class="cap">図: webhook は API サーバーの外から他のオブジェクトを読めるが、その分だけ呼び出しのたびに待ち時間とクラスタの可用性への依存が増える。</p>
+    </div>
+  </section>
+
+  <section id="s6">
+    <h2>まとめと次の回</h2>
+    <p>リクエストは、認証・認可の後、デコード(刈り込み+既定値埋め)を経て、mutating(書き換え + 拒否も可)→ スキーマ検証(構造+CEL) → validating(合否判定)の順に進む。webhook は mutating と validating の 2 か所にだけ外部プログラムを割り込ませる仕組みで(スキーマ検証そのものには割り込めない)、<code>failurePolicy</code>・<code>sideEffects</code>・<code>timeoutSeconds</code>・TLS 証明書の設定を誤ると、クラスタ全体の操作を止めてしまう。次の第 13 回では、webhook を書かずに CEL だけで同じ関所の判定を API サーバーの中で完結させる <code>ValidatingAdmissionPolicy</code> と <code>MutatingAdmissionPolicy</code> を見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 180" role="img" aria-label="第12回のまとめ">
+        <rect x="20" y="60" width="140" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f"/>
+        <text x="90" y="92" font-size="13" text-anchor="middle" fill="#1d4e8f">mutating</text>
+        <rect x="200" y="60" width="140" height="56" rx="10" fill="#e7f6ee" stroke="#198754"/>
+        <text x="270" y="85" font-size="12.5" text-anchor="middle" fill="#0f5132">スキーマ検証</text>
+        <text x="270" y="101" font-size="11" text-anchor="middle" fill="#4a5d54">構造+CEL</text>
+        <rect x="380" y="60" width="140" height="56" rx="10" fill="#fdf3e2" stroke="#8a5a12"/>
+        <text x="450" y="92" font-size="13" text-anchor="middle" fill="#8a5a12">validating</text>
+        <rect x="560" y="60" width="120" height="56" rx="10" fill="#0f5132"/>
+        <text x="620" y="92" font-size="13" text-anchor="middle" fill="#fff">etcd</text>
+        <path fill="none" d="M160 88 H200" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12m)"/>
+        <path fill="none" d="M340 88 H380" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12m)"/>
+        <path fill="none" d="M520 88 H560" stroke="#4a5d54" stroke-width="2" marker-end="url(#arrow12m)"/>
+        <text x="350" y="30" font-size="12.5" text-anchor="middle" fill="#4a5d54">webhook は mutating と validating だけに割り込む / 次回は CEL で割り込まない方法</text>
+        <defs><marker id="arrow12m" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: admission = mutating → スキーマ検証 → validating。webhook が割り込めるのは mutating と validating の 2 か所だけで、スキーマ検証そのものには割り込めない。</p>
+    </div>
+  </section>
+
+  <div class="navlinks">
+    <a href="./k8sctl-11-writing-safely.html">← 第 11 回 書き込みの作法</a>
+    <a href="./k8sctl-13-admission-policies.html">第 13 回 ValidatingAdmissionPolicy と MutatingAdmissionPolicy →</a>
+  </div>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (10 問に拡張すること)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'ある Widget の CREATE リクエストに、mutating webhook(失敗しても通す設定)と validating webhook(落ちている)が両方登録されている。validating webhook の failurePolicy が既定値のままなら何が起きる？',
+    opts: [
+      'validating webhook の呼び出しが失敗し、failurePolicy の既定(Fail)によりリクエストは拒否される',
+      'validating webhook が落ちていても、スキーマ検証さえ通れば作成される',
+      'mutating webhook が落ちていないので、そのまま作成される',
+      '両方の webhook を無視して、いちばん速く応答した結果が使われる',
+      'mutating webhook が validating webhook の代わりに合否を判定する'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b> failurePolicy の既定は Fail。公式ドキュメントのとおり、webhook の呼び出しに失敗すればリクエストは拒否される。',
+      '違う。スキーマ検証(構造+CEL。既定値はこれより前のデコード段階で埋まっている)は validating admission より前の段階で、通ってもその後の validating webhook の結果には影響しない。',
+      '違う。mutating webhook が無事でも、validating admission はこの後に走る別の段階で、ここで落ちれば結果が変わる。',
+      '違う。admission は「どちらかが通れば良い」という多数決ではなく、関わる段階をすべて順番に通過する必要がある。',
+      '違う。mutating webhook も <code>allowed: false</code> で拒否はできるが、それは validating webhook の代役にはならない。登録された webhook はそれぞれ別個に呼ばれて判定する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>mutating はもう通過済みで、問題は「この後」の validating の段階で起きている。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="failurePolicy既定の影響">'
+          + '<rect x="20" y="50" width="130" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="85" y="80" font-size="12.5" text-anchor="middle" fill="#198754">mutating 通過済み</text>'
+          + '<rect x="190" y="50" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="270" y="72" font-size="12" text-anchor="middle" fill="#c0492f">validating webhook</text><text x="270" y="89" font-size="11.5" text-anchor="middle" fill="#c0492f">落ちている・failurePolicy=Fail</text>'
+          + '<rect x="400" y="50" width="170" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="485" y="80" font-size="13" text-anchor="middle" fill="#c0492f">リクエスト拒否</text>'
+          + '<path fill="none" d="M150 75 H190" stroke="#4a5d54" stroke-width="2"/><path fill="none" d="M350 75 H400" stroke="#c0492f" stroke-width="2"/>'
+          + '</svg><p class="cap">図: mutating を通過しても、後段の validating webhook が落ちていれば既定の Fail で拒否される。</p></div>'
+    }
+  },
+  {
+    q: '同じ Pod CREATE リクエストに対して、mutating webhook A が <code>spec.image</code> を書き換え、mutating webhook B はラベルだけを見て判定したいとする。A と B の実行順序について正しいものは？',
+    opts: [
+      'A と B は必ず同時に(並列に)呼ばれ、どちらが先かは決まっていない',
+      'mutating admission の段階の中で、登録された mutating webhook が順番に呼ばれ、A の書き換え結果を B が見られる場合がある',
+      'validating webhook が先に呼ばれ、その後に mutating webhook A, B が呼ばれる',
+      'B がラベルしか見ないなら、admission をすべてスキップしてよい',
+      'A と B はスキーマ検証より後に呼ばれる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。mutating admission の段階は、登録された複数の mutating webhook を直列に(順番に)呼ぶ。並列が前提ではない。',
+      '<b>これが正解。</b> mutating admission はこの段階の中で webhook を直列に呼び、前の webhook が書き換えた結果を後の webhook が見られる場合がある。ただし呼ばれる順序そのものは保証されないので「必ず A → B」と決めつけてコードを書くべきではなく、書き換えが起きたときに前段へ戻って呼び直す <code>reinvocationPolicy</code>(既定 <code>Never</code>)という設定もある。',
+      '違う。validating admission はすべての mutating admission とスキーマ検証が終わった後に実行される段階で、先に呼ばれることはない。',
+      '違う。「ラベルだけを見る」という条件は webhook 内部の判定ロジックの話で、admission の段階そのものをスキップする理由にはならない。',
+      '違う。mutating webhook はスキーマ検証より前の、まさに「mutating admission」の段階で呼ばれる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>mutating admission は 1 つの段階で、その中に複数の webhook が順番に並ぶ。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 150" aria-label="mutating内の順序">'
+          + '<rect x="20" y="40" width="540" height="70" rx="10" fill="#e6eef8" stroke="#1d4e8f"/><text x="290" y="60" font-size="12.5" text-anchor="middle" fill="#1d4e8f">mutating admission という1つの段階</text>'
+          + '<rect x="50" y="70" width="150" height="30" rx="6" fill="#fff" stroke="#1d4e8f"/><text x="125" y="90" font-size="12" text-anchor="middle" fill="#1d4e8f">webhook A(画像を書き換え)</text>'
+          + '<rect x="230" y="70" width="150" height="30" rx="6" fill="#fff" stroke="#1d4e8f"/><text x="305" y="90" font-size="12" text-anchor="middle" fill="#1d4e8f">webhook B(ラベル判定)</text>'
+          + '<path fill="none" d="M200 85 H230" stroke="#1d4e8f" stroke-width="2"/>'
+          + '</svg><p class="cap">図: 同じ段階の中で直列に呼ばれるので、B が A の書き換えた後の姿を見ることがある。ただしどちらが先かは保証されない。</p></div>'
+    }
+  },
+  {
+    q: 'ある validating webhook が、大きな変更を伴う外部の在庫データベースへ問い合わせて判定する(副作用あり)。<code>--dry-run=server</code> でこの webhook を安全に動かすには、どう設定するべき？',
+    opts: [
+      '何もしなくてよい。dry-run では admission そのものが自動的にスキップされる',
+      'timeoutSeconds を 0 にして、呼び出しそのものを無効化する',
+      'sideEffects を NoneOnDryRun にして、dry-run のときだけ webhook 側で副作用を抑制するコードを書く',
+      'sideEffects を Some に設定する(admissionregistration.k8s.io/v1 でもそのような値が使えるはず、という前提で)',
+      'failurePolicy を Ignore にして、dry-run のときは判定自体を無視させる'
+    ],
+    ans: 2,
+    exps: [
+      '違う。dry-run でも admission は走る。webhook が dry-run を安全に扱えると宣言(None か NoneOnDryRun)していない限り、呼び出し自体がスキップされるのではなく、その webhook には送らずに API 呼び出しを失敗させる側に倒れる。',
+      '違う。timeoutSeconds は 1〜30 秒の範囲でしか指定できず、登録時に 0 を指定すると拒否される。そもそも呼び出しを無効化する項目ではない。',
+      '<b>これが正解。</b> sideEffects=NoneOnDryRun を宣言し、webhook のコード側で <code>request.dryRun</code> を見て副作用(在庫DBへの書き込みなど)を実際には行わないようにする。',
+      '違う。admissionregistration.k8s.io/v1 の sideEffects に指定できるのは None と NoneOnDryRun だけで、Some は作成時に拒否される。仮に副作用のある webhook をこの 2 つのどちらかのまま(実際には副作用があるのに申告が不十分なまま)にしても、dry-run リクエストはその webhook に送られず呼び出しごと失敗するだけで、在庫DBへの書き込みが dry-run 中に実行されてしまうわけではない。',
+      '違う。failurePolicy は「呼び出しに失敗したときの扱い」を決めるだけで、dry-run 時の副作用の扱いとは無関係。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>sideEffects は「副作用があるかどうか」を API サーバーに伝える申告で、dry-run の安全性を保証するのは webhook 側のコード。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="sideEffectsとdry-run">'
+          + '<rect x="20" y="30" width="180" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="110" y="60" font-size="12.5" text-anchor="middle" fill="#1d4e8f">dry-run リクエスト</text>'
+          + '<rect x="240" y="30" width="180" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="330" y="52" font-size="12" text-anchor="middle" fill="#8a5a12">sideEffects=</text><text x="330" y="68" font-size="12" text-anchor="middle" fill="#8a5a12">NoneOnDryRun</text>'
+          + '<rect x="460" y="30" width="120" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="520" y="60" font-size="12.5" text-anchor="middle" fill="#198754">呼ばれる</text>'
+          + '<rect x="240" y="100" width="340" height="40" rx="8" fill="#fff" stroke="#d9e5df"/><text x="410" y="125" font-size="12" text-anchor="middle" fill="#4a5d54">webhook 内部で request.dryRun を見て在庫DB書き込みを止める</text>'
+          + '<path fill="none" d="M200 55 H240" stroke="#4a5d54" stroke-width="2"/><path fill="none" d="M420 55 H460" stroke="#4a5d54" stroke-width="2"/>'
+          + '</svg><p class="cap">図: 宣言(sideEffects)と実際に副作用を止めるコードの両方が必要。</p></div>'
+    }
+  },
+  {
+    q: 'Widget コントローラーの運用チームが「同じ namespace に Secret が存在するかどうかで Widget の作成を許可したい」という要件を実装したい。第06回で学んだ CRD の CEL(<code>x-kubernetes-validations</code>)では実現できず、webhook が必要になる理由は何？',
+    opts: [
+      'CEL は自然言語しか扱えず、Secret という単語を理解できないから',
+      'webhook のほうが CEL より高速だから、性能上の理由で webhook を選ぶ',
+      'CEL はそもそも真偽値しか返せず、存在確認ができないから',
+      'CRD の CEL は <code>self</code> と <code>oldSelf</code>、つまりそのオブジェクト自身の新旧しか参照できず、クラスタ内の他のオブジェクトを読めないから',
+      'CRD の CEL は namespaced なリソースにしか使えないから'
+    ],
+    ans: 3,
+    exps: [
+      '違う。CEL は自然言語ではなく式を評価する言語で、文字列比較などは普通に行える。問題は「読める範囲」。',
+      '違う。むしろ webhook は外部プロセス呼び出しのため CEL よりオーバーヘッドが大きい。選ぶ理由は速度ではなく「できること」の違い。',
+      '違う。CEL は真偽値を返す式として書け、存在確認に類する判定(例えばフィールドが設定されているか)も表現できる。本質的な制約はクラスタ内の他オブジェクトを読めないこと。',
+      '<b>これが正解。</b> CRD の CEL は、検証対象のオブジェクト自身の <code>self</code>(と変更禁止チェック用の <code>oldSelf</code>)しか見られない。他の Secret や ConfigMap を読みに行くことはできない。webhook ならそれができる(第 13 回で見る VAP もパラメータや namespace オブジェクトなら読めるが、任意の名前のオブジェクトを自由に読みに行けるのは webhook のほうが広い)。',
+      '違う。CEL の <code>x-kubernetes-validations</code> はクラスタ全体リソースにも使え、namespaced かどうかは制約にならない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>CEL が見られる範囲と、webhook が見られる範囲の違いが決め手。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 150" aria-label="CELとwebhookの視野の違い">'
+          + '<rect x="30" y="30" width="200" height="90" rx="10" fill="#e6eef8" stroke="#1d4e8f"/><text x="130" y="55" font-size="12.5" text-anchor="middle" fill="#1d4e8f">CRD の CEL</text><text x="130" y="75" font-size="11.5" text-anchor="middle" fill="#4a5d54">self / oldSelf のみ</text><text x="130" y="92" font-size="11.5" text-anchor="middle" fill="#4a5d54">(このオブジェクト自身)</text>'
+          + '<rect x="280" y="30" width="290" height="90" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="425" y="55" font-size="12.5" text-anchor="middle" fill="#0f5132">validating webhook</text><text x="425" y="75" font-size="11.5" text-anchor="middle" fill="#4a5d54">同じ namespace の Secret を get できる</text><text x="425" y="92" font-size="11.5" text-anchor="middle" fill="#4a5d54">クラスタ全体を見に行くことも可能</text>'
+          + '</svg><p class="cap">図: CEL の視野はオブジェクト自身だけ。クラスタ内の任意のオブジェクトを自由に読む判定は webhook の領分(VAP はパラメータと namespace だけ)。</p></div>'
+    }
+  },
+  {
+    q: 'webhook サービスの証明書を発行している CA(認証局)自体を新しいものに入れ替えたが、<code>WebhookConfiguration</code> オブジェクトの <code>caBundle</code> は古い CA のまま更新し忘れていた。このときに起きることとして最も正確なものは？',
+    opts: [
+      '証明書の内容に関わらず、Kubernetes は常に平文通信にフォールバックするので問題は起きない',
+      'caBundle の不一致は warning としてログに出るだけで、リクエストは常に通る',
+      'caBundle が古くても、webhook の Pod が動いていれば必ず成功する',
+      'このケースでは mutating webhook だけが影響を受け、validating webhook は影響を受けない',
+      'API サーバーが webhook サービスとの TLS ハンドシェイクに失敗し、webhook 呼び出しが失敗する(その後は failurePolicy 次第)'
+    ],
+    ans: 4,
+    exps: [
+      '違う。admission webhook の通信は HTTPS が必須で、平文へのフォールバックは用意されていない。',
+      '違う。TLS 検証の失敗は warning どころではなく、admission そのものが失敗する重大な事象として扱われる。',
+      '違う。Pod が動いていても、TLS の検証に失敗すればその接続自体が成立しない。',
+      '違う。TLS ハンドシェイクの失敗は通信層の話で、mutating/validating のどちらの webhook かには関係しない。',
+      '<b>これが正解。</b> caBundle は(API サーバー自体の設定ではなく)WebhookConfiguration オブジェクトのフィールドで、webhook サービスの証明書をどの CA で検証するかを持つ。CA ごと入れ替わって caBundle が古いままだと TLS ハンドシェイクに失敗し、webhook 呼び出し自体が失敗扱いになり、あとは failurePolicy(既定 Fail)で拒否されるかどうかが決まる。発行元の CA が同じ証明書の更新(renewal)だけなら、古い caBundle のままでも通る。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>caBundle のズレは「相手を疑う」方向に働くので、安全側の失敗になる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 150" aria-label="caBundle不一致">'
+          + '<rect x="30" y="40" width="180" height="60" rx="8" fill="#f3f9f6" stroke="#8fd6b4"/><text x="120" y="63" font-size="12.5" text-anchor="middle" fill="#0f5132">WebhookConfiguration</text><text x="120" y="80" font-size="11" text-anchor="middle" fill="#4a5d54">caBundle は旧 CA のまま</text>'
+          + '<rect x="280" y="40" width="180" height="60" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="370" y="63" font-size="12.5" text-anchor="middle" fill="#1d4e8f">webhook Service</text><text x="370" y="80" font-size="11" text-anchor="middle" fill="#4a5d54">新しい CA で発行済み</text>'
+          + '<path fill="none" d="M210 70 H280" stroke="#c0492f" stroke-width="2" stroke-dasharray="5 3"/><text x="245" y="60" font-size="11.5" fill="#c0492f">検証失敗</text>'
+          + '<rect x="490" y="40" width="100" height="60" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="540" y="63" font-size="12" text-anchor="middle" fill="#c0492f">呼び出し</text><text x="540" y="80" font-size="12" text-anchor="middle" fill="#c0492f">失敗扱い</text>'
+          + '<path fill="none" d="M460 70 H490" stroke="#c0492f" stroke-width="2"/>'
+          + '</svg><p class="cap">図: caBundle と実際の証明書が食い違うと TLS ハンドシェイクで止まり、webhook 呼び出しは失敗として扱われる。</p></div>'
+    }
+  },
+  {
+    q: '第 11 回で学んだ「resourceVersion による楽観的排他」と admission webhook の関係について、正しい説明は？',
+    opts: [
+      'webhook が長く(timeoutSeconds に近いほど)かかるほど、その間に他のクライアントが同じオブジェクトを書き換えて 409 Conflict が起きる可能性も上がる',
+      'admission webhook はリクエストを etcd への書き込みより前に判定するので、楽観的排他の仕組みとは無関係に独立して動く',
+      'webhook は内部で resourceVersion を自動的に 1 ずつ増やしてくれるので、Conflict は起こらなくなる',
+      '楽観的排他は validating webhook にのみ関係し、mutating webhook には関係しない',
+      'webhook が判定している間、API サーバーは該当オブジェクトをロックして他のクライアントの書き込みを止める'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b> admission(webhook を含む)にかかる時間が長くなるほど、リクエストが etcd に書き込まれるまでの時間も延び、その間に別のクライアントが先に書き込んで resourceVersion が変わってしまう(409 Conflict)可能性が高くなる。',
+      '違う。webhook は admission の中で動くが、その処理時間だけリクエスト全体の滞留時間が延びるため、楽観的排他の衝突確率には影響する。「無関係」ではない。',
+      '違う。resourceVersion は etcd 側の仕組みで、webhook がこれを操作することはない。',
+      '違う。楽観的排他は mutating・validating どちらの webhook の処理時間にも等しく影響する。',
+      '違う。Kubernetes の admission はオブジェクトをロックしない。ロックしない代わりに resourceVersion の不一致を検知する楽観的排他を使っている(第 11 回)。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>webhook の待ち時間はそのまま「他の誰かが先に書き込める時間」になる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 150" aria-label="webhookの待ち時間と衝突">'
+          + '<rect x="30" y="40" width="160" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="110" y="70" font-size="12.5" text-anchor="middle" fill="#1d4e8f">webhook 判定中</text>'
+          + '<rect x="230" y="40" width="160" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="310" y="62" font-size="12" text-anchor="middle" fill="#8a5a12">別クライアントが</text><text x="310" y="78" font-size="12" text-anchor="middle" fill="#8a5a12">先に書き込み完了</text>'
+          + '<rect x="430" y="40" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="505" y="70" font-size="12.5" text-anchor="middle" fill="#c0492f">409 Conflict</text>'
+          + '<path fill="none" d="M190 65 H230" stroke="#4a5d54" stroke-width="2"/><path fill="none" d="M390 65 H430" stroke="#4a5d54" stroke-width="2"/>'
+          + '</svg><p class="cap">図: webhook の処理時間が延びるほど、同じオブジェクトへの競合する書き込みと衝突する余地も広がる。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

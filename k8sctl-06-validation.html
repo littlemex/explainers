@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ============================================================
+  explainers クイズ付き解説ページ 共通テンプレート
+  - このファイルをコピーして各シリーズのサンプルを作る
+  - 単一 HTML・inline CSS/JS・ビルド不要・MathJax は CDN
+  - {{PLACEHOLDER}} を埋め、QUIZ 配列を 10 問に拡張する
+  ============================================================ -->
+<title>第 06 回 検証 (validation) ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+  .nav2{display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px}
+  .nav2 a{color:var(--g2);text-decoration:none}
+  .nav2 a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 06 回</p>
+  <h1>検証 (validation)</h1>
+  <p>OpenAPI の素朴な制約と、CEL による自由な検証。2 つの仕組みがどう分担しているか</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">第 05 回で見た CRD のスキーマには、形(type)を決めるだけでなく、値を制限する検証の仕組みが 2 つ用意されている。1 つは enum や minimum のような OpenAPI の素朴な制約、もう 1 つは CEL(Common Expression Language: 小さな式言語)による自由度の高い検証。この回では実験で実際に拒否されたエラーを見ながら、両者の役割分担を整理する。</p>
+
+  <div class="lead">OpenAPI の制約(type, enum, minimum/maximum など)は 1 つのフィールドの形を手早く縛る。CEL(<code>x-kubernetes-validations</code>)は <code>self</code>(今の値)や <code>oldSelf</code>(更新前の値)を使って、複数フィールドの関係や「変更禁止」まで表現できる。ただし、enum・required・型の不一致・長さや個数の上限のように「形の前提が崩れる」違反が 1 つでもあると、そのオブジェクトの CEL ルールはまとめて評価されずに終わる。</div>
+
+  <section>
+    <h2>検証は何を守っているか</h2>
+    <p>CRD のスキーマが持つ検証は、大きく 2 種類に分かれる。1 つは OpenAPI v3 の標準的な制約で、<code>type</code>・<code>enum</code>・<code>minimum</code>/<code>maximum</code>・<code>pattern</code>・<code>minLength</code>・<code>required</code>・<code>maxItems</code> など、1 つのフィールドの形を宣言的に縛るもの。もう 1 つは <code>x-kubernetes-validations</code> という拡張フィールドに書く CEL で、複数のフィールドをまたいだ関係や、更新前後の比較まで表現できる。実験用 Widget の CRD(第 05 回で見た YAML)は両方を使っている。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 220" role="img" aria-label="OpenAPI制約とCELの役割分担を示す図">
+        <defs>
+          <marker id="a1g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+        </defs>
+        <rect x="280" y="16" width="200" height="48" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="2"/>
+        <text x="380" y="45" text-anchor="middle" font-size="14" font-weight="700" fill="#0f5132">CRD のスキーマ</text>
+
+        <rect x="40" y="100" width="300" height="90" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="190" y="124" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1d4e8f">OpenAPI の制約</text>
+        <text x="190" y="144" text-anchor="middle" font-size="12" fill="#1d4e8f">type / enum / minimum / maximum</text>
+        <text x="190" y="162" text-anchor="middle" font-size="12" fill="#1d4e8f">1 フィールドの形を縛る</text>
+        <text x="190" y="180" text-anchor="middle" font-size="12" fill="#1d4e8f">(例: size は small か large のみ)</text>
+
+        <rect x="420" y="100" width="300" height="90" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>
+        <text x="570" y="124" text-anchor="middle" font-size="13.5" font-weight="700" fill="#8a5a12">CEL (x-kubernetes-validations)</text>
+        <text x="570" y="144" text-anchor="middle" font-size="12" fill="#8a5a12">self / oldSelf で関係や変更禁止</text>
+        <text x="570" y="162" text-anchor="middle" font-size="12" fill="#8a5a12">複数フィールドをまたげる</text>
+        <text x="570" y="180" text-anchor="middle" font-size="12" fill="#8a5a12">(例: minReplicas ≤ replicas)</text>
+
+        <line x1="340" y1="60" x2="220" y2="98" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+        <line x1="420" y1="60" x2="540" y2="98" stroke="#198754" stroke-width="2" marker-end="url(#a1g)"/>
+      </svg>
+      <p class="cap">図: 1 フィールドの形は OpenAPI、フィールド間の関係や変更禁止は CEL が担当する</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>OpenAPI の制約: 素朴だが効く</h2>
+    <p>実験用 Widget は <code>size: {enum: [small, large]}</code>、<code>replicas: {minimum: 0, maximum: 10}</code>、<code>image: {minLength: 1}</code>、<code>spec.required: [image]</code> を持つ。これらは宣言するだけで API サーバーが自動でチェックしてくれる、最も手早い検証の手段。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): <code>size: huge</code> を指定すると <code>Unsupported value</code> で拒否、<code>replicas: 11</code> を指定すると <code>spec.replicas in body should be less than or equal to 10</code> で拒否された。どちらも、値を見た瞬間に機械的に判定できる種類の制約。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="OpenAPI制約が値だけを見て判定する図">
+        <defs>
+          <marker id="a2g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+          <marker id="a2r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0492f"/></marker>
+        </defs>
+        <rect x="20" y="45" width="180" height="60" rx="10" fill="#fff" stroke="#8a9892" stroke-width="1.4"/>
+        <text x="110" y="70" text-anchor="middle" font-size="13" fill="#12211a">size: huge</text>
+        <text x="110" y="88" text-anchor="middle" font-size="11.5" fill="#4a5d54">(1 つの値だけ見る)</text>
+        <rect x="480" y="20" width="200" height="50" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>
+        <text x="580" y="50" text-anchor="middle" font-size="13" fill="#c0492f">Unsupported value</text>
+        <rect x="480" y="90" width="200" height="50" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+        <text x="580" y="120" text-anchor="middle" font-size="13" fill="#0f5132">small / large なら通る</text>
+        <line x1="200" y1="65" x2="476" y2="45" stroke="#c0492f" stroke-width="2" marker-end="url(#a2r)"/>
+        <line x1="200" y1="85" x2="476" y2="115" stroke="#198754" stroke-width="2" marker-end="url(#a2g)"/>
+      </svg>
+      <p class="cap">図: OpenAPI の制約は、その場の値だけを見て機械的に通す/拒否する(実測)</p>
+    </div>
+    <table>
+      <tr><th>制約</th><th>Widget での使い方</th><th>実測で拒否された例</th></tr>
+      <tr><td><code>enum</code></td><td>size は small か large のみ</td><td><code>size: huge</code> → Unsupported value</td></tr>
+      <tr><td><code>maximum</code></td><td>replicas は 0〜10</td><td><code>replicas: 11</code> → must be ≤ 10</td></tr>
+      <tr><td><code>minLength</code></td><td>image は 1 文字以上</td><td>(空文字は同様の仕組みで拒否される)</td></tr>
+      <tr><td><code>required</code></td><td>image は必須</td><td>(image を書かないと作成できない)</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>CEL による検証: self と oldSelf</h2>
+    <p><code>x-kubernetes-validations</code> には <code>rule</code>(CEL の式)、<code>message</code>(固定の拒否メッセージ)、<code>messageExpression</code>(CEL で動的に組み立てるメッセージ)、<code>fieldPath</code>(どのフィールドのエラーとして報告するか)、<code>reason</code>(エラーの分類)を書ける。式の中では <code>self</code> で今まさに検証している値を、<code>oldSelf</code> で更新前の値を参照できる。</p>
+    <p>実験用 Widget には 2 つの CEL ルールがある。spec 全体に対する <code>self.minReplicas &lt;= self.replicas</code>(複数フィールドの関係)と、image フィールドに対する <code>self == oldSelf</code>(更新前後を比較する変更禁止)。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): <code>minReplicas: 5</code>(replicas=1 のまま)で更新すると <code>spec: Invalid value: minReplicas must be &lt;= replicas</code> で拒否。image を <code>nginx</code> から <code>redis</code> に変更すると <code>spec.image: Invalid value: "redis": image is immutable</code> で拒否された。<code>self == oldSelf</code> という 1 行だけで「作成時はどんな値でもよいが、一度決めたら変更禁止」という動きになる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 210" role="img" aria-label="selfとoldSelfを使った変更禁止ルールの図">
+        <defs>
+          <marker id="a3r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0492f"/></marker>
+        </defs>
+        <rect x="30" y="30" width="220" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="140" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">oldSelf</text>
+        <text x="140" y="75" text-anchor="middle" font-size="12" fill="#0f5132">image: "nginx" (更新前)</text>
+
+        <rect x="300" y="30" width="220" height="60" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="410" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">self</text>
+        <text x="410" y="75" text-anchor="middle" font-size="12" fill="#0f5132">image: "redis" (更新後)</text>
+
+        <rect x="570" y="30" width="170" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>
+        <text x="655" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="#c0492f">self == oldSelf</text>
+        <text x="655" y="75" text-anchor="middle" font-size="12" fill="#c0492f">false → 拒否</text>
+
+        <line x1="250" y1="60" x2="296" y2="60" stroke="#c0492f" stroke-width="2" marker-end="url(#a3r)"/>
+        <line x1="520" y1="60" x2="566" y2="60" stroke="#c0492f" stroke-width="2" marker-end="url(#a3r)"/>
+        <text x="380" y="150" text-anchor="middle" font-size="13" fill="#4a5d54">rule: "self == oldSelf" / message: "image is immutable"</text>
+      </svg>
+      <p class="cap">図: self と oldSelf を比べる 1 行の CEL ルールが、変更禁止フィールドを作る</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>検証が走る順番と、CEL のコスト上限</h2>
+    <p>検証は何でも同時に評価されるわけではない。実測(EKS 1.35 のテスト用クラスタ): <code>size: huge</code> という OpenAPI の enum 違反を起こすと、エラーメッセージに「some validation rules were not checked because the object was invalid」という一文も付いてきた。これは、enum・required・型の不一致・<code>maxLength</code>・<code>maxItems</code>/<code>maxProperties</code> のように「形の前提が崩れる」違反が 1 つでもあると、そのオブジェクト全体の CEL ルールがまとめて評価されずに終わる、という意味。一方で <code>minimum</code>・<code>maximum</code>・<code>pattern</code>・<code>minLength</code> の違反では CEL は普通に評価される。「その項目だけ」ではなく「オブジェクト全体」が止まる点に注意。全体の中でこの検証がどこに位置するかは、第 12 回で admission 全体の流れとして図にする。</p>
+    <p class="note">CEL の式は API サーバーの中で直接実行されるため、無制限に重い式を許すとサーバーの応答を遅らせてしまう。そのため CEL には実行コストの予算があり、<a href="https://kubernetes.io/docs/reference/using-api/cel/" target="_blank" rel="noopener">公式ドキュメント</a>によれば式のコストは配列や文字列の長さにも依存する。<code>maxItems</code> や <code>maxLength</code> を付けるのは、単に値を制限するだけでなく、CEL のコスト計算を現実的な範囲に収める役目も持つ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="OpenAPI違反でCELが止まる順番を示す図">
+        <defs>
+          <marker id="a4r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0492f"/></marker>
+        </defs>
+        <rect x="20" y="40" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>
+        <text x="130" y="65" text-anchor="middle" font-size="13" font-weight="700" fill="#c0492f">OpenAPI: enum 違反</text>
+        <text x="130" y="85" text-anchor="middle" font-size="12" fill="#c0492f">size: huge</text>
+        <rect x="460" y="40" width="220" height="60" rx="10" fill="#f0f0ee" stroke="#8a9892" stroke-width="1.6" stroke-dasharray="4 3"/>
+        <text x="570" y="65" text-anchor="middle" font-size="13" fill="#4a5d54">CEL ルール</text>
+        <text x="570" y="85" text-anchor="middle" font-size="12" fill="#4a5d54">評価されず終了</text>
+        <line x1="240" y1="70" x2="456" y2="70" stroke="#c0492f" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a4r)"/>
+        <text x="350" y="55" text-anchor="middle" font-size="11.5" fill="#4a5d54">(先に拒否)</text>
+      </svg>
+      <p class="cap">図: OpenAPI の制約違反があると、その先の CEL ルールまで進まない(実測)</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>ratcheting: 検証を締めても、既存データは残る</h2>
+    <p>スキーマの制約を後から厳しくすると、既にクラスタにある古いデータの扱いが問題になる。<code>CRDValidationRatcheting</code>(検証のラチェット)という仕組みが無いと、締めた後の制約に違反したままのオブジェクトは、違反と無関係なフィールドを直すだけの更新すら拒否されてしまう。ratcheting はそれを避けるために、「違反しているフィールドに触らない更新」なら通す。ラチェット(ratchet)は自転車の後輪についている、こぐのをやめても車輪だけ回り続けられる仕組みや、ラチェットレンチのように一方向にだけ動く仕掛けのことで、ここでは「違反を広げる方向にだけ足止めする」という比喩。</p>
+    <p>実測(EKS 1.35 のテスト用クラスタ): replicas=8 の Widget を作った後に、スキーマの <code>maximum</code> を 10 から 5 に締めた。この違反したままのオブジェクトで<b>別のフィールド</b>(size)を変更する更新は<b>通った</b>。一方、違反しているフィールド自体(replicas)を別の違反値(9)に変えようとすると拒否された。新規作成で replicas=8 を指定するのも拒否される。保存されている値も 8 のまま変わらない。確認済み: この機能ゲート <code>CRDValidationRatcheting</code> はこのクラスタで stage が空(つまり GA)で有効だった。</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 230" role="img" aria-label="ratchetingの挙動を示す図">
+        <defs>
+          <marker id="a4g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#198754"/></marker>
+          <marker id="a4r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0492f"/></marker>
+        </defs>
+        <rect x="30" y="20" width="700" height="46" rx="10" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="380" y="48" text-anchor="middle" font-size="13" fill="#0f5132">保存済み: replicas = 8 (maximum を 10→5 に締めた後も違反したまま残る)</text>
+
+        <rect x="30" y="100" width="330" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="195" y="124" text-anchor="middle" font-size="13" font-weight="700" fill="#0f5132">別フィールド (size) だけ変更</text>
+        <text x="195" y="144" text-anchor="middle" font-size="12" fill="#0f5132">通った (replicas は 8 のまま)</text>
+
+        <rect x="400" y="100" width="330" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>
+        <text x="565" y="124" text-anchor="middle" font-size="13" font-weight="700" fill="#c0492f">replicas を 9 に変更</text>
+        <text x="565" y="144" text-anchor="middle" font-size="12" fill="#c0492f">拒否 (別の違反値に変えた)</text>
+
+        <line x1="195" y1="68" x2="195" y2="98" stroke="#198754" stroke-width="2" marker-end="url(#a4g)"/>
+        <line x1="565" y1="68" x2="565" y2="98" stroke="#c0492f" stroke-width="2" marker-end="url(#a4r)"/>
+      </svg>
+      <p class="cap">図: ratcheting は違反フィールドそのものへの新しい違反だけを止める(実測)</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>まとめと次の回</h2>
+    <p>OpenAPI の制約は 1 フィールドの形を素早く縛り、CEL は <code>self</code> と <code>oldSelf</code> を使ってフィールド間の関係や変更禁止まで表現する。形の前提が崩れる種類のスキーマ違反があるとオブジェクト全体の CEL が評価されず、CEL 自体にもコストの上限がある。ratcheting は、検証を締めた後も違反と無関係な更新までは止めない仕組みだった(保存データ自体は締めるだけでは書き換わらない)。</p>
+    <p>次の第 07 回では、検証の隣にあるもう 1 つの仕組み、既定値(defaulting)を見る。値を省略したときに何が起きるか、そしていつその値が入るかを扱う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="この回のまとめの図">
+        <defs>
+          <marker id="a6g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5d54"/></marker>
+        </defs>
+        <rect x="20" y="40" width="190" height="55" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="115" y="72" text-anchor="middle" font-size="12.5" fill="#1d4e8f">OpenAPI の制約</text>
+        <rect x="245" y="40" width="190" height="55" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>
+        <text x="340" y="72" text-anchor="middle" font-size="12.5" fill="#8a5a12">CEL + ratcheting</text>
+        <rect x="470" y="40" width="210" height="55" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.8"/>
+        <text x="575" y="72" text-anchor="middle" font-size="12.5" fill="#0f5132">既定値 defaulting(次回)</text>
+        <path d="M210 67 L243 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6g)"/>
+        <path d="M435 67 L468 67" stroke="#4a5d54" stroke-width="2" marker-end="url(#a6g)"/>
+      </svg>
+      <p class="cap">図: 検証の次は、書かなかった値をどう埋めるかという話に進む</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <div class="nav2">
+    <a href="./k8sctl-05-crd-anatomy.html">← 第 05 回 CRD の骨格</a>
+    <a href="./k8sctl-07-defaulting.html">第 07 回 既定値 (defaulting) →</a>
+  </div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (10 問に拡張すること)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: '実験用 Widget で、spec.minReplicas と spec.replicas の大小関係(minReplicas ≤ replicas)を縛るのに使われている仕組みは何か。',
+    opts: [
+      'spec.minReplicas に minimum: 0 を指定するだけで自動的に縛られる',
+      'additionalPrinterColumns で 2 つのフィールドを並べて表示することで縛っている',
+      'spec 全体に対する x-kubernetes-validations の CEL ルール(self.minReplicas <= self.replicas)',
+      'status サブリソースを有効にすることで自動的に縛られる',
+      'kubectl の --validate=strict オプションが自動で比較している'
+    ],
+    ans: 2,
+    exps: [
+      '違う。minimum は 1 つのフィールド単独の下限を決めるだけで、他のフィールドとの比較はできない。',
+      '違う。additionalPrinterColumns は kubectl get の表示列を増やすだけで、検証には一切関与しない(第 05 回)。',
+      '<b>これが正解。</b>OpenAPI の制約は 1 フィールドしか見られないので、2 つのフィールドの関係は CEL で書く。実験用 Widget は spec 全体に rule: "self.minReplicas <= self.replicas" を持つ。',
+      '違う。status サブリソースは spec と status の書き込み経路を分ける仕組みで、フィールド間の値の比較とは無関係(第 08 回)。',
+      '違う。--validate=strict は kubectl のフラグで、サーバーに「厳格に見てほしい」と伝えるためのもの。検証そのものは常にサーバー側で行われ、フィールド間の関係を見る検証でもない(第 05 回)。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>OpenAPI の制約は 1 本の矢印(1 フィールド)しか見られない。2 本の矢印を結びつけるには CEL が要る。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 170" aria-label="OpenAPIとCELが見る範囲の違いを示す図">'
+          + '<rect x="30" y="30" width="200" height="50" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="130" y="60" text-anchor="middle" font-size="13" fill="#1d4e8f">minReplicas (1 フィールド)</text>'
+          + '<rect x="30" y="100" width="200" height="50" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>'
+          + '<text x="130" y="130" text-anchor="middle" font-size="13" fill="#1d4e8f">replicas (1 フィールド)</text>'
+          + '<rect x="330" y="55" width="240" height="70" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.8"/>'
+          + '<text x="450" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#8a5a12">CEL: self.minReplicas</text>'
+          + '<text x="450" y="98" text-anchor="middle" font-size="12" fill="#8a5a12">&lt;= self.replicas</text>'
+          + '<line x1="230" y1="55" x2="326" y2="80" stroke="#8a5a12" stroke-width="1.8"/>'
+          + '<line x1="230" y1="125" x2="326" y2="95" stroke="#8a5a12" stroke-width="1.8"/>'
+          + '</svg><p class="cap">図: CEL だけが 2 つのフィールドをまとめて見られる</p></div>'
+    }
+  },
+  {
+    q: 'CEL の x-kubernetes-validations で、image フィールドを「作成後に変更禁止」にしている rule: "self == oldSelf" について、self と oldSelf の意味として正しいものは。',
+    opts: [
+      'self は spec 全体、oldSelf は status 全体を指す',
+      'self は作成時だけ使え、oldSelf は削除時だけ使える特殊変数である',
+      'self はクラスタ内の別の Widget オブジェクト、oldSelf は自分自身を指す',
+      'self も oldSelf も同じ値を指す別名で、書き分けても意味は変わらない',
+      'self は今まさに検証している(更新後の)値、oldSelf は更新前の値を指す'
+    ],
+    ans: 4,
+    exps: [
+      '違う。self と oldSelf はどちらも同じフィールド(ここでは image)の値を指し、spec 全体や status 全体ではない。',
+      '違う。self は通常の検証全般で使える現在値の参照で、oldSelf は UPDATE のときにだけ意味を持つ(CREATE には「更新前」が存在しないため)。削除時専用という制限は無い。',
+      '違う。oldSelf は同じオブジェクトの更新前の状態であり、別オブジェクトを参照する仕組みではない。',
+      '違う。同じ値を指す別名ではなく、更新の前後という異なる時点の値を指す。だからこそ比較に意味がある。',
+      '<b>これが正解。</b>self は今検証している値(更新後)、oldSelf は直前に保存されていた値(更新前)。両者を比べることで「前と同じでなければ拒否」という変更禁止ルールになる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>self と oldSelf は「今」と「前」という時間軸上の 2 点を指す。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="selfとoldSelfが指す時点を示す図">'
+          + '<line x1="60" y1="90" x2="540" y2="90" stroke="#8a9892" stroke-width="2"/>'
+          + '<circle cx="180" cy="90" r="8" fill="#0f5132"/>'
+          + '<text x="180" y="65" text-anchor="middle" font-size="13" fill="#0f5132">oldSelf (更新前)</text>'
+          + '<circle cx="420" cy="90" r="8" fill="#c0492f"/>'
+          + '<text x="420" y="65" text-anchor="middle" font-size="13" fill="#c0492f">self (更新後)</text>'
+          + '<text x="300" y="130" text-anchor="middle" font-size="13" fill="#4a5d54">self == oldSelf が false なら拒否</text>'
+          + '</svg><p class="cap">図: self と oldSelf は時間軸上の異なる 2 点</p></div>'
+    }
+  }
+  ,
+  {
+    q: '実験用 Widget で <code>size: huge</code>(enum 違反)を送ったとき、エラーメッセージに「some validation rules were not checked because the object was invalid」という一文が付いていた(実測)。これは何を意味するか。',
+    opts: [
+      'OpenAPI のスキーマ違反(enum 違反)があったため、そのオブジェクト全体の CEL ルールがまとめて評価されずに終わった',
+      'CEL のルールが構文エラーで壊れていたので全く評価されなかった',
+      'size というフィールドには最初から CEL ルールが 1 つも定義されていない',
+      'このメッセージはサーバーのバグによる無関係なログで、検証の順番とは関係が無い',
+      'CEL のルールは常に OpenAPI の制約より先に評価され、OpenAPI 違反があっても結果に影響しない'
+    ],
+    ans: 0,
+    exps: [
+      '<b>これが正解。</b>OpenAPI のスキーマ違反(enum・required・型・長さや個数の上限など、形の前提が崩れる違反)がある時点で、そのオブジェクト全体の CEL ルールがまとめて評価をスキップされる。「size だけの CEL」が止まるのではない。',
+      '違う。実験用 Widget の CEL ルール(self.minReplicas <= self.replicas や image の変更禁止)自体は構文的に正しく、別の機会(例: minReplicas:5 のケース)では実際に評価されて拒否を返している。',
+      '違う。size 自体に CEL ルールは無いが、spec 全体に minReplicas と replicas の関係を見る CEL ルールがあり、それが評価されなかったという話。',
+      '違う。このメッセージは API サーバーが検証の順序を律儀に伝えている正規の挙動で、実測でも再現した。',
+      '違う。実測で確認したとおり、順序は逆。OpenAPI のスキーマ違反があると、そのオブジェクト全体の CEL は評価されない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>検証は「形が正しいか」を先に確かめ、形が崩れていればその先の CEL まで進まない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 640 170" aria-label="検証の順番を示す図">'
+          + '<rect x="30" y="50" width="220" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>'
+          + '<text x="140" y="75" text-anchor="middle" font-size="13" font-weight="700" fill="#c0492f">OpenAPI: enum 違反</text>'
+          + '<text x="140" y="95" text-anchor="middle" font-size="12" fill="#c0492f">size: huge</text>'
+          + '<rect x="380" y="50" width="220" height="60" rx="10" fill="#f0f0ee" stroke="#8a9892" stroke-width="1.6" stroke-dasharray="4 3"/>'
+          + '<text x="490" y="75" text-anchor="middle" font-size="13" fill="#4a5d54">CEL ルール</text>'
+          + '<text x="490" y="95" text-anchor="middle" font-size="12" fill="#4a5d54">評価されず終了</text>'
+          + '<text x="300" y="140" text-anchor="middle" font-size="13" fill="#4a5d54">形の違反で止まり、その先の関係チェックには進まない</text>'
+          + '</svg><p class="cap">図: スキーマ違反があると CEL は評価されない(実測)</p></div>'
+    }
+  },
+  {
+    q: 'CRD のスキーマに <code>maxItems</code> や <code>maxLength</code> を付けることが推奨される理由のうち、CEL と直接関係するものは何か。',
+    opts: [
+      'maxItems や maxLength を付けないと CRD が作成できないため',
+      'etcd の 1 オブジェクトあたりの保存容量が無限に増えるのを防ぐためだけで、CEL とは無関係',
+      'maxItems や maxLength は additionalPrinterColumns の表示幅を決める設定だから',
+      'CEL の式は API サーバーの中で直接実行され、配列や文字列の長さに応じてコストが増えるため、上限を決めておくとコスト計算が現実的な範囲に収まる',
+      'kubectl apply の実行速度をクライアント側で上げるための設定だから'
+    ],
+    ans: 3,
+    exps: [
+      '基本的には違う。maxItems や maxLength を付けなくても CRD の作成自体はできる(構造的スキーマの必須条件ではない)。ただし CEL のルールが上限の無い配列や文字列を丸ごと走査する場合、推定コストが予算を超えて CRD の作成そのものが拒否されることがある。これが上限を付ける一番の実務的な理由にもなる。',
+      '違う。保存容量を抑える効果はあるが、この設問が聞いているのは CEL と直接関係する理由であり、無関係と言い切るのは誤り。',
+      '違う。表示列の幅を決める設定は存在しない。additionalPrinterColumns は値をそのまま表示するだけ。',
+      '<b>これが正解。</b>CEL は API サーバーの中で動くため、配列が長い・文字列が長いほど評価コストが増える。上限を決めておくことで、CEL のコスト予算が計算しやすくなり、サーバーへの負荷を抑えられる(公式ドキュメントで解説されているコスト予算の考え方)。',
+      '違う。kubectl 自体の実行速度に影響する設定ではなく、API サーバー側の検証コストに関わる設定。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>配列や文字列が長いほど、CEL が全部を見るコストが増える。上限はそのコストにふたをする役目。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="maxItemsとCELコストの関係を示す図">'
+          + '<rect x="30" y="30" width="540" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.6"/>'
+          + '<text x="300" y="55" text-anchor="middle" font-size="13" fill="#8a5a12">配列が長いほど CEL のコストが増える</text>'
+          + '<rect x="30" y="90" width="540" height="40" rx="8" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.6"/>'
+          + '<text x="300" y="115" text-anchor="middle" font-size="13" fill="#0f5132">maxItems / maxLength で上限を決め、コストを現実的な範囲に収める</text>'
+          + '</svg><p class="cap">図: 長さの上限は CEL のコスト予算を守る役目も持つ</p></div>'
+    }
+  }
+  ,
+  {
+    q: 'ratcheting(検証のラチェット)が有効なクラスタで、replicas=8 の Widget を作った後に maximum を 10 から 5 に締めた。この Widget に対して「size だけを変更する更新」を送ると何が起きるか(実測)。',
+    opts: [
+      '更新は拒否される。replicas が違反したままなので、どのフィールドの更新も通らない',
+      '更新は通る。違反しているフィールド(replicas)に触っていない更新なら ratcheting が通す',
+      'replicas が自動的に 5 に修正されてから更新が適用される',
+      'Widget オブジェクト全体が自動的に削除される',
+      '更新は通るが、size の値は無視されて変化しない'
+    ],
+    ans: 1,
+    exps: [
+      '違う。実測では size だけの変更は通った。ratcheting は「違反フィールドそのものに新しい違反を加える」更新だけを止める。',
+      '<b>これが正解。</b>ratcheting は、既に違反している値を持つオブジェクトに対して、その違反フィールドに触れない更新なら通す。実測でも size の変更は通り、replicas は 8 のまま残った。',
+      '違う。ratcheting は値を書き換えてくれる機能ではなく、検証を緩めるだけ。保存値は 8 のまま変化しない。',
+      '違う。検証に関する ratcheting がオブジェクトを削除することはない。',
+      '違う。size の変更は実際に適用される。違反フィールドそのものに新たな違反値を書いた場合は、値が無視されるのではなく、更新リクエスト全体が拒否される。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ratchet(逆転防止の歯車)は、違反を広げる方向だけを止める。違反と無関係な動きは通す。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 160" aria-label="ratchetingが別フィールドの更新を通す図">'
+          + '<rect x="30" y="50" width="240" height="60" rx="10" fill="#e7f6ee" stroke="#0f5132" stroke-width="1.8"/>'
+          + '<text x="150" y="75" text-anchor="middle" font-size="13" fill="#0f5132">size を変更</text>'
+          + '<text x="150" y="95" text-anchor="middle" font-size="12" fill="#0f5132">replicas には触れない → 通る</text>'
+          + '<rect x="330" y="50" width="240" height="60" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>'
+          + '<text x="450" y="75" text-anchor="middle" font-size="13" fill="#c0492f">replicas を 9 に変更</text>'
+          + '<text x="450" y="95" text-anchor="middle" font-size="12" fill="#c0492f">別の違反値 (9) に変える → 拒否</text>'
+          + '</svg><p class="cap">図: 触れたフィールドが違反しているかどうかで結果が分かれる(実測)</p></div>'
+    }
+  },
+  {
+    q: '同じクラスタ(maximum を 10 から 5 に締めた後)で、新しく replicas=8 の Widget を作成しようとすると何が起きるか(実測)。',
+    opts: [
+      'ratcheting が働くので、既存の Widget と同じ値なら新規作成も通る',
+      'replicas の値が自動的に 5 に切り下げられて作成される',
+      '新規作成は常に無条件で通る。maximum の変更は既存データにしか影響しない',
+      '新規作成すると maximum が自動的に 8 まで緩められる',
+      '新規作成は拒否される。ratcheting が助けるのは「既にある違反データの一部を変えない更新」だけで、新規作成には適用されない'
+    ],
+    ans: 4,
+    exps: [
+      '違う。ratcheting は「既に保存されている違反データ」を基準に、それを変えない更新を許すだけの仕組みで、まだ存在しない新規オブジェクトには適用されない。',
+      '違う。値を自動で切り下げる機能は無い。単純に拒否される。',
+      '違う。実測のとおり新規作成は拒否されており、「常に無条件で通る」は誤り。',
+      '違う。ratcheting はスキーマの制約値そのものを書き換える機能ではない。maximum は 5 のまま。',
+      '<b>これが正解。</b>実測では、締めた後の新規作成(replicas=8)は拒否された。ratcheting の前提は「既存の違反状態を維持する更新」であり、新規作成はその前提に当たらない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>ratcheting が効くのは「既にある違反データを変えない更新」だけ。新規作成はこの土台に乗らない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 600 170" aria-label="ratchetingが新規作成には適用されない図">'
+          + '<rect x="30" y="30" width="540" height="40" rx="8" fill="#eef6f1" stroke="#0f5132" stroke-width="1.6"/>'
+          + '<text x="300" y="55" text-anchor="middle" font-size="13" fill="#0f5132">既存オブジェクトの更新 (別フィールド) → ratcheting が通す</text>'
+          + '<rect x="30" y="90" width="540" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.8"/>'
+          + '<text x="300" y="115" text-anchor="middle" font-size="13" fill="#c0492f">新規作成 (replicas=8, maximum=5) → 拒否</text>'
+          + '</svg><p class="cap">図: ratcheting の土台(既存の違反データ)が無いと働かない(実測)</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

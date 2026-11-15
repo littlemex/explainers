@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ============================================================
+  explainers クイズ付き解説ページ 共通テンプレート
+  - このファイルをコピーして各シリーズのサンプルを作る
+  - 単一 HTML・inline CSS/JS・ビルド不要・MathJax は CDN
+  - QUIZ 配列は 6 問で確定済み
+  ============================================================ -->
+<title>第 11 回 書き込みの作法 ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 11 回</p>
+  <h1>書き込みの作法</h1>
+  <p>複数のコントローラーと人間が同時に同じオブジェクトへ書き込む時代の流儀</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">第 10 回では、作った子をどう親に結びつけ、消すときにどう後片付けの時間を確保するかを見た。この回は、そうして作った・消したオブジェクトに、人間や他のコントローラーと取り合いにならないよう安全に書き込む作法を見る。</p>
+
+  <div class="lead">この章の結論: Kubernetes のオブジェクトは、誰か 1 人だけが書くわけではない。古い情報を元に上書きしてしまわないよう resourceVersion(リソースバージョン: 書き込みのたびに変わる版の印。同じかどうかの比較にだけ使う、回数ではない)で楽観的排他(先に書いた方が勝ち、後から追いついた方は衝突として弾かれる仕組み)を効かせ、Patch や Server-Side Apply で「自分が管理するフィールドだけ」を送る。そして、内容が本当に変わる時だけ書く。内容が同じなら resourceVersion もイベントも変わらないが、毎回違う値(現在時刻など)を書けば話は別で、それが無駄な Reconcile の呼び戻しを生む。</div>
+
+  <section>
+    <h2>1. resourceVersion と楽観的排他</h2>
+    <p>すべての Kubernetes オブジェクトは <code>metadata.resourceVersion</code> という値を持ち、書き込みが成功するたびに更新される。これは etcd(Kubernetes がデータを保存する場所)のクラスタ全体のリビジョンに由来する不透明な文字列で、「何回書き換えられたか」という回数ではなく、1 ずつ増える保証もない。意味があるのは「前に読んだ値と今の値が同じか違うか」の比較だけ。2 人(あるいは 2 つのコントローラー)が同じオブジェクトを同時に Get して、それぞれ別の変更を加えて Update しようとすると、先に書けた方の resourceVersion が進み、後から書こうとした方は「自分が読んだ時点の resourceVersion と、今サーバーにある resourceVersion が違う」ことを検出されて <strong>409 Conflict</strong>(409 は「衝突している」を意味する HTTP のエラー番号)で弾かれる。これを楽観的排他(optimistic concurrency: 普段は衝突しないと楽観して、衝突した時だけ検出して弾く方式)と呼ぶ。</p>
+    <p>弾かれたコントローラー側がすべきことは、エラーを握りつぶさず、もう一度 Get からやり直すこと。古いオブジェクトに自分の変更だけを上書きで強行すると、相手の変更を消してしまう。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 190" role="img" aria-label="楽観的排他で片方が弾かれる">
+        <defs><marker id="a11-1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="20" width="160" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="100" y="47" text-anchor="middle" font-size="12.5" fill="#1d4e8f">コントローラー X</text>
+        <rect x="20" y="120" width="160" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="100" y="147" text-anchor="middle" font-size="12.5" fill="#1d4e8f">コントローラー Y</text>
+        <rect x="300" y="70" width="160" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="380" y="97" text-anchor="middle" font-size="12.5" fill="#8a5a12">同じ Widget</text>
+        <text x="380" y="113" text-anchor="middle" font-size="11" fill="#8a5a12">(両方 resourceVersion=5 で Get)</text>
+        <path d="M182,42 L298,80" stroke="#4a5d54" stroke-width="1.4" fill="none"/>
+        <path d="M182,142 L298,100" stroke="#4a5d54" stroke-width="1.4" fill="none"/>
+        <path d="M462,85 L620,45" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-1)"/>
+        <rect x="620" y="20" width="110" height="44" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.6"/>
+        <text x="675" y="47" text-anchor="middle" font-size="12.5" fill="#0f5132">X: 成功(rv=6)</text>
+        <path d="M462,100 L620,142" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-1)"/>
+        <rect x="620" y="120" width="110" height="44" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.6"/>
+        <text x="675" y="147" text-anchor="middle" font-size="12.5" fill="#c0492f">Y: 409 Conflict</text>
+      </svg>
+      <p class="cap">図: 先に書けた方が勝ち、後から追いついた方は衝突として弾かれる(rv=5→6 は説明用の例の数字で、実際の値が 1 ずつ増えるとは限らない)。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Get → 変更 → Update のリスクと Patch の違い</h2>
+    <p>Get → 変更 → Update は、取得した丸ごとのオブジェクトを resourceVersion と一緒に送り直す。カスタムリソースへの Update は resourceVersion を伴わない書き込みを受け付けないので、相手の変更を気づかずに踏みつけることはない。むしろ Update の弱点は逆方向にある: 自分が触っていない、相手が変えたフィールド(たとえば自分は spec.image だけを変えたのに、相手が spec.size を変えていた)とも resourceVersion の不一致で 409 Conflict になり、無関係な変更とまでぶつかって Get からのやり直しが増える。</p>
+    <p>対して Patch は差分だけを送る。<code>client.MergeFrom(obj)</code>(controller-runtime v0.24.1 の <code>pkg/client/patch.go</code> で確認)は、変更前と変更後のオブジェクトを比較して JSON Merge Patch の差分を作る。自分が触っていないフィールドはそもそも送信データに含まれないので、別のフィールドの変更とは衝突せずに通る。ただし Patch(MergeFrom)は既定では resourceVersion を確認しないため、<strong>同じフィールド</strong>を両方が触っていた場合は検知なしで後勝ちになり、相手の変更を踏みつける。JSON Merge Patch は配列を丸ごと置き換える仕様なので、<code>finalizers</code> や <code>conditions</code> のような配列フィールドを Patch で触ると、相手が追加した別の要素を消してしまうこともある。配列を安全に触るには <code>client.MergeFromWithOptions(obj, client.MergeFromWithOptimisticLock{})</code>(確認済み: <code>pkg/client/patch.go</code>)で resourceVersion チェックを足すか、要素の追加・削除のような操作に向く JSON Patch を使う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 160" role="img" aria-label="UpdateとPatchの送信範囲の違い">
+        <rect x="20" y="20" width="320" height="120" rx="12" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>
+        <text x="180" y="42" text-anchor="middle" font-size="13" fill="#c0492f">Update: オブジェクト全体を送信</text>
+        <rect x="40" y="56" width="110" height="26" rx="5" fill="#fff" stroke="#c0492f" stroke-width="1.2"/>
+        <text x="95" y="74" text-anchor="middle" font-size="11.5" fill="#c0492f">自分が変えた所</text>
+        <rect x="170" y="56" width="140" height="26" rx="5" fill="#fff" stroke="#c0492f" stroke-width="1.2" stroke-dasharray="3,2"/>
+        <text x="240" y="74" text-anchor="middle" font-size="11.5" fill="#c0492f">触ってない所も同梱</text>
+        <rect x="400" y="20" width="320" height="120" rx="12" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>
+        <text x="560" y="42" text-anchor="middle" font-size="13" fill="#0f5132">Patch(MergeFrom): 差分だけ送信</text>
+        <rect x="490" y="70" width="140" height="30" rx="5" fill="#fff" stroke="#198754" stroke-width="1.3"/>
+        <text x="560" y="90" text-anchor="middle" font-size="12" fill="#0f5132">自分が変えた所だけ</text>
+      </svg>
+      <p class="cap">図: Patch は触っていないフィールドを送信データに含めない。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Server-Side Apply: field manager という考え方</h2>
+    <p>Server-Side Apply(SSA: サーバー側適用。クライアントが「自分はこのフィールドを管理する」と宣言し、API サーバー側がフィールドごとの持ち主を記録する仕組み)は、Patch よりさらに進んで、フィールドの持ち主を field manager(フィールド管理者)という単位で <code>metadata.managedFields</code> に記録する(<a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/" target="_blank" rel="noopener">公式ドキュメント</a>)。例えば kubectl が spec の一部を管理し、別のコントローラーが status の一部を管理する、という共存が成り立つ。注意点として、既定の <code>kubectl apply</code> はクライアント側で差分を計算する古い方式(client-side apply)で、Server-Side Apply ではない。SSA として動かすには <code>kubectl apply --server-side</code> と明示する必要がある。</p>
+    <p>2 人の field manager が同じフィールドに違う値を Apply しようとすると、ここでも 409 Conflict になる。解決策としては、強制上書きして単独管理者になる(force-conflicts)、自分の宣言からそのフィールドを外して管理権を放棄する、両者が同じ値で合意して共有管理者になる、の 3 つが選べるが、<a href="https://kubernetes.io/docs/reference/using-api/server-side-apply/" target="_blank" rel="noopener">公式ドキュメント</a>はコントローラー(人間が叩く kubectl ではなく自動で動くプログラム)には常に force-conflicts を使うことを勧めている。コントローラーは自分が管理するフィールドについて「自分が最新の望む状態を知っている」立場なので、衝突したら自分の値で確定させるのが筋に合う。</p>
+    <p>controller-runtime では <code>client.Client</code> インターフェースが持つ <code>Apply(ctx, obj, opts...)</code> メソッドを <code>r.Client.Apply(ctx, obj, &amp;client.ApplyOptions{FieldManager: "widget-controller"})</code> のように呼ぶ(確認済み: v0.24.1 の <code>pkg/client/interfaces.go</code> の <code>Client</code> インターフェース定義と <code>pkg/client/client_test.go</code> の使用例)。ここで渡す <code>obj</code> は通常の Widget 構造体ではなく、<code>runtime.ApplyConfiguration</code> という Apply 専用の型でなければならない。手書きの構造体をそのまま渡すことはできず、<code>client.ApplyConfigurationFromUnstructured(u)</code> で unstructured オブジェクトから作る、または型ごとに生成された ApplyConfiguration を使う。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 180" role="img" aria-label="field managerの衝突">
+        <defs><marker id="a11-3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="280" y="20" width="180" height="140" rx="12" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="370" y="42" text-anchor="middle" font-size="12.5" fill="#8a5a12">Widget a</text>
+        <rect x="300" y="56" width="140" height="28" rx="6" fill="#fff" stroke="#8a5a12" stroke-width="1.2"/>
+        <text x="370" y="75" text-anchor="middle" font-size="11.5" fill="#8a5a12">spec.image(kubectl 管理)</text>
+        <rect x="300" y="96" width="140" height="28" rx="6" fill="#fff" stroke="#8a5a12" stroke-width="1.2"/>
+        <text x="370" y="115" text-anchor="middle" font-size="11" fill="#8a5a12">status.phase(controller 管理)</text>
+        <path d="M60,40 L280,65" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a11-3)"/>
+        <rect x="20" y="20" width="150" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="95" y="45" text-anchor="middle" font-size="11" fill="#1d4e8f">kubectl apply --server-side</text>
+        <path d="M60,150 L280,110" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a11-3)"/>
+        <rect x="20" y="130" width="150" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="95" y="155" text-anchor="middle" font-size="12" fill="#1d4e8f">widget-controller</text>
+      </svg>
+      <p class="cap">図: 別々のフィールドを持てば共存できるが、同じフィールドを両方が Apply すると 409 になる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. controllerutil.CreateOrUpdate の使い方</h2>
+    <p>「無ければ作る、あれば必要なら直す」という定型処理には <code>controllerutil.CreateOrUpdate(ctx, c, obj, f MutateFn) (OperationResult, error)</code> が使える(v0.24.1 の <code>pkg/controller/controllerutil/controllerutil.go</code> で確認)。内部では Get して無ければ(f を適用した上で) Create、あれば f を適用した結果が元と同じか比べて、違う時だけ Update する。差分が無ければ本当に何も送らない。</p>
+    <div class="warn">ソースのコメントに明記されている注意点: MutateFn の中で status のようなサブリソースを変更しても、その変更は捨てられる(<code>Note: changes made by MutateFn to any sub-resource (status...), will be discarded.</code>)。これは CreateOrUpdate が status だけを特別に除外しているからではなく、CreateOrUpdate が最後に呼ぶのは普通の <code>Update</code>(本体宛て)で、第 08 回で見たとおり status サブリソースが有効な間は本体への書き込みが status を無視するため。status を書きたい時は次のセクションの <code>Status().Update</code> / <code>Status().Patch</code> を別途呼ぶ必要がある。</div>
+    <div class="fig">
+      <svg viewBox="0 0 740 160" role="img" aria-label="CreateOrUpdateの分岐">
+        <defs><marker id="a11-4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="52" width="140" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="90" y="79" text-anchor="middle" font-size="12.5" fill="#8a5a12">Get(key, obj)</text>
+        <path d="M162,60 L250,30" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a11-4)"/>
+        <path d="M162,88 L250,120" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a11-4)"/>
+        <rect x="260" y="8" width="160" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="340" y="33" text-anchor="middle" font-size="12" fill="#1d4e8f">無い → f を適用して Create</text>
+        <rect x="260" y="100" width="160" height="44" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>
+        <text x="340" y="120" text-anchor="middle" font-size="12" fill="#0f5132">ある → f 適用後、差分が</text>
+        <text x="340" y="136" text-anchor="middle" font-size="11.5" fill="#0f5132">あれば Update、無ければ何もしない</text>
+        <rect x="470" y="100" width="250" height="44" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>
+        <text x="595" y="120" text-anchor="middle" font-size="11.5" fill="#c0492f">status への変更は破棄される</text>
+        <text x="595" y="136" text-anchor="middle" font-size="11" fill="#c0492f">(ソースのコメントに明記)</text>
+      </svg>
+      <p class="cap">図: 本体は無ければ作り差分があれば直すが、status への変更だけは別経路が必要。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. status の更新は Status().Update / Status().Patch</h2>
+    <p>第 08 回で見たとおり、status サブリソースを有効にした CRD では、本体への Update/Patch で status を書いても無視される。status を書くには、client の <code>StatusClient</code> インターフェースが持つ <code>Status() SubResourceWriter</code>(v0.24.1 の <code>pkg/client/interfaces.go</code> で確認)を経由する。</p>
+    <pre><code>err := r.Client.Status().Update(ctx, widget)
+err := r.Client.Status().Patch(ctx, widget, patch)</code></pre>
+    <p><code>SubResourceWriter</code> には <code>Update</code> と <code>Patch</code> の両方があり、使い分けは本体への Update/Patch と同じ考え方: 丸ごと送るか、差分だけ送るか。status は観測結果の集約なので、複数のコントローラーが同じ CR の status を分担して書くことは少ないが、それでも resourceVersion の衝突は起こりうる。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 150" role="img" aria-label="statusサブリソース経由の書き込み">
+        <defs><marker id="a11-5" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="40" width="150" height="50" rx="9" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="95" y="62" text-anchor="middle" font-size="12.5" fill="#1d4e8f">r.Client.Status()</text>
+        <text x="95" y="79" text-anchor="middle" font-size="11" fill="#4a5d54">SubResourceWriter</text>
+        <path d="M172,65 L260,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-5)"/>
+        <rect x="270" y="40" width="130" height="50" rx="9" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="335" y="62" text-anchor="middle" font-size="12.5" fill="#0f5132">Update / Patch</text>
+        <text x="335" y="79" text-anchor="middle" font-size="11" fill="#4a5d54">/status だけを書く</text>
+        <path d="M402,65 L490,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-5)"/>
+        <rect x="500" y="40" width="170" height="50" rx="9" fill="#0f5132" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="585" y="62" text-anchor="middle" font-size="12" fill="#fff">本体の spec には</text>
+        <text x="585" y="79" text-anchor="middle" font-size="12" fill="#fff">触れない</text>
+      </svg>
+      <p class="cap">図: status サブリソースは専用の書き込み口を通る。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 差分が無ければ書かない</h2>
+    <p>第 08 回の実測で見たとおり、送った内容が保存済みの内容と完全に同じ更新は、API サーバーのストレージ層で no-op(何もしない)と判定される。<code>resourceVersion</code> は変わらず、informer への watch イベントも出ない。つまり「本当に中身が同じ Update」を Reconcile の最後で毎回呼んでも、それ自体が無限に Reconcile を呼び戻す原因にはならない。</p>
+    <p>ただし、これは「見た目は同じ Update を書いている」つもりでも、実際には毎回違う値になっていないか注意が必要という意味でもある。たとえば <code>status.conditions</code> の <code>lastTransitionTime</code> を状態が変わっていなくても毎回「今の時刻」で上書きしていたり、ログや再試行回数のようなカウンタを status に書いていたりすると、送る内容は毎回本当に変わるので resourceVersion は進み、watch イベントが出て、また Reconcile が呼ばれる無駄なループになる。また、中身が完全に同じでも、API サーバーへの往復・admission webhook の呼び出し(第 12 回)・監査ログの記録は毎回発生するので、「変化が無いなら呼ばない」を徹底する価値はある。対策は単純で、書く前に「今の値と書こうとしている値が同じか」を比較し、同じなら Update も Patch も呼ばない。<code>controllerutil.CreateOrUpdate</code> が本体についてこれを自動でやってくれるのも、この理由による。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 190" role="img" aria-label="内容が本当に同じか違うかで結果が分かれる">
+        <defs><marker id="a11-6" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="20" width="140" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="90" y="47" text-anchor="middle" font-size="12.5" fill="#8a5a12">Reconcile</text>
+        <path d="M162,42 L250,42" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-6)"/>
+        <rect x="260" y="20" width="170" height="44" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="345" y="42" text-anchor="middle" font-size="12" fill="#0f5132">完全に同じ内容で Update</text>
+        <path d="M432,42 L520,42" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-6)"/>
+        <rect x="530" y="20" width="150" height="44" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="605" y="42" text-anchor="middle" font-size="12" fill="#0f5132">no-op、イベント無し</text>
+        <rect x="20" y="100" width="140" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="90" y="127" text-anchor="middle" font-size="12.5" fill="#8a5a12">Reconcile</text>
+        <path d="M162,122 L250,122" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-6)"/>
+        <rect x="260" y="100" width="170" height="44" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="345" y="118" text-anchor="middle" font-size="11.5" fill="#c0492f">毎回違う値(現在時刻等)</text>
+        <text x="345" y="134" text-anchor="middle" font-size="11" fill="#c0492f">で Update</text>
+        <path d="M432,122 L520,122" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-6)"/>
+        <rect x="530" y="100" width="150" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="605" y="122" text-anchor="middle" font-size="12" fill="#1d4e8f">watch イベント発生</text>
+        <path d="M605,146 L345,166 L90,146" stroke="#4a5d54" stroke-width="1.4" fill="none" stroke-dasharray="4,3" marker-end="url(#a11-6)"/>
+        <text x="350" y="180" text-anchor="middle" font-size="11.5" fill="#4a5d54">また Reconcile が呼ばれる</text>
+      </svg>
+      <p class="cap">図: 内容が本当に同じなら no-op で止まる。毎回違う値を書くときだけ呼び戻しのループになる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. まとめと次の回</h2>
+    <p>resourceVersion による楽観的排他が「古い情報の上書き」を防ぎ、Patch と Server-Side Apply が「自分が管理する分だけ」を安全に送る手段を与える。status はサブリソース専用の書き込み口を通し、変える必要が無いなら何も書かないことで無駄な watch イベントと無駄な Reconcile を減らせる。次の第 12 回では、こうした書き込みが API サーバーを通る際に、途中でどう検査・変形されるか(admission と webhook)を見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 140" role="img" aria-label="章全体のまとめ">
+        <defs><marker id="a11-7" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="10" y="40" width="160" height="50" rx="9" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="90" y="62" text-anchor="middle" font-size="12" fill="#1d4e8f">resourceVersion</text>
+        <text x="90" y="79" text-anchor="middle" font-size="11" fill="#4a5d54">衝突を検出</text>
+        <path d="M172,65 L238,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-7)"/>
+        <rect x="240" y="40" width="160" height="50" rx="9" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="320" y="62" text-anchor="middle" font-size="12" fill="#0f5132">Patch / SSA</text>
+        <text x="320" y="79" text-anchor="middle" font-size="11" fill="#4a5d54">自分の分だけ送る</text>
+        <path d="M402,65 L468,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a11-7)"/>
+        <rect x="470" y="40" width="220" height="50" rx="9" fill="#0f5132" stroke="#0f5132" stroke-width="1.5"/>
+        <text x="580" y="62" text-anchor="middle" font-size="12" fill="#fff">第 12 回</text>
+        <text x="580" y="79" text-anchor="middle" font-size="11" fill="#dbefe4">admission と webhook</text>
+      </svg>
+      <p class="cap">図: この章で見た関係と次回の橋渡し。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <p style="display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px">
+    <a class="back" href="./k8sctl-10-ownership-and-finalizers.html" style="margin:0">← 第 10 回 所有と後片付け</a>
+    <a class="back" href="./k8sctl-12-admission-webhooks.html" style="margin:0">第 12 回 Admission と webhook →</a>
+  </p>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (6 問)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'コントローラー X とコントローラー Y が、同じ Widget a を同時に Get した(両方とも resourceVersion=5)。X が先に Update を成功させ(resourceVersion が 6 になった)、その直後に Y が自分の変更を Update しようとした。何が起きるか。',
+    opts: [
+      'Y の Update も問題なく成功し、resourceVersion は 7 になる',
+      'X と Y の変更が自動的にマージされる',
+      'Y の変更は無視されて静かに捨てられる(エラーは返らない)',
+      'Y の Update は 409 Conflict で弾かれる(Y が読んだ resourceVersion=5 はもう古い)',
+      'サーバーが先着順ではなくランダムにどちらかを勝たせる'
+    ],
+    ans: 3,
+    exps: [
+      '違う。Y が送る resourceVersion=5 は既に古く、サーバー上の最新は 6。一致しないので弾かれる。',
+      '違う。Update は丸ごと送られるオブジェクトを上書きする操作で、自動マージの機能は無い(個別フィールドの共存を実現したいなら Server-Side Apply の仕組みが要る)。',
+      '違う。409 Conflict は明示的なエラーとして返るので、呼び出し側が検知できる(検知して無視するのは呼び出し側の実装次第)。',
+      'これが正解。楽観的排他は、書き込み時に送った resourceVersion とサーバー上の現在値を比較し、一致しなければ 409 Conflict を返す。Y はもう一度 Get してやり直す必要がある。',
+      '違う。ランダムではなく、resourceVersion の一致不一致という決定的な条件で判定される。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>先に進んだ resourceVersion と一致しない書き込みは弾かれる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="resourceVersion不一致による409"><defs><marker id="qa11-1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="20" width="160" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>'
+          + '<text x="100" y="45" text-anchor="middle" font-size="12" fill="#0f5132">X: rv 5→6 成功</text>'
+          + '<rect x="20" y="90" width="220" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>'
+          + '<text x="130" y="115" text-anchor="middle" font-size="12" fill="#c0492f">Y: rv=5 で送信 → 409</text>'
+          + '<path d="M250,110 L340,110" stroke="#4a5d54" stroke-width="1.5" fill="none" marker-end="url(#qa11-1)"/>'
+          + '<rect x="350" y="90" width="170" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.4"/>'
+          + '<text x="435" y="115" text-anchor="middle" font-size="11.5" fill="#8a5a12">Y は Get からやり直す</text>'
+          + '</svg><p class="cap">図: 古い resourceVersion での書き込みは拒否される。</p></div>'
+    }
+  },
+  {
+    q: 'controllerutil.CreateOrUpdate の MutateFn の中で widget.Status.Phase = "Ready" と書いて、Update まで完了したことを確認した。この後 Get で読み直すと status.phase はどうなっているか。',
+    opts: [
+      '変更前の値のまま(status への変更は本体の Update では反映されない)',
+      '"Ready" になっている',
+      'エラーで CreateOrUpdate 自体が失敗する',
+      '空文字列にリセットされる',
+      'ランダムな値になる'
+    ],
+    ans: 0,
+    exps: [
+      'これが正解。CreateOrUpdate 自体はオブジェクト全体を比較して普通の Update を呼ぶだけで、「本体だけを見る」特別な比較はしていない。status が反映されないのは、第 08 回で見た status サブリソースの仕組み(API サーバー側が本体への書き込みから status を無視する)による。手元の widget オブジェクトも Update の応答で上書きされるので、status を書くには Status().Update または Status().Patch を別途呼ぶ必要がある。',
+      '違う。controllerutil.CreateOrUpdate のソースコードのコメントに明記されている通り、MutateFn の中で status のようなサブリソースに加えた変更は捨てられる。',
+      '違う。エラーにはならず、黙って成功したように見えて status だけが反映されない。これが罠になりやすい理由。',
+      '違う。「捨てられる」は「変更前の値を保持する」という意味で、ゼロ値へのリセットではない。',
+      '違う。ランダムな挙動ではなく、常に「サブリソースへの変更は無視される」という一貫した挙動。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>CreateOrUpdate が呼ぶのは普通の Update。status サブリソースの仕組みによって、そこだけ素通りして捨てられる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="CreateOrUpdateがstatusを捨てる"><defs><marker id="qa11-2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="20" width="160" height="90" rx="9" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="100" y="42" text-anchor="middle" font-size="12" fill="#8a5a12">MutateFn の中で</text>'
+          + '<text x="100" y="60" text-anchor="middle" font-size="11.5" fill="#8a5a12">spec を変更</text>'
+          + '<text x="100" y="85" text-anchor="middle" font-size="11.5" fill="#c0492f">status も変更(無効)</text>'
+          + '<path d="M182,45 L300,45" stroke="#4a5d54" stroke-width="1.5" fill="none" marker-end="url(#qa11-2)"/>'
+          + '<rect x="310" y="25" width="160" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>'
+          + '<text x="390" y="50" text-anchor="middle" font-size="11.5" fill="#0f5132">spec: 反映される</text>'
+          + '<path d="M182,85 L300,85" stroke="#4a5d54" stroke-width="1.5" fill="none" stroke-dasharray="4,3"/>'
+          + '<rect x="310" y="70" width="160" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>'
+          + '<text x="390" y="95" text-anchor="middle" font-size="11.5" fill="#c0492f">status: 捨てられる</text>'
+          + '</svg><p class="cap">図: 本体だけが通過し、status は素通りで捨てられる。</p></div>'
+    }
+  },
+  {
+    q: 'kubectl が spec.image を Server-Side Apply で管理し、widget-controller が status.phase を別の Apply で管理している。この状態で widget-controller が spec.image にも新しい値を Apply しようとした場合、何が起きるか。',
+    opts: [
+      '問題なく上書きできる(status と spec は別フィールドなので無関係)',
+      'widget-controller の Apply 全体がまるごとエラーになり status.phase の管理権も失う',
+      'kubectl の管理権が自動的に widget-controller に移る',
+      'spec.image が削除される',
+      'kubectl が既に spec.image の field manager なので、同じ値でない限り 409 Conflict になる'
+    ],
+    ans: 4,
+    exps: [
+      '違う。field manager の衝突はフィールド単位で判定される。widget-controller が触ろうとしているのが spec.image であれば、そのフィールドの既存の持ち主(kubectl)との衝突になる。',
+      '違う。衝突は該当フィールドについてだけ起きる。widget-controller が既に管理している status.phase の管理権には影響しない。',
+      '違う。管理権は自動的には移らない。移すには明示的に force-conflicts(強制上書き)を指定する必要がある。',
+      '違う。Apply は値の削除を意味しない。衝突時はエラーが返り、どちらの値になるかは解決策次第。',
+      'これが正解。Server-Side Apply では、既に別の field manager が管理しているフィールドに異なる値を Apply しようとすると 409 Conflict になる。解決には force-conflicts で上書きする、そのフィールドを自分の宣言から外す、または同じ値で合意するのいずれかが必要。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>field manager の衝突はフィールド単位。管理が分かれているフィールドには影響しない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="field manager衝突はフィールド単位"><defs><marker id="qa11-3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="40" y="20" width="200" height="100" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="140" y="42" text-anchor="middle" font-size="12" fill="#8a5a12">Widget a</text>'
+          + '<rect x="60" y="55" width="160" height="26" rx="5" fill="#fbeeea" stroke="#c0492f" stroke-width="1.2"/>'
+          + '<text x="140" y="73" text-anchor="middle" font-size="11" fill="#c0492f">spec.image: 衝突 409</text>'
+          + '<rect x="60" y="88" width="160" height="26" rx="5" fill="#e7f6ee" stroke="#198754" stroke-width="1.2"/>'
+          + '<text x="140" y="106" text-anchor="middle" font-size="11" fill="#0f5132">status.phase: 影響なし</text>'
+          + '<path d="M260,68 L350,68" stroke="#4a5d54" stroke-width="1.5" fill="none" marker-end="url(#qa11-3)"/>'
+          + '<text x="440" y="72" text-anchor="middle" font-size="12" fill="#4a5d54">widget-controller の Apply</text>'
+          + '</svg><p class="cap">図: 衝突するのは触っているフィールドだけ。</p></div>'
+    }
+  },
+  {
+    q: 'status サブリソースが有効な Widget に対して、r.Client.Update(ctx, widget) を呼んで widget.Status.Phase を書き換えようとした。何が起きるか。',
+    opts: [
+      'status.phase が書き換わる',
+      '409 Conflict になる',
+      'status.phase への変更は無視され、本体の Update は spec など他の変更だけ反映される(第 08 回で見た実測と同じ理屈)',
+      'CRD の定義そのものが壊れる',
+      'status.phase がゼロ値にリセットされる'
+    ],
+    ans: 2,
+    exps: [
+      '違う。status サブリソースが有効な場合、本体への書き込み経路(Update/Patch)は status を無視する。',
+      '違う。これは resourceVersion の不一致によるエラーではなく、status フィールドがそもそも本体の書き込み経路の対象外になっている、という仕組みの話。',
+      'これが正解。これは第 08 回で見た「status サブリソースを有効にすると本体の更新で status が無視される」という挙動の延長で、status を書くには Status().Update または Status().Patch を使う必要がある。',
+      '違う。CRD の定義は変わらない。単に意図した書き込みが届かないだけ。',
+      '違う。「無視される」は「変更前の値を保持する」という意味で、ゼロ値へのリセットではない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>status サブリソースが有効な間、本体の書き込み経路は status に触れない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 140" aria-label="本体Updateがstatusを無視する"><defs><marker id="qa11-5" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="40" width="160" height="46" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>'
+          + '<text x="100" y="67" text-anchor="middle" font-size="12" fill="#1d4e8f">Client.Update(widget)</text>'
+          + '<path d="M182,55 L270,35" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#qa11-5)"/>'
+          + '<rect x="280" y="14" width="150" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>'
+          + '<text x="355" y="38" text-anchor="middle" font-size="11.5" fill="#0f5132">spec: 反映される</text>'
+          + '<path d="M182,75 L270,95" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#qa11-5)"/>'
+          + '<rect x="280" y="78" width="150" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>'
+          + '<text x="355" y="102" text-anchor="middle" font-size="11.5" fill="#c0492f">status: 無視される</text>'
+          + '</svg><p class="cap">図: 本体の書き込みは status サブリソースに届かない。</p></div>'
+    }
+  },
+  {
+    q: 'あるコントローラーが Reconcile のたびに r.Client.Status().Update(ctx, widget) を呼んでいる。(a) 書く内容が前回保存した内容と完全に同じ場合と、(b) status.conditions の lastTransitionTime を、状態が変わっていなくても毎回「今の時刻」で上書きしている場合がある。実際に起きることとして正しいものはどれか。',
+    opts: [
+      '(a)も(b)も resourceVersion が毎回進み、Reconcile が無限に呼び戻される',
+      '(a)も(b)も resourceVersion は変わらず、Reconcile は呼び戻されない',
+      '(b)の方が(a)より API サーバーへの負荷が小さい',
+      '(a)は保存層で no-op(何もしない)と判定され resourceVersion も watch イベントも変わらない。(b)は毎回内容が本当に変わるので resourceVersion が進み、watch イベントが出て Reconcile が呼び戻される',
+      '(a)は Update 自体がエラーになり失敗する'
+    ],
+    ans: 3,
+    exps: [
+      '違う。第 08 回の実測(patched (no change))のとおり、送った内容が保存済みと完全に同じ書き込みは no-op になり resourceVersion は進まない。(a)は無限ループにならない。',
+      '違う。(b)は lastTransitionTime が毎回違う値になるので、送る内容は毎回本当に変わっている。これは完全に同じ内容の書き込みではなく、resourceVersion は進む。',
+      '違う。逆。(b)は毎回実際の書き込みと watch イベントが発生するので、(a)より負荷が大きい。',
+      'これが正解。(a)は内容が完全に同じなのでストレージ層で no-op と判定され、resourceVersion も watch イベントも変わらない(第 08 回の実測と同じ理屈)。(b)は lastTransitionTime が毎回違う値になるため、送る内容が毎回本当に変わり、resourceVersion が進んで watch イベントが出て、Reconcile が呼び戻される無駄なループになる。どちらも API への往復自体は毎回発生する。',
+      '違う。内容が同じでも Update はエラーにはならず、正常に処理されて no-op になる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>本当に内容が同じかどうかが分岐点。同じなら no-op で止まり、毎回違う値を書くときだけ呼び戻しのループになる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="no-opか呼び戻しループかの分岐"><defs><marker id="qa11-6" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="20" width="150" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="95" y="45" text-anchor="middle" font-size="11.5" fill="#8a5a12">(a) 完全に同じ内容</text>'
+          + '<path d="M172,40 L260,40" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa11-6)"/>'
+          + '<rect x="270" y="20" width="150" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>'
+          + '<text x="345" y="45" text-anchor="middle" font-size="11.5" fill="#0f5132">no-op・イベント無し</text>'
+          + '<rect x="20" y="90" width="150" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="95" y="115" text-anchor="middle" font-size="11.5" fill="#8a5a12">(b) 毎回時刻が変わる</text>'
+          + '<path d="M172,110 L260,110" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa11-6)"/>'
+          + '<rect x="270" y="90" width="150" height="40" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="345" y="115" text-anchor="middle" font-size="11.5" fill="#c0492f">watch イベント発生</text>'
+          + '<path d="M345,132 L95,152" stroke="#4a5d54" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#qa11-6)"/>'
+          + '<text x="220" y="158" text-anchor="middle" font-size="11" fill="#4a5d54">Reconcile が呼び戻される</text>'
+          + '</svg><p class="cap">図: (a)は no-op で止まり、(b)だけが自分自身を再び呼び出す。</p></div>'
+    }
+  },
+  {
+    q: 'Widget a の spec.image だけをコントローラーが書き換えたい。別のコントローラーが同じ Widget a の spec.size をほぼ同時に書き換えている。r.Client.Update(ctx, widget)(丸ごと送る)と r.Client.Patch(ctx, widget, client.MergeFrom(original))(差分だけ送る)を比べたとき、正しい説明はどれか。',
+    opts: [
+      'Update の方が常に安全(送る量が多いほど確実)',
+      'Update は resourceVersion を送るので相手の size 変更を踏みつけはしないが、無関係な size の変更とも 409 Conflict でぶつかり Get からのやり直しが増える。Patch(MergeFrom)は別フィールドの変更とは衝突せずに通る',
+      'Patch は spec.image のような個々のフィールドを変更できず、Update しか使えない',
+      'どちらを使っても結果は完全に同じで、違いは無い',
+      'Update と Patch は両方とも resourceVersion の概念と無関係'
+    ],
+    ans: 1,
+    exps: [
+      '違う。Update は resourceVersion を一緒に送るので、カスタムリソースへの Update は相手が先に書いていれば 409 Conflict になり、黙って踏みつけることはない。「送る量が多いほど安全」ではなく、むしろ無関係な変更とまで衝突して手間が増える側。',
+      'これが正解。カスタムリソースの Update は resourceVersion を伴うので、相手の size 変更を気づかずに踏みつけることはない。ただし自分は image しか変えていなくても、相手の size 変更で resourceVersion が進んでいれば 409 Conflict になり、無関係な変更とまでぶつかって Get からやり直す手間が増える。Patch(MergeFrom)は自分が触った image だけを差分として送るので、別フィールドの size の変更とは衝突せずに通る(ただし同じフィールドを両方が触っていた場合や配列は、既定の MergeFrom では検知されずに上書きされるので注意が必要)。',
+      '違う。Patch でも個々のフィールドの変更は問題なく表現できる。むしろ個々のフィールドの変更を表現するのに向いているのが Patch。',
+      '違う。送信するデータの範囲が異なるため、衝突の起き方が異なる。Update は size の変更とも衝突し、Patch は衝突しない。',
+      '違う。Update は resourceVersion による楽観的排他が働く。Patch も client.MergeFromWithOptions(obj, client.MergeFromWithOptimisticLock{}) を使えば同様に resourceVersion チェックを効かせられる。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>Update は無関係な変更とも衝突して手間が増える。Patch は別フィールドなら衝突せず通る。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="Updateと Patchの衝突範囲の違い"><defs><marker id="qa11-7" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="20" width="230" height="56" rx="9" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="135" y="42" text-anchor="middle" font-size="12" fill="#c0492f">Update: rv を送るので踏みつけない</text>'
+          + '<text x="135" y="60" text-anchor="middle" font-size="11" fill="#c0492f">→ size の変更とも 409 で衝突</text>'
+          + '<rect x="290" y="20" width="230" height="56" rx="9" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>'
+          + '<text x="405" y="42" text-anchor="middle" font-size="12" fill="#0f5132">Patch: image だけ送信</text>'
+          + '<text x="405" y="60" text-anchor="middle" font-size="11" fill="#0f5132">→ size とは衝突せず通る</text>'
+          + '<text x="280" y="110" text-anchor="middle" font-size="11.5" fill="#4a5d54">注意: 同じフィールド・配列は MergeFromWithOptimisticLock が必要</text>'
+          + '</svg><p class="cap">図: Update は衝突が広く、Patch は狭いが検知もその分弱い。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ============================================================
+  explainers クイズ付き解説ページ 共通テンプレート
+  - このファイルをコピーして各シリーズのサンプルを作る
+  - 単一 HTML・inline CSS/JS・ビルド不要・MathJax は CDN
+  - QUIZ 配列は 6 問で確定済み
+  ============================================================ -->
+<title>第 09 回 Reconcile ループの中身 ― カスタムコントローラー自作</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eef6f1;color:var(--g1)}
+  .note{background:#e6eef8;border:1px solid #bed3ea;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .warn{background:#fdf3e2;border:1px solid #e6cf9e;border-radius:10px;padding:12px 14px;margin:12px 0}
+  .lead{background:#e7f6ee;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;margin:0 0 18px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 09 回</p>
+  <h1>Reconcile ループの中身</h1>
+  <p>何がきっかけでも、結局は「今の状態を読み直して差を埋める」関数が呼ばれるだけ</p>
+</header>
+<main>
+  <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
+  <p class="intro">第 03 回で、コントローラーは「今の状態を見て、望む状態との差を埋め続ける」調整ループ(reconcile loop)だと学んだ。この回ではその中身を、controller-runtime(controller-runtime: コントローラーを作るための Go の共通基盤ライブラリ)のソースコードに実在する名前で分解する。</p>
+
+  <div class="lead">この章の結論: Reconcile 関数は「何が起きたか」を渡されるのではなく「どのオブジェクトを見ろ」という名前だけを渡される。中身は informer(インフォーマー: API サーバーを一覧+監視し続けてキャッシュを作る仕組み)が用意したキャッシュを自分で読みに行く。だから同じ名前が何度積まれても、workqueue(ワークキュー: 処理待ちの名前を並べる待ち行列)が重複をまとめ、1 つの名前が同時に 2 回処理されることはない。</div>
+
+  <section>
+    <h2>1. API サーバーを毎回叩かない: informer とキャッシュ</h2>
+    <p>Reconcile はオブジェクトの数が増えるほど、また更新が増えるほど頻繁に呼ばれる。そのたびに API サーバーへ問い合わせていたら、対象が多いクラスタでは API サーバー側が先に音を上げる。そこで controller-runtime は informer を使い、対象の種類(例: Widget)を「まず一覧し、その後は変化だけを受け取る(List + Watch)」という形でまとめてローカルのキャッシュに複製する。</p>
+    <p>Builder の <code>.For(&amp;v1.Widget{})</code> を呼ぶと、裏側で Widget 用の informer が立ち上がり、cache(キャッシュ)に Widget の今の状態が複製される。コントローラーのコードが <code>mgr.GetClient().Get(...)</code> で読むとき、実際に読んでいるのはこのキャッシュで、読み取りのたびに API サーバーへは通信しない。書き込み(Create / Update / Delete)だけは直接 API サーバーへ飛ぶ。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 230" role="img" aria-label="informer とキャッシュの関係">
+        <defs><marker id="a9-1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="30" y="30" width="170" height="56" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.6"/>
+        <text x="115" y="62" text-anchor="middle" font-size="15" fill="#1d4e8f"><tspan font-weight="600">API サーバー</tspan></text>
+        <rect x="290" y="30" width="170" height="56" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="1.6"/>
+        <text x="375" y="55" text-anchor="middle" font-size="14" fill="#0f5132">informer</text>
+        <text x="375" y="74" text-anchor="middle" font-size="12.5" fill="#4a5d54">List + Watch</text>
+        <rect x="290" y="144" width="170" height="56" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="1.6"/>
+        <text x="375" y="176" text-anchor="middle" font-size="15" fill="#0f5132">cache</text>
+        <rect x="540" y="144" width="170" height="56" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.6"/>
+        <text x="625" y="169" text-anchor="middle" font-size="14" fill="#8a5a12">Reconcile</text>
+        <text x="625" y="186" text-anchor="middle" font-size="12.5" fill="#4a5d54">(Get で読む)</text>
+        <path d="M200,58 L288,58" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-1)"/>
+        <path d="M375,88 L375,142" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-1)"/>
+        <text x="400" y="118" font-size="12.5" fill="#4a5d54">書き込み</text>
+        <path d="M462,172 L538,172" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-1)"/>
+        <text x="470" y="160" font-size="12.5" fill="#4a5d54">読み取り</text>
+      </svg>
+      <p class="cap">図: API サーバーの変化は informer がキャッシュに写し、Reconcile はキャッシュだけを読む。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. workqueue: 同じキーはまとめる、処理中のキーは並行処理されない</h2>
+    <p>informer が変化を見つけると、変わったオブジェクトの名前(正確には namespace と name の組、キー)を workqueue に積む。controller-runtime v0.24.1 の既定の queue(<code>pkg/controller/priorityqueue</code> に実在。古い版や素の client-go の workqueue では dirty/processing という名前だったのと同じ役割を、items(次に処理する分の対応表)と locked(今まさに取り出されて処理中のキーの集合)という形で持つ)は、キーごとに 1 件しか保持しない。同じキーで <code>AddWithOpts</code> が重なっても 1 件にまとまる。同じ Widget が短時間に 5 回更新されても、処理が始まる前なら 1 回の Reconcile にまとめられる(ソースで確認: controller-runtime v0.24.1 の <code>pkg/controller/priorityqueue/priorityqueue.go</code>)。</p>
+    <p>さらに重要なのは、あるキーが locked に入っている(今まさに <code>Get</code> で取り出され Reconcile が実行中の)あいだに同じキーがまた積まれても、2 つめの Reconcile は始まらない。再度の Add は items を更新するだけで止まり、今動いている Reconcile が <code>Done</code>(完了)を呼んで locked から外れた時点で items に残っていれば、そこで初めて次の回が積まれる。つまり同じ Widget に対して 2 つの Reconcile が同時に走ることはない。</p>
+    <p>失敗した時は <code>AddRateLimited</code> で間隔を伸ばして再試行する。既定のレートリミッタは 5 ミリ秒から始めて最大 1000 秒(約 16.7 分)まで倍々に伸びる指数バックオフ(exponential backoff: 失敗するたびに次の再試行までの待ち時間を倍々に伸ばす作法。失敗が続くほど間隔を広げ、サーバーを叩き続けないようにする)で、成功すると <code>Forget</code> で間隔がリセットされる(controller-runtime v0.24.1 のソースで確認)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 220" role="img" aria-label="workqueue の重複排除と同時実行の禁止">
+        <defs><marker id="a9-2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <text x="20" y="28" font-size="13.5" fill="#4a5d54">Add(a) が 3 回続けて来た場合</text>
+        <rect x="20" y="42" width="90" height="36" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="65" y="65" text-anchor="middle" font-size="13" fill="#1d4e8f">Add(a)</text>
+        <rect x="130" y="42" width="90" height="36" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="175" y="65" text-anchor="middle" font-size="13" fill="#1d4e8f">Add(a)</text>
+        <rect x="240" y="42" width="90" height="36" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="285" y="65" text-anchor="middle" font-size="13" fill="#1d4e8f">Add(a)</text>
+        <path d="M65,80 L300,120" stroke="#8a5a12" stroke-width="1.4" fill="none" stroke-dasharray="3,3"/>
+        <path d="M175,80 L300,120" stroke="#8a5a12" stroke-width="1.4" fill="none" stroke-dasharray="3,3"/>
+        <path d="M285,80 L300,120" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-2)"/>
+        <rect x="255" y="122" width="90" height="36" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.6"/>
+        <text x="300" y="145" text-anchor="middle" font-size="13" fill="#0f5132">dirty={a}</text>
+        <path d="M300,160 L300,180" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-2)"/>
+        <rect x="245" y="182" width="230" height="30" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.4"/>
+        <text x="360" y="202" text-anchor="middle" font-size="12.5" fill="#8a5a12">Reconcile(a) は 1 回だけ起動</text>
+        <rect x="540" y="42" width="180" height="170" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.4"/>
+        <text x="630" y="64" text-anchor="middle" font-size="13" fill="#c0492f">processing={a} の間に</text>
+        <text x="630" y="82" text-anchor="middle" font-size="13" fill="#c0492f">Add(a) が来ても</text>
+        <text x="630" y="108" text-anchor="middle" font-size="13" fill="#c0492f">2 個目の Reconcile(a) は</text>
+        <text x="630" y="126" text-anchor="middle" font-size="13" fill="#c0492f">起動しない</text>
+        <text x="630" y="152" text-anchor="middle" font-size="12.5" fill="#4a5d54">Done 後に dirty が</text>
+        <text x="630" y="170" text-anchor="middle" font-size="12.5" fill="#4a5d54">残っていれば次の 1 回だけ</text>
+      </svg>
+      <p class="cap">図: dirty が重複を吸収し、processing が同時実行を防ぐ。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Reconcile(ctx, req) (ctrl.Result, error) が「名前だけ」を受け取る理由</h2>
+    <p>実際のシグネチャ(controller-runtime v0.24.1 のソースで確認):</p>
+    <pre><code>func (r *WidgetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error)</code></pre>
+    <p><code>ctrl.Request</code> の中身は <code>types.NamespacedName</code>、つまり namespace と name の組だけ。どのフィールドが書き換わったかは一切渡されない。これは第 03 回で説明したレベルトリガー(level-triggered: 変化の内容そのものではなく「今の状態」を見るやり方)の実装そのもの。Reconcile は呼ばれるたびに「この名前のオブジェクトをキャッシュから読み直し、望む状態と比べて、足りない分だけ埋める」を最初からやり直す。</p>
+    <p>だから Reconcile を呼ぶきっかけが作成イベントでも更新イベントでも再試行でも、関数の中身を変える必要がない。むしろ変えてはいけない。イベントの種類で分岐するコントローラーは、再起動直後にイベントそのものを取り戻せず状態を見失う。</p>
+    <p>ここまでの材料を組み合わせると、Reconcile の骨組みはだいたいこの形になる(第 10・11 回で削除中の分岐と子の作成、status の書き方を詳しく見る)。</p>
+    <pre><code>func (r *WidgetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+    var w v1.Widget
+    if err := r.Get(ctx, req.NamespacedName, &amp;w); err != nil {
+        return ctrl.Result{}, client.IgnoreNotFound(err)
+    }
+    // ここに: 削除中かの判定(第10回)、子の作成(第10回)、status の更新(第11回)
+    return ctrl.Result{}, nil
+}</code></pre>
+    <div class="fig">
+      <svg viewBox="0 0 740 190" role="img" aria-label="どんなきっかけでも同じ Request に集約される">
+        <defs><marker id="a9-3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="14" width="150" height="34" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="95" y="36" text-anchor="middle" font-size="12.5" fill="#1d4e8f">作成イベント</text>
+        <rect x="20" y="58" width="150" height="34" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="95" y="80" text-anchor="middle" font-size="12.5" fill="#1d4e8f">更新イベント</text>
+        <rect x="20" y="102" width="150" height="34" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="95" y="124" text-anchor="middle" font-size="12.5" fill="#1d4e8f">レート制限の再試行</text>
+        <rect x="20" y="146" width="150" height="34" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="95" y="168" text-anchor="middle" font-size="12.5" fill="#1d4e8f">RequeueAfter の再実行</text>
+        <path d="M172,31 L350,95" stroke="#4a5d54" stroke-width="1.3" fill="none"/>
+        <path d="M172,75 L350,95" stroke="#4a5d54" stroke-width="1.3" fill="none"/>
+        <path d="M172,119 L350,95" stroke="#4a5d54" stroke-width="1.3" fill="none"/>
+        <path d="M172,163 L350,95" stroke="#4a5d54" stroke-width="1.3" fill="none" marker-end="url(#a9-3)"/>
+        <rect x="350" y="70" width="150" height="50" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="1.6"/>
+        <text x="425" y="92" text-anchor="middle" font-size="13" fill="#0f5132">Request{ns,name}</text>
+        <text x="425" y="109" text-anchor="middle" font-size="12" fill="#4a5d54">名前だけ</text>
+        <path d="M502,95 L600,95" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-3)"/>
+        <rect x="600" y="60" width="130" height="70" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.6"/>
+        <text x="665" y="88" text-anchor="middle" font-size="13" fill="#8a5a12">同じ Reconcile</text>
+        <text x="665" y="106" text-anchor="middle" font-size="12" fill="#4a5d54">毎回読み直す</text>
+      </svg>
+      <p class="cap">図: きっかけの種類は捨てられ、同じ 1 つの関数が毎回フルに読み直す。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. For / Owns / Watches で何を見るか</h2>
+    <p><code>ctrl.NewControllerManagedBy(mgr)</code> で Builder を作り、<code>.For(&amp;v1.Widget{})</code> で「これを調整する対象」を登録する。ソースのコメントには、これは内部で <code>Watches(source.Kind(cache, &amp;Widget{}, &amp;handler.EnqueueRequestForObject{}))</code> を呼ぶのと同じだとある。</p>
+    <p><code>.Owns(&amp;corev1.ConfigMap{})</code> は「自分が作った子を見る」。子が変わったら、その子の ownerReferences(第 10 回)をさかのぼって親の Widget の名前を workqueue に積む。</p>
+    <p><code>.Watches(&amp;corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(fn))</code> は、所有していない任意のオブジェクトの変化を、好きな対応表(<code>fn</code> の型は <code>func(context.Context, client.Object) []reconcile.Request</code>、ソースで確認)で Widget の名前に変換して積む。1 つの変化から複数の Widget の名前を返すこともできる。どの経路でキーが積まれても、先は同じ 1 本の workqueue で、呼ばれる Reconcile も同じ関数。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 210" role="img" aria-label="For Owns Watches が同じキューに合流する">
+        <defs><marker id="a9-4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="20" width="150" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="95" y="44" text-anchor="middle" font-size="13" fill="#0f5132">For(Widget)</text>
+        <rect x="20" y="78" width="150" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="95" y="102" text-anchor="middle" font-size="13" fill="#1d4e8f">Owns(ConfigMap)</text>
+        <rect x="20" y="136" width="150" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="95" y="160" text-anchor="middle" font-size="13" fill="#1d4e8f">Watches(+MapFunc)</text>
+        <path d="M172,40 L350,100" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a9-4)"/>
+        <path d="M172,98 L350,100" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a9-4)"/>
+        <path d="M172,156 L350,100" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a9-4)"/>
+        <rect x="350" y="76" width="140" height="48" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.6"/>
+        <text x="420" y="104" text-anchor="middle" font-size="13" fill="#8a5a12">1 本の workqueue</text>
+        <path d="M492,100 L600,100" stroke="#4a5d54" stroke-width="1.8" fill="none" marker-end="url(#a9-4)"/>
+        <rect x="600" y="76" width="130" height="48" rx="10" fill="#0f5132" stroke="#0f5132" stroke-width="1.6"/>
+        <text x="665" y="104" text-anchor="middle" font-size="13" fill="#fff">Reconcile</text>
+      </svg>
+      <p class="cap">図: 見る先が 3 種類あっても、積まれるキーと呼ばれる関数は 1 つにまとまる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Result{RequeueAfter} とエラー返しの違い</h2>
+    <p>Reconcile は <code>(ctrl.Result, error)</code> を返す。<code>ctrl.Result</code> は構造体なので <code>nil</code> は返せない。<code>ctrl.Result{}, nil</code>(ゼロ値の Result)ならこのキーの作業は完了で、次に動くのは informer が次の変化を見つけた時だけ。<code>ctrl.Result{RequeueAfter: 30 * time.Second}, nil</code> は、今は完了しているが 30 秒後に自分からもう一度見に行きたい(外部 API の状態をポーリングしたい時など)という意味で、この間隔はレート制限とは別経路で積まれる。error を返すと失敗として扱われ、<code>AddRateLimited</code> により前述の指数バックオフで再試行される。</p>
+    <p>両方を同時に設定(error も RequeueAfter も non-zero)すると、controller-runtime は error を優先し RequeueAfter を無視する。ソースのログ文面に <span class="note" style="display:inline;padding:2px 6px;margin:0">"RequeueAfter and Requeue will always be ignored if the error is non-nil"</span> とそのまま書かれている(controller-runtime v0.24.1 の <code>pkg/internal/controller/controller.go</code> で確認)。ポーリングだけしたいなら error を返してはいけない。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 220" role="img" aria-label="Result と error の分岐">
+        <defs><marker id="a9-5" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="20" y="86" width="150" height="48" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.6"/>
+        <text x="95" y="114" text-anchor="middle" font-size="13" fill="#8a5a12">Reconcile の戻り値</text>
+        <path d="M172,95 L300,45" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a9-5)"/>
+        <path d="M172,110 L300,110" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a9-5)"/>
+        <path d="M172,125 L300,180" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#a9-5)"/>
+        <rect x="300" y="20" width="200" height="50" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>
+        <text x="400" y="42" text-anchor="middle" font-size="12.5" fill="#0f5132">ctrl.Result{}, nil</text>
+        <text x="400" y="60" text-anchor="middle" font-size="12" fill="#4a5d54">次の変化まで何もしない</text>
+        <rect x="300" y="85" width="200" height="50" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="400" y="107" text-anchor="middle" font-size="12.5" fill="#1d4e8f">Result{RequeueAfter}, nil</text>
+        <text x="400" y="125" text-anchor="middle" font-size="12" fill="#4a5d54">指定した間隔で自発的に再実行</text>
+        <rect x="300" y="155" width="200" height="50" rx="10" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>
+        <text x="400" y="177" text-anchor="middle" font-size="12.5" fill="#c0492f">_, err</text>
+        <text x="400" y="195" text-anchor="middle" font-size="12" fill="#4a5d54">指数バックオフで再試行(RequeueAfter は無視)</text>
+      </svg>
+      <p class="cap">図: error が入っていると RequeueAfter は常に無視され、バックオフ側が勝つ。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. キャッシュは少し古いかもしれない、という前提で書く</h2>
+    <p>informer のキャッシュは watch イベントの到着を待っているので、API サーバーの最新状態より一瞬遅れることがある(ネットワークの遅延や再接続中など)。だから Reconcile の中で「このリソースはまだ無いはずだ」と思って Create しても、本当はもう誰か(別の Reconcile 実行、あるいは人間)が作っていて AlreadyExists が返ることがある。第 03 回で触れた冪等性(何回実行しても同じ結果になること)が守られていれば、AlreadyExists はそのまま無視してよい失敗ではないが、プロセスを止めるような異常でもない。ただし「もう目的が達成されている」とは限らない。既にある ConfigMap が自分の望む内容になっているか、自分が ownerReferences で所有しているものかは保証されないので、次の Reconcile(読み直し)で中身と所有者を確かめる必要がある。</p>
+    <p>逆方向もある。書き込みの結果はキャッシュに即時反映されない。同じ Reconcile 呼び出しの中で書いた直後に同じキャッシュを読み直しても、古い値が返ることがある。</p>
+    <div class="fig">
+      <svg viewBox="0 0 700 170" role="img" aria-label="API サーバーとキャッシュのずれ">
+        <rect x="20" y="30" width="280" height="110" rx="10" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>
+        <text x="160" y="56" text-anchor="middle" font-size="13" fill="#1d4e8f">API サーバー(最新)</text>
+        <text x="160" y="80" text-anchor="middle" font-size="12.5" fill="#4a5d54">Widget a は既に存在</text>
+        <rect x="400" y="30" width="280" height="110" rx="10" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>
+        <text x="540" y="56" text-anchor="middle" font-size="13" fill="#8a5a12">ローカルの cache(一瞬遅れ)</text>
+        <text x="540" y="80" text-anchor="middle" font-size="12.5" fill="#4a5d54">Widget a はまだ無いように見える</text>
+        <text x="540" y="100" text-anchor="middle" font-size="12.5" fill="#c0492f">→ Create すると AlreadyExists</text>
+        <text x="540" y="118" text-anchor="middle" font-size="12" fill="#4a5d54">冪等なら失敗として扱わない</text>
+      </svg>
+      <p class="cap">図: キャッシュの遅れを前提にすれば、AlreadyExists は想定内の結果になる。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. まとめと次の回</h2>
+    <p>Reconcile は「何が起きたか」でなく「今どうなっているか」だけを見る関数。informer がキャッシュを作り、workqueue が同じ名前の重複と同時実行をつぶし、Result と error が「いつまた呼ぶか」を決める。次の第 10 回では、コントローラーが作った子をどう結びつけ(ownerReferences)、消すときにどう後片付け(finalizer)するかを見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 740 150" role="img" aria-label="章全体のまとめ">
+        <defs><marker id="a9-7" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>
+        <rect x="15" y="40" width="130" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.4"/>
+        <text x="80" y="69" text-anchor="middle" font-size="12.5" fill="#1d4e8f">informer+cache</text>
+        <path d="M147,65 L213,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a9-7)"/>
+        <rect x="215" y="40" width="130" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.4"/>
+        <text x="280" y="69" text-anchor="middle" font-size="12.5" fill="#0f5132">workqueue</text>
+        <path d="M347,65 L413,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a9-7)"/>
+        <rect x="415" y="40" width="130" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.4"/>
+        <text x="480" y="69" text-anchor="middle" font-size="12.5" fill="#8a5a12">Reconcile</text>
+        <path d="M547,65 L613,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#a9-7)"/>
+        <rect x="615" y="40" width="120" height="50" rx="8" fill="#0f5132" stroke="#0f5132" stroke-width="1.4"/>
+        <text x="675" y="62" text-anchor="middle" font-size="12" fill="#fff">Result /</text>
+        <text x="675" y="79" text-anchor="middle" font-size="12" fill="#fff">error</text>
+      </svg>
+      <p class="cap">図: この章で見た一本道。</p>
+    </div>
+  </section>
+
+  <!-- ===== クイズパート ===== -->
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 6</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 6 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <p style="display:flex;justify-content:space-between;gap:12px;margin:28px 0 0;font-size:14.5px">
+    <a class="back" href="./k8sctl-08-status-subresource.html" style="margin:0">← 第 08 回 status と scale のサブリソース</a>
+    <a class="back" href="./k8sctl-10-ownership-and-finalizers.html" style="margin:0">第 10 回 所有と後片付け →</a>
+  </p>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+/* ============================================================
+  QUIZ データ仕様 (6 問)
+  q      : 問題文 (LaTeX 可)
+  opts   : 5 択の本文 (LaTeX 可)
+  ans    : 正解 index (0-4)
+  exps   : 各選択肢の詳細解説 (LaTeX 可)。正解は「なぜ正しいか」、
+           誤答は「なぜ違うか + よくある誤解の指摘」を丁寧に。
+  why    : {html} 図解つきの総合解説 (なぜその答えになるかを視覚的に)。SVG 推奨。
+  ============================================================ */
+const QUIZ = [
+  {
+    q: 'ある Widget a に対して、1 秒の間に update イベントが 3 回続けて発生し、そのたびに workqueue に Add(a) が呼ばれた。まだ Reconcile(a) は一度も始まっていない。この間に Reconcile(a) は何回起動されるか。',
+    opts: [
+      '3 回(イベントの数だけ起動される)',
+      '2 回(最初と最後だけ)',
+      '0 回(3 回とも無視される)',
+      '1 回(同じキーの重複を吸収する対応表(items)がまとめる)',
+      'イベントの内容によって変わる'
+    ],
+    ans: 3,
+    exps: [
+      '違う。workqueue はイベントの個数を数えておらず、キー単位で対応表(items)に入っているかどうかしか見ない。3 回積んでも items には a が 1 つあるだけ。',
+      '違う。「最初と最後」のような特別扱いは無い。items には有無しかなく回数は記録されない。',
+      '違う。Add は無視ではなく、最初の 1 回でキーを items に入れて Get で取り出せる状態にする。',
+      'これが正解。controller-runtime v0.24.1 の既定の queue の Add は、キーが既に items にあれば 2 回目以降は更新するだけで、新しい行を増やさない。だから起動前に重複した Add は 1 回にまとまる。',
+      '違う。Reconcile に渡るのは namespace と name だけで、イベントの内容(どのフィールドが変わったか)はそもそも workqueue に積まれない。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>workqueue は「キーがあるかどうか」の集合であって、イベントのカウンターではない。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 160" aria-label="dirty集合は重複を吸収する"><defs><marker id="qa9-1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<text x="20" y="28" font-size="13" fill="#4a5d54">Add(a)×3</text>'
+          + '<path d="M90,20 L220,70" stroke="#4a5d54" stroke-width="1.4" fill="none" marker-end="url(#qa9-1)"/>'
+          + '<rect x="230" y="50" width="120" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>'
+          + '<text x="290" y="75" text-anchor="middle" font-size="13" fill="#0f5132">dirty={a}</text>'
+          + '<path d="M352,70 L440,70" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa9-1)"/>'
+          + '<rect x="450" y="50" width="100" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="500" y="75" text-anchor="middle" font-size="12.5" fill="#8a5a12">Reconcile×1</text>'
+          + '</svg><p class="cap">図: 3 回の Add は dirty={a} という 1 つの事実にしかならない。</p></div>'
+    }
+  },
+  {
+    q: 'Reconcile(a) が実行中(processing 集合に a が入っている状態)に、別の変化でまた Add(a) が呼ばれた。正しい説明はどれか。',
+    opts: [
+      '即座に 2 つめの Reconcile(a) が別スレッドで並行して始まる',
+      'エラーになって Add 自体が失敗する',
+      'dirty に a が積まれるだけで、今動いている Reconcile(a) が Done を呼ぶまで次は始まらない',
+      'キュー全体が止まり、他のキーの処理も止まる',
+      '古い方の Reconcile(a) が中断されて新しい方に差し替わる'
+    ],
+    ans: 2,
+    exps: [
+      '違う。processing 集合に a が入っている間は、同じキーに対する 2 つめの Get は発生しない。同時実行は起こらない。',
+      '違う。Add は失敗しない。黙って items(次に処理する分)に積むだけの操作で、エラーという概念はない。',
+      'これが正解。Add は dirty.Insert(a) をするだけ。processing に a がある間は queue 本体には積まれず、Done が呼ばれた時に dirty を見て、残っていればそこで初めて次の分が積まれる。',
+      '違う。他のキー b や c の処理には影響しない。ロックの粒度はキュー全体の一瞬の排他制御だけで、処理そのものは独立。',
+      '違う。controller-runtime にはそのような「実行中の Reconcile を中断する」機能は無い。今動いている分は最後まで走る。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>processing は「排他ロック」そのものではないが、同じキーの二重起動を防ぐ役割を果たす。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 170" aria-label="processing中の再Add"><defs><marker id="qa9-2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="20" width="200" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="120" y="42" text-anchor="middle" font-size="12.5" fill="#c0492f">processing={a}(実行中)</text>'
+          + '<text x="120" y="60" text-anchor="middle" font-size="11.5" fill="#4a5d54">この間の Add(a) は dirty だけ</text>'
+          + '<path d="M120,72 L120,100" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa9-2)"/>'
+          + '<rect x="20" y="102" width="200" height="40" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>'
+          + '<text x="120" y="127" text-anchor="middle" font-size="12.5" fill="#0f5132">Done 後に次の 1 回だけ起動</text>'
+          + '</svg><p class="cap">図: 実行中の再 Add は、完了後の再実行 1 回分として蓄えられる。</p></div>'
+    }
+  },
+  {
+    q: '次のうち、controller-runtime の Reconcile メソッドの実際のシグネチャに最も近いものはどれか。',
+    opts: [
+      'func Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error)',
+      'func Reconcile(obj *v1.Widget) error',
+      'func Reconcile(event watch.Event) error',
+      'func Reconcile(old, new *v1.Widget) (ctrl.Result, error)',
+      'func Reconcile(ctx context.Context, name string, spec WidgetSpec) error'
+    ],
+    ans: 0,
+    exps: [
+      'これが正解。controller-runtime v0.24.1 の pkg/reconcile/reconcile.go に実在するシグネチャで、req の中身は types.NamespacedName(名前だけ)。',
+      '違う。引数にオブジェクトの中身(spec や status)は渡されない。渡されるのは名前だけで、中身は自分でキャッシュから読みに行く。',
+      '違う。watch.Event は informer の内部で処理され、Reconcile まで届くのは「どのキーが変わったか」だけ。イベントそのものは渡らない。',
+      '違う。変更前(old)と変更後(new)を両方受け取る形は、レベルトリガーの思想と矛盾する。Reconcile は常に「今の 1 つの状態」だけを見る。',
+      '違う。spec を直接渡す形にすると、Reconcile 実行までの間にオブジェクトがさらに変わっていた場合に古い spec で判断してしまう。必ず読み直す設計になっている。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>引数が「名前」だけなのは、キャッシュを読み直すことが前提だから。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="Request引数の中身"><defs><marker id="qa9-3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="30" y="40" width="160" height="50" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>'
+          + '<text x="110" y="62" text-anchor="middle" font-size="12.5" fill="#0f5132">req.NamespacedName</text>'
+          + '<text x="110" y="80" text-anchor="middle" font-size="11.5" fill="#4a5d54">ns + name だけ</text>'
+          + '<path d="M192,65 L300,65" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa9-3)"/>'
+          + '<rect x="310" y="40" width="160" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="390" y="62" text-anchor="middle" font-size="12.5" fill="#8a5a12">Get(ctx, key, obj)</text>'
+          + '<text x="390" y="80" text-anchor="middle" font-size="11.5" fill="#4a5d54">自分でキャッシュを読む</text>'
+          + '</svg><p class="cap">図: 中身は渡されず、読み直す責任は Reconcile 側にある。</p></div>'
+    }
+  },
+  {
+    q: '.For(&v1.Widget{}) と .Owns(&corev1.ConfigMap{}) と .Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(fn)) を同時に設定したコントローラーがある。この構成の説明として正しいものはどれか。',
+    opts: [
+      '3 つはそれぞれ別々の workqueue と別々の Reconcile 関数につながる',
+      'For だけが workqueue に積む権限を持ち、他の 2 つは単にログを出すだけ',
+      'Watches を設定すると For と Owns は無効になる',
+      'Owns は ConfigMap の Reconcile を別に起動する',
+      '3 つのどの経路でキーが積まれても、最終的には同じ 1 本の workqueue、同じ 1 つの Reconcile 関数が呼ばれる'
+    ],
+    ans: 4,
+    exps: [
+      '違う。Builder はこれらすべてを 1 つの Controller にまとめる。workqueue も Reconcile 関数も 1 つしかない。',
+      '違う。For 以外も実際に workqueue へ Add する。Watches の MapFunc(MapFunc: 1 つのオブジェクトの変化を、好きな対応表で別のキーの一覧に変換する関数)の戻り値がそのまま積まれるキーになる。',
+      '違う。3 つは併用が前提の機能で、互いに無効化し合わない。',
+      '違う。Owns は ConfigMap のための別の Reconcile を用意するのではなく、ConfigMap の変化を「親の Widget を見てほしい」という Request に変換するだけ。',
+      'これが正解。For は対象自身の変化、Owns は自分が作った子の変化(ownerReferences をさかのぼって親の名前に変換)、Watches は任意のオブジェクトの変化を MapFunc で Widget の名前に変換する。経路は違うが、積まれる先と呼ばれる関数は 1 つに合流する。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>経路が 3 つあっても、積まれる場所も呼ばれる関数も 1 つ。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="3つの経路が1本に合流"><defs><marker id="qa9-4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="16" width="120" height="30" rx="7" fill="#e7f6ee" stroke="#198754" stroke-width="1.3"/>'
+          + '<text x="80" y="36" text-anchor="middle" font-size="11.5" fill="#0f5132">For</text>'
+          + '<rect x="20" y="60" width="120" height="30" rx="7" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.3"/>'
+          + '<text x="80" y="80" text-anchor="middle" font-size="11.5" fill="#1d4e8f">Owns</text>'
+          + '<rect x="20" y="104" width="120" height="30" rx="7" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.3"/>'
+          + '<text x="80" y="124" text-anchor="middle" font-size="11.5" fill="#1d4e8f">Watches</text>'
+          + '<path d="M142,31 L280,75" stroke="#4a5d54" stroke-width="1.3" fill="none" marker-end="url(#qa9-4)"/>'
+          + '<path d="M142,75 L280,75" stroke="#4a5d54" stroke-width="1.3" fill="none" marker-end="url(#qa9-4)"/>'
+          + '<path d="M142,119 L280,75" stroke="#4a5d54" stroke-width="1.3" fill="none" marker-end="url(#qa9-4)"/>'
+          + '<rect x="290" y="55" width="120" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="350" y="79" text-anchor="middle" font-size="12.5" fill="#8a5a12">1 本の queue</text>'
+          + '</svg><p class="cap">図: 合流点は 1 つ。</p></div>'
+    }
+  },
+  {
+    q: 'Reconcile が外部 API の処理完了を 30 秒ごとに確認したいので ctrl.Result{RequeueAfter: 30 * time.Second} を返した。同じ呼び出しの中で、途中の別の処理で発生したエラーも error として一緒に返してしまった(非 nil の error と RequeueAfter を両方返した)。実際に起きることはどれか。',
+    opts: [
+      '30 秒後にもう一度実行され、同時に指数バックオフの再試行間隔もカウントされる',
+      'RequeueAfter は無視され、指数バックオフの間隔で再試行される',
+      'error が無視され、必ず 30 秒後に実行される',
+      'controller-runtime がこの組み合わせを検知してプロセスを終了する',
+      'どちらが有効になるかは RequeueAfter と error を設定した順序で決まる'
+    ],
+    ans: 1,
+    exps: [
+      '違う。両方が同時に効くことはない。controller-runtime のコードは error が非 nil なら RequeueAfter 側の分岐には入らない。',
+      'これが正解。controller-runtime v0.24.1 の pkg/internal/controller/controller.go の reconcileHandler は switch の最初に err != nil を判定し、そちらに入ったら RequeueAfter は使われない。ログにも「RequeueAfter and Requeue will always be ignored if the error is non-nil」と出る。',
+      '違う。逆。error がある方が優先され、RequeueAfter 側が無視される。',
+      '違う。異常終了するような安全装置ではない。単に優先順位に従って処理が進むだけで、警告ログが出るのみ。',
+      '違う。Go の構造体のフィールドに設定順序という概念は無く、戻り値を見た時点の値だけで switch が判定される。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>switch 文の最初の分岐が error なので、他の条件は評価されずに終わる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="errが優先される分岐"><defs><marker id="qa9-5" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="50" width="160" height="50" rx="8" fill="#fbeeea" stroke="#c0492f" stroke-width="1.5"/>'
+          + '<text x="100" y="72" text-anchor="middle" font-size="12.5" fill="#c0492f">err と RequeueAfter 両方あり</text>'
+          + '<path d="M182,75 L270,75" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa9-5)"/>'
+          + '<rect x="280" y="50" width="160" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>'
+          + '<text x="360" y="72" text-anchor="middle" font-size="12.5" fill="#1d4e8f">err != nil を最初に判定</text>'
+          + '<text x="360" y="90" text-anchor="middle" font-size="11.5" fill="#4a5d54">RequeueAfter は見ない</text>'
+          + '</svg><p class="cap">図: switch の最初の case で確定し、後段は評価されない。</p></div>'
+    }
+  },
+  {
+    q: 'ある Reconcile が、informer のキャッシュを見て「Widget a の子である ConfigMap はまだ存在しない」と判断し、Create を呼んだ。ところが API サーバーからは AlreadyExists が返ってきた。この状況を正しく説明しているものはどれか。',
+    opts: [
+      'informer のキャッシュが API サーバーより一瞬遅れていたため起きた、想定内の状況であり、冪等に作られていれば異常停止はしなくてよい(既にある ConfigMap の中身と所有者は、次の Reconcile で確かめる)',
+      'controller-runtime の重大なバグで、再起動が必要',
+      'workqueue が同じキーを 2 回同時に処理したために起きた',
+      'ConfigMap には ownerReferences が無いと必ず起きる現象',
+      'RBAC の権限不足が原因である'
+    ],
+    ans: 0,
+    exps: [
+      'これが正解。キャッシュは最新の API サーバーの状態に対して一瞬遅れることがある。別の実行や人間が先に作っていた場合、Create は AlreadyExists になる。第 03 回の冪等性(同じ操作を繰り返しても同じ結果になること)が守られていれば、これを理由に異常停止する必要はない。ただし既にある ConfigMap が自分の望む内容か、自分が所有者かは分からないので、「もう目的達成」と決めつけず、次の Reconcile で中身と所有者を確かめる。',
+      '違う。これはバグではなく、informer のキャッシュが watch イベントの到着を待つ仕組み上、必然的に発生する一瞬の遅れによるもの。',
+      '違う。workqueue はこの章の 2 で見たとおり同じキーの同時処理を防ぐ。この現象はキャッシュと API サーバーの時間差で起き、同時実行とは別の話。',
+      '違う。ownerReferences の有無とこの現象は無関係。キャッシュの遅れはどんなオブジェクトにも起こりうる。',
+      '違う。AlreadyExists は権限不足(403 Forbidden)とは別のエラーで、対象が既に存在するという意味のエラー。'
+    ],
+    why: {
+      html: '<h4>図で理解する</h4><p>遅れを前提にした設計では、AlreadyExists は想定内の分岐の 1 つになる。</p>'
+          + '<div class="fig"><svg viewBox="0 0 560 150" aria-label="AlreadyExistsは想定内"><defs><marker id="qa9-6" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4a5d54"/></marker></defs>'
+          + '<rect x="20" y="30" width="180" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12" stroke-width="1.5"/>'
+          + '<text x="110" y="55" text-anchor="middle" font-size="12.5" fill="#8a5a12">キャッシュ: 無いように見える</text>'
+          + '<path d="M202,50 L300,50" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa9-6)"/>'
+          + '<rect x="310" y="30" width="180" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f" stroke-width="1.5"/>'
+          + '<text x="400" y="55" text-anchor="middle" font-size="12.5" fill="#1d4e8f">Create → AlreadyExists</text>'
+          + '<path d="M400,72 L400,100" stroke="#4a5d54" stroke-width="1.6" fill="none" marker-end="url(#qa9-6)"/>'
+          + '<rect x="300" y="102" width="200" height="36" rx="8" fill="#e7f6ee" stroke="#198754" stroke-width="1.5"/>'
+          + '<text x="400" y="125" text-anchor="middle" font-size="12.5" fill="#0f5132">冪等なら成功扱いでよい</text>'
+          + '</svg><p class="cap">図: ずれを前提にすれば AlreadyExists は失敗ではない。</p></div>'
+    }
+  }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+</script>
+</body>
+</html>

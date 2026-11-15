@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>カスタムコントローラー自作シリーズ ― 全 18 回</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.8}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:64px 24px 52px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:36px;letter-spacing:.04em}
+  header p{margin:0;opacity:.92;font-size:17px}
+  main{max-width:1040px;margin:0 auto;padding:36px 20px 80px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 22px}
+  .filters{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 30px}
+  .filters button{font-family:inherit;font-size:14px;font-weight:700;border:1.5px solid var(--line);background:#fff;
+    color:var(--sub);border-radius:999px;padding:6px 18px;cursor:pointer;transition:.15s}
+  .filters button.on{background:var(--g1);border-color:var(--g1);color:#fff}
+  .lvsec{margin:0 0 40px}
+  .lvh{font-size:17px;color:var(--sub);font-weight:500;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;
+    box-shadow:0 2px 14px rgba(15,81,50,.05);transition:.18s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 10px 26px rgba(15,81,50,.14);border-color:var(--g3)}
+  .card .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .card .num{font-size:12.5px;color:#7d918a;font-weight:700}
+  .card h2{margin:0 0 8px;font-size:19px;color:var(--g1);line-height:1.45}
+  .card p{margin:0 0 14px;font-size:14.5px;color:var(--sub);flex:1}
+  .card .meta{font-size:12.5px;color:#9aa;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .card .go{color:var(--g2);font-weight:700;white-space:nowrap}
+  .src{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:0 7px;margin:0 4px 0 0;color:#6b7f77;font-size:11.5px}
+  .level{display:inline-block;border-radius:999px;padding:2px 12px;font-size:12.5px;font-weight:700;letter-spacing:.06em}
+  .lv-b{background:#e7f6ee;color:#0f5132} .lv-m{background:#e3edf5;color:#1f4a68}
+  .lv-s{background:#efe8f7;color:#5b3d80} .lv-e{background:#fbeeea;color:#b5401f}
+  .hidden{display:none}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a,.intro a{color:var(--g2)}
+  .back{display:inline-block;margin:0 0 22px;color:var(--g2);text-decoration:none;font-size:14px}
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">K8S CUSTOM CONTROLLER ・ シリーズ</p>
+  <h1>カスタムコントローラー自作シリーズ</h1>
+  <p>CRD とコントローラーの違いから始めて、本物の FSx を配るコントローラーを作り、実機で確かめるまでの全 18 回</p>
+</header>
+<main>
+  <a class="back" href="./index.html">← explainers トップへ戻る</a>
+  <p class="intro">Kubernetes を拡張して自分の API を作るための連載です。各回は図を中心にした解説と、5 択 6 問のクイズでできています。細かいコードやテンプレートではなく、何がどこで何をしているかに絞り、必要な書き方だけを短く載せています。例に使う実験用の CRD は EKS 1.35 のテスト用クラスタで実際に動かし、その出力を載せています。最後の 3 回では、<a href="https://github.com/littlemex/distributed-ai" target="_blank" rel="noopener">distributed-ai</a> と <a href="https://zenn.dev/tosshi/books/eks-distributed-ai" target="_blank" rel="noopener">Zenn の本「eks-distributed-ai」</a>の課題から題材を選び、既存の FSx を namespace ごとに配るコントローラーを設計・実装し、FSx for Lustre と FSx for OpenZFS で確かめます。上から順に読むと、前の回の知識で次の回が読めるように並べてあります。</p>
+  <div class="filters">
+    <button class="on" data-f="all">すべて</button>
+    <button data-f="b">Beginner</button><button data-f="m">Mid</button><button data-f="s">Senior</button><button data-f="e">Practice</button>
+  </div>
+  <section class="lvsec" data-lv="b">
+    <h2 class="lvh"><span class="level lv-b">Beginner</span>仕組みの地図。Kubernetes は望む状態の台帳で、動かすのはコントローラー。CRD・CR・コントローラー・オペレーターの違いまで</h2>
+    <div class="grid">
+    <a class="card" data-lv="b" href="./k8sctl-01-desired-state.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 01 回</span></div>
+      <h2>Kubernetes は「望む状態」の台帳</h2>
+      <p>命令型と宣言型、API サーバー・etcd・コントローラー・kubelet の役割、kubectl apply は保存するだけで動かすのは誰か。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./k8sctl-02-api-objects.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 02 回</span></div>
+      <h2>API の住所と型</h2>
+      <p>Group・Version・Kind・Resource、namespace に属するものとクラスタ全体のもの、REST のパス、metadata の各項目は何のためにあるか。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./k8sctl-03-controller.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 03 回</span></div>
+      <h2>コントローラーとは何か</h2>
+      <p>調整ループ、Deployment から ReplicaSet と Pod ができる連鎖、レベルトリガーとエッジトリガー、冪等が必須な理由。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="b" href="./k8sctl-04-crd-cr-controller.html">
+      <div class="top"><span class="level lv-b">Beginner</span><span class="num">第 04 回</span></div>
+      <h2>CRD・CR・コントローラー・オペレーターの違い</h2>
+      <p>型の登録、その実物、それを動かす別プログラム、運用知識を詰めたもの。CRD だけ入れると何が起き、何が起きないかを実測で。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-lv="m">
+    <h2 class="lvh"><span class="level lv-m">Mid</span>CRD を書く。スキーマ、検証(OpenAPI と CEL)、既定値、status と scale のサブリソース。コントローラー無しで API サーバーが何をしてくれるか</h2>
+    <div class="grid">
+    <a class="card" data-lv="m" href="./k8sctl-05-crd-anatomy.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 05 回</span></div>
+      <h2>CRD の骨格</h2>
+      <p>names、scope、versions、構造的スキーマと未知フィールドの刈り込み、表示列。マーカーから CRD の YAML が生まれる流れ。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./k8sctl-06-validation.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 06 回</span></div>
+      <h2>検証 (validation)</h2>
+      <p>OpenAPI の制約と CEL のルール、変更前と比べる遷移ルール、CEL が評価されない条件、コストの上限、締めた規則のラチェット。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./k8sctl-07-defaulting.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 07 回</span></div>
+      <h2>既定値 (defaulting)</h2>
+      <p>スキーマの default はいつ入るか(作成・更新・読み出し)、required や nullable との関係、webhook で入れる既定値との違い。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="m" href="./k8sctl-08-status-subresource.html">
+      <div class="top"><span class="level lv-m">Mid</span><span class="num">第 08 回</span></div>
+      <h2>status と scale のサブリソース</h2>
+      <p>spec と status の分離、generation と observedGeneration、conditions の作法、status だけの RBAC、kubectl scale と HPA。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-lv="s">
+    <h2 class="lvh"><span class="level lv-s">Senior</span>コントローラーを書き、API サーバーを拡張する。Reconcile ループ、所有と finalizer、安全な書き込み、webhook と admission policy、バージョンと変換、道具とテスト</h2>
+    <div class="grid">
+    <a class="card" data-lv="s" href="./k8sctl-09-reconcile-loop.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 09 回</span></div>
+      <h2>Reconcile ループの中身</h2>
+      <p>informer とキャッシュ、workqueue、名前だけを受け取る理由、For・Owns・Watches、再試行と RequeueAfter、少し古いキャッシュとの付き合い方。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./k8sctl-10-ownership-and-finalizers.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 10 回</span></div>
+      <h2>所有と後片付け</h2>
+      <p>ownerReferences とガベージコレクション、3 つの消し方、namespace の壁(実測)、finalizer の流れと、外れずに固まる典型。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./k8sctl-11-writing-safely.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 11 回</span></div>
+      <h2>書き込みの作法</h2>
+      <p>resourceVersion と楽観的排他、Update と Patch と Server-Side Apply の使い分け、status の書き方、同じ内容を書いても何が起きるか。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./k8sctl-12-admission-webhooks.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 12 回</span></div>
+      <h2>Admission と webhook</h2>
+      <p>リクエストが API サーバーを通る順番、mutating と validating、failurePolicy や sideEffects、TLS、webhook が落ちると何が止まるか。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./k8sctl-13-admission-policies.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 13 回</span></div>
+      <h2>ValidatingAdmissionPolicy と MutatingAdmissionPolicy</h2>
+      <p>webhook を書かずに CEL で判定する仕組み、Policy と Binding、パラメータ、Deny・Warn・Audit、CEL・VAP・webhook の選び方。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./k8sctl-14-versions-and-conversion.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 14 回</span></div>
+      <h2>バージョン管理と変換</h2>
+      <p>served と storage、storedVersions、変換なしで項目名を変えると黙ってデータが消える実測、変換 webhook と真ん中の版。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="s" href="./k8sctl-15-tools-and-tests.html">
+      <div class="top"><span class="level lv-s">Senior</span><span class="num">第 15 回</span></div>
+      <h2>道具とテスト</h2>
+      <p>kubebuilder が生成するものの地図、マーカーと controller-gen、manager と leader election、metrics と Events、テストの 3 層。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+  <section class="lvsec" data-lv="e">
+    <h2 class="lvh"><span class="level lv-e">Practice</span>実際に作る。distributed-ai の作業記録から題材を選び、設計し、本物の FSx で確かめる</h2>
+    <div class="grid">
+    <a class="card" data-lv="e" href="./k8sctl-16-choosing-the-subject.html">
+      <div class="top"><span class="level lv-e">Practice</span><span class="num">第 16 回</span></div>
+      <h2>題材選び</h2>
+      <p>Zenn 本と distributed-ai の作業記録から手作業を拾い、3 つの物差しで「既存の FSx を namespace ごとに配る」に決める。コードの前に実機で前提を確かめる。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="e" href="./k8sctl-17-design.html">
+      <div class="top"><span class="level lv-e">Practice</span><span class="num">第 17 回</span></div>
+      <h2>設計</h2>
+      <p>書き手で分けた 2 つの CR、守る約束は 1 つ、取り上げの猶予と読み直し、3 つのコントローラーの責任分担。レビューで変わった 6 点。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    <a class="card" data-lv="e" href="./k8sctl-18-build-and-verify.html">
+      <div class="top"><span class="level lv-e">Practice</span><span class="num">第 18 回</span></div>
+      <h2>実装と実機検証</h2>
+      <p>4 つの層に分けた実装、単体・envtest・実機の 3 層のテスト、FSx for Lustre と OpenZFS で 39 項目、distributed-ai への取り込み案。</p>
+      <div class="meta"><span>解説＋クイズ 6 問</span><span class="go">開く →</span></div>
+    </a>
+    </div>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+<script>
+document.querySelector('.filters').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('.filters button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.lvsec').forEach(s => s.classList.toggle('hidden', b.dataset.f !== 'all' && s.dataset.lv !== b.dataset.f));
+});
+</script>
+</body>
+</html>
