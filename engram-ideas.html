@@ -66,7 +66,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <h1>Engram の発想をどう良くするか<br>Fable 5.2 と考え、学習し直さずに確かめた</h1>
 
 <div class="lead">
-<p><b>結論から。</b>小さな GPT に入れた Engram の表は、<b>学習用の文章を覚え込み、学習用の文章に一度も出てこなかった 3-gram（直前の 3 トークンの並び）の位置で損をして、得の大半を打ち消していました</b>。そこで、学習で見なかった、または 5 回未満しか見なかった 3-gram の位置だけ、3-gram の 8 行を読まずに 0 にすると、学習し直さずに、テスト用の文章のパープレキシティ（低いほど良い）が Engram の 29.39 から 28.71 に下がりました（3 seed の平均、2.3% 低い）。8 節では、足切りを出現回数に応じてなめらかにすると 28.59（2.7% 低い）まで下がり、表の得は「見た並びの続きを思い出すこと」から来ていると確かめました。</p>
+<p><b>結論から。</b>小さな GPT に入れた Engram の表は、<b>学習用の文章を覚え込み、学習用の文章に一度も出てこなかった 3-gram（直前の 3 トークンの並び）の位置で損をして、得の大半を打ち消していました</b>。そこで、学習で見なかった、または 5 回未満しか見なかった 3-gram の位置だけ、3-gram の 8 行を読まずに 0 にすると、学習し直さずに、テスト用の文章のパープレキシティ（低いほど良い）が Engram の 29.39 から 28.71 に下がりました（3 seed の平均、2.3% 低い）。9 節では学習し直し、学習用の文章と表を 2 つに分けて互いに相手の表を読ませると、出現回数の表なしでテストが 28.66（2.5% 低い）になり、暗記がほぼ消えました。8 節では、足切りを出現回数に応じてなめらかにすると 28.59（2.7% 低い）まで下がり、表の得は「見た並びの続きを思い出すこと」から来ていると確かめました。</p>
 <p style="margin-bottom:0"><b>この文書でやったこと。</b>前の記事の実測を Fable 5.2 に渡して改善のアイデアを 4 往復で出してもらい、Opus 5.5 にその案と実験を厳しく査読させました。そのうえで、公開済みの 3 seed の学習済みモデルを CPU で動かし、学習をし直さない解析と対照実験を回しました。</p>
 </div>
 
@@ -80,6 +80,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <tr><td>6</td><td>足切りの形をもっと良くできるかを試すため</td><td>回数に応じたなめらかな重み、2-gram の足切り、頭ごとの足切りを、検証で比べてからテストで 3 seed 測った</td><td>しきい値をもっと細かく探す</td><td>なめらかな重み 28.59、2-gram の足切りを足すと 28.59（前回の足切り 28.71）。頭ごとは 28.83 で悪化</td><td>8 節</td></tr>
 <tr><td>7</td><td>害がゲート経由か、足し込む中身経由かを分けるため</td><td>3-gram の行を key だけ、value だけから消した（3 seed、検証とテスト）</td><td>ゲートの値を直接見る</td><td>value だけで 28.73、key だけで 29.35（テスト）。害は足し込む中身から来る</td><td>8 節、#6</td></tr>
 <tr><td>8</td><td>表が何を覚えているかを確かめるため</td><td>位置を、3-gram の回数と「次の語まで含めた 4-gram が学習にあったか」で分けた</td><td>3-gram の回数だけで分ける（3 節）</td><td>どの帯でも、4-gram があれば得、無ければ損（1,000 回以上の帯でも）</td><td>8 節、#2</td></tr>
+<tr><td>9</td><td>暗記を学習の段階で消せるかを試すため</td><td>学習時からの足切り 2 通りと、表を 2 つに分けて互いに相手を読ませる方法で学習し直した（表 2 つは 3 seed）</td><td>推論時の足切りだけで済ませる</td><td>学習時からの足切りは暗記が残り不合格。表を 2 つに分けると学習用の文章での得が -0.151 → -0.007、テスト 29.40 → 28.66（回数の表なし）</td><td>9 節、#7、#8</td></tr>
 </table>
 
 <h2>1. 何をしたか</h2>
@@ -204,7 +205,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 
 <p>Fable 5.2 が 1 往復目に出した 10 案と、2 往復目に足した 3 案を、今回の結果でどう見直したかを並べます。「先行研究」は Fable 5.2 の記述を Opus 5.5 が確かめたもので、確かめられなかったものはそう書いています。</p>
 
-<table><tr><th>#</th><th>アイデア</th><th>1 往復目の期待</th><th>今回の結果で</th><th>理由</th><th>先行研究</th></tr><tr><td>1</td><td>頻度と情報量で行を割り当てる</td><td>中</td><td class="y">上がる</td><td>今回の解析で、得は 10〜99 回の帯に集中し、0 回の帯で損。行の配分を変える前に、足切り（案 A）で同じ効果の大半が取れる</td><td>frequency-based double hashing（Zhang ら 2020）、CAFE（2024）、entropy pruning（Stolcke 1998）。Opus が実在と内容を確認</td></tr><tr><td>2</td><td>長いキー（4〜5-gram、skip-gram）を入れる</td><td>中</td><td class="no">下がる</td><td>長いキーほど学習に無い位置が増え、今回の損の形が強まる見込み</td><td>Goodman 2001、SNM（Shazeer ら 2015）、Infini-gram（Liu ら 2024）</td></tr><tr><td>3</td><td>ゲートを次数ごと・行ごとにする</td><td>低</td><td class="y">上がる</td><td>3-gram だけ止めて 2-gram を通すと良くなった（5 節）。ただし回数を入力に足さないと、ゲートは見たかどうかを知れない（案 B）</td><td>Hash Embeddings（Svenstrup ら 2017）</td></tr><tr><td>4</td><td>token で候補を決め、隠れ状態で選ぶ</td><td>中</td><td class="no">下がる</td><td>暗記に使える枠が増える。Opus は列の数が減る交絡を指摘</td><td>PKM（Lample 2019）、Memory Layers at Scale（Berges 2024）</td></tr><tr><td>5</td><td>同じ行を深い層で読み直す</td><td>低</td><td class="">変わらず</td><td>暗記にも足切りにも関係しない</td><td>Per-Layer Embeddings（Gemma 3n）。STEM は確認できず</td></tr><tr><td>6</td><td>似た token をまとめた番号でも引く</td><td>低</td><td class="y">上がる</td><td>まとめると 1 つの並びの出現が増え、学習に無い位置が減る。ただし N-Grammer とほぼ同じ発想</td><td>N-Grammer（Roy ら 2022）。Opus は新しさの主張は弱いと指摘</td></tr><tr><td>7</td><td>表引きを確率的に外して学習する</td><td>中（運用）</td><td class="">変わらず</td><td>全体を飛ばすと悪化した（5 節）ので、外すなら次数ごとが筋</td><td>stochastic depth（2016）、LayerDrop（2019）</td></tr><tr><td>8</td><td>浮いた深さをブロック数で回収する</td><td>中</td><td class="no">下がる</td><td>表の得の多くが暗記なら、深さは浮いていない。Opus は最も筋の良い案と評価（2×2 の比較）</td><td>論文に深さを減らす実験は見当たらない（Opus は確認できず）</td></tr><tr><td>9</td><td>key と value を分けて置く</td><td>低</td><td class="no">下がる</td><td>Opus: ゲートを見てから value を取りに行くので、先読みという Engram の利点を壊す</td><td>PKM</td></tr><tr><td>10</td><td>表だけの追加学習で別の分野に合わせる</td><td>中</td><td class="">変わらず</td><td>表が暗記しやすいことは、逆に新しい文章を覚えさせる道具になる可能性</td><td>adapter、LoRA、ROME</td></tr><tr><td>A</td><td>学習時から足切りする（出現回数 − 1 &lt; k）</td><td>—</td><td class="y">最優先</td><td>推論時だけの足切りで 2.3% 下がった。学習時から入れると 2-gram の行が足切りを前提に育つ</td><td>count cutoff、Kneser-Ney の leave-one-out（古典 n-gram）</td></tr><tr><td>B</td><td>出現回数を次数ごとのゲートに入れる</td><td>—</td><td class="y">次</td><td>ゲートと出現回数の相関は 0.28 と弱い</td><td>Jelinek-Mercer、Witten-Bell の補間</td></tr><tr><td>C</td><td>見ていない並び用の共有の行</td><td>—</td><td class="y">A と同時に</td><td>「初めての並び」という手がかりを残す</td><td>知らない（Fable）</td></tr></table>
+<table><tr><th>#</th><th>アイデア</th><th>1 往復目の期待</th><th>今回の結果で</th><th>理由</th><th>先行研究</th></tr><tr><td>1</td><td>頻度と情報量で行を割り当てる</td><td>中</td><td class="y">上がる</td><td>今回の解析で、得は 10〜99 回の帯に集中し、0 回の帯で損。行の配分を変える前に、足切り（案 A）で同じ効果の大半が取れる</td><td>frequency-based double hashing（Zhang ら 2020）、CAFE（2024）、entropy pruning（Stolcke 1998）。Opus が実在と内容を確認</td></tr><tr><td>2</td><td>長いキー（4〜5-gram、skip-gram）を入れる</td><td>中</td><td class="no">下がる</td><td>長いキーほど学習に無い位置が増え、今回の損の形が強まる見込み</td><td>Goodman 2001、SNM（Shazeer ら 2015）、Infini-gram（Liu ら 2024）</td></tr><tr><td>3</td><td>ゲートを次数ごと・行ごとにする</td><td>低</td><td class="y">上がる</td><td>3-gram だけ止めて 2-gram を通すと良くなった（5 節）。ただし回数を入力に足さないと、ゲートは見たかどうかを知れない（案 B）</td><td>Hash Embeddings（Svenstrup ら 2017）</td></tr><tr><td>4</td><td>token で候補を決め、隠れ状態で選ぶ</td><td>中</td><td class="no">下がる</td><td>暗記に使える枠が増える。Opus は列の数が減る交絡を指摘</td><td>PKM（Lample 2019）、Memory Layers at Scale（Berges 2024）</td></tr><tr><td>5</td><td>同じ行を深い層で読み直す</td><td>低</td><td class="">変わらず</td><td>暗記にも足切りにも関係しない</td><td>Per-Layer Embeddings（Gemma 3n）。STEM は確認できず</td></tr><tr><td>6</td><td>似た token をまとめた番号でも引く</td><td>低</td><td class="y">上がる</td><td>まとめると 1 つの並びの出現が増え、学習に無い位置が減る。ただし N-Grammer とほぼ同じ発想</td><td>N-Grammer（Roy ら 2022）。Opus は新しさの主張は弱いと指摘</td></tr><tr><td>7</td><td>表引きを確率的に外して学習する</td><td>中（運用）</td><td class="">変わらず</td><td>全体を飛ばすと悪化した（5 節）ので、外すなら次数ごとが筋</td><td>stochastic depth（2016）、LayerDrop（2019）</td></tr><tr><td>8</td><td>浮いた深さをブロック数で回収する</td><td>中</td><td class="no">下がる</td><td>表の得の多くが暗記なら、深さは浮いていない。Opus は最も筋の良い案と評価（2×2 の比較）</td><td>論文に深さを減らす実験は見当たらない（Opus は確認できず）</td></tr><tr><td>9</td><td>key と value を分けて置く</td><td>低</td><td class="no">下がる</td><td>Opus: ゲートを見てから value を取りに行くので、先読みという Engram の利点を壊す</td><td>PKM</td></tr><tr><td>10</td><td>表だけの追加学習で別の分野に合わせる</td><td>中</td><td class="">変わらず</td><td>表が暗記しやすいことは、逆に新しい文章を覚えさせる道具になる可能性</td><td>adapter、LoRA、ROME</td></tr><tr><td>A</td><td>学習時から足切りする（出現回数 − 1 &lt; k）</td><td>—</td><td class="no">下がる</td><td>学習し直して試した（9 節）。暗記は残り、推論時の足切りより悪い。不合格</td><td>count cutoff、Kneser-Ney の leave-one-out（古典 n-gram）</td></tr><tr><td>B</td><td>出現回数を次数ごとのゲートに入れる</td><td>—</td><td class="y">次</td><td>ゲートと出現回数の相関は 0.28 と弱い</td><td>Jelinek-Mercer、Witten-Bell の補間</td></tr><tr><td>C</td><td>見ていない並び用の共有の行</td><td>—</td><td class="y">A と同時に</td><td>「初めての並び」という手がかりを残す</td><td>知らない（Fable）</td></tr></table>
 
 <h2>8. もう一歩: 4 往復目のアイデアと、その結果</h2>
 
@@ -265,20 +266,63 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 
 <h3>4 往復目のアイデアの一覧</h3>
 
-<table><tr><th>#</th><th>アイデア</th><th>状態</th><th>結果、またはねらい</th><th>近い先行研究（Fable 5.2 の記述）</th></tr><tr><td>I-1</td><td>足切りを key と value に分ける</td><td class="y">実施</td><td>害は value 経由。value だけ消すと前回の足切りと同じ効き目、key だけでは効かない</td><td>path patching（Goldowsky-Dill ら 2023）と同じ形</td></tr><tr><td>I-2</td><td>0 ではなく平均で埋める</td><td class="y">実施</td><td>0 より少し悪い。捨てる</td><td>mean ablation</td></tr><tr><td>I-3</td><td>次の語も学習にあったかで分ける</td><td class="y">実施</td><td>どの回数の帯でも、次の語が学習にあれば得、無ければ損。表は続きを覚えている</td><td>Witten-Bell、Kneser-Ney</td></tr><tr><td>I-4</td><td>8 頭の読み出しの揃い方から、見たことのない 3-gram を当てる</td><td class="">未実施</td><td>当たれば Bloom filter が要らなくなる</td><td>Hash Embeddings（Svenstrup ら 2017）</td></tr><tr><td>I-5</td><td>足切りの効き目がどこに出るか</td><td class="y">実施</td><td>効き目の大半は切った位置そのもの。切った後も、学習に無い 3-gram の位置は Engram なしより悪い</td><td>—</td></tr><tr><td>I-6</td><td>Engram の出力を 1-gram・2-gram・3-gram の成分に分ける</td><td class="">未実施</td><td>表を外すと 59.54 になる理由を調べる解析</td><td>確かでない（Fable）</td></tr><tr><td>II-1</td><td>学習用の文章を 2 つに分け、表も 2 つにして、互いに相手の表を読む</td><td class="">未実施（学習が要る）</td><td>学習中も「見たことのない並び」が検証と同じ割合で現れる。I-3 の結果が根拠</td><td>cross-fitting（Chernozhukov ら 2018）、leaving-one-out（Ney ら 1994）</td></tr><tr><td>II-2</td><td>学習中に一部の 3-gram の行番号を無作為に差し替える</td><td class="">未実施（学習が要る）</td><td>学習中に、見たことのない並びの行を読む練習をさせる</td><td>確かでない（Fable）</td></tr><tr><td>II-3</td><td>ハッシュの係数を変えて 1 本学習する</td><td class="">未実施（学習が要る）</td><td>改善案ではなく、3 seed が係数を共有している測定の穴を埋める</td><td>—</td></tr></table>
+<table><tr><th>#</th><th>アイデア</th><th>状態</th><th>結果、またはねらい</th><th>近い先行研究（Fable 5.2 の記述）</th></tr><tr><td>I-1</td><td>足切りを key と value に分ける</td><td class="y">実施</td><td>害は value 経由。value だけ消すと前回の足切りと同じ効き目、key だけでは効かない</td><td>path patching（Goldowsky-Dill ら 2023）と同じ形</td></tr><tr><td>I-2</td><td>0 ではなく平均で埋める</td><td class="y">実施</td><td>0 より少し悪い。捨てる</td><td>mean ablation</td></tr><tr><td>I-3</td><td>次の語も学習にあったかで分ける</td><td class="y">実施</td><td>どの回数の帯でも、次の語が学習にあれば得、無ければ損。表は続きを覚えている</td><td>Witten-Bell、Kneser-Ney</td></tr><tr><td>I-4</td><td>8 頭の読み出しの揃い方から、見たことのない 3-gram を当てる</td><td class="">未実施</td><td>当たれば Bloom filter が要らなくなる</td><td>Hash Embeddings（Svenstrup ら 2017）</td></tr><tr><td>I-5</td><td>足切りの効き目がどこに出るか</td><td class="y">実施</td><td>効き目の大半は切った位置そのもの。切った後も、学習に無い 3-gram の位置は Engram なしより悪い</td><td>—</td></tr><tr><td>I-6</td><td>Engram の出力を 1-gram・2-gram・3-gram の成分に分ける</td><td class="">未実施</td><td>表を外すと 59.54 になる理由を調べる解析</td><td>確かでない（Fable）</td></tr><tr><td>II-1</td><td>学習用の文章を 2 つに分け、表も 2 つにして、互いに相手の表を読む</td><td class="y">実施</td><td>学習し直して試した（9 節）。暗記がほぼ消え、回数の表なしでテストが推論時の足切りと同じ水準</td><td>cross-fitting（Chernozhukov ら 2018）、leaving-one-out（Ney ら 1994）</td></tr><tr><td>II-2</td><td>学習中に一部の 3-gram の行番号を無作為に差し替える</td><td class="">未実施（学習が要る）</td><td>学習中に、見たことのない並びの行を読む練習をさせる</td><td>確かでない（Fable）</td></tr><tr><td>II-3</td><td>ハッシュの係数を変えて 1 本学習する</td><td class="">未実施（学習が要る）</td><td>改善案ではなく、3 seed が係数を共有している測定の穴を埋める</td><td>—</td></tr></table>
 
 
-<h2>9. まだ分からないこと</h2>
+<h2>9. 学習し直して確かめた: 表を 2 つに分けると暗記が消える</h2>
+
+<p>8 節で、推論時の工夫で取れる分はほぼ取り切ったと分かったので、学習し直す案を 3 つ試しました。学習の設定は前の記事と同じで（3,600 ステップ、1 本あたり GPU 1 枚で約 28 分）、窓の取り方も同じ乱数で同じにしています。</p>
+
+<table>
+<tr><th>案</th><th>学習のときにすること</th></tr>
+<tr><td>学習時から足切り（6 節の案 A）</td><td>3-gram の出現回数から自分の 1 回を引いた数が 5 未満の位置で、3-gram の 8 行を 0 にする。評価のときは引かずに数える</td></tr>
+<tr><td>学習時から、なめらかな足切り</td><td>同じ数え方で、3-gram の 8 行を c/(c+5) 倍にする</td></tr>
+<tr><td>表を 2 つに分ける（8 節の II-1）</td><td>学習用の文章を記事ごとに交互に A と B に分け、表も A と B の 2 つにする。A の記事の位置は B の表の値を読み、勾配は A の表に流す（B の記事はその逆）。評価のときは 2 つの表の平均を読む。表 1 つの行数は半分にして、全体の大きさを元と同じにした</td></tr>
+</table>
+
+<p>表を 2 つに分けると、どの表も、自分が学習した文章の位置では一度も読まれません。そのため学習中も、検証と同じく「表がまだ見ていない並び」を読む場面が自然に現れます。</p>
+
+<figure>
+<svg viewBox="0 0 880 298" width="100%"><defs><pattern id="hatch4" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="#fbeceb"/><line x1="0" y1="0" x2="0" y2="7" stroke="#8f2f2f" stroke-width="2.5"/></pattern></defs>
+<text x="860" y="20" font-size="12" fill="#3c5a4c" text-anchor="end" font-weight="700">Engram あり − なし の損失（左に長いほど得）</text>
+<line x1="860" x2="860" y1="30" y2="292" stroke="#12241c"/><text x="20" y="66" font-size="12.5" fill="#12241c" font-weight="400">ふつうの Engram（3 seed）</text><text x="340" y="55" font-size="11.5" fill="#3c5a4c">学習用の文章</text><rect x="511.9" y="42" width="348.1" height="18" fill="url(#hatch4)" stroke="#8f2f2f"/><text x="505.9" y="55" font-size="12" text-anchor="end" fill="#8f2f2f" font-weight="700">-0.151</text><text x="340" y="79" font-size="11.5" fill="#3c5a4c">検証用の文章</text><rect x="836.8" y="66" width="23.2" height="18" fill="#1f7a4d" stroke="#1f7a4d"/><text x="830.8" y="79" font-size="12" text-anchor="end" fill="#1f7a4d" font-weight="700">-0.010</text><text x="20" y="128" font-size="12.5" fill="#12241c" font-weight="400">学習時から足切り（seed 1337）</text><text x="340" y="117" font-size="11.5" fill="#3c5a4c">学習用の文章</text><rect x="515.7" y="104" width="344.3" height="18" fill="url(#hatch4)" stroke="#8f2f2f"/><text x="509.7" y="117" font-size="12" text-anchor="end" fill="#8f2f2f" font-weight="700">-0.150</text><text x="340" y="141" font-size="11.5" fill="#3c5a4c">検証用の文章</text><rect x="796.6" y="128" width="63.4" height="18" fill="#1f7a4d" stroke="#1f7a4d"/><text x="790.6" y="141" font-size="12" text-anchor="end" fill="#1f7a4d" font-weight="700">-0.028</text><text x="20" y="190" font-size="12.5" fill="#12241c" font-weight="400">学習時から、なめらかな足切り（seed 1337）</text><text x="340" y="179" font-size="11.5" fill="#3c5a4c">学習用の文章</text><rect x="514.7" y="166" width="345.3" height="18" fill="url(#hatch4)" stroke="#8f2f2f"/><text x="508.7" y="179" font-size="12" text-anchor="end" fill="#8f2f2f" font-weight="700">-0.150</text><text x="340" y="203" font-size="11.5" fill="#3c5a4c">検証用の文章</text><rect x="792.5" y="190" width="67.5" height="18" fill="#1f7a4d" stroke="#1f7a4d"/><text x="786.5" y="203" font-size="12" text-anchor="end" fill="#1f7a4d" font-weight="700">-0.029</text><text x="20" y="252" font-size="12.5" fill="#12241c" font-weight="700">表を 2 つに分ける（3 seed）</text><text x="340" y="241" font-size="11.5" fill="#3c5a4c">学習用の文章</text><rect x="842.8" y="228" width="17.2" height="18" fill="url(#hatch4)" stroke="#8f2f2f"/><text x="836.8" y="241" font-size="12" text-anchor="end" fill="#8f2f2f" font-weight="700">-0.007</text><text x="340" y="265" font-size="11.5" fill="#3c5a4c">検証用の文章</text><rect x="802.5" y="252" width="57.5" height="18" fill="#1f7a4d" stroke="#1f7a4d"/><text x="796.5" y="265" font-size="12" text-anchor="end" fill="#1f7a4d" font-weight="700">-0.025</text></svg>
+<figcaption>学習の終わりでの、Engram あり − なし の損失の差。学習用の文章（斜線）は最後の 200 ステップの平均、検証用の文章は学習を終えた時点の値です。ふつうの Engram と、学習時から足切りした 2 つは、学習用の文章でだけ得が大きく、暗記が残っています。表を 2 つに分けると、学習用の文章での得が検証での得より小さくなりました。</figcaption>
+</figure>
+
+<p><b>学習時から足切りしても、暗記は残りました</b>。学習用の文章での得は -0.150 で、ふつうの Engram（-0.151）とほとんど同じです。2 周目には、5 回以上出た 3-gram の続きも、2-gram の行も覚えられるからだと考えられます（推測）。成績も、ふつうの Engram に推論時の足切りを足したほうが良く、案 A は 6 節で決めた「推論時の足切りより 0.3 以上下がる」に届かず不合格です。</p>
+
+<p><b>表を 2 つに分けると、暗記がほぼ消えました</b>。学習用の文章での得は -0.151 から -0.007 に縮み、検証での得は -0.010 から -0.025 に増えました。3 seed のどれでも、検証とテストの両方でふつうの Engram より下がっています。</p>
+
+<table>
+<tr><th>モデル</th><th>推論時の足切り</th><th>検証</th><th>テスト</th></tr>
+<tr><td>（参考）Engram なし（3 seed）</td><td>—</td><td class="n">29.26</td><td class="n">29.35</td></tr>
+<tr><td>ふつうの Engram（3 seed）</td><td>なし</td><td class="n">28.97</td><td class="n">29.40</td></tr>
+<tr><td>ふつうの Engram（3 seed）</td><td>なめらかな足切り（8 節）</td><td class="n y">28.22</td><td class="n y">28.60</td></tr>
+<tr><td>学習時から足切り（seed 1337）</td><td>学習時と同じ足切り</td><td class="n">28.47</td><td class="n">28.92</td></tr>
+<tr><td>学習時から、なめらかな足切り（seed 1337）</td><td>学習時と同じ足切り</td><td class="n">28.42</td><td class="n">28.80</td></tr>
+<tr><td><b>表を 2 つに分ける（3 seed）</b></td><td>なし</td><td class="n y">28.54</td><td class="n y">28.66</td></tr>
+<tr><td>表を 2 つに分ける（3 seed）</td><td>なめらかな足切り</td><td class="n">28.53</td><td class="n">28.65</td></tr>
+<tr><td>表を 2 つに分け、行数を半分にしない（seed 1337、表の大きさは 2 倍）</td><td>なし</td><td class="n">28.29</td><td class="n">28.46</td></tr>
+</table>
+
+<p>この表の値は、どのモデルも同じ GPU で同じ精度（bfloat16）で測り直したもので、5 節と 8 節の CPU での値と 0.01 ほど違います。</p>
+
+<p>表を 2 つに分けたモデルは、推論時に出現回数の表を持たずに、テストで 28.66 になりました（ふつうの Engram より 2.5% 低い）。<b>8 節のなめらかな足切りとテストでほぼ同じで、しかも学習用の文章の情報を推論時に足していないので、Engram なしのモデルとも公平に比べられます</b>。Engram なしより 2.4% 低い値です。このモデルに推論時の足切りを足しても、ほとんど変わりません（28.65）。学習に無い並びの害を、学習の段階で取り除けたと読めます。</p>
+
+<p>一方、検証では推論時の足切り（28.22）のほうが 0.32 良く、6 節の合格の目安（推論時の足切りより両方で 0.3 以上下がる）には届いていません。表の行数を半分にしない版（seed 1337 の 1 本）は検証 28.29、テスト 28.46 で、半分にした版より少し良くなりました。ただし表の大きさが 2 倍なので、公平な比較ではありません。</p>
+
+
+<h2>10. まだ分からないこと</h2>
 
 <ul>
-<li><b>学習時から足切りしたらどうなるか。</b>今回は学習し直していません。6 節の案 A と、8 節の II-1（表を 2 つに分けて互いに相手の表を読む）が次の実験です。8 節で害が value 経由と分かったので、案 B より先に回します。</li>
+<li><b>表を 2 つに分ける方法は、どこまで伸びるか。</b>9 節の結果は 1 つの規模と 1 つの分け方（記事ごとに交互）だけです。3 つ以上に分ける、分け方を変える、表の行数を変えるといった比べ方はまだしていません。行数を半分にしない版は 1 seed だけで、表の大きさも違います。</li>
 <li><b>大きな規模でも同じか。</b>1.18 億トークンを約 2 周する小さな設定では、検証の位置の 26% の 3-gram が学習に無く、1 行を約 583 種類が共有します。1 周しかしない大規模な学習では、暗記の量も衝突の量も違います。</li>
 <li><b>ハッシュの組み合わせが変わっても同じか。</b>3 seed はハッシュの係数を共有しているので、どの 3-gram がどの行でぶつかるかは同じです。</li>
 <li><b>n-gram の統計を足すだけの方法と比べてどうか。</b>足切りは、学習用の文章の出現回数という、Engram なしのモデルが持っていない情報を使っています。Engram なしのモデルに n-gram の言語モデルを混ぜる方法との比較はしていません。</li>
 </ul>
 
 <p class="foot">
-解析のコードは <code>analyze.py</code>（損失の分け方、ゲートの固定）、<code>analyze2.py</code>（足切り）、<code>analyze3.py</code>、<code>analyze4.py</code>（対照）で、zenmai-lab の <code>experiments/2026-10-21-engram-nanogpt</code>（commit 7d12d41）の上で動かしました。モデルは Hugging Face の littlemex/engram-nanogpt-wikitext103（revision e9758158）、データは WikiText-103（Salesforce/wikitext、b08601e0）です。評価は前の記事と同じく、重ならない 512 トークンの窓ごとに前の文脈を持たずに測りました。Fable 5.2 と Opus 5.5 の回答は手元の記録に残しています。
+解析のコードは <code>analyze.py</code>（損失の分け方、ゲートの固定）、<code>analyze2.py</code>（足切り）、<code>analyze3.py</code>、<code>analyze4.py</code>（対照）で、zenmai-lab の <code>experiments/2026-10-21-engram-nanogpt</code>（commit 7d12d41）の上で動かしました。モデルは Hugging Face の littlemex/engram-nanogpt-wikitext103（revision e9758158）、データは WikiText-103（Salesforce/wikitext、b08601e0）です。評価は前の記事と同じく、重ならない 512 トークンの窓ごとに前の文脈を持たずに測りました。9 節の学習し直しのコードと結果は、zenmai-lab の <code>experiments/2026-11-17-engram-cutoff-train</code>（commit d347217）にあります。Fable 5.2 と Opus 5.5 の回答は手元の記録に残しています。
 </p>
 
 </div>
