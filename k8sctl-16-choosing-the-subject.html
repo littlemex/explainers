@@ -86,7 +86,7 @@
 <main>
   <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
   <p class="intro">第 01〜15 回で、CRD・CR・コントローラー・検証・既定値・status・finalizer・admission・バージョン・テストを一通り見た。ここからの 3 回は、実際に使う場所がある本物のカスタムコントローラーを一から作る。第 16 回は「何を作るか」を、実際の作業記録と実機の確認から決める。</p>
-  <div class="lead"><p style="margin:0"><b>結論から。</b>作るのは「既にある FSx のファイルシステムを、namespace ごとに読み取り専用か読み書きで配る」CRD とコントローラー。手作業と事故の記録が最も多く、学んだ部品をほぼ全部使い、GPU なしで本物のマウントまで確かめられるからだ。コードを書く前に手で試したところ、「読み取り専用なら ReadOnlyMany」という自然な発想が実機では通らなかった。</p></div>
+  <div class="lead"><p style="margin:0"><b>結論から。</b>作るのは「既にある FSx for Lustre のファイルシステムの中のディレクトリを、namespace ごとに読み取り専用か読み書きで配る」CRD とコントローラー。手作業と事故の記録が最も多く、学んだ部品をほぼ全部使い、GPU なしで本物のマウントまで確かめられるからだ。コードを書く前に手で試したところ、「読み取り専用なら ReadOnlyMany」という自然な発想が実機では通らず、逆に「ディレクトリだけをマウントする」ことはドライバを変えずにできると分かった。</p></div>
   <section>
     <h2>1. どこから題材を探したか</h2>
     <p>作るものは「あとで実際に使うリポジトリに取り込めて、便利なもの」でなければ意味がない。そこで、想像で題材を考えるのではなく、実際の作業の記録から「人が手で繰り返している操作」を探した。調べたのは次の 3 つだ。</p>
@@ -111,8 +111,8 @@
         <text x="725" y="120" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="600">共有ストレージの配布</text>
         <text x="725" y="142" font-size="13" text-anchor="middle" fill="#0f5132">に決定</text>
         <g stroke="#4a5d54" stroke-width="2" fill="none" marker-end="url(#a16)">
-          <path d="M222 52 L318 112"/><path d="M222 125 L318 125"/><path d="M222 198 L318 140"/>
-          <path d="M512 125 L606 125"/>
+          <path fill="none" d="M222 52 L318 112"/><path fill="none" d="M222 125 L318 125"/><path fill="none" d="M222 198 L318 140"/>
+          <path fill="none" d="M512 125 L606 125"/>
         </g>
         <text x="560" y="112" font-size="13" text-anchor="middle" fill="#4a5d54">物差し 3 つ</text>
         <defs><marker id="a16" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
@@ -164,16 +164,16 @@
           <rect x="40" y="124" width="340" height="34" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="210" y="146" text-anchor="middle">claimRef で予約する(忘れると横取り)</text>
           <rect x="40" y="166" width="340" height="34" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="210" y="188" text-anchor="middle">Released になったら 288 行で解放</text>
           <rect x="40" y="208" width="340" height="34" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="210" y="230" text-anchor="middle">やめるときは PVC と PV を手で消す</text>
-          <rect x="480" y="70" width="340" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="650" y="97" text-anchor="middle" fill="#1d4e8f">管理者: SharedFilesystem(配ってよい先)</text>
-          <rect x="480" y="150" width="340" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="650" y="177" text-anchor="middle" fill="#0f5132">利用者: SharedFilesystemClaim(使いたい)</text>
+          <rect x="480" y="70" width="340" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="650" y="97" text-anchor="middle" fill="#1d4e8f">管理者: FilesystemShare(どのパスを誰に)</text>
+          <rect x="480" y="150" width="340" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="650" y="177" text-anchor="middle" fill="#0f5132">利用者: いつもの PVC(使いたい)</text>
           <text x="650" y="232" text-anchor="middle" fill="#4a5d54">残りはコントローラーが繰り返し揃える</text>
         </g>
-        <path d="M400 140 L462 140" stroke="#4a5d54" stroke-width="2" marker-end="url(#a16b)"/>
+        <path fill="none" d="M400 140 L462 140" stroke="#4a5d54" stroke-width="2" marker-end="url(#a16b)"/>
         <defs><marker id="a16b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
-      <p class="cap">図: 左の 5 つの手作業を、右の 2 つの宣言に置き換える。どちらも「あるべき状態」が書けるので、コントローラーの形をしている。</p>
+      <p class="cap">図: 左の 5 つの手作業を、右の 2 つの宣言に置き換える。どちらも「あるべき状態」が書けるので、コントローラーの形をしている。利用者の側は、新しい種類の CR ではなく普段どおりの PVC で済む形にした(第 17 回)。</p>
     </div>
-    <p>この題材は第 01〜15 回の部品をほぼ全部使う。PV はクラスタ全体のオブジェクトで、namespace に属する Claim からは ownerReference(親子関係)を張れない(第 10 回)ので finalizer で後片付けする。PVC は同じ namespace なので親子関係を張れる。許可の判定は namespace のラベルや管理者の設定という「他のオブジェクト」に依存するので、webhook でなく reconcile で行うべきかを考える必要がある(第 12 回)。そして本物の FSx を CPU ノードにマウントすれば、GPU なしで本当の動作を確かめられる。</p>
+    <p>この題材は第 01〜15 回の部品をほぼ全部使う。管理者の設定はクラスタ全体の CR にし、そこから StorageClass(PVC の申し込み先の種類)を作って ownerReference(親子関係、第 10 回)でつなぐ。PV もクラスタ全体のオブジェクトなので、使っている PV が残っている間は finalizer で設定の削除を待たせる。許可の判定は namespace のラベルという「他のオブジェクト」に依存するので、webhook でなく reconcile で行うべきかを考える必要がある(第 12 回)。そして本物の FSx を CPU ノードにマウントすれば、GPU なしで本当の動作を確かめられる。</p>
   </section>
   <section>
     <h2>4. karpenter-tenant-pools はどうしたか</h2>
@@ -189,8 +189,8 @@
         <rect x="500" y="120" width="300" height="56" rx="10" fill="#e7f6ee" stroke="#198754" stroke-width="2"/>
         <text x="650" y="144" font-size="14" text-anchor="middle" fill="#0f5132">この連載で作る CRD</text>
         <text x="650" y="164" font-size="13" text-anchor="middle" fill="#0f5132">共有ストレージを配る</text>
-        <path d="M210 116 L390 74" stroke="#1d4e8f" stroke-width="2" marker-end="url(#a16c)"/>
-        <path d="M650 116 L470 74" stroke="#198754" stroke-width="2" marker-end="url(#a16c)"/>
+        <path fill="none" d="M210 116 L390 74" stroke="#1d4e8f" stroke-width="2" marker-end="url(#a16c)"/>
+        <path fill="none" d="M650 116 L470 74" stroke="#198754" stroke-width="2" marker-end="url(#a16c)"/>
         <defs><marker id="a16c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
       <p class="cap">図: 計算資源と記憶装置を、それぞれ別のコントローラーが namespace 単位で配る。</p>
@@ -204,10 +204,13 @@
       <tr><td>読み取り専用の PV を accessModes の <code>ReadOnlyMany</code> で作る</td><td class="no">両ドライバともマウント失敗(<code>Volume capability not supported</code>)</td><td>読み取り専用は <code>ReadWriteMany</code> + マウントオプション <code>ro</code> で強制する</td></tr>
       <tr><td><code>ro</code> 付きの PV と付いていない PV を同じノードで同時にマウント</td><td class="y">ro 側の書き込みは <code>Read-only file system</code> で失敗、rw 側は書ける</td><td>1 つのファイルシステムを namespace ごとに rw と ro で配れる</td></tr>
       <tr><td>予約済みの PV を、別 namespace の PVC が名前で指名</td><td class="y">Pending のまま(<code>already bound to a different claim</code>)</td><td>claimRef の予約だけで横取りを防げる</td></tr>
-      <tr><td>PVC を消して同じ名前で作り直す</td><td class="no">PV は <code>Released</code>、新しい PVC は Pending</td><td>コントローラーが自動で直す必要がある</td></tr>
-      <tr><td>PV の <code>claimRef.uid</code> と <code>claimRef.resourceVersion</code> だけを消す</td><td class="y">5 秒以内に新しい PVC と結び付いた</td><td>予約(namespace と名前)は残したまま直せる</td></tr>
+      <tr><td>PVC を消して同じ名前で作り直す</td><td class="no">PV は <code>Released</code>、新しい PVC は Pending</td><td>PV を使い回さず、PVC 1 つごとに新しい PV を作る(第 17 回)</td></tr>
+      <tr><td>PV の <code>claimRef.uid</code> と <code>claimRef.resourceVersion</code> だけを消す</td><td class="y">5 秒以内に新しい PVC と結び付いた</td><td>手で直すなら予約(namespace と名前)は残したまま直せる</td></tr>
+      <tr><td>FSx for Lustre の PV の <code>mountname</code> を <code>&lt;元の値&gt;/&lt;ディレクトリ&gt;</code> にする</td><td class="y">そのディレクトリだけがマウントされ、中身がマウントの根に見える</td><td>ドライバを変えずに、ディレクトリ単位で配れる</td></tr>
+      <tr><td>無いディレクトリ、または symlink(別の場所を指す名前)を、最後や途中に含むパスを指定する</td><td class="y">どれもマウントが失敗する。symlink は辿られない</td><td>パスの安全はファイルシステム側が守る。ディレクトリは先に作る必要がある</td></tr>
+      <tr><td>FSx for OpenZFS で根以外のパスを指定する</td><td class="no">ドライバが拒否する</td><td>ディレクトリ単位で配れるのは Lustre だけ</td></tr>
     </table>
-    <p>最初の行は、想定が外れた例だ。「読み取り専用なら <code>ReadOnlyMany</code>」と考えたくなるが、accessModes はもともと PV と PVC を結ぶときの条件で、書き込みを止める仕組みではない。<a href="https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes" target="_blank" rel="noopener">公式ドキュメント</a>にも「access modes do not enforce write protection(ReadOnlyMany でも、ドライバが強制しなければ書けてしまう)」とある。しかもドライバのソースコード(<a href="https://github.com/kubernetes-sigs/aws-fsx-csi-driver/blob/5ede23e587cddcb7aeef1fea9e265065d910eb25/pkg/driver/controller.go" target="_blank" rel="noopener">aws-fsx-csi-driver の controller.go</a>)を読むと、受け付ける方式は 2 つだけだった。最後の行の修復方法も大事だ。<code>05-release-pv.sh</code> は claimRef を丸ごと外して PV を <code>Available</code>(誰でも使える状態)に戻す(<a href="https://github.com/littlemex/distributed-ai/blob/e092c3f54e2ebcee665389cbdfc17348f612c2d3/infra/eks/scripts/05-release-pv.sh#L252-L256" target="_blank" rel="noopener">252〜256 行</a>)。元の PV を次に使う namespace へ渡し直すという、このスクリプトの用途ではそれで正しい。しかし namespace ごとに予約した PV を配る用途では、予約が消えた瞬間に、どの namespace からでも名前で取れる状態ができてしまう。消すのを UID と resourceVersion だけにすれば、その穴は開かない。この 5 秒という結び付きの速さは、PV と PVC が両方揃った状態から直したときのもので、第 18 回で測る「Claim を作ってから使えるまでの時間」とは別の数字だ。</p>
+    <p>最初の行は、想定が外れた例だ。「読み取り専用なら <code>ReadOnlyMany</code>」と考えたくなるが、accessModes はもともと PV と PVC を結ぶときの条件で、書き込みを止める仕組みではない。<a href="https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes" target="_blank" rel="noopener">公式ドキュメント</a>にも「access modes do not enforce write protection(ReadOnlyMany でも、ドライバが強制しなければ書けてしまう)」とある。しかもドライバのソースコード(<a href="https://github.com/kubernetes-sigs/aws-fsx-csi-driver/blob/5ede23e587cddcb7aeef1fea9e265065d910eb25/pkg/driver/controller.go" target="_blank" rel="noopener">aws-fsx-csi-driver の controller.go</a>)を読むと、受け付ける方式は 2 つだけだった。最後の行の修復方法も大事だ。<code>05-release-pv.sh</code> は claimRef を丸ごと外して PV を <code>Available</code>(誰でも使える状態)に戻す(<a href="https://github.com/littlemex/distributed-ai/blob/e092c3f54e2ebcee665389cbdfc17348f612c2d3/infra/eks/scripts/05-release-pv.sh#L252-L256" target="_blank" rel="noopener">252〜256 行</a>)。元の PV を次に使う namespace へ渡し直すという、このスクリプトの用途ではそれで正しい。しかし namespace ごとに予約した PV を配る用途では、予約が消えた瞬間に、どの namespace からでも名前で取れる状態ができてしまう。消すのを UID と resourceVersion だけにすれば、その穴は開かない。コントローラーでは、この直し方そのものを使わずに済む形を選んだ。PV を直して使い回すのをやめ、PVC 1 つごとに新しい PV を作り、PVC が消えたら PV も消す(第 17 回)。そうすれば Released の PV を直す場面が最初から生まれない。</p>
     <div class="fig">
       <svg viewBox="0 0 860 220" role="img" aria-label="claimRef を丸ごと外すと誰でも取れる窓が開くが、uid だけ消せば予約が残る">
         <text x="20" y="28" font-size="14" fill="#c0492f" font-weight="600">claimRef を丸ごと外す</text>
@@ -218,15 +221,15 @@
         <rect x="20" y="140" width="190" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="115" y="165" font-size="13" text-anchor="middle">Released</text>
         <rect x="260" y="140" width="300" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="410" y="165" font-size="13" text-anchor="middle">予約は namespace と名前のまま</text>
         <rect x="610" y="140" width="230" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="725" y="165" font-size="13" text-anchor="middle">予約どおりの PVC だけ</text>
-        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a16d)"><path d="M212 60 L256 60"/><path d="M562 60 L606 60"/><path d="M212 160 L256 160"/><path d="M562 160 L606 160"/></g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a16d)"><path fill="none" d="M212 60 L256 60"/><path fill="none" d="M562 60 L606 60"/><path fill="none" d="M212 160 L256 160"/><path fill="none" d="M562 160 L606 160"/></g>
         <defs><marker id="a16d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
-      <p class="cap">図: 同じ「Released を直す」でも、外す範囲で安全さが変わる。上は予約の無い窓が開き、下は開かない。</p>
+      <p class="cap">図: 手で「Released を直す」とき、外す範囲で安全さが変わる。上は予約の無い窓が開き、下は開かない。</p>
     </div>
   </section>
   <section>
     <h2>まとめと次の回</h2>
-    <p>題材は、作業記録の中で最も手作業と事故が多く、学んだ部品をほぼ全部使い、GPU なしで本物の動作を証明できる「既存の共有ファイルシステムを namespace ごとに配る」に決めた。作りかけの GPU プールのオペレーターは、残りが運用の機能だったので役割分担の相手にした。そしてコードを書く前に、読み取り専用の実現方法と Released の直し方を実機で確かめ、1 つは想定が外れていたことが分かった。第 17 回では、この事実を土台に API とコントローラーの責任の分け方を設計する。</p>
+    <p>題材は、作業記録の中で最も手作業と事故が多く、学んだ部品をほぼ全部使い、GPU なしで本物の動作を証明できる「既存の共有ファイルシステムを namespace ごとに配る」に決めた。作りかけの GPU プールのオペレーターは、残りが運用の機能だったので役割分担の相手にした。そしてコードを書く前に、読み取り専用の実現方法、Released の直し方、ディレクトリだけのマウントを実機で確かめ、1 つは想定が外れ、1 つは思ったより簡単だと分かった。第 17 回では、この事実を土台に API とコントローラーの責任の分け方を設計する。</p>
     <div class="fig">
       <svg viewBox="0 0 860 120" role="img" aria-label="調査、比較、実測、設計の順に進む">
         <g font-size="14" text-anchor="middle">
@@ -235,7 +238,7 @@
           <rect x="460" y="40" width="170" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="545" y="67">実測(第 16 回)</text>
           <rect x="680" y="40" width="160" height="44" rx="8" fill="#fff" stroke="#4a5d54"/><text x="760" y="67">設計(第 17 回)</text>
         </g>
-        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a16e)"><path d="M192 62 L236 62"/><path d="M412 62 L456 62"/><path d="M632 62 L676 62"/></g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a16e)"><path fill="none" d="M192 62 L236 62"/><path fill="none" d="M412 62 L456 62"/><path fill="none" d="M632 62 L676 62"/></g>
         <defs><marker id="a16e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
       <p class="cap">図: 設計より先に実測を置いたのは、API の形が実測の結果に依存するから。</p>

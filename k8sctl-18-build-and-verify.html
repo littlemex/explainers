@@ -81,172 +81,184 @@
 <header>
   <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 18 回</p>
   <h1>第 18 回 実装と実機検証</h1>
-  <p>4 つの層に分けた実装、3 層のテスト、本物の FSx で 39 項目</p>
+  <p>層に分けた実装、特権を絞ったディレクトリ作成、テストの層、本物の FSx for Lustre で 49 項目</p>
 </header>
 <main>
   <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
-  <p class="intro">最終回。第 17 回の設計を Go(kubebuilder v4.15、controller-runtime v0.24)で実装し、単体テスト、envtest、本物のクラスタという 3 層で確かめた。EKS 1.35 のテスト用クラスタで、FSx for Lustre と FSx for OpenZFS の本物のファイルシステムを CPU ノードにマウントし、39 項目の検証を両方で通した。</p>
-  <div class="lead"><p style="margin:0"><b>結論から。</b>コードは約 1,700 行(空行を除き、テストを含まない)で、検証は Lustre と OpenZFS の両方で 39 項目中 39 項目が通り、その間コントローラーのエラーは 0 件だった。読み書きの Pod と読み取り専用の Pod を同じノードに置き、片方が書いた値をもう片方が読めて、読み取り専用の側は書き込みが拒否されることを、本物のマウントで確かめた。envtest と実機は、それぞれ別の欠陥を見つけた。</p></div>
+  <p class="intro">最終回。第 17 回の設計を Go(kubebuilder v4.15、controller-runtime v0.24)で実装し、単体テスト、envtest、本物のクラスタという 3 層で確かめた。ディレクトリを作る Pod は、本番と同じ権限に絞ったコンテナでも別に試した。EKS 1.35 のテスト用クラスタで、FSx for Lustre の本物のファイルシステムを CPU ノードにマウントし、49 項目の検証を通した。</p>
+  <div class="lead"><p style="margin:0"><b>結論から。</b>コードは約 3,000 行(空行を除き、テストを含まない)で、実機の検証は 49 項目中 49 項目が通った。チームのディレクトリが決めた持ち主と権限で作られ、各 Pod には自分のディレクトリしか見えず、読み取り専用の側は書けず、許可を外すと猶予の後に取り上げられることを、本物のマウントで確かめた。ディレクトリを作る Pod の最初の作り方は、本番と同じ権限では必ず失敗するものだった。</p></div>
   <section>
     <h2>1. コードの地図</h2>
-    <p>kubebuilder が作った骨組み(第 15 回)に 4 つの層を置き、<code>cmd/main.go</code> がそれらを組み立てて起動する。下の層は上の層を知らない。一番下の <code>api</code> は型と名前だけ、<code>driver</code> はドライバごとの事実だけ、<code>volume</code> は「この Claim ならこういう PV と PVC になる」を計算するだけで、API サーバーと一切話さない。API サーバーと話すのは <code>controller</code> だけだ。こうすると、間違えると危ない計算(名前、予約、読み取り専用の付け方、Released の判定)を、クラスタ無しの単体テストで全部確かめられる。</p>
+    <p>kubebuilder が作った骨組み(第 15 回)に層を置き、<code>cmd/main.go</code> がそれらを組み立てて起動する。下の層は上の層を知らない。<code>api</code> は型と名前だけ、<code>driver</code> はドライバごとの事実だけ、<code>sharepath</code> はパスの規則だけ、<code>volume</code> は「この PVC ならこういう PV になる」を計算するだけで、どれも API サーバーと話さない。<code>prepare</code> はファイルシステムの上でディレクトリを 1 つ作るだけで、これも API サーバーを知らない。API サーバーと話すのは <code>controller</code> だけだ。間違えると危ない計算(パスの検査、PV の形、読み取り専用の付け方)を、クラスタ無しの単体テストで確かめられる。</p>
     <table>
-      <tr><th>ファイル</th><th>行数</th><th>中身</th></tr>
-      <tr><td><code>api/v1alpha1/sharedfilesystem_types.go</code></td><td class="n">134</td><td>SharedFilesystem の型。kubebuilder マーカーで CEL(変更不可、空のセレクタ禁止)、既定値、表示列を書く</td></tr>
-      <tr><td><code>api/v1alpha1/sharedfilesystemclaim_types.go</code></td><td class="n">90</td><td>Claim の型。spec 全体を <code>self == oldSelf</code> で変更不可にする</td></tr>
-      <tr><td><code>api/v1alpha1/conditions.go</code></td><td class="n">80</td><td>condition と reason の名前、ラベルと finalizer の名前(利用者が目にする約束)</td></tr>
-      <tr><td><code>internal/driver/driver.go</code></td><td class="n">81</td><td>対応ドライバ 2 つの表。各行にソースの確認先を書く</td></tr>
-      <tr><td><code>internal/volume/source.go</code>, <code>volume.go</code></td><td class="n">237</td><td>元の PV の読み取りと検査、生成する PV と PVC の形、所有の判定、Released の判定</td></tr>
-      <tr><td><code>internal/controller/sharedfilesystemclaim_controller.go</code></td><td class="n">655</td><td>許可の判定、作成、修復、取り上げ、片付け</td></tr>
-      <tr><td><code>internal/controller/sharedfilesystem_controller.go</code></td><td class="n">201</td><td>元の PV の表示と削除の見張り</td></tr>
-      <tr><td><code>internal/controller/orphan_controller.go</code>, <code>common.go</code></td><td class="n">211</td><td>孤児の回収と、3 つの経路(削除、取り上げ、孤児の回収)が共有する解放処理 <code>releaseVolumes</code>、索引</td></tr>
+      <tr><th>層</th><th>行数</th><th>中身</th></tr>
+      <tr><td><code>api/v1alpha1</code></td><td class="n">400</td><td>FilesystemShare と FilesystemShareDirectory の型。kubebuilder マーカーで CEL(パスの形、変更不可、空のセレクタ禁止)、既定値、表示列。condition と reason、注釈とラベルの名前</td></tr>
+      <tr><td><code>internal/sharepath</code></td><td class="n">160</td><td>パスの規則、<code>{namespace}</code> の置き換え、2 つのパスが重なりうるかの判定。CEL と同じ例の一覧を両方に流す</td></tr>
+      <tr><td><code>internal/driver</code></td><td class="n">96</td><td>対応ドライバ 2 つの表。ディレクトリを mountname に足せるのは Lustre だけ</td></tr>
+      <tr><td><code>internal/volume</code></td><td class="n">314</td><td>元の PV の読み取りと検査、係として作る PV、下準備用の PV と PVC の形</td></tr>
+      <tr><td><code>internal/prepare</code></td><td class="n">242</td><td>ディレクトリを 1 つ、途中の姿を見せずに作る(第 2 節)</td></tr>
+      <tr><td><code>internal/controller</code></td><td class="n">1,411</td><td>Share、係(Provisioner)、Directory、Reclaim の 4 つのコントローラーと共通部分</td></tr>
+      <tr><td><code>cmd</code></td><td class="n">336</td><td>起動、フラグ、下準備の Pod の入口(<code>prepare-directory</code>)</td></tr>
     </table>
-    <p>行数は空行を除いたもので、テストは含まない。型の定義で必要な書き方は、マーカー数行で済む。たとえば Claim の spec を丸ごと変更不可にし、アクセスの既定値を読み取り専用にするのは次の 2 行だ。controller-gen(第 05 回)が、これを CRD の YAML の <code>x-kubernetes-validations</code> と <code>default</code> に変換する。</p>
-    <pre><code>// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable; delete and recreate the claim"
-// +kubebuilder:default=ReadOnly</code></pre>
+    <p>パスの規則は 2 か所にある。API サーバーが受け付けるときの CEL と、コントローラーと下準備の Pod が使う Go の関数だ。CEL から Go の関数は呼べないので、同じ規則を 2 回書くことになる。そこで「通るべきパス」と「断るべきパス」の例の一覧を 1 つ作り、Go の関数と、envtest の本物の API サーバーの両方に流して、答えが一致することを確かめている。CEL のほうは、最初に書いた式が API サーバーの計算量の上限(第 06 回)を超えて CRD ごと登録を断られたので、パス全体に 1 回だけ正規表現を当てる形に書き直した。</p>
+    <pre><code>// +kubebuilder:validation:XValidation:rule="!has(self.spec.provision) || self.spec.path != '/'",message="provision needs a path below the root: the root exists already"</code></pre>
     <div class="fig">
-      <svg viewBox="0 0 860 200" role="img" aria-label="api、driver、volume、controller、cmd の層と依存の向き">
-        <g font-size="14" text-anchor="middle">
-          <rect x="20" y="70" width="140" height="56" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="90" y="96">api</text><text x="90" y="114" font-size="12" fill="#4a5d54">型と名前</text>
-          <rect x="190" y="70" width="140" height="56" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="260" y="96">driver</text><text x="260" y="114" font-size="12" fill="#4a5d54">ドライバの事実</text>
-          <rect x="360" y="70" width="140" height="56" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="430" y="96">volume</text><text x="430" y="114" font-size="12" fill="#4a5d54">形の計算</text>
-          <rect x="530" y="70" width="150" height="56" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="605" y="96">controller</text><text x="605" y="114" font-size="12" fill="#4a5d54">API サーバーと話す</text>
-          <rect x="710" y="70" width="130" height="56" rx="8" fill="#fff" stroke="#4a5d54"/><text x="775" y="96">cmd/main</text><text x="775" y="114" font-size="12" fill="#4a5d54">組み立て</text>
-        </g>
-        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a18)"><path d="M188 98 L164 98"/><path d="M358 98 L334 98"/><path d="M528 98 L504 98"/><path d="M708 98 L684 98"/></g>
-        <text x="260" y="170" font-size="13" text-anchor="middle" fill="#198754">ここまでは単体テストで全部確かめられる</text>
-        <path d="M20 150 L500 150" stroke="#198754" stroke-width="2"/>
-        <text x="430" y="40" font-size="13" text-anchor="middle" fill="#4a5d54">矢印は「使う」の向き(右が左を使う)</text>
-        <defs><marker id="a18" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
-      </svg>
-      <p class="cap">図: 危ない計算を、API サーバーと話さない層に閉じ込めた。</p>
-    </div>
-  </section>
-  <section>
-    <h2>2. Claim の reconcile 1 回で起きること</h2>
-    <p>Claim のコントローラーの <code>Reconcile</code> は、第 09 回で見たとおり「Claim の名前」だけを受け取り、今の状態を読み直して判断する。流れは次の図の通りで、どの分かれ道を通っても最後に必ず <code>Bound</code> を「今ある PVC と PV の事実」から作り直し、status を差分だけ送る。最初の実装では、取り上げた後にも、削除を待っている間にも、古い <code>Bound=True</code> が残っていた。削除中の経路も含めて全部の経路で事実から作り直すことで、古い値が残る余地を無くした。</p>
-    <div class="fig">
-      <svg viewBox="0 0 860 400" role="img" aria-label="Claim の reconcile の流れ">
+      <svg viewBox="0 0 860 200" role="img" aria-label="api、sharepath、driver、volume、prepare、controller、cmd の層と依存の向き">
         <g font-size="13" text-anchor="middle">
-          <rect x="330" y="10" width="200" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="430" y="33">Claim を読む</text>
-          <rect x="330" y="66" width="200" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="430" y="89">削除中?</text>
-          <rect x="590" y="66" width="260" height="36" rx="6" fill="#fdf3e2" stroke="#8a5a12"/><text x="720" y="89" font-size="12">PVC、PV の順に解放し finalizer を外す</text>
-          <rect x="330" y="122" width="200" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="430" y="145">許可を判定(admit)</text>
-          <rect x="60" y="192" width="300" height="36" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="210" y="215" font-size="12">許可あり: 名前を確認、PV を SSA、PVC を作る</text>
-          <rect x="60" y="244" width="300" height="36" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="210" y="267">PV が Released なら uid を消す</text>
-          <rect x="500" y="192" width="320" height="36" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="660" y="215">許可が無い: 猶予を待ち、読み直して解放</text>
-          <rect x="500" y="244" width="320" height="36" rx="6" fill="#fff" stroke="#4a5d54"/><text x="660" y="267">一時的な理由: 何も消さない</text>
-          <rect x="230" y="318" width="400" height="36" rx="6" fill="#e6eef8" stroke="#1d4e8f"/><text x="430" y="341">Bound を事実から作り、Ready を導き、status を差分で送る</text>
+          <rect x="20" y="20" width="820" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="430" y="45">cmd(組み立てと起動)</text>
+          <rect x="20" y="80" width="560" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="300" y="105">controller(API サーバーと話すのはここだけ)</text>
+          <rect x="600" y="80" width="240" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="720" y="105">prepare(ファイルだけ)</text>
+          <rect x="20" y="140" width="180" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="110" y="165">volume</text>
+          <rect x="220" y="140" width="180" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="310" y="165">sharepath</text>
+          <rect x="420" y="140" width="180" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="510" y="165">driver</text>
+          <rect x="620" y="140" width="220" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="730" y="165">api</text>
         </g>
-        <g stroke="#4a5d54" stroke-width="2" fill="none" marker-end="url(#a18b)">
-          <path d="M430 48 L430 62"/><path d="M532 84 L586 84"/><path d="M430 104 L430 118"/>
-          <path d="M380 160 L240 188"/><path d="M480 160 L640 188"/><path d="M210 230 L210 240"/>
-          <path d="M210 282 L360 314"/><path d="M660 282 L520 314"/>
-        </g>
-        <text x="558" y="76" font-size="12" fill="#4a5d54" text-anchor="middle">はい</text>
-        <defs><marker id="a18b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+        <g stroke="#4a5d54" stroke-width="2" fill="none" marker-end="url(#a18l)"><path fill="none" d="M300 62 L300 76"/><path fill="none" d="M720 62 L720 76"/></g>
+        <defs><marker id="a18l" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
-      <p class="cap">図: 行き先は 4 つ(削除中、許可あり、許可が無い、それ以外の理由)。削除中は解放の後に、残りは最後の箱で、Bound を事実から作り直す。</p>
+      <p class="cap">図: cmd が controller と prepare を組み立て、その 2 つが下の段の部品を使う。下の段はどれも API サーバーと話さない。危ない計算をそこに閉じ込めた。</p>
     </div>
-    <p>PVC を作るときは、キャッシュ(第 09 回)の古さにも気を付ける。作った直後の reconcile では、キャッシュがまだ新しい PVC を知らず「無い」と答えることがある。そこで作成が <code>AlreadyExists</code>(もうある)で失敗したら、キャッシュではなく API サーバーから直接読み直して、それが自分の PVC かを確かめる。消す判断(Released の修復、取り上げ、孤児の回収)の直前も、同じく直接読む。元に戻せない操作は、古いかもしれない情報では行わない、という一つの方針だ。</p>
   </section>
   <section>
-    <h2>3. テストの 3 層と、それぞれが見つけたもの</h2>
-    <p>第 15 回の 3 層をそのまま使った。層ごとに「見えるもの」が違うので、見つかる欠陥も違った。</p>
+    <h2>2. ディレクトリを作る Pod</h2>
+    <p>share に <code>provision</code> があると、チームのディレクトリは初めて使うときに作る。ここには 3 つの難しさがある。1 つめは権限だ。他人の持ち物のディレクトリを作るには root が要るが、root の Pod はできるだけ何もできないようにしたい。2 つめは途中で止まったときだ。作りかけのディレクトリ(持ち主や権限がまだ決まっていない)が本当の名前で見えると、そこを誰かに使われうる。3 つめは、既にあるものを壊さないことだ。</p>
+    <p>権限は、root(UID 0)のまま <code>CAP_CHOWN</code>(持ち主を変える権限)だけを残し、他の特権をすべて外した。普通のユーザーに特権を 1 つ足す方法は使えない。Kubernetes はプログラムを起動するときに足した特権を引き継がせる設定(ambient capability)をしないので、起動した瞬間に失われるからだ。Pod はサービスアカウントのトークンを持たず、読み取り専用のルートファイルシステムで動き、マウントするのは作るディレクトリの<b>親</b>だけだ。この形は Pod Security の <code>baseline</code>(最低限の安全基準)に収まるので、コントローラーの namespace をその水準にした。</p>
+    <p>手順は次のとおりで、すべてファイル記述子(開いたファイルを指す番号)を通して行うので、途中で名前を差し替えられても別のものを触らない。親の持ち主が root で、グループや他人が書けないことを最初に確かめる。そうでない親は断る(<code>InsecureParent</code>)。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 230" role="img" aria-label="仮の名前で作り、root に渡し、権限、持ち主、確認、名前の付け替えの順に進む">
+        <g font-size="13" text-anchor="middle">
+          <rect x="10" y="40" width="130" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="75" y="62">仮の名前で</text><text x="75" y="80">0700 で作る</text>
+          <rect x="155" y="40" width="130" height="50" rx="8" fill="#fff" stroke="#4a5d54"/><text x="220" y="62">持ち主を</text><text x="220" y="80">root:root に</text>
+          <rect x="300" y="40" width="130" height="50" rx="8" fill="#fff" stroke="#4a5d54"/><text x="365" y="62">権限を設定</text><text x="365" y="80">(2770 など)</text>
+          <rect x="445" y="40" width="130" height="50" rx="8" fill="#fff" stroke="#4a5d54"/><text x="510" y="62">持ち主を</text><text x="510" y="80">uid:gid に</text>
+          <rect x="590" y="40" width="110" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="645" y="70">確かめる</text>
+          <rect x="715" y="40" width="135" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="782" y="62">本当の名前に</text><text x="782" y="80">付け替える</text>
+          <text x="75" y="120" fill="#4a5d54">止まっても残るのは</text><text x="75" y="138" fill="#4a5d54">空の仮ディレクトリ</text>
+          <text x="220" y="120" fill="#4a5d54">setgid を</text><text x="220" y="138" fill="#4a5d54">落とさない</text>
+          <text x="440" y="120" fill="#4a5d54">権限が先: root の物なら</text><text x="440" y="138" fill="#4a5d54">特権無しで変えられる</text>
+          <text x="782" y="120" fill="#4a5d54">既にあれば</text><text x="782" y="138" fill="#4a5d54">上書きしない</text>
+          <rect x="10" y="168" width="840" height="40" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="430" y="193">本当の名前で見えるのは、持ち主と権限が決まった後だけ</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a18p)"><path fill="none" d="M141 65 L151 65"/><path fill="none" d="M286 65 L296 65"/><path fill="none" d="M431 65 L441 65"/><path fill="none" d="M576 65 L586 65"/><path fill="none" d="M701 65 L711 65"/></g>
+        <defs><marker id="a18p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 仮の名前は本当の名前から決まる(<code>.sharedfs-tmp-</code> + 名前のハッシュ)。点で始まる名前は share のパスに使えないので、仮のディレクトリが PV で配られることは無い。</p>
+    </div>
+    <p>最初の作り方は、権限 0000(誰も読めない)でディレクトリを作り、それを「作りかけの印」にするものだった。ところが本番と同じ権限(root で <code>CAP_CHOWN</code> だけ)のコンテナで試すと、自分で作った 0000 のディレクトリを開けなかった。root でも、権限の検査を飛ばす特権(<code>CAP_DAC_OVERRIDE</code>)を外すと、普通のユーザーと同じく権限に従うからだ。結果は毎回 <code>PermissionDenied</code> だった。作り方を図の形に変えると、同じコンテナで試験が全部通った。もう 1 つ、親が setgid(中に作ったものが親のグループを受け継ぐ印)で、そのグループが root のものでない場合、権限に setgid を付けようとしても黙って落とされることが同じコンテナで分かった(2770 のつもりが 0770)。先に持ち主を root:root に渡す手順を足すと 2770 になった。どちらも、直す前に失敗し、直した後に通ることを確かめている。</p>
+    <p>終わった Pod の結果は、終了コードではなく、Pod が書く結果の JSON(終了メッセージ)で読む。中身は決められた結果の名前のどれかでなければ信じない。失敗したら、30 秒から始めて倍々に、最大 1 時間まで間を空けてやり直す。親ディレクトリが無いと Pod はマウントで止まったままになるので、3 分の時間切れを付け、どこで止まったか(スケジュールされない、イメージが取れない、マウントできない)を理由に書く。</p>
+  </section>
+  <section>
+    <h2>3. 係の reconcile 1 回で起きること</h2>
+    <p>係のコントローラーの <code>Reconcile</code> は、第 09 回で見たとおり「PVC の名前」だけを受け取り、今の状態を読み直して判断する。PVC に PV の名前が既に入っていれば、取り上げの判定(第 17 回の第 4 節)に進む。まだ入っていなければ、自分宛ての印が付いた PVC についてだけ、次の順に確かめる。どこかで止まったら PV は作らず、Event で理由を伝えて 30 分後にもう一度見る。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 330" role="img" aria-label="係の reconcile の流れ">
+        <g font-size="13">
+          <rect x="20" y="20" width="300" height="34" rx="6" fill="#fff" stroke="#4a5d54"/><text x="34" y="42">StorageClass は share のものか</text>
+          <rect x="20" y="66" width="300" height="34" rx="6" fill="#fff" stroke="#4a5d54"/><text x="34" y="88">応えられる注文か</text>
+          <rect x="20" y="112" width="300" height="34" rx="6" fill="#fff" stroke="#4a5d54"/><text x="34" y="134">share は Ready か</text>
+          <rect x="20" y="158" width="300" height="34" rx="6" fill="#fff" stroke="#4a5d54"/><text x="34" y="180">許可の 1 つがこの namespace を選ぶか</text>
+          <rect x="20" y="204" width="300" height="34" rx="6" fill="#fff" stroke="#4a5d54"/><text x="34" y="226">ディレクトリの記録と UID は合うか</text>
+          <rect x="20" y="250" width="300" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="34" y="272">PV を作る(Provisioned)</text>
+          <g fill="#c0492f">
+            <text x="380" y="42">UnsupportedClaim</text>
+            <text x="380" y="88">UnsupportedClaim(selector、Block など)</text>
+            <text x="380" y="134">ShareNotReady(理由の名前だけ)</text>
+            <text x="380" y="180">NotGranted</text>
+            <text x="380" y="226">NamespaceRecreated / DirectoryNotReady</text>
+          </g>
+          <text x="380" y="272" fill="#4a5d54">PV コントローラーが結ぶ</text>
+          <text x="380" y="312" fill="#4a5d54">赤は PV を作らず Event で伝える行き先</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a18f)"><path fill="none" d="M170 56 L170 62"/><path fill="none" d="M170 102 L170 108"/><path fill="none" d="M170 148 L170 154"/><path fill="none" d="M170 194 L170 200"/><path fill="none" d="M170 240 L170 246"/></g>
+        <g stroke="#c0492f" stroke-width="1.5" stroke-dasharray="4 3"><path fill="none" d="M322 37 L372 37"/><path fill="none" d="M322 83 L372 83"/><path fill="none" d="M322 129 L372 129"/><path fill="none" d="M322 175 L372 175"/><path fill="none" d="M322 221 L372 221"/></g>
+        <defs><marker id="a18f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 上から順に確かめ、最初に当てはまらなかった理由を伝える。ディレクトリを作る share では、記録の Prepared が True になるまで PV を作らない。</p>
+    </div>
+    <p>2 つ細かい点がある。1 つめは、share が変わった直後だ。share のコントローラーがまだ新しい中身を検査していない(<code>observedGeneration</code> が古い、第 08 回)間は、古い判定を伝えないように、Event を出さずに 2 秒後に見直す。2 つめは、テナントに見せる情報の量だ。share が Ready でない理由の詳しい説明には、元の PV の名前や他の share のパスが入る。それは管理者の情報なので、PVC の Event には理由の名前だけを書く。</p>
+    <p>キャッシュ(第 09 回)の古さにも気を付ける。PV の名前は PVC の UID から決まるので、作った直後にキャッシュが古くて「まだ無い」と見えても、もう一度作ろうとして「もうある」と返れば、それで成功とみなせる。消す判断(取り上げ)の直前は、キャッシュではなく API サーバーから直接読む。元に戻せない操作は、古いかもしれない情報では行わない、という一つの方針だ。</p>
+  </section>
+  <section>
+    <h2>4. テストの 3 層と、それぞれが見つけたもの</h2>
+    <p>第 15 回の 3 層に、ディレクトリを作る処理だけを本番と同じ権限で動かす層を 1 つ足した。層ごとに「見えるもの」が違うので、見つかる欠陥も違った。</p>
     <table>
       <tr><th>層</th><th>数</th><th>見えるもの</th><th>見えないもの</th><th>この層で見つかった欠陥</th></tr>
-      <tr><td>単体テスト</td><td class="n">13 関数</td><td>名前、予約、ro の付け方、容量の申し込み、Released の判定、ドライバの表</td><td>API サーバーの振る舞い</td><td>(設計どおりに書けていることの確認が主)</td></tr>
-      <tr><td>envtest(本物の API サーバーと etcd だけ)</td><td class="n">19 件</td><td>CEL と既定値、作られる PV と PVC、condition、削除の順番、猶予、孤児の回収</td><td>PV の bind、GC、pvc-protection、マウント</td><td>孤児の PVC を消した後、PV に何も変化が起きないので回収が止まる。Claim と PVC の削除も孤児の回収のきっかけにして直した</td></tr>
-      <tr><td>実機(EKS 1.35 + 本物の FSx)</td><td class="n">39 項目 × 2</td><td>bind、マウント、読み取り専用の強制、取り上げ中の Pod の振る舞い、名前を指定した横取りの防止</td><td>(この題材で見たいものは全部見える)</td><td>finalizer の付け外しと status の書き込みが楽観的排他でぶつかり続けていた(status を差分で送る形に変えて 0 件にした)。Claim を作ってから使えるまで 25 秒かかっていた(PVC を先に作っていたのが原因で、PV を先にして縮めた)。テスト自身の誤りも 1 つ見つかった(下)</td></tr>
+      <tr><td>単体テスト</td><td class="n">15 関数</td><td>パスの規則、PV の形、ro と localflock、ドライバの表</td><td>API サーバーの振る舞い</td><td>(設計どおりに書けていることの確認が主)</td></tr>
+      <tr><td>権限を絞ったコンテナ</td><td class="n">7 関数</td><td>root で <code>CAP_CHOWN</code> だけのときのディレクトリ作成</td><td>Lustre の上での振る舞い</td><td>0000 で作ると開けない。setgid の親で setgid が落ちる(第 2 節)</td></tr>
+      <tr><td>envtest(本物の API サーバーと etcd だけ)</td><td class="n">17 件</td><td>CEL(パスの例の一覧も)、PV の形、Event、重なりの判定、取り上げ、記録と UID、下準備の Pod の形</td><td>PV の bind、GC、マウント、kubelet</td><td>パスの CEL が計算量の上限を超えて CRD が登録できない。同じ秒に作った 2 つの share の判定が揺れる(テストを直した)</td></tr>
+      <tr><td>実機(EKS 1.35 + 本物の FSx for Lustre)</td><td class="n">49 項目</td><td>bind、マウント、ディレクトリの持ち主と権限、ro の強制、一時ボリューム、取り上げ中の Pod</td><td>大規模、複数ノード、コントローラーの切り替わり</td><td>Ready でない share には StorageClass が無く、PVC に理由が届かない(常に 2 つ作るように直した)</td></tr>
     </table>
-    <p>envtest には PV を bind する役も、保護用の finalizer を外す役(どちらも kube-controller-manager の中にある)も居ない。だからテストの中で「bind された」状態を手で書き(status を直接更新する)、保護用の finalizer はテストが代わりに外し、「Pod が使っている」状態は自前の finalizer を PVC に付けて真似した。こうして作った状態に、コントローラーが正しく反応するかを見る。逆に、bind やマウントそのものが正しく起きるかは、envtest では原理的に確かめられないので、実機の層に任せる。</p>
-    <p>実機では、テストの期待のほうが間違っていた例もあった。コントローラーを止めた状態で Claim を finalizer ごと消すと「PVC と PV が残る」と期待したが、PVC は消えていた。PVC には Claim を親とする ownerReference があるので、Kubernetes の GC(第 10 回)が消したのだ。親を持てないクラスタ全体の PV だけが残り、再起動したコントローラーの孤児の回収がそれを片付けた。期待を「PV が残る」に直すと、孤児の回収が本当に働いたことを示すテストになった。</p>
-    <p>テストが揺れる(ときどき失敗する)原因も 1 つ見つかった。condition の時刻(<code>lastTransitionTime</code>)は秒単位で保存されるので、3 秒の猶予がテストの中では 2 秒台に縮むことがあった。今は取り上げの期限を <code>withdrawAfter</code> に書いており、これも秒単位で保存されるので、期限は秒に切り上げて書くようにした。</p>
+    <p>envtest には PV を bind する役も、Pod を動かす kubelet も居ない。だからテストの中で「bind された」状態を手で書き(PVC の <code>volumeName</code> と PV の status を直接更新する)、下準備の Pod の「終わった」状態と結果の JSON も手で書いた。こうして作った状態に、コントローラーが正しく反応するかを見る。逆に、マウントそのものや、本物の root の権限での振る舞いは envtest では確かめられないので、外側の層に任せる。</p>
+    <p>実機の検証には、テストスクリプト自身の誤りも 1 つあった。スクリプトの中で定義した関数を <code>sh -c "..."</code> の中から呼んでいたので、別のシェルでは関数が無く、条件がいつも偽になっていた。コントローラーは正しく動いていた。期待どおりに失敗しない検査は、期待どおりに通ることも示せない、という例だ。</p>
     <div class="fig">
-      <svg viewBox="0 0 860 200" role="img" aria-label="3 層のテストが見える範囲">
+      <svg viewBox="0 0 860 210" role="img" aria-label="テストの層が見える範囲">
         <g font-size="13">
-          <rect x="20" y="20" width="820" height="160" rx="10" fill="#e6eef8" stroke="#1d4e8f"/><text x="36" y="44" fill="#1d4e8f">実機: bind、マウント、ro の強制、Pod の振る舞い</text>
-          <rect x="40" y="58" width="560" height="110" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="56" y="82" fill="#0f5132">envtest: CEL、既定値、PV と PVC の形、condition、順番、猶予</text>
-          <rect x="60" y="96" width="320" height="60" rx="10" fill="#fff" stroke="#4a5d54"/><text x="76" y="120">単体: 名前、予約、ro、Released の判定</text><text x="76" y="142" fill="#4a5d54">API サーバー無し</text>
+          <rect x="20" y="20" width="820" height="170" rx="10" fill="#e6eef8" stroke="#1d4e8f"/><text x="36" y="44" fill="#1d4e8f">実機: bind、マウント、持ち主と権限、ro の強制、Pod の振る舞い</text>
+          <rect x="40" y="58" width="520" height="120" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="56" y="82" fill="#0f5132">envtest: CEL、PV の形、Event、重なり、取り上げ、記録</text>
+          <rect x="60" y="96" width="230" height="70" rx="10" fill="#fff" stroke="#4a5d54"/><text x="76" y="122">単体: パス、PV の形</text><text x="76" y="144" fill="#4a5d54">API サーバー無し</text>
+          <rect x="580" y="58" width="240" height="70" rx="10" fill="#fdf3e2" stroke="#8a5a12"/><text x="596" y="84">権限を絞ったコンテナ</text><text x="596" y="106" fill="#4a5d54">ディレクトリ作成だけ</text>
         </g>
       </svg>
-      <p class="cap">図: 外側の層ほど見える範囲が広く、遅く、高い。内側で確かめられることは内側で確かめる。</p>
+      <p class="cap">図: 外側の層ほど見える範囲が広く、遅く、高い。ディレクトリ作成は、権限だけを本番に合わせた別の層で先に確かめた。</p>
     </div>
   </section>
   <section>
-    <h2>4. 実機検証の結果</h2>
-    <p>検証は 1 本のスクリプト(<code>test/e2e-eks/run.sh</code>)にまとめ、元になる PV の名前とノード名を渡すだけで、namespace の用意から後片付けまでを行う。ファイルシステムに書くのは確認用の小さなディレクトリ 1 つだけで、最後に消す。FSx for Lustre(元の PV は <code>Released</code> のまま)と FSx for OpenZFS の両方で流した。</p>
+    <h2>5. 実機検証の結果</h2>
+    <p>検証は 1 本のスクリプト(<code>test/e2e-eks/run.sh</code>)にまとめ、元になる PV の名前とノード名を渡すだけで、namespace と share の用意から後片付けまでを行う。ファイルシステムに書くのは確認用のディレクトリ 1 つの下だけで、最後に消す。元の PV は <code>Released</code> のまま(予約は付いている)の FSx for Lustre を使った。</p>
     <table>
-      <tr><th>手順</th><th>確かめたこと</th><th>Lustre</th><th>OpenZFS</th></tr>
-      <tr><td>準備</td><td>元の PV の状態(Lustre は Released、OpenZFS は別の namespace に Bound)に関係なく SharedFilesystem が Ready になる</td><td class="y">1/1</td><td class="y">1/1</td></tr>
-      <tr><td>1</td><td>読み書きと読み取り専用の Claim が同じノードでマウントでき、書いた値を読めて、読み取り専用の側は書けない</td><td class="y">7/7</td><td class="y">7/7</td></tr>
-      <tr><td>2</td><td>許可の無い namespace には何も作られず、予約済みの PV を名前で指名しても Pending のまま</td><td class="y">3/3</td><td class="y">3/3</td></tr>
-      <tr><td>3</td><td>PVC を消すと、人の手無しで作り直されて bind され、書いた値がまだ読める(Released の罠)</td><td class="y">2/2</td><td class="y">2/2</td></tr>
-      <tr><td>4</td><td>reconcile をもう一度起こしても PV の resourceVersion が変わらない(無駄な書き込みが無い)</td><td class="y">1/1</td><td class="y">1/1</td></tr>
-      <tr><td>4b</td><td>許可のある使用中の Claim を消すと Pod を待ち、Pod を止めると Claim、PVC、PV が消える</td><td class="y">5/5</td><td class="y">5/5</td></tr>
-      <tr><td>5</td><td>許可を外すと、猶予の間は PVC が残り、その後に取り上げられる。動いている Pod は読み続け、新しい Pod は起動しない。Pod を止めると PVC と PV が消える</td><td class="y">7/7</td><td class="y">7/7</td></tr>
-      <tr><td>5b</td><td>コントローラーを止めている間に Claim を finalizer ごと消すと PV が残り、再起動後に孤児の回収が消す</td><td class="y">3/3</td><td class="y">3/3</td></tr>
-      <tr><td>6, 6b</td><td>SharedFilesystem は生成 PV が残る間は消えず、削除中でも許可を外せば取り上げが効き、使用中の Pod の名前が表示される</td><td class="y">6/6</td><td class="y">6/6</td></tr>
-      <tr><td>7</td><td>Pod を止めると PVC と PV が消え、Claim も消え、SharedFilesystem も自分で消え、元の PV は残っている</td><td class="y">4/4</td><td class="y">4/4</td></tr>
+      <tr><th>手順</th><th>確かめたこと</th><th>結果</th></tr>
+      <tr><td>準備</td><td>管理者用の根の share(<code>allow-overlap</code> 付き)で、確認用のディレクトリと symlink を作る</td><td class="y">4/4</td></tr>
+      <tr><td>1</td><td>チームのディレクトリが下準備の Pod で <code>0:2000 2770</code> で作られ、仮のディレクトリも下準備の Pod・PVC・PV も残らない。UID 1000・グループ 2000 の Pod が書けて、自分のディレクトリしか見えない</td><td class="y">9/9</td></tr>
+      <tr><td>2</td><td>読み取り専用の share を別の namespace がマウントし、管理者の書いたファイルを読めて、書けず、そのディレクトリしか見えず、localflock になっている</td><td class="y">7/7</td></tr>
+      <tr><td>3</td><td>許可の無い namespace、読み取り専用の許可に読み書きで申し込む、<code>ReadWriteOncePod</code> は PV が作られない。容量を増やす申し込みは断られる</td><td class="y">5/5</td></tr>
+      <tr><td>4</td><td>一時ボリューム(Pod と一緒に作られて消える PVC)で読めて、Pod を消すと PVC と PV も消える</td><td class="y">3/3</td></tr>
+      <tr><td>5</td><td>パスが symlink の share は PVC まで結ばれるが、Pod はマウントできずに起動しない</td><td class="y">3/3</td></tr>
+      <tr><td>6</td><td>使われている share を含む読み書きの share を新しく作ると、新しい側だけが OverlappingShare になり、その PVC には ShareNotReady が届く</td><td class="y">4/4</td></tr>
+      <tr><td>7</td><td>許可を外すと PV に期限が書かれ、猶予の間は PVC が残り、その後に消える。動いている Pod は読み続け、Pod を止めると PV まで消える</td><td class="y">5/5</td></tr>
+      <tr><td>8</td><td>namespace を消して作り直すと NamespaceRecreated で止まり、前のチームのファイルは手付かずで残る。管理者が記録を消すと結ばれ、記録は DirectoryExists になる</td><td class="y">5/5</td></tr>
+      <tr><td>9</td><td>使われている share は削除を待ち(VolumesRemaining)、PVC が消えると消える。元の PV は一度も書き換えられない。コントローラーのログに reconcile のエラーが無い</td><td class="y">4/4</td></tr>
     </table>
-    <p>どちらも 39 項目中 39 項目が通り、検証の間、コントローラーのログに reconcile のエラーは 1 件も出なかった。Claim を作ってから使えるまでの時間は、PV を先に作るように直す前の e2e では 25 秒、直した後は 19〜20 秒だった。e2e とは別に、namespace・SharedFilesystem・Claim 2 つを新しく作って Ready になるまでを 1 秒ごとに直接確かめると 5.8 秒(2 回とも同じ。kubectl を呼ぶ時間を含む)で、e2e の数字との差の理由はまだ確かめていない。読み取り専用の Pod の中で <code>/proc/mounts</code>(今のマウントの一覧)を見ると、Lustre のマウントは <code>ro,...,flock,...</code> になっていた。</p>
+    <p>49 項目中 49 項目が通った。最後の 3 回は続けて全部通り、最初の 1 回は 47/49 で、2 件は第 4 節のテストの誤りと StorageClass の欠陥だった。PVC を作ってから Bound になるまでは、ディレクトリを作る Pod の時間を含めて 17〜22 秒だった(4 回: 19、17、19、22 秒)。sharedfs が作った PV の finalizer は <code>kubernetes.io/pv-protection</code> だけで、FSx のドライバの係が手を出していないことも確かめた。読み取り専用の Pod の中で <code>/proc/mounts</code>(今のマウントの一覧)を見ると、Lustre のマウントは <code>ro,...,localflock,...</code> で、マウント元はファイルシステムの名前の後ろに share のパスが付いたものだった。</p>
     <div class="fig">
-      <svg viewBox="0 0 860 250" role="img" aria-label="1 つのノードで読み書きと読み取り専用の Pod が同じファイルシステムをマウントする">
-        <rect x="20" y="20" width="560" height="200" rx="12" fill="#fff" stroke="#4a5d54"/><text x="40" y="44" font-size="14">CPU ノード 1 台</text>
-        <rect x="50" y="64" width="230" height="64" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="165" y="92" font-size="13" text-anchor="middle">Pod w(読み書き)</text><text x="165" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">値を書く</text>
-        <rect x="320" y="64" width="230" height="64" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="435" y="92" font-size="13" text-anchor="middle">Pod r(読み取り専用)</text><text x="435" y="112" font-size="12" text-anchor="middle" fill="#4a5d54">読める・書くと拒否</text>
-        <rect x="50" y="154" width="230" height="44" rx="8" fill="#fff" stroke="#198754"/><text x="165" y="181" font-size="12" text-anchor="middle">PV sfc-…(flock)</text>
-        <rect x="320" y="154" width="230" height="44" rx="8" fill="#fff" stroke="#1d4e8f"/><text x="435" y="181" font-size="12" text-anchor="middle">PV sfc-…(flock, ro)</text>
-        <rect x="640" y="90" width="200" height="70" rx="12" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/><text x="740" y="120" font-size="14" text-anchor="middle">FSx</text><text x="740" y="142" font-size="12" text-anchor="middle" fill="#4a5d54">同じ 1 つ</text>
-        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a18c)"><path d="M165 130 L165 150"/><path d="M435 130 L435 150"/><path d="M165 200 L165 232 L740 232 L740 164" fill="none"/><path d="M435 200 L435 228" fill="none"/></g>
-        <defs><marker id="a18c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
-      </svg>
-      <p class="cap">図: PV は Claim ごとに 1 本ずつ別に作る(名前、volumeHandle、予約はそれぞれ別)。指す先は同じファイルシステムで、マウントのされ方の違いは ro の有無だけ。flock はファイルのロックを使えるようにするオプション。</p>
-    </div>
-  </section>
-  <section>
-    <h2>5. distributed-ai への取り込み案</h2>
-    <p>コードはまだ distributed-ai には入れていない。独立したディレクトリで作り、実機で確かめたところまでだ。取り込むときに置き換わるもの、足すものは次のとおりで、どれも distributed-ai の実ファイルを読んで決めた。</p>
-    <table>
-      <tr><th>今あるもの</th><th>取り込んだ後</th></tr>
-      <tr><td><code>infra/eks/manifests/fsx-lustre-shared-pv/</code> の README と PV / PVC のテンプレート(値を 4 つ読んで埋める手順)</td><td>管理者が SharedFilesystem を 1 つ、各チームが Claim を 1 つ書くだけになる。テンプレートは不要になる</td></tr>
-      <tr><td><code>infra/eks/scripts/05-release-pv.sh</code> の、配った PV の解放</td><td>コントローラーが自動で直す。元の PV そのものを渡し直す用途には、スクリプトがそのまま残る</td></tr>
-      <tr><td>OpenZFS の PV を手で複製(同じ volumeHandle の 2 本)</td><td>handle が PV ごとに別になり、同じノードでの取り違えが起きない</td></tr>
-      <tr><td><code>infra/eks/scripts/04-teardown.sh</code></td><td>Claim、SharedFilesystem、コントローラー、CRD の順に消す手順を足す。順番を逆にすると finalizer が残って namespace が消えなくなる</td></tr>
-      <tr><td>コンテナイメージ</td><td>distributed-ai の、クラスタ内でイメージを焼く仕組み(<code>image-builder-lib</code> の ConfigMap 方式)で作れることを確かめた。今回の検証イメージもこれで作った</td></tr>
-    </table>
-    <p>コントローラーは AWS の権限を一切持たない。読み書きするのは Kubernetes のオブジェクトだけなので、IAM(AWS の権限の仕組み)の設定を増やさずに入れられる。公開しているのは、認証付きの metrics の口(クラスタ内だけから見える)だけだ。</p>
-    <div class="fig">
-      <svg viewBox="0 0 860 170" role="img" aria-label="手順書とスクリプトが 2 つの宣言に置き換わる">
+      <svg viewBox="0 0 860 250" role="img" aria-label="1 つのファイルシステムの中の別々のディレクトリを、別々の namespace の Pod がマウントする">
         <g font-size="13" text-anchor="middle">
-          <rect x="20" y="20" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="45">README の手順とテンプレート</text>
-          <rect x="20" y="70" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="95">05-release-pv.sh(配った PV)</text>
-          <rect x="20" y="120" width="250" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="145" y="145">手で複製した PV</text>
-          <rect x="520" y="40" width="320" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="680" y="67">SharedFilesystem(管理者が 1 つ)</text>
-          <rect x="520" y="100" width="320" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="680" y="127">Claim(チームごとに 1 つ)</text>
+          <rect x="300" y="20" width="260" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="430" y="45">1 つの FSx for Lustre</text>
+          <rect x="60" y="100" width="200" height="40" rx="8" fill="#fff" stroke="#0f5132"/><text x="160" y="125">…/team(2770)</text>
+          <rect x="330" y="100" width="200" height="40" rx="8" fill="#fff" stroke="#0f5132"/><text x="430" y="125">…/data</text>
+          <rect x="600" y="100" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="700" y="125">…/link(symlink)</text>
+          <rect x="60" y="180" width="200" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="160" y="205">チームの Pod: rw</text>
+          <rect x="330" y="180" width="200" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="430" y="205">別のチームの Pod: ro</text>
+          <rect x="600" y="180" width="200" height="40" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="700" y="205">Pod: 起動しない</text>
         </g>
-        <path d="M290 90 L500 90" stroke="#4a5d54" stroke-width="2" marker-end="url(#a18d)"/>
-        <defs><marker id="a18d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+        <g stroke="#4a5d54" stroke-width="2"><path fill="none" d="M380 62 L180 98"/><path fill="none" d="M430 62 L430 98"/><path fill="none" d="M480 62 L680 98"/><path fill="none" d="M160 142 L160 178"/><path fill="none" d="M430 142 L430 178"/></g>
+        <path fill="none" d="M700 142 L700 178" stroke="#c0492f" stroke-width="2" stroke-dasharray="5 4"/>
       </svg>
-      <p class="cap">図: 人の手順(左)を、保ち続けられる宣言(右)に置き換える。</p>
+      <p class="cap">図: PV は PVC ごとに別に作り、指す先はディレクトリごとに違う。symlink の先は Lustre が辿らないので、マウントそのものが失敗する。</p>
     </div>
   </section>
   <section>
     <h2>6. まだ残っていること</h2>
-    <p>やっていないことと、できないことを分けて書く。隠すと、出来上がったように見えて実際より悪くなる。</p>
+    <p>やっていないこと、確かめていないこと、仕様として守れないことを分けて書く。隠すと、出来上がったように見えて実際より悪くなる。</p>
     <table>
       <tr><th>種類</th><th>内容</th></tr>
-      <tr><td>仕様として残る限界</td><td>読み書きを許した namespace は、ファイルシステム全体を書き換えられる(隔離ではなく配布)。取り上げても、動いている Pod は止まるまでマウントを使い続ける。許可は namespace のラベルで選ぶので、テナントがそのラベルを書き換えられない運用が前提</td></tr>
-      <tr><td>v1alpha1 で対応しないもの</td><td>EFS(volumeHandle からマウントするので handle を変えられない)、サブディレクトリだけのマウント、手で作った既存の PV の引き取り、元の PV の変更への自動追従、取り上げ時の Pod の退去、複数バージョン</td></tr>
-      <tr><td>まだ確かめていないこと</td><td>Claim が数百個ある規模での動き、コントローラーの台数を増やしたときの leader election(複数台のうち 1 台だけが働く仕組み、第 15 回)の切り替わり(設定は有効にしてあるが、実機で切り替えてはいない)</td></tr>
-      <tr><td>これからの作業</td><td>リポジトリの作成と公開、distributed-ai への取り込み(第 5 節の表)</td></tr>
+      <tr><td>仕様として守れないこと</td><td>守るのはマウントの境界まで。特権のある Pod、<code>hostPath</code>(ノードの中身を直接見る)、PV を作れる人は、sharedfs と関係なくファイルシステム全体に届く。FSx for Lustre では <code>nosuid</code> と <code>nodev</code> が効かなかったので、同じパスの書き手は読み手に setuid のプログラムを置ける。ディレクトリへの制限は Lustre のクライアント(ノード)側で効き、サーバー側では強制されない。取り上げても動いている Pod はマウントを使い続け、消した PVC は許可が戻っても作り直されない</td></tr>
+      <tr><td>対応しないもの</td><td>容量の上限(Lustre 2.15 の project quota が要る)、share より深いパス、PVC ごとのディレクトリ、EFS(volumeHandle からマウントする)、OpenZFS のディレクトリ(ドライバが断る)、取り上げ時の Pod の退去、複数バージョン</td></tr>
+      <tr><td>まだ確かめていないこと</td><td>PVC が数千個ある規模、複数ノードでの同時マウント、コントローラーを複数台にしたときの切り替わり。v2 の実機検証は Lustre だけで、OpenZFS は envtest で「根以外を断る」ことだけを確かめた。Lustre のファイル ID を使った、ディレクトリの外への到達は測っていない</td></tr>
+      <tr><td>これからの作業</td><td>リポジトリの公開。FSx の CSI ドライバ本体に「サブディレクトリをマウントする」明示的な設定を足す提案(今は mountname に足す振る舞いに頼っている)。distributed-ai への取り込み(下の表)</td></tr>
+    </table>
+    <p>distributed-ai に取り込むときに置き換わるものは次のとおりだ。</p>
+    <table>
+      <tr><th>今あるもの</th><th>取り込んだ後</th></tr>
+      <tr><td><code>infra/eks/manifests/fsx-lustre-shared-pv/</code> の README と PV / PVC のテンプレート</td><td>管理者が share を書き、各チームは StorageClass の名前を書いた PVC を出すだけ。チームごとのディレクトリも自動で作れる</td></tr>
+      <tr><td><code>infra/eks/scripts/05-release-pv.sh</code> の、配った PV の解放</td><td>配った PV は PVC ごとに作って消すので、解放の手順が要らない。元の PV そのものを渡し直す用途には、スクリプトがそのまま残る</td></tr>
+      <tr><td><code>infra/eks/scripts/04-teardown.sh</code></td><td>PVC、share、コントローラー、CRD の順に消す手順を足す。順番を逆にすると finalizer が外れずに残る</td></tr>
     </table>
     <div class="fig">
       <svg viewBox="0 0 860 140" role="img" aria-label="済み、未確認、未対応の 3 区分">
         <g font-size="13" text-anchor="middle">
-          <rect x="20" y="30" width="260" height="80" rx="10" fill="#e7f6ee" stroke="#198754"/><text x="150" y="62">確かめた</text><text x="150" y="84" fill="#4a5d54">39 項目 × 2 ドライバ</text>
-          <rect x="300" y="30" width="260" height="80" rx="10" fill="#fdf3e2" stroke="#8a5a12"/><text x="430" y="62">まだ確かめていない</text><text x="430" y="84" fill="#4a5d54">規模、台数の切り替わり</text>
-          <rect x="580" y="30" width="260" height="80" rx="10" fill="#fbeeea" stroke="#c0492f"/><text x="710" y="62">対応しない</text><text x="710" y="84" fill="#4a5d54">EFS、隔離、Pod の退去</text>
+          <rect x="20" y="40" width="250" height="60" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="145" y="66">確かめた</text><text x="145" y="86" fill="#4a5d54">49 項目と各層のテスト</text>
+          <rect x="305" y="40" width="250" height="60" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="430" y="66">まだ確かめていない</text><text x="430" y="86" fill="#4a5d54">規模、複数台、ファイル ID</text>
+          <rect x="590" y="40" width="250" height="60" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="715" y="66">守れない、対応しない</text><text x="715" y="86" fill="#4a5d54">特権 Pod、nosuid、容量</text>
         </g>
       </svg>
       <p class="cap">図: 結果は 3 つに分けて持つ。真ん中を左と混ぜない。</p>
@@ -254,16 +266,17 @@
   </section>
   <section>
     <h2>まとめ: シリーズを通して</h2>
-    <p>第 01 回の「Kubernetes は望む状態の台帳」から始めて、最後は本物の FSx を配るコントローラーまでたどり着いた。振り返ると、CRD は台帳に新しい欄を足すだけで、それだけでは何も動かない(第 04 回)。動かすのはコントローラーで、それは「今の状態を読み直し、差を埋め、何度やっても同じ結果になる」ループだった(第 03・09 回)。スキーマ、CEL、既定値、status、finalizer、所有関係、SSA、admission、バージョンは、どれもそのループを安全にするための部品だった。そして部品の使い分けは、規則が「1 つの CR だけで決まるか」「他のオブジェクトに依存して後から変わるか」「誰が書けるかの問題か」で決まった(第 17 回)。</p>
-    <p>作ってみて一番効いたのは、コードの前に実機で前提を確かめたこと、元に戻せない操作ほど条件を絞り直接読み直してから行ったこと、そしてテストの層ごとに「見えないもの」を自覚したことだ。</p>
+    <p>第 01 回の「Kubernetes は望む状態の台帳」から始めて、最後は本物の FSx のディレクトリを namespace ごとに配るコントローラーまでたどり着いた。振り返ると、CRD は台帳に新しい欄を足すだけで、それだけでは何も動かない(第 04 回)。動かすのはコントローラーで、それは「今の状態を読み直し、差を埋め、何度やっても同じ結果になる」ループだった(第 03・09 回)。スキーマ、CEL、既定値、status、finalizer、所有関係、admission、バージョンは、どれもそのループを安全にするための部品だった。そして部品の使い分けは、規則が「1 つの CR だけで決まるか」「他のオブジェクトに依存して後から変わるか」「誰が書けるかの問題か」で決まった(第 17 回)。</p>
+    <p>作ってみて一番効いたのは、コードの前に実機で前提を確かめたこと、利用者に新しい CR を覚えさせず Kubernetes の普通の申し込み(PVC と StorageClass)に乗ったこと、元に戻せない操作ほど条件を絞り直接読み直してから行ったこと、そしてテストの層ごとに「見えないもの」を自覚し、見えないものは本番と同じ条件の層で確かめたことだ。</p>
     <div class="fig">
       <svg viewBox="0 0 860 120" role="img" aria-label="シリーズの 5 つの段階">
         <g font-size="13" text-anchor="middle">
-          <rect x="20" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="95" y="65">地図 01〜04</text>
-          <rect x="190" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="265" y="65">CRD 05〜08</text>
-          <rect x="360" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="435" y="65">制御 09〜11</text>
-          <rect x="530" y="36" width="150" height="48" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="605" y="65">拡張 12〜15</text>
-          <rect x="700" y="36" width="140" height="48" rx="8" fill="#0f5132"/><text x="770" y="65" fill="#fff">実践 16〜18</text>
+          <rect x="10" y="40" width="156" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="88" y="67">仕組みの地図</text>
+          <rect x="182" y="40" width="156" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="260" y="67">CRD を書く</text>
+          <rect x="354" y="40" width="156" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="432" y="67">コントローラー</text>
+          <rect x="526" y="40" width="156" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="604" y="67">API の拡張</text>
+          <rect x="698" y="40" width="156" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="776" y="67">実際に作る</text>
+          <text x="88" y="106" fill="#4a5d54">01〜04</text><text x="260" y="106" fill="#4a5d54">05〜08</text><text x="432" y="106" fill="#4a5d54">09〜11</text><text x="604" y="106" fill="#4a5d54">12〜15</text><text x="776" y="106" fill="#4a5d54">16〜18</text>
         </g>
       </svg>
       <p class="cap">図: 18 回の道のり。</p>
@@ -295,118 +308,118 @@
   ============================================================ */
 const QUIZ = [
   {
-    q: '名前・予約・ro の付け方・Released の判定を、API サーバーと話さない volume パッケージに閉じ込めた一番の利点は？',
+    q: 'ディレクトリを作る Pod を「普通のユーザーに CAP_CHOWN を足す」形にせず、「root から CAP_CHOWN 以外の特権を外す」形にした理由は？',
     opts: [
-      'ビルドが速くなる',
-      'controller-gen が CRD を作れるようになる',
-      'コントローラーの台数を増やせる',
-      'RBAC の権限が減る',
-      '間違えると危ない計算を、クラスタ無しの単体テストで全部確かめられる'
-    ],
-    ans: 4,
-    exps: [
-      'ビルド時間はほとんど変わらない。',
-      'controller-gen が読むのは api パッケージのマーカー。',
-      '台数は leader election の話で、パッケージの分け方とは関係ない。',
-      'RBAC はコントローラーが実際に呼ぶ API で決まる。',
-      '<b>これが正解。</b>入力(Claim と元の PV)から出力(PV と PVC の形)を計算するだけの関数にすると、envtest も実機も要らずに境界の値まで確かめられる。'
-    ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="純粋な計算と API 呼び出しの分離"><rect x="20" y="25" width="240" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="140" y="55" font-size="13" text-anchor="middle">volume: 計算だけ</text><rect x="300" y="25" width="240" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="420" y="55" font-size="13" text-anchor="middle">controller: API と話す</text></svg><p class="cap">図: 左は単体テストだけで確かめられる。</p></div>' }
-  },
-  {
-    q: 'reconcile のどの経路を通っても(削除を待っている間も)、Bound 条件を「今ある PVC と PV の事実」から作り直す理由は？',
-    opts: [
-      '古い値が残らないようにするため。経路ごとに書くと、書き忘れた経路で前の状態が残る',
-      'status は毎回全部書き直さないと API サーバーに拒否されるから',
-      'Bound は spec の一部なので毎回必要だから',
-      'conditions は 1 つずつしか書けないから',
-      'Ready を true にするために必ず必要だから'
-    ],
-    ans: 0,
-    exps: [
-      '<b>これが正解。</b>実際に、最初の実装では取り上げた後も Bound=True が残っていた。事実から毎回作れば、どの経路でも正しい値になる。',
-      '差分だけ送っても拒否されない(実際に merge patch で送っている)。',
-      'Bound は status の condition。',
-      'conditions は配列で、いくつでも一度に書ける。',
-      'Ready の材料ではあるが、毎回作り直す理由は「古い値を残さない」こと。'
-    ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="どの経路も最後の 1 か所を通る"><g font-size="13" text-anchor="middle"><rect x="20" y="20" width="140" height="30" rx="6" fill="#fff" stroke="#4a5d54"/><text x="90" y="40">許可あり</text><rect x="20" y="60" width="140" height="30" rx="6" fill="#fff" stroke="#4a5d54"/><text x="90" y="80">許可なし</text><rect x="300" y="38" width="240" height="34" rx="6" fill="#e6eef8" stroke="#1d4e8f"/><text x="420" y="60">事実から Bound を作る</text></g><path d="M162 35 L296 52 M162 75 L296 58" stroke="#4a5d54" stroke-width="2"/></svg><p class="cap">図: 合流点を 1 つにする。</p></div>' }
-  },
-  {
-    q: 'envtest のテストで、PVC を「Pod が使っている」状態にしたいとき、どうした？',
-    opts: [
-      '本物の Pod を作った',
-      'kubelet を envtest に追加した',
-      'テスト用の finalizer を PVC に付けて、消えないようにした',
-      'PVC の status を Terminating に書き換えた',
-      'envtest では確かめられないので諦めた'
-    ],
-    ans: 2,
-    exps: [
-      'envtest には Pod を動かすノードが無いので、Pod を作っても誰も動かさない。',
-      'envtest は API サーバーと etcd だけで、kubelet は足せない。',
-      '<b>これが正解。</b>pvc-protection は、作成時に全 PVC へ保護用の finalizer を付けておき、削除を頼まれても使っている Pod が居る間はそれを外さない仕組み。同じ「消えずに残る」状態をテスト用の finalizer で真似し、その間 PV が消されないことを確かめた。',
-      'Terminating は status ではなく、削除の時刻(deletionTimestamp)が付いた状態のこと。',
-      '真似をすれば確かめられる。確かめられないのは bind やマウントそのもの。'
-    ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="本物の仕組みと真似"><rect x="20" y="25" width="240" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="140" y="55" font-size="13" text-anchor="middle">実機: pvc-protection</text><rect x="300" y="25" width="240" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="420" y="55" font-size="13" text-anchor="middle">envtest: テスト用 finalizer</text></svg><p class="cap">図: どちらも「消えずに残る」状態を作る。</p></div>' }
-  },
-  {
-    q: '最初の実装では、Claim を作ってから Ready になるまで 25 秒かかっていた。原因として正しいものは？',
-    opts: [
-      'コントローラーが 25 秒ごとにしか動かないから',
-      'FSx のマウントに時間がかかるから',
-      'CEL の評価に時間がかかるから',
-      'PVC を先に作り PV を後から作っていたので、PV コントローラーが PVC を見たときに PV が無く、次の定期的な見直しまで待たされたから',
-      'イメージのダウンロードに時間がかかるから'
-    ],
-    ans: 3,
-    exps: [
-      'コントローラーは変化の通知ですぐ動く。',
-      'Ready は PVC が Bound になった時点で出る。マウントは Pod を起動したときで、別の時間。',
-      'CEL の評価はミリ秒単位。',
-      '<b>これが正解。</b>PV と PVC を結ぶのは kube-controller-manager の PV コントローラー。PVC ができたときに結ぶ相手の PV がまだ無いと、後から PV が現れても PVC 側は次の定期的な見直しまで待つ。名前の衝突を確かめてから PV を先に作るように直し、e2e の数字は 19〜20 秒、直接測ると 5.8 秒になった。',
-      'Claim の Ready にコンテナイメージは関係しない。'
-    ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="作成から bind までの待ち"><line x1="20" y1="60" x2="540" y2="60" stroke="#4a5d54" stroke-width="2"/><circle cx="40" cy="60" r="6" fill="#198754"/><text x="40" y="40" font-size="13" text-anchor="middle">PVC 作成</text><rect x="60" y="50" width="400" height="20" fill="#fdf3e2" stroke="#8a5a12"/><text x="260" y="95" font-size="13" text-anchor="middle">PV が無かったので次の見直しまで待つ</text><circle cx="480" cy="60" r="6" fill="#198754"/><text x="480" y="40" font-size="13" text-anchor="middle">Bound</text></svg><p class="cap">図: 待っているのは別のコントローラー。</p></div>' }
-  },
-  {
-    q: '実機の検証で、許可を外した namespace について確かめた振る舞いとして正しいものは？',
-    opts: [
-      '許可を外した瞬間に、動いている Pod が強制終了された',
-      '猶予の間は PVC が残り、その後 PVC が削除中になり、動いている Pod は読み続け、新しい Pod は起動しなかった',
-      'PVC はすぐ消え、PV だけが残った',
-      'PV が先に消え、PVC が Lost になった',
-      '何も起きなかった'
+      '普通のユーザーでは Pod を作れないから',
+      'Kubernetes は起動時に足した特権を引き継がせる設定をしないので、普通のユーザーに足した特権は起動した瞬間に失われるから',
+      'root の方が速くディレクトリを作れるから',
+      'CAP_CHOWN は root にしか付けられない名前だから',
+      'Pod Security の restricted が root を求めるから'
     ],
     ans: 1,
     exps: [
-      'Pod は止めない。止めるのは管理者の判断で、限界として README に書いた。',
-      '<b>これが正解。</b>猶予 30 秒の間は何も消さず、その後に PVC を削除する。pvc-protection が使用中の PVC を残すので、既存の Pod は使い続け、新しい Pod はマウントできずに起動しない。Pod を止めると PVC と PV が順に消えた。',
-      '使用中の PVC はすぐには消えない。',
-      'PV は PVC が消えてから消す順番にしている。',
-      '猶予の後に取り上げが起きた。'
+      '違う。普通のユーザーの Pod も作れる。問題は特権が効くかどうか。',
+      '<b>これが正解。</b>足した特権を、起動したプログラムに引き継がせる仕組み(ambient capability)を Kubernetes は設定しない。だから効かせるには root のまま他を外すしかない。この形は Pod Security の baseline に収まる。',
+      '速さは関係ない。',
+      '違う。特権の名前は誰にでも書けるが、普通のユーザーでは起動時に失われる。',
+      '違う。restricted は逆に root を禁じる。だからコントローラーの namespace は baseline にしている。'
     ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="取り上げの段階"><g font-size="13" text-anchor="middle"><rect x="20" y="35" width="120" height="40" rx="6" fill="#fdf3e2" stroke="#8a5a12"/><text x="80" y="60">猶予</text><rect x="160" y="35" width="160" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="240" y="60">PVC 削除中</text><rect x="340" y="35" width="200" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="440" y="60">Pod 停止で全部消える</text></g></svg><p class="cap">図: 3 段階で進む。</p></div>' }
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="特権の行方"><rect x="20" y="20" width="240" height="34" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="140" y="42" font-size="13" text-anchor="middle">普通のユーザー + CHOWN → 失われる</text><rect x="20" y="64" width="240" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="140" y="86" font-size="13" text-anchor="middle">root − 他の特権すべて → 残る</text><text x="410" y="64" font-size="13" text-anchor="middle" fill="#4a5d54">残るのは CHOWN だけ</text></svg><p class="cap">図: 足すのではなく、外して残す。</p></div>' }
   },
   {
-    q: 'このシリーズの題材で、規則の置き場所を決めた基準として正しい組み合わせは？',
+    q: '最初の作り方は「権限 0000 でディレクトリを作り、それを作りかけの印にする」だった。root で CAP_CHOWN だけのコンテナで試すとどうなった？',
     opts: [
-      'すべての規則を validating webhook に置く',
-      'すべての規則をコントローラーの reconcile に置く',
-      '1 つの CR だけで決まる規則はスキーマと CEL、他のオブジェクトに依存し後から変わる規則は reconcile、誰が書けるかは RBAC',
-      '1 つの CR だけで決まる規則は reconcile、他のオブジェクトに依存する規則は CEL',
-      '規則はすべて README に書き、利用者に守ってもらう'
+      '問題なく作れた',
+      '自分で作ったディレクトリを開けず、毎回 PermissionDenied になった',
+      'ディレクトリが 2 つできた',
+      '持ち主が自動で uid:gid になった',
+      '親ディレクトリが消えた'
     ],
-    ans: 2,
+    ans: 1,
     exps: [
-      'webhook はその CR への書き込みが来たときにしか呼ばれないので、namespace のラベルのような他のオブジェクトの変化には追いつけない。',
-      'reconcile だと、enum や変更不可のような規則を「保存する前に拒否する」ことができない。',
-      '<b>これが正解。</b>規則の性質ごとに、それを一番確実に守れる場所に置く。この題材では webhook が必要な規則が残らなかった。',
-      '逆。1 つの CR で決まる規則は保存前に拒否できる CEL が向き、他のオブジェクトに依存する規則は CEL では書けない。',
-      '守ってもらうだけの規則は守られない。'
+      '違う。root でも、権限の検査を飛ばす特権(CAP_DAC_OVERRIDE)を外すと普通のユーザーと同じく権限に従う。0000 は誰も読めない。',
+      '<b>これが正解。</b>だから作り方を「仮の名前で 0700 で作る → root:root に → 権限 → 持ち主 → 確かめる → 本当の名前に付け替える」に変えた。直す前に失敗し、直した後に通ることを同じコンテナで確かめた。',
+      '違う。作ったのは 1 つで、それを開けなかった。',
+      '違う。持ち主は自分で変えるまで root のまま。',
+      '違う。親には何も起きない。'
     ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="規則と置き場所"><g font-size="13" text-anchor="middle"><rect x="10" y="30" width="170" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="95" y="60">CEL</text><rect x="195" y="30" width="170" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="280" y="60">reconcile</text><rect x="380" y="30" width="170" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="465" y="60">RBAC</text></g></svg><p class="cap">図: 3 つの置き場所の使い分け。</p></div>' }
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="権限の検査"><rect x="20" y="30" width="230" height="44" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="135" y="57" font-size="13" text-anchor="middle">0000 のディレクトリ</text><rect x="310" y="30" width="230" height="44" rx="8" fill="#fff" stroke="#4a5d54"/><text x="425" y="57" font-size="13" text-anchor="middle">root(検査を飛ばせない)</text><path fill="none" d="M308 52 L254 52" stroke="#c0492f" stroke-width="2"/><text x="281" y="44" font-size="12" text-anchor="middle" fill="#c0492f">開けない</text></svg><p class="cap">図: 特権を外した root は、権限に従う。</p></div>' }
+  },
+  {
+    q: 'ディレクトリを仮の名前で作り、最後に本当の名前へ付け替える一番の理由は？',
+    opts: [
+      '本当の名前は長すぎて作れないから',
+      '持ち主と権限が決まる前の姿を、本当の名前で誰にも見せないため。途中で止まっても残るのは空の仮ディレクトリだけ',
+      '付け替えると容量が節約されるから',
+      'Lustre は付け替えないとマウントできないから',
+      '仮の名前の方がテストしやすいから'
+    ],
+    ans: 1,
+    exps: [
+      '違う。長さの問題ではない。',
+      '<b>これが正解。</b>作りかけが本当の名前で見えると、その間に誰かに使われうる。付け替えは既にある名前を上書きしない方法で行い、次の実行は自分の名前の仮ディレクトリだけを片付ける。',
+      '違う。容量は変わらない。',
+      '違う。マウントは付け替えと関係ない。',
+      '違う。テストのしやすさは理由ではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="仮から本当の名前へ"><rect x="20" y="30" width="200" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="120" y="57" font-size="13" text-anchor="middle">.sharedfs-tmp-…</text><rect x="340" y="30" width="200" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="440" y="57" font-size="13" text-anchor="middle">team-a(完成)</text><path fill="none" d="M222 52 L336 52" stroke="#4a5d54" stroke-width="2"/><text x="279" y="44" font-size="12" text-anchor="middle" fill="#4a5d54">付け替え</text></svg><p class="cap">図: 本当の名前で見えるのは完成した後だけ。</p></div>' }
+  },
+  {
+    q: '下準備の Pod の結果を、終了コードではなく Pod が書いた結果の JSON で読むのはなぜ？',
+    opts: [
+      '終了コードは Kubernetes に保存されないから',
+      '「既にあった」「親が危ない」「権限が足りない」など結果の種類を区別でき、決められた名前以外は信じないことで、壊れた報告をそのまま status に書かないから',
+      'JSON の方が速く読めるから',
+      'Pod の終了コードは常に 0 だから',
+      'envtest が終了コードを扱えないから'
+    ],
+    ans: 1,
+    exps: [
+      '違う。終了コードも status に残る。ただし 0 か 0 以外かしか分からない。',
+      '<b>これが正解。</b>結果の種類がそのまま Prepared 条件の理由になる。決められた名前のどれかでなければ「結果でない」と扱う。報告の無い Pod は失敗とみなす。',
+      '違う。速さは関係ない。',
+      '違う。終了コードは成否で変わりうる。それでも細かい区別には足りない。',
+      '違う。テストの都合で決めたことではない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="結果の読み方"><rect x="20" y="30" width="200" height="44" rx="8" fill="#fff" stroke="#4a5d54"/><text x="120" y="57" font-size="13" text-anchor="middle">終了メッセージの JSON</text><rect x="340" y="30" width="200" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="440" y="57" font-size="13" text-anchor="middle">決められた名前か</text><path fill="none" d="M222 52 L336 52" stroke="#4a5d54" stroke-width="2"/></svg><p class="cap">図: 中身を確かめてから status に写す。</p></div>' }
+  },
+  {
+    q: '実機の検証で、ある検査が「いつも失敗する」状態になっていた。原因はコントローラーではなかった。何だった？',
+    opts: [
+      'FSx のマウントが遅かった',
+      'スクリプトで定義した関数を sh -c の中から呼んでいて、別のシェルには関数が無く、条件がいつも偽だった',
+      'kubectl の版が古かった',
+      'クラスタの時計がずれていた',
+      'Event が 1 時間で消えていた'
+    ],
+    ans: 1,
+    exps: [
+      '違う。マウントは通っていた。',
+      '<b>これが正解。</b>sh -c は新しいシェルを起動するので、元のスクリプトの関数は見えない。条件が必ず偽になる検査は、通るべきときにも失敗する。コントローラーは正しく動いていた。',
+      '違う。kubectl の版は関係ない。',
+      '違う。時計の問題ではない。',
+      '違う。Event の寿命は関係ない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="シェルの境界"><rect x="20" y="30" width="230" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="135" y="57" font-size="13" text-anchor="middle">元のシェル: 関数あり</text><rect x="310" y="30" width="230" height="44" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="425" y="57" font-size="13" text-anchor="middle">sh -c: 関数なし</text></svg><p class="cap">図: 検査そのものも、失敗と成功の両方で確かめる。</p></div>' }
+  },
+  {
+    q: 'v2 の検証結果について、正しい言い方はどれ？',
+    opts: [
+      'Lustre と OpenZFS の両方で 49 項目が通ったので、両方とも本番で使える',
+      'Lustre で 49 項目が通った。OpenZFS は envtest で「根以外を断る」ことだけを確かめ、規模や複数台の切り替わりはまだ確かめていない',
+      '49 項目が通ったので、まだ確かめていないことは無い',
+      'envtest が通ったので、実機の検証は要らなかった',
+      '1 回目に 47/49 だったので、コントローラーには 2 つの欠陥があった'
+    ],
+    ans: 1,
+    exps: [
+      '違う。v2 の実機検証は Lustre だけで流した。',
+      '<b>これが正解。</b>確かめたこと、まだ確かめていないこと、守れないことを分けて書く。真ん中を「確かめた」に混ぜない。',
+      '違う。PVC が数千個の規模、複数ノード、コントローラーの切り替わりは未確認。',
+      '違う。envtest には bind もマウントも kubelet も無い。StorageClass の欠陥は実機で見つかった。',
+      '違う。2 件のうち 1 件はテストスクリプトの誤りで、コントローラーの欠陥は 1 件だった。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="3 区分"><rect x="20" y="30" width="160" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="100" y="57" font-size="13" text-anchor="middle">確かめた</text><rect x="200" y="30" width="160" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="280" y="57" font-size="13" text-anchor="middle">未確認</text><rect x="380" y="30" width="160" height="44" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="460" y="57" font-size="13" text-anchor="middle">守れない</text></svg><p class="cap">図: 結果は 3 つに分けて持つ。</p></div>' }
   }
 ];
 

@@ -81,222 +81,254 @@
 <header>
   <p class="kicker">K8S CUSTOM CONTROLLER ・ 第 17 回</p>
   <h1>第 17 回 設計</h1>
-  <p>書き手で分けた 2 つの CR、守る約束は 1 つ、責任で分けた 3 つのコントローラー</p>
+  <p>パスごとに配る FilesystemShare、いつもの PVC で申し込む、取り上げの猶予、重なりの検査、4 つのコントローラー</p>
 </header>
 <main>
   <a class="back" href="./k8sctl-index.html">← カスタムコントローラー自作 シリーズ目次へ</a>
-  <p class="intro">第 16 回で題材を「既存の FSx を namespace ごとに配る」に決め、読み取り専用の実現方法と Released の直し方を実機で確かめた。第 17 回は、それを API とコントローラーに落とす。何を CR にするか、生成する PV と PVC をどんな形にするか、どの条件で配り、どの条件で取り上げるか、3 つのコントローラーにどう責任を分けるかを決める。設計は Fable 5.2(Anthropic の AI モデル)との 5 往復のレビューで大きく変わったので、その変化も載せる。</p>
-  <div class="lead"><p style="margin:0"><b>結論から。</b>CR は 2 種類。管理者が作る <code>SharedFilesystem</code>(どのファイルシステムを、どの namespace に、どの強さで配るか)と、利用者が作る <code>SharedFilesystemClaim</code>(使いたい)だ。守る約束は 1 つだけ。<b>「許可が消えて猶予の 30 秒を過ぎたら、その namespace では新しいマウントができなくなる」</b>。最初の設計は「拒否したら即削除」で、一瞬のラベル外れでそのチームの PVC が、元の PV が一瞬読めないだけで全チームの PVC が消える形だった。</p></div>
+  <p class="intro">第 16 回で題材を「既存の FSx を namespace ごとに配る」に決め、読み取り専用の実現方法とディレクトリだけのマウントを実機で確かめた。第 17 回は、それを API とコントローラーに落とす。何を CR にするか、利用者は何を書くか、生成する PV をどんな形にするか、どの条件で配り、どの条件で取り上げるか、4 つのコントローラーにどう責任を分けるかを決める。</p>
+  <div class="lead"><p style="margin:0"><b>結論から。</b>管理者が書くのは <code>FilesystemShare</code>(どのファイルシステムの、どのパスを、どの namespace に、どの強さで)だけで、利用者は<b>新しい CR を覚えず、いつもの PVC を書く</b>。コントローラーは share ごとに <code>&lt;名前&gt;-rw</code> と <code>&lt;名前&gt;-ro</code> の 2 つの StorageClass を作り、その申し込みを受け付ける係(外部プロビジョナー)になる。最初の形は「ファイルシステムを丸ごと、専用の Claim という CR で配る」だったが、学習や推論の実際の使い方(チームごとのディレクトリ、Helm や StatefulSet)に合わなかった。</p></div>
   <section>
-    <h2>1. CR を 2 種類に分ける理由</h2>
-    <p>CR の数と形は「誰が書くか」で決まる。ファイルシステムを配ってよいかを決めるのは管理者で、使いたいと言うのは各チームだ。この 2 つを 1 つの CR に混ぜると、チームに「配ってよい先」まで書ける権限を渡すことになる。そこで 2 種類に分け、RBAC(誰がどの API を呼べるかの設定)で書き手を分ける。</p>
+    <h2>1. 最初の形と、作り直した理由</h2>
+    <p>最初に作った形(v1)は、CR を 2 種類に分けていた。管理者が書く <code>SharedFilesystem</code>(配ってよい先)と、利用者が namespace に書く <code>SharedFilesystemClaim</code>(使いたい)だ。Claim を作ると、コントローラーがファイルシステム全体を指す PV と PVC を作る。本物の FSx で一通り動いたが、LLM(大規模言語モデル)の学習と推論で 1 つのファイルシステムを分け合う実際の使い方と並べると、2 つの点で合わなかった。</p>
     <table>
-      <tr><th>CR</th><th>置き場所(scope)</th><th>書く人</th><th>spec に書くこと</th></tr>
-      <tr><td><code>SharedFilesystem</code></td><td>クラスタ全体</td><td>管理者</td><td>元になる静的 PV の名前(<code>persistentVolumeRef</code>、後から変更不可)と、許可の一覧 <code>grants</code>(namespace の選び方と、読み取り専用か読み書きか)</td></tr>
-      <tr><td><code>SharedFilesystemClaim</code></td><td>namespace</td><td>利用者</td><td>使いたい SharedFilesystem の名前と、欲しいアクセス(既定は <code>ReadOnly</code>)。spec 全体が変更不可で、変えたいときは作り直す</td></tr>
+      <tr><th>使い方</th><th>要るもの</th><th>丸ごと配る形では</th></tr>
+      <tr><td>学習データ</td><td>1 つの木(ディレクトリの集まり)を、多くのチームに読み取り専用で</td><td class="y">できる</td></tr>
+      <tr><td>推論用のモデルの重み</td><td>1 つの木を、多くの推論用 namespace に読み取り専用で</td><td class="y">できる</td></tr>
+      <tr><td>チェックポイント(学習の途中結果)</td><td>チームごとのディレクトリを、そのチームだけ読み書き</td><td class="no">読み書きを許すと、ファイルシステム全体を書き換えられる</td></tr>
+      <tr><td>Helm チャート、StatefulSet、一時ボリューム</td><td><code>storageClassName</code> を書くだけで使える</td><td class="no">専用の Claim を知らない道具からは使えない</td></tr>
     </table>
-    <pre><code>apiVersion: sharedfs.littlemex.github.io/v1alpha1
-kind: SharedFilesystem
-metadata: {name: training-data}
-spec:
-  persistentVolumeRef: {name: fsx-training}
-  grants:
-  - namespaceSelector: {matchLabels: {team: research}}
-    access: ReadWrite</code></pre>
-    <p>利用者は PV を一切触らない。Claim を作ると、コントローラーが Claim と同じ名前の PVC をその namespace に作るので、Pod はその PVC をマウントするだけだ。Claim の spec を丸ごと変更不可にしたのは、変更を許すと「マウント中の PV を作り直す」という難しい手順が要るからで(PV のボリュームの指定は作成後に変えられない)、作り直しで済むなら API から消すほうが単純で安全だ。変更不可は CEL の <code>self == oldSelf</code>(第 06 回)で書ける。</p>
+    <p>1 つめの問題は<b>配る単位</b>だ。読み書きを許したチームがファイルシステム全体を書き換えられるなら、チームごとのチェックポイントを安心して置けない。第 16 回で、Lustre はドライバを変えずにディレクトリだけをマウントできると分かったので、<b>配る単位を「ファイルシステム」から「パス」に変えた</b>。2 つめの問題は<b>申し込みの形</b>だ。Helm チャート(アプリの部品をまとめた雛形)、StatefulSet の <code>volumeClaimTemplates</code>、Pod と一緒に作られて消える一時ボリューム(generic ephemeral volume)は、どれも「StorageClass の名前を書いた PVC」を自分で作る。専用の Claim を間にはさむと、これらは一切使えない。そこで<b>申し込みは普通の PVC にし、コントローラーは StorageClass の係(プロビジョナー)になる</b>ことにした。</p>
     <div class="fig">
-      <svg viewBox="0 0 860 250" role="img" aria-label="管理者は SharedFilesystem、利用者は Claim だけを書き、PV と PVC はコントローラーが作る">
-        <rect x="20" y="20" width="200" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="120" y="50" font-size="14" text-anchor="middle" fill="#1d4e8f">管理者</text>
-        <rect x="20" y="160" width="200" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="120" y="190" font-size="14" text-anchor="middle" fill="#1d4e8f">利用者(チーム)</text>
-        <rect x="300" y="20" width="230" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="415" y="50" font-size="14" text-anchor="middle">SharedFilesystem</text>
-        <rect x="300" y="160" width="230" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="415" y="190" font-size="14" text-anchor="middle">SharedFilesystemClaim</text>
-        <rect x="620" y="90" width="220" height="50" rx="8" fill="#fff" stroke="#0f5132" stroke-width="2"/><text x="730" y="113" font-size="14" text-anchor="middle">コントローラー</text><text x="730" y="131" font-size="13" text-anchor="middle" fill="#4a5d54">PV と PVC を作る</text>
-        <g stroke="#4a5d54" stroke-width="2" fill="none" marker-end="url(#a17)"><path d="M222 45 L296 45"/><path d="M222 185 L296 185"/><path d="M532 50 L616 105"/><path d="M532 180 L616 125"/></g>
-        <text x="415" y="110" font-size="13" text-anchor="middle" fill="#c0492f">利用者は PV に触れない</text>
-        <defs><marker id="a17" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      <svg viewBox="0 0 860 250" role="img" aria-label="v1 は丸ごと配り専用の Claim で申し込む。v2 はパスごとに配りいつもの PVC で申し込む">
+        <text x="210" y="24" font-size="14" text-anchor="middle" fill="#c0492f" font-weight="600">最初の形: 丸ごと、専用の Claim</text>
+        <text x="650" y="24" font-size="14" text-anchor="middle" fill="#198754" font-weight="600">今の形: パスごと、いつもの PVC</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="40" y="44" width="340" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="210" y="69">SharedFilesystem(ファイルシステム)</text>
+          <rect x="40" y="114" width="160" height="40" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="120" y="139">Claim(専用の CR)</text>
+          <rect x="220" y="114" width="160" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="300" y="139">PVC + PV</text>
+          <rect x="40" y="184" width="340" height="40" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="210" y="209">マウントされるのは全体</text>
+          <rect x="480" y="44" width="340" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="650" y="69">FilesystemShare(1 つのパス)</text>
+          <rect x="480" y="114" width="160" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="560" y="139">いつもの PVC</text>
+          <rect x="660" y="114" width="160" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="740" y="139">PV(係が作る)</text>
+          <rect x="480" y="184" width="340" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="650" y="209">マウントされるのはそのパスだけ</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a17a)"><path fill="none" d="M120 86 L120 110"/><path fill="none" d="M200 134 L216 134"/><path fill="none" d="M210 156 L210 180"/><path fill="none" d="M560 86 L560 110"/><path fill="none" d="M640 134 L656 134"/><path fill="none" d="M650 156 L650 180"/></g>
+        <defs><marker id="a17a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
-      <p class="cap">図: 書き手ごとに CR を分けると、権限の境界がそのまま RBAC になる。</p>
+      <p class="cap">図: 変えたのは「配る単位」と「申し込みの形」の 2 つ。利用者が覚える CR は 0 個になった。</p>
     </div>
-    <p>「読み取り専用で配る先」と「読み書きで配る先」を分けたい場合、最初の設計では同じ PV を指す SharedFilesystem を 2 つ作る運用だった。レビューで「それでは名前がファイルシステムでなく許可の名前になっている」と指摘され、1 つの SharedFilesystem に許可の一覧(<code>grants</code>)を持たせる形に変えた。複数の許可に当てはまる namespace は、その中で一番強いアクセスを得る。</p>
+    <p>この作り直しで変わらなかったものもある。書き手を分けるという考え方(配ってよい先を決めるのは管理者だけ)、読み取り専用は <code>ro</code> のマウントオプションで強制すること、許可が消えたら猶予の後に取り上げることだ。書き手の分け方は、管理者が FilesystemShare を書き、利用者は自分の namespace の PVC だけを書く、という形でそのまま残る。</p>
   </section>
   <section>
-    <h2>2. 生成する PV と PVC の形</h2>
-    <p>Claim 1 つにつき、PV を 1 本と PVC を 1 つ作る。どの項目も「何を防ぐためにそうするか」が決まっている。</p>
+    <h2>2. 管理者が書くもの、利用者が書くもの</h2>
+    <p>FilesystemShare はクラスタ全体に置く CR で、管理者だけが書く。1 つの share は<b>1 つのファイルシステムの 1 つのパス</b>だ。パスの一部に <code>{namespace}</code> と書くと、申し込んだ namespace の名前に置き換わる。チームごとのチェックポイントのように「同じ形でチームごとに別の場所」を配りたいとき、share を 1 つ書くだけで済む。</p>
+    <pre><code>apiVersion: sharedfs.littlemex.github.io/v1alpha1
+kind: FilesystemShare
+metadata: {name: checkpoints}
+spec:
+  persistentVolumeRef: {name: fsx-lustre}
+  path: "checkpoints/{namespace}"
+  provision: {gid: 1000, mode: "2770"}
+  grants:
+  - {namespaceSelector: {matchExpressions: [{key: example.com/team, operator: Exists}]}, access: ReadWrite}</code></pre>
     <table>
-      <tr><th>項目</th><th>決めた値</th><th>防ぐこと</th></tr>
-      <tr><td>PV の名前</td><td><code>sfc-&lt;Claim の UID&gt;</code></td><td>namespace と名前をつなげると、namespace <code>a-b</code> の Claim <code>c</code> と、namespace <code>a</code> の Claim <code>b-c</code> がどちらも <code>a-b-c</code> になる。UID(一意な番号)なら重ならず、名前から Claim を逆にたどれる</td></tr>
-      <tr><td><code>volumeHandle</code></td><td>元の値 + <code>-sfc-</code> + Claim の UID</td><td>同じ handle の PV が同じノードで取り違えられる。ドライバはマウントに handle を使わず <code>volumeAttributes</code> の接続先を使うことをソースで確認済み</td></tr>
-      <tr><td><code>claimRef</code></td><td>namespace と名前だけ</td><td>別の namespace に横取りされる。uid は書かず、PV コントローラー(kube-controller-manager の中で PV と PVC を結ぶ役)に任せる</td></tr>
-      <tr><td>回収方針</td><td>必ず <code>Retain</code></td><td>PVC が消えたときに、ドライバへファイルシステムの削除が頼まれうる</td></tr>
-      <tr><td>accessModes / マウントオプション</td><td><code>ReadWriteMany</code>、読み取り専用なら <code>ro</code> を足す</td><td>両ドライバが <code>ReadOnlyMany</code> を拒否する(第 16 回の実測)</td></tr>
-      <tr><td>PVC の <code>storageClassName</code></td><td>空文字 <code>""</code>(未設定ではない)</td><td>既定の StorageClass があるクラスタでは、未設定の PVC にその名前が入り、<code>""</code> の PV と食い違って結び付かない(公式ドキュメントの規則。検証したクラスタには既定が無く、未設定でも結び付いた)</td></tr>
-      <tr><td>PVC の容量の申し込み</td><td>1Gi と元の容量の小さい方</td><td>4800Gi をそのまま申し込むと、namespace の容量の上限(ResourceQuota)に引っかかる</td></tr>
+      <tr><th>項目</th><th>意味</th><th>なぜその形か</th></tr>
+      <tr><td><code>persistentVolumeRef</code></td><td>既にある静的 PV(ファイルシステムの接続先を持つ)</td><td>接続先の値を管理者が手で写さずに済む</td></tr>
+      <tr><td><code>path</code></td><td><code>"/"</code> か、<code>[A-Za-z0-9._-]</code> の区切り(<code>.</code> や <code>-</code> で始まらない)か <code>{namespace}</code></td><td><code>..</code> や隠しディレクトリ、オプションに見える名前を入口で断る。最大 32 区切り、全体で 1024 バイト</td></tr>
+      <tr><td><code>grants</code></td><td>namespace の選び方と、<code>ReadOnly</code> か <code>ReadWrite</code></td><td>空のセレクタは「全部」と読まれるので CEL で禁止する(第 06 回)</td></tr>
+      <tr><td><code>provision</code></td><td>任意。初めて使うときにディレクトリを作る持ち主と権限</td><td>管理者が先に作る運用でもよい。<code>path: "/"</code> とは組み合わせられない</td></tr>
     </table>
-    <p>作る順番にも理由がある。まず同じ名前の PVC が既に無いか(あれば他人のものか)を確かめ、空いていれば PV を作り、最後に PVC を作る。名前が他人に取られているなら PV を予約しない。そして PV を先に作っておくと、PVC ができた最初の瞬間に PV コントローラーが予約済みの PV を見つけて結ぶ(bind する)。逆の順番だと、PV が後から現れても PVC 側は次の定期的な見直しまで待たされる。そこで PV を初めて作ったときは、PV コントローラーの手元に PV が届くよう 1 秒おいてから PVC を作る。最初の実装は逆で、これが Claim を作ってから使えるまでの時間を延ばしていた(第 18 回)。</p>
-    <p>PV と PVC で書き方も変えた。PV は Server-Side Apply(第 11 回)で書く。<code>claimRef</code> は SSA で項目ごとに持ち主を分けられる作りになっていて(ソースに <code>+structType=granular</code> とある)、namespace と名前はこのコントローラー、uid は PV コントローラーと、二者が互いの書いた値を消さずに同じ項目を共有できる。PVC は<b>spec を作成時に決め、二度と書き換えない</b>。後から書くのは、外された ownerReference の付け直しと、結び付き先を失った(Lost の)PVC の作り直しだけだ。SSA や <code>CreateOrUpdate</code> で書くと、同じ名前で他人が作った PVC を黙って自分のものにしてしまうからだ。</p>
+    <p>許可の一覧以外は、作った後に変えられない(CEL の <code>self</code> と <code>oldSelf</code>、第 06 回)。もう PV を配っている share のパスが後から変わると、既に配った PV と新しく配る PV が別の場所を指すことになるからだ。パスを変えたいときは、別の share を作る。</p>
+    <p>利用者が書くのは普通の PVC で、<code>storageClassName</code> に share の名前と <code>-rw</code> か <code>-ro</code> を付けるだけだ。<code>team-a</code> の PVC は <code>checkpoints/team-a</code> だけをマウントし、その上は見えない。</p>
+    <pre><code>apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ckpt, namespace: team-a}
+spec:
+  storageClassName: checkpoints-rw
+  accessModes: [ReadWriteMany]
+  resources: {requests: {storage: 1Gi}}</code></pre>
     <div class="fig">
-      <svg viewBox="0 0 860 210" role="img" aria-label="claimRef の namespace と name はこのコントローラー、uid は PV コントローラーが持つ">
-        <rect x="250" y="20" width="360" height="170" rx="10" fill="#fff" stroke="#4a5d54"/>
-        <text x="270" y="48" font-size="14" font-weight="600">PV sfc-&lt;uid&gt; の claimRef</text>
-        <rect x="270" y="64" width="320" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="290" y="86" font-size="13">namespace: team-a</text>
-        <rect x="270" y="104" width="320" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="290" y="126" font-size="13">name: data</text>
-        <rect x="270" y="144" width="320" height="34" rx="6" fill="#e6eef8" stroke="#1d4e8f"/><text x="290" y="166" font-size="13">uid: (bind のときに書かれる)</text>
-        <text x="20" y="104" font-size="14" fill="#0f5132">sharedfs</text><text x="20" y="124" font-size="13" fill="#4a5d54">(SSA の持ち主)</text>
-        <text x="650" y="166" font-size="14" fill="#1d4e8f">PV コントローラー</text>
-        <g stroke-width="2" fill="none" marker-end="url(#a17b)"><path d="M120 100 L266 82" stroke="#198754"/><path d="M120 108 L266 120" stroke="#198754"/><path d="M646 162 L594 161" stroke="#1d4e8f"/></g>
+      <svg viewBox="0 0 860 260" role="img" aria-label="1 つの share と 2 つの StorageClass から、namespace ごとに別のディレクトリを指す PV ができる">
+        <g font-size="13" text-anchor="middle">
+          <rect x="20" y="100" width="190" height="56" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="115" y="124">FilesystemShare</text><text x="115" y="144" fill="#1d4e8f">checkpoints/{namespace}</text>
+          <rect x="260" y="60" width="170" height="40" rx="8" fill="#fff" stroke="#1d4e8f"/><text x="345" y="85">checkpoints-rw</text>
+          <rect x="260" y="156" width="170" height="40" rx="8" fill="#fff" stroke="#1d4e8f"/><text x="345" y="181">checkpoints-ro</text>
+          <rect x="480" y="30" width="150" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="555" y="55">PVC(team-a)</text>
+          <rect x="480" y="100" width="150" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="555" y="125">PVC(team-b)</text>
+          <rect x="680" y="30" width="160" height="40" rx="8" fill="#fff" stroke="#0f5132"/><text x="760" y="55">.../team-a</text>
+          <rect x="680" y="100" width="160" height="40" rx="8" fill="#fff" stroke="#0f5132"/><text x="760" y="125">.../team-b</text>
+          <text x="345" y="234" fill="#4a5d54">StorageClass は share が持ち主</text>
+          <text x="760" y="180" fill="#4a5d54">PV がマウントする場所</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a17b)"><path fill="none" d="M212 118 L256 84"/><path fill="none" d="M212 138 L256 172"/><path fill="none" d="M476 50 L434 76"/><path fill="none" d="M476 118 L434 88"/><path fill="none" d="M634 50 L676 50"/><path fill="none" d="M634 120 L676 120"/></g>
         <defs><marker id="a17b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
-      <p class="cap">図: 同じ claimRef の中で、項目ごとに持ち主が違う。SSA だからこそ二者が消し合わない。</p>
+      <p class="cap">図: PVC は StorageClass を名指しするだけ。どのディレクトリになるかは、PVC の namespace と share のパスで決まる。</p>
     </div>
-    <p>「この PVC は自分のものか」の判定にも落とし穴があった。最初は ownerReference(親子関係の印)で判定する設計だったが、ownerReference は PVC の持ち主であるテナントが自由に消せる。消されると「自分の PVC ではない」と誤認し、許可を取り上げたいときに消すべき PVC を見失う。そこで判定は <b>PVC の <code>spec.volumeName</code> が <code>sfc-&lt;Claim の UID&gt;</code> を指しているか</b>にした。Kubernetes のソースのコメントにも「PV と PVC の結び付きを決めるのは <code>claim.VolumeName</code>」とあり、テナントがこれを他の PV に向けても、その PV は予約が合わないので何も得られない。</p>
+    <p>StorageClass は、許可にどの強さが含まれるかに関係なく<b>いつも 2 つとも</b>作る。片方しか無いと、許されない強さで申し込んだ PVC は「その StorageClass が無い」という理由で待たされ、本当の理由(許可が無い)が伝わらないからだ。share が使えない状態(Ready でない)でも作る。そうすれば PVC には「share が使えない」という理由が届く。</p>
+    <p>もう 1 種類、コントローラー自身が書く <code>FilesystemShareDirectory</code> がある。<code>{namespace}</code> を含む share のディレクトリについて、「最初に使った namespace の UID(一意な番号)」を記録する CR だ。namespace を消して同じ名前で作り直すと UID が変わるので、別のチームが前のチームのディレクトリを黙って受け継ぐことを防げる。これは第 4 節で使う。</p>
   </section>
   <section>
-    <h2>3. 配る条件と、取り上げる条件</h2>
-    <p>コントローラーが守る約束は 1 つにした。<b>SharedFilesystem が無くなるか、その namespace への許可(またはその強さの許可)が無くなって猶予を過ぎたら、新しいマウントはできなくなる</b>。この約束を守るには、許可が無くなったときに PVC を消す必要がある。ただし「拒否」にはいろいろな理由があり、全部で PVC を消すと危ない。元の PV が一瞬読めないだけで、全チームの PVC が消えてしまうからだ。そこで拒否の理由を 2 種類に分けた。</p>
+    <h2>3. 係として作る PV の形</h2>
+    <p>Kubernetes では、StorageClass を名指しした PVC が来ると、PV コントローラー(kube-controller-manager の中で PV と PVC を結ぶ役)がその PVC に「この StorageClass の係はこれだ」という印(注釈 <code>volume.kubernetes.io/storage-provisioner</code>)を付ける。係はその印の付いた PVC を見つけて PV を作り、PV コントローラーが 2 つを結ぶ(bind する)。これを外部プロビジョナー(Kubernetes の外で書かれた、PV を用意する係)と呼ぶ。sharedfs は自分の印 <code>sharedfs.littlemex.github.io</code> が付いた PVC だけを扱う。PV のどの項目も「何を防ぐためにそうするか」が決まっている。</p>
     <table>
-      <tr><th>種類</th><th>理由(Accepted 条件の reason)</th><th>既にある PVC と PV</th></tr>
-      <tr><td class="no">許可が無い</td><td><code>NamespaceNotGranted</code>(どの許可にも選ばれない)、<code>AccessNotGranted</code>(読み書きを頼んだが読み取り専用しか許されていない)、<code>FilesystemNotFound</code>(SharedFilesystem が無い)</td><td>猶予の後に取り上げる</td></tr>
-      <tr><td class="y">許可とは別の理由</td><td><code>FilesystemDeleting</code>、<code>SourceNotFound</code>、<code>UnsupportedDriver</code>、<code>InvalidGrant</code> など</td><td>そのまま残す</td></tr>
+      <tr><th>項目</th><th>決めた値</th><th>防ぐこと</th></tr>
+      <tr><td>PV の名前</td><td><code>sfs-&lt;PVC の UID&gt;</code></td><td>やり直しても同じ名前になるので、二重に作らない(作成が「もうある」で失敗したら成功とみなす)</td></tr>
+      <tr><td><code>volumeHandle</code></td><td><code>sharedfs:&lt;PVC の UID&gt;</code></td><td>ファイルシステムの ID に見えない値なので、ドライバ側の係が「自分のファイルシステム」と取り違えない。ドライバはマウントに handle を使わない(第 16 回でソースを確認)</td></tr>
+      <tr><td>マウント先</td><td><code>mountname</code> の後ろにパスを足す(<code>&lt;元の値&gt;/checkpoints/team-a</code>)</td><td>そのディレクトリより上が見えない(第 16 回の実測)</td></tr>
+      <tr><td>注釈 <code>pv.kubernetes.io/provisioned-by</code></td><td>sharedfs</td><td>PVC が消えた後の PV を PV コントローラーもドライバの係も触らず、消すのは sharedfs だけになる。ファイルシステムに削除が頼まれることが無い</td></tr>
+      <tr><td>回収方針</td><td><code>Delete</code>(消えるのは PV の札だけ)</td><td>使い終わった PV が Released のまま溜まる。第 16 回の「Released の罠」がそもそも起きない</td></tr>
+      <tr><td><code>claimRef</code></td><td>PVC の namespace、名前、UID</td><td>動的に作った PV と同じく、その PVC 以外とは結び付かない</td></tr>
+      <tr><td>accessModes</td><td><code>ReadWriteMany</code> を先頭に、PVC が頼んだものを後ろに</td><td>kubelet は先頭の値をドライバに渡し、ドライバは <code>ReadOnlyMany</code> を断る(第 16 回)。一方で PV コントローラーは、PVC が頼んだ値が全部 PV に含まれないと結ばない</td></tr>
+      <tr><td>マウントオプション</td><td>読み取り専用なら <code>ro</code>。元が <code>flock</code> なら <code>localflock</code> に変える</td><td>読み取り専用の側が、ファイルシステム全体に効くロックを持てない</td></tr>
+      <tr><td><code>fsType</code></td><td>書かない</td><td>Pod の <code>fsGroup</code> に合わせて、kubelet が共有ディレクトリの持ち主を丸ごと書き換えるのを防ぐ</td></tr>
     </table>
-    <p>SharedFilesystem が削除中(<code>FilesystemDeleting</code>)でも PVC を残すのは、管理者が誤って削除した場合に、使っているチームを巻き込まないためだ。SharedFilesystem の finalizer は、生成した PV が全部消えるまで本当の削除を待つ。管理者が本当に取り上げたいときは、許可を外せばよい。</p>
-    <p>許可の判定は、削除中かどうかや元の PV の検査よりも先に行う(ただし許可の書き方そのものが壊れている場合は、壊れていると報告するだけで取り上げない)。最初の設計では「SharedFilesystem が削除中か」を先に見ていたので、管理者が削除中の SharedFilesystem から許可を外しても取り上げが効かなかった。順番を入れ替えるだけで直る穴だった。</p>
-    <p>取り上げにはさらに 2 つの安全装置を付けた。1 つは<b>猶予期間</b>(既定 30 秒)だ。GitOps(Git の中身にクラスタを合わせる運用)の同期中にラベルが一瞬外れても、30 秒以内に戻れば何も消さない。取り上げの対象になった瞬間に、その期限(今の時刻 + 猶予)を Claim の status の <code>withdrawAfter</code> に書く。最初は「Accepted 条件が False になった時刻」から数えていたが、別の理由で既に False だった Claim ではその時刻が古く、ラベルが外れた瞬間に猶予ゼロで消える経路があると 4 回目のレビューで分かった。もう 1 つは<b>消す直前の読み直し</b>で、キャッシュ(第 09 回)ではなく API サーバーから namespace と SharedFilesystem を直接読み、まだ許可が無いと確かめてから消す。</p>
+    <p>PVC の中には、係が応えられない注文もある。<code>selector</code>(PV を選ぶ条件)、<code>volumeMode: Block</code>(ファイルでなく生のディスクとして使う)、<code>dataSource</code>(既存データの複製)、<code>ReadWriteOncePod</code>(1 つの Pod だけ)などだ。黙って無視すると頼まれていない PV を結んでしまうので、PV を作らずに Event(<code>UnsupportedClaim</code>)で理由を伝える。StorageClass には <code>allowVolumeExpansion: false</code> を付けるので、容量を増やす申し込みは API サーバーが断る。</p>
     <div class="fig">
-      <svg viewBox="0 0 860 180" role="img" aria-label="許可が外れてから猶予、読み直し、PVC の削除、Pod 停止で PV の削除までの時間の流れ">
+      <svg viewBox="0 0 860 200" role="img" aria-label="PVC に係の印が付き、sharedfs が PV を作り、PV コントローラーが結ぶ。PVC が消えると Released になった PV を sharedfs が消す">
+        <g font-size="13" text-anchor="middle">
+          <rect x="20" y="40" width="130" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="85" y="65">PVC を作る</text>
+          <rect x="190" y="40" width="160" height="40" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="270" y="65">PV コントローラー</text>
+          <rect x="390" y="40" width="150" height="40" rx="8" fill="#fff" stroke="#0f5132"/><text x="465" y="65">sharedfs</text>
+          <rect x="580" y="40" width="130" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="645" y="65">PV(sfs-…)</text>
+          <rect x="740" y="40" width="100" height="40" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="790" y="65">Bound</text>
+          <text x="270" y="104" fill="#4a5d54">係の印を付ける</text>
+          <text x="465" y="104" fill="#4a5d54">許可を確かめて作る</text>
+          <rect x="20" y="140" width="130" height="40" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="85" y="165">PVC が消える</text>
+          <rect x="190" y="140" width="160" height="40" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="270" y="165">PV は Released</text>
+          <rect x="390" y="140" width="150" height="40" rx="8" fill="#fff" stroke="#0f5132"/><text x="465" y="165">sharedfs が消す</text>
+          <text x="690" y="165" fill="#4a5d54">ファイルとディレクトリは残る</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a17c)"><path fill="none" d="M152 60 L186 60"/><path fill="none" d="M352 60 L386 60"/><path fill="none" d="M542 60 L576 60"/><path fill="none" d="M712 60 L736 60"/><path fill="none" d="M152 160 L186 160"/><path fill="none" d="M352 160 L386 160"/></g>
+        <defs><marker id="a17c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+      </svg>
+      <p class="cap">図: 結ぶのは Kubernetes の PV コントローラーで、sharedfs は PV を作ることと、使い終わった PV の札を消すことだけを受け持つ。</p>
+    </div>
+  </section>
+  <section>
+    <h2>4. 配る条件と、取り上げる条件</h2>
+    <p>PVC に PV を作るのは、<b>share の許可のうち 1 つが、その namespace を選び、かつ StorageClass の強さを許すとき</b>だけだ。読み書きの許可は読み取り専用も含む。許可を複数組み合わせて判定しないのは、パスと強さがいつも同じ share から来るようにするためだ。当てはまらなければ、PVC は Pending のまま Event(<code>NotGranted</code>)で理由を伝える。Event は約 1 時間で消えるので、待っている間は 30 分ごとに出し直す。</p>
+    <p>取り上げは、許可が消えたときに PVC を消すことで行う。ここで v1 から変わらない 2 つの安全装置を使う。1 つは<b>猶予期間</b>(既定 30 秒)で、GitOps(Git の中身にクラスタを合わせる運用)の同期中にラベルが一瞬外れても、戻れば何も消さない。もう 1 つは<b>消す直前の読み直し</b>で、キャッシュ(第 09 回)ではなく API サーバーから share と namespace を直接読み、まだ許可が無いと確かめてから消す。消すときは PVC の UID を前提条件に付けるので、同じ名前で作り直された別の PVC を間違って消すことも無い。</p>
+    <p>変わったのは、期限を書く場所だ。今の形では利用者の側に専用の CR が無いので、期限を PVC に書くことになる。しかし PVC はテナントが自由に書き換えられるので、期限を消し続ければ取り上げを先延ばしにできてしまう。そこで期限は <b>PV の注釈</b>(<code>withdraw-after</code>)に書く。PV を書けるのはクラスタの管理者だけだ。同じ理由で、PVC のラベルも判定に一切使わない。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 180" role="img" aria-label="許可が外れてから PV に期限を書き、猶予、読み直し、PVC の削除、Pod 停止で PV の削除まで">
         <line x1="40" y1="110" x2="830" y2="110" stroke="#4a5d54" stroke-width="2"/>
         <g font-size="13" text-anchor="middle">
-          <circle cx="80" cy="110" r="6" fill="#c0492f"/><text x="80" y="90">許可が外れる</text><text x="80" y="140" fill="#4a5d54">withdrawAfter</text><text x="80" y="156" fill="#4a5d54">を記録</text>
-          <rect x="100" y="98" width="260" height="24" fill="#fdf3e2" stroke="#8a5a12"/><text x="230" y="90">猶予 30 秒(戻れば何もしない)</text>
+          <circle cx="80" cy="110" r="6" fill="#c0492f"/><text x="80" y="90">許可が外れる</text><text x="80" y="140" fill="#4a5d54">PV に期限を書く</text>
+          <rect x="100" y="98" width="260" height="24" fill="#fdf3e2" stroke="#8a5a12"/><text x="230" y="90">猶予 30 秒(戻れば期限を消す)</text>
           <circle cx="380" cy="110" r="6" fill="#1d4e8f"/><text x="380" y="140">API から読み直す</text>
           <circle cx="500" cy="110" r="6" fill="#c0492f"/><text x="500" y="90">PVC を削除</text>
           <rect x="510" y="98" width="200" height="24" fill="#fbeeea" stroke="#c0492f"/><text x="610" y="140">動いている Pod は使い続ける</text><text x="610" y="156">新しい Pod は起動できない</text>
           <circle cx="740" cy="110" r="6" fill="#198754"/><text x="760" y="72">Pod が止まると</text><text x="760" y="90">PVC と PV が消える</text>
         </g>
       </svg>
-      <p class="cap">図: 取り上げは即時ではない。猶予と読み直しの後に PVC を消し、Pod が止まって初めて PV まで消える。</p>
+      <p class="cap">図: 期限はテナントが書けない PV に置く。消すのは PVC だけで、ファイルは残る。</p>
     </div>
-    <div class="warn"><b>取り上げても、動いている Pod は止まらない。</b> PVC を消しても、Kubernetes の pvc-protection(使用中の PVC を守る仕組み)が、その PVC を使う Pod が止まるまで本当の削除を待たせる。新しい Pod は起動できなくなるが、既に動いている Pod は書き続けられる。この限界は README に明記し、Claim の Ready 条件のメッセージに「まだマウントしている Pod の名前」を出すようにした。今すぐ止める必要があるなら、管理者が Pod を退去させる。</div>
+    <p>取り上げの理由は「許可が無い」ことに絞った。share が一時的に使えない(元の PV が読めない、ドライバの設定が危ない、など)ときは、新しい PVC に PV を作らないだけで、既に配った PV は取り上げない。元の PV が一瞬読めないだけで全チームの PVC が消えるのを避けるためだ。読み書きの PV を持つ namespace の許可が読み取り専用に下がった場合は、許可が無いのと同じに扱う。</p>
+    <p>namespace の作り直しにも備える。<code>{namespace}</code> を含む share では、ディレクトリを最初に使った namespace の UID を FilesystemShareDirectory に記録しておく。同じ名前の namespace が後から作られて PVC を出しても、UID が違うので PV を作らず、Event(<code>NamespaceRecreated</code>)で理由を伝える。管理者が記録を消せば、新しい namespace がそのディレクトリを使えるようになる。</p>
+    <div class="warn"><b>取り上げても、動いている Pod は止まらない。</b> Kubernetes の pvc-protection(使用中の PVC を守る仕組み)が、その PVC を使う Pod が止まるまで本当の削除を待たせる。また、消した PVC は許可が戻っても作り直されない。間違ったラベル変更で PVC を失わないよう、猶予は運用に合わせて長めにできる。この 2 つは README に明記した。</div>
   </section>
   <section>
-    <h2>4. 3 つのコントローラーの責任分担</h2>
-    <p>1 つのプログラム(manager、第 15 回)の中で、3 つのコントローラーを動かす。分け方の基準は「何をキーに動くか」と「何を書くか」だ。各コントローラーは自分の担当の status だけを書き、他人の status は書かない。</p>
+    <h2>5. share を使ってよいかの検査</h2>
+    <p>share のコントローラーは、share が「PV を配ってよい状態か」を決め、<code>Ready</code> 条件(第 08 回)に理由と一緒に書く。Ready でない share の PVC には PV を作らない。検査は、穴があると誰かがファイルシステム全体に届いてしまうものから順に並べた。</p>
+    <table>
+      <tr><th>検査</th><th>落ちたときの理由(reason)</th><th>無いと何が起きるか</th></tr>
+      <tr><td>元の PV が予約されているか(<code>claimRef</code> がある)</td><td><code>SourceUnreserved</code></td><td>予約の無い PV は、どの namespace の PVC からも名前で指名して結べる。ファイルシステム全体を許可なしで使われる</td></tr>
+      <tr><td>ドライバがディレクトリを扱えるか</td><td><code>SubPathUnsupported</code></td><td>OpenZFS は根以外のパスを断る(第 16 回)。パスは <code>"/"</code> だけにする</td></tr>
+      <tr><td>CSIDriver の設定</td><td><code>UnsafeDriverPolicy</code></td><td><code>fsGroupPolicy: File</code> だと kubelet が共有ディレクトリの持ち主を書き換える。一時ボリュームの方式(Ephemeral)が許されていると、Pod が PV なしで直接マウントできる</td></tr>
+      <tr><td>他の share との重なり</td><td><code>OverlappingShare</code></td><td>下で説明する</td></tr>
+      <tr><td>StorageClass の名前が空いているか</td><td><code>StorageClassTaken</code></td><td>他人が作った同名の StorageClass を自分のものとして使ってしまう</td></tr>
+    </table>
+    <p>重なりの検査は、パス単位で配るようになって初めて必要になった。同じファイルシステムで、share A のパスが share B のパスを中に含み、A が読み書きを許しているとする。すると A の利用者は、B のディレクトリの名前を変えたり、B の利用者が読み込むファイル(たとえば学習の途中結果)を置き換えたりできる。そこで、<b>読み書きを許す外側の share と内側の share の組は、片方を Ready にしない</b>。<code>{namespace}</code> はどの名前にもなりうる区切りとして比べる。同じディレクトリを読み書き用と読み取り専用の 2 つの share で配るのは、データセットの普通の配り方なので許す。読み取り専用の外側は、警告を出すだけにする。</p>
+    <p>難しいのは「どちらを止めるか」だ。後から作った方を止める、という単純な決め方では穴が残る。share で後から変えられるのは許可の一覧だけなので、昔からある外側の share に、後から読み書きの許可を足せるからだ。そうすると、既に使われている内側の share が止まり、しかも外側は新しく読み書きの PV を配れてしまう。そこで外側の share には「初めて読み書きの許可を見た時刻」(<code>status.readWriteSince</code>)を記録し、<b>重なりを後から持ち込んだ側を止める</b>ことにした。外側はその時刻、内側は作られた時刻で比べ、同じ秒なら UID で決める。どちらの share から判定しても同じ答えになり、使われている share が後から来た share に止められることは無い。</p>
+    <div class="fig">
+      <svg viewBox="0 0 860 230" role="img" aria-label="外側の share に後から読み書きを足すと外側が止まり、内側は使われ続ける">
+        <line x1="60" y1="190" x2="820" y2="190" stroke="#4a5d54" stroke-width="2"/>
+        <g font-size="13" text-anchor="middle">
+          <circle cx="120" cy="190" r="6" fill="#1d4e8f"/><text x="120" y="215">外側 teams を作る(読み取り専用)</text>
+          <circle cx="360" cy="190" r="6" fill="#198754"/><text x="360" y="215">内側 teams/x を作る</text>
+          <circle cx="640" cy="190" r="6" fill="#c0492f"/><text x="640" y="215">外側に読み書きを足す</text>
+          <rect x="300" y="40" width="500" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="550" y="62">内側: Ready のまま、PV を配り続ける</text>
+          <rect x="580" y="96" width="220" height="34" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="690" y="118">外側: OverlappingShare</text>
+          <text x="160" y="110" fill="#4a5d54">比べるのは</text>
+          <text x="160" y="128" fill="#4a5d54">「内側を作った時刻」と</text>
+          <text x="160" y="146" fill="#4a5d54">「外側が読み書きになった時刻」</text>
+        </g>
+        <g stroke="#4a5d54" stroke-width="1.5" stroke-dasharray="4 3"><path fill="none" d="M360 184 L360 76"/><path fill="none" d="M640 184 L640 132"/></g>
+      </svg>
+      <p class="cap">図: 後から重なりを持ち込んだのは外側なので、外側が止まる。既に配った PV はこの検査では取り上げない。</p>
+    </div>
+    <p>管理者が自分用にファイルシステムの根を読み書きで持ちたい場合もある。外側の share に注釈 <code>allow-overlap: "true"</code> を付けると、その share は検査から外れる。</p>
+  </section>
+  <section>
+    <h2>6. 4 つのコントローラーの責任分担</h2>
+    <p>1 つのプログラム(manager、第 15 回)の中で、4 つのコントローラーを動かす。分け方の基準は「何をキーに動くか」と「何を書くか」で、どの項目にも書き手は 1 人しかいない。</p>
     <table>
       <tr><th>コントローラー</th><th>キー</th><th>書くもの</th><th>責任</th></tr>
-      <tr><td>SharedFilesystem</td><td>SharedFilesystem</td><td>自分の status と finalizer</td><td>元の PV が配れる状態かを表示する。自分を指す生成 PV が 1 本でも残っている間は、削除を待たせる</td></tr>
-      <tr><td>SharedFilesystemClaim</td><td>Claim</td><td>PV(SSA)、PVC(作成のみ)、Claim の status と finalizer</td><td>許可を判定し、PV と PVC を作り、Released を直し、許可が消えたら取り上げ、削除時に片付ける</td></tr>
-      <tr><td>Orphan(孤児の回収)</td><td>生成された PV</td><td>PVC と PV の削除</td><td>持ち主の Claim がもう無い PV を片付ける。起動時に全 PV を一度見直す</td></tr>
+      <tr><td>Share</td><td>FilesystemShare</td><td>share の status と finalizer、StorageClass(作成のみ)</td><td>配ってよいかの検査、StorageClass の持ち主、使われている PV が残る間は削除を待たせる</td></tr>
+      <tr><td>Provisioner(係)</td><td>PVC</td><td>テナントの PV、ディレクトリの記録(作成のみ)、PV の期限の注釈、PVC の削除</td><td>Pending の PVC に PV を作る。許可が消えた PVC を取り上げる</td></tr>
+      <tr><td>Directory</td><td>FilesystemShareDirectory</td><td>記録の status、下準備の Pod と専用の PVC と PV</td><td>ディレクトリを一度だけ作り、結果を書き、片付ける</td></tr>
+      <tr><td>Reclaim(回収)</td><td>PV</td><td>テナントの PV の削除</td><td>Released になった sharedfs の PV を消す</td></tr>
     </table>
-    <p>3 つめが必要な理由は、Claim の finalizer が働かない場合があるからだ。誰かが finalizer を手で外して Claim を消した、バックアップから Claim を戻したら UID が変わった、といった場合、PV は予約(namespace と名前)を持ったまま残る。後で同じ名前の namespace が作られると、許可されていないのにその PV を使えてしまう。PV をキーに動くコントローラーなら、Claim が無いことに気付いて片付けられる。PV の名前に Claim の UID が入っているので、PV を見るだけで「持ち主は誰だったか」が分かる。</p>
-    <p>Claim のコントローラーが元の PV の中身を、SharedFilesystem の status 経由ではなく<b>元の PV から直接読む</b>ようにしたのも、レビューで変えた点だ。status を経由すると、2 つのコントローラーの間に「どの時点の status なら信じてよいか」という約束が必要になり、片方が更新を書く前にもう片方が古い値を読む、という食い違いの種になる。</p>
+    <p>ディレクトリを作る仕事を Directory に分けたのは、ファイルシステムに触る仕事を、Kubernetes のオブジェクトだけを読み書きする係から切り離すためだ。コントローラー本体はファイルシステムをマウントしない。ディレクトリが要るときだけ、そのディレクトリの親だけをマウントする短命の Pod を、コントローラー自身の namespace で動かす。この Pod は root(UID 0)だが、持ち主を変える権限(<code>CAP_CHOWN</code>)以外の特権をすべて外し、API に話しかける鍵(サービスアカウントのトークン)も持たない。中身は第 18 回で見る。</p>
+    <p>所有関係(第 10 回)も、この分け方に合わせた。StorageClass はクラスタ全体のオブジェクトなので、クラスタ全体の share を親にできる。下準備の Pod と PVC は namespace に属するが、親はクラスタ全体の記録でよい(逆向きは張れない)。テナントの PV は誰の子にもしない。PVC が消えたときに PV の札を消すのは、ガベージコレクション(GC)ではなく Reclaim の仕事だ。</p>
     <div class="fig">
-      <svg viewBox="0 0 860 330" role="img" aria-label="どの変化がどのコントローラーを起こすかの対応表">
-        <text x="480" y="34" font-size="14" text-anchor="middle" font-weight="600">Claim</text>
-        <text x="630" y="34" font-size="14" text-anchor="middle" font-weight="600">SharedFilesystem</text>
-        <text x="780" y="34" font-size="14" text-anchor="middle" font-weight="600">Orphan</text>
-        <rect x="20" y="46" width="840" height="44" fill="#f3f9f6"/>
-        <text x="36" y="74" font-size="13">Claim の変化</text>
-        <circle cx="480" cy="70" r="9" fill="#198754"/>
-        <text x="630" y="75" font-size="13" text-anchor="middle" fill="#9aa">-</text>
-        <circle cx="780" cy="70" r="9" fill="#198754"/>
-        <rect x="20" y="90" width="840" height="44" fill="#fff"/>
-        <text x="36" y="118" font-size="13">同じ名前の PVC の変化</text>
-        <circle cx="480" cy="114" r="9" fill="#198754"/>
-        <text x="630" y="119" font-size="13" text-anchor="middle" fill="#9aa">-</text>
-        <circle cx="780" cy="114" r="9" fill="#198754"/>
-        <rect x="20" y="134" width="840" height="44" fill="#f3f9f6"/>
-        <text x="36" y="162" font-size="13">生成された PV の変化</text>
-        <circle cx="480" cy="158" r="9" fill="#198754"/>
-        <circle cx="630" cy="158" r="9" fill="#198754"/>
-        <circle cx="780" cy="158" r="9" fill="#198754"/>
-        <rect x="20" y="178" width="840" height="44" fill="#fff"/>
-        <text x="36" y="206" font-size="13">元の PV の変化</text>
-        <circle cx="480" cy="202" r="9" fill="#198754"/>
-        <circle cx="630" cy="202" r="9" fill="#198754"/>
-        <text x="780" y="207" font-size="13" text-anchor="middle" fill="#9aa">-</text>
-        <rect x="20" y="222" width="840" height="44" fill="#f3f9f6"/>
-        <text x="36" y="250" font-size="13">SharedFilesystem の変化</text>
-        <circle cx="480" cy="246" r="9" fill="#198754"/>
-        <circle cx="630" cy="246" r="9" fill="#198754"/>
-        <text x="780" y="251" font-size="13" text-anchor="middle" fill="#9aa">-</text>
-        <rect x="20" y="266" width="840" height="44" fill="#fff"/>
-        <text x="36" y="294" font-size="13">namespace のラベルの変化</text>
-        <circle cx="480" cy="290" r="9" fill="#198754"/>
-        <text x="630" y="295" font-size="13" text-anchor="middle" fill="#9aa">-</text>
-        <text x="780" y="295" font-size="13" text-anchor="middle" fill="#9aa">-</text>
+      <svg viewBox="0 0 860 300" role="img" aria-label="どの変化がどのコントローラーを起こすかの対応表">
+        <g font-size="13">
+          <text x="250" y="30" text-anchor="middle" font-weight="600">Share</text><text x="410" y="30" text-anchor="middle" font-weight="600">係</text><text x="570" y="30" text-anchor="middle" font-weight="600">Directory</text><text x="730" y="30" text-anchor="middle" font-weight="600">Reclaim</text>
+          <text x="20" y="66">FilesystemShare</text><text x="20" y="104">PVC</text><text x="20" y="142">PV</text><text x="20" y="180">Namespace</text><text x="20" y="218">ディレクトリの記録</text><text x="20" y="256">下準備の Pod / CSIDriver</text>
+        </g>
+        <g stroke="#cfe0d6"><line x1="160" y1="80" x2="820" y2="80"/><line x1="160" y1="118" x2="820" y2="118"/><line x1="160" y1="156" x2="820" y2="156"/><line x1="160" y1="194" x2="820" y2="194"/><line x1="160" y1="232" x2="820" y2="232"/></g>
+        <g fill="#198754">
+          <circle cx="250" cy="61" r="8"/><circle cx="410" cy="61" r="8"/><circle cx="570" cy="61" r="8"/>
+          <circle cx="410" cy="99" r="8"/>
+          <circle cx="250" cy="137" r="8"/><circle cx="410" cy="137" r="8"/><circle cx="730" cy="137" r="8"/>
+          <circle cx="410" cy="175" r="8"/>
+          <circle cx="410" cy="213" r="8"/><circle cx="570" cy="213" r="8"/>
+          <circle cx="570" cy="251" r="8"/><circle cx="250" cy="251" r="8"/>
+        </g>
       </svg>
-      <p class="cap">図: 行の変化が、丸の付いた列のコントローラーを起こす(第 09 回の Watches)。PVC は ownerReference ではなく名前で Claim に結ぶので、他人の PVC が消えたときも Claim が気付ける。</p>
+      <p class="cap">図: 行の変化が、丸の付いた列のコントローラーを起こす(第 09 回の Watches)。下の行は、Pod の変化が Directory を、CSIDriver の変化が Share を起こす。share の変化は、判定が変わりうるときだけ伝える。</p>
     </div>
   </section>
   <section>
-    <h2>5. 設計判断と、比べた案</h2>
-    <p>第 01〜15 回で学んだ道具の中から、何を使い、何を使わなかったかを表にする。使わなかったものにも理由がある。</p>
+    <h2>7. 設計判断と、比べた案</h2>
     <table>
       <tr><th>決めたこと</th><th>比べた案</th><th>理由</th></tr>
-      <tr><td>admission webhook は作らない</td><td>許可の判定を validating webhook で行う</td><td>1 つの CR だけで決まる規則(enum、既定値、変更不可)は CRD のスキーマと CEL で書ける(第 06・07 回)。許可は namespace のラベルや SharedFilesystem という他のオブジェクトに依存し、作った後にも変わる。webhook は Claim への書き込み(作成や更新)が来たときにしか呼ばれず、namespace のラベルが後から変わっても呼ばれないので、その変化に追いつけない。だから reconcile で毎回判定し、結果を condition に出す</td></tr>
-      <tr><td>ValidatingAdmissionPolicy も入れない</td><td>テナントが PV を直接作るのを VAP で禁止する</td><td>PV を書けるのは元々クラスタ管理者だけで、RBAC で足りる。雑な VAP は PV の bind を行う kube-controller-manager まで締め出しうる</td></tr>
-      <tr><td>許可のセレクタは空を禁止する(CEL)</td><td>空のセレクタは「全 namespace」と読む</td><td>打ち間違いで項目が消えると、意図せず全 namespace に開く。全 namespace に配りたいときは、明示的な書き方を求める</td></tr>
-      <tr><td>status は差分だけ送る(merge patch)</td><td>全体を Update する</td><td>finalizer の付け外しと status の書き込みが、楽観的排他(第 11 回)で何度もぶつかっていた。resourceVersion を付けない差分(merge patch)は衝突を検出しない代わりに後から書いた方が勝つ。status を書くのはこのコントローラーだけなので、それで安全になる</td></tr>
-      <tr><td>ドライバの対応表はコードに置く</td><td>設定ファイルで足せるようにする</td><td>表の 1 行は「このドライバのマウントは volumeHandle に依存しない」という安全性の主張で、ソースと実機で確かめたもの。設定で EFS(handle からマウントするドライバ)を足されると、黙って壊れる</td></tr>
-      <tr><td>バージョンは v1alpha1 だけ</td><td>最初から複数版と変換 webhook を用意する</td><td>変えるべき点がまだ実際の利用で出ていない。第 14 回の通り、版を足すのは形を変える必要が出てからでよい</td></tr>
+      <tr><td>申し込みは普通の PVC</td><td>専用の Claim CR</td><td>Helm、StatefulSet、一時ボリューム、学習用のオペレーターがそのまま使える。将来ドライバ側が同じ機能を持てば、StorageClass を差し替えるだけで移れる</td></tr>
+      <tr><td>1 つの share は 1 つのパス</td><td>1 つの share に複数のパスと、許可ごとのパス</td><td>パスと強さがいつも同じ share から来るので、許可を組み合わせた判定が要らない。share の一覧がそのままデータの目録になる</td></tr>
+      <tr><td>admission webhook も ValidatingAdmissionPolicy も入れない</td><td>他のオブジェクトを見る規則を webhook で</td><td>1 つの CR で決まる規則はスキーマと CEL で書ける。許可や重なりは他のオブジェクトに依存して後から変わるので、reconcile で毎回判定し condition に出す(第 12・13 回)。下準備用の PV は専用の PVC にだけ UID で予約されるので、他の PVC は結べない</td></tr>
+      <tr><td>期限は PV の注釈</td><td>PVC に書く</td><td>テナントが書き換えて取り上げを延ばせない</td></tr>
+      <tr><td>ディレクトリの記録は別の CR</td><td>share の status に一覧で持つ</td><td>記録を外すことは管理者の判断で、それは「オブジェクトを消す」という操作で表せる。一覧が大きくなる心配も無い</td></tr>
+      <tr><td>ドライバの対応表はコードに置く</td><td>設定で足せるようにする</td><td>表の 1 行は「このドライバのマウントは volumeHandle に依存しない」という安全性の主張。設定で EFS(handle からマウントする)を足されると黙って壊れる</td></tr>
+      <tr><td>バージョンは v1alpha1 だけ</td><td>最初から変換 webhook</td><td>まだ公開前で、形を変えてもよい段階。変換は形を変える必要が出てから(第 14 回)</td></tr>
     </table>
     <div class="fig">
       <svg viewBox="0 0 860 200" role="img" aria-label="規則の種類ごとに置き場所が違う">
         <g font-size="13" text-anchor="middle">
-          <rect x="20" y="30" width="250" height="60" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="145" y="55">1 つの CR だけで決まる規則</text><text x="145" y="75" fill="#4a5d54">enum・既定値・変更不可</text>
-          <rect x="300" y="30" width="250" height="60" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="425" y="55">他のオブジェクトに依存し、</text><text x="425" y="75">後から変わる規則</text>
-          <rect x="580" y="30" width="260" height="60" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="710" y="55">誰が書けるか</text><text x="710" y="75" fill="#4a5d54">PV は管理者だけ</text>
-          <rect x="20" y="130" width="250" height="44" rx="8" fill="#fff" stroke="#0f5132" stroke-width="2"/><text x="145" y="157">CRD のスキーマと CEL</text>
-          <rect x="300" y="130" width="250" height="44" rx="8" fill="#fff" stroke="#0f5132" stroke-width="2"/><text x="425" y="157">reconcile と condition</text>
-          <rect x="580" y="130" width="260" height="44" rx="8" fill="#fff" stroke="#0f5132" stroke-width="2"/><text x="710" y="157">RBAC</text>
+          <rect x="20" y="30" width="250" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="145" y="57">1 つの CR で決まる</text>
+          <rect x="305" y="30" width="250" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="430" y="57">他のオブジェクトで変わる</text>
+          <rect x="590" y="30" width="250" height="44" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="715" y="57">誰が書けるか</text>
+          <rect x="20" y="120" width="250" height="44" rx="8" fill="#fff" stroke="#198754"/><text x="145" y="147">スキーマと CEL</text>
+          <rect x="305" y="120" width="250" height="44" rx="8" fill="#fff" stroke="#1d4e8f"/><text x="430" y="147">reconcile と condition</text>
+          <rect x="590" y="120" width="250" height="44" rx="8" fill="#fff" stroke="#8a5a12"/><text x="715" y="147">RBAC と置き場所</text>
+          <text x="145" y="190" fill="#4a5d54">パスの形、変更不可</text><text x="430" y="190" fill="#4a5d54">許可、重なり、予約</text><text x="715" y="190" fill="#4a5d54">期限は PV、Pod は専用 namespace</text>
         </g>
-        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a17c)"><path d="M145 92 L145 126"/><path d="M425 92 L425 126"/><path d="M710 92 L710 126"/></g>
-        <defs><marker id="a17c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
+        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a17g)"><path fill="none" d="M145 76 L145 116"/><path fill="none" d="M430 76 L430 116"/><path fill="none" d="M715 76 L715 116"/></g>
+        <defs><marker id="a17g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
       </svg>
       <p class="cap">図: webhook を使わなかったのは、この題材の規則がどれも webhook 以外の置き場所に収まったから。</p>
     </div>
   </section>
   <section>
-    <h2>6. レビューで変わったこと</h2>
-    <p>設計と実装は、Fable 5.2 に 5 回見せた。1 回目は題材選び、2 回目は実装前の設計書、3 回目は実装後に「敵対的(壊す手順を探す)」「責任の分け方」「本質と名前」の 3 つの観点で別々に、4 回目と 5 回目は直した後の確認だ。最初の設計から、少なくとも次の 7 点が変わった。どれも「動くが、ある手順を踏むと約束が破れる」種類の欠陥で、テストや実機で落ちたものではなく、コードを読むレビューで見つかった。</p>
-    <table>
-      <tr><th>最初の設計</th><th>どう破れるか</th><th>今の設計</th></tr>
-      <tr><td>拒否したら PVC と PV を即削除</td><td>元の PV が一瞬読めないだけで、全チームの PVC が消える</td><td>許可が無い 3 つの理由だけで、猶予と読み直しの後に取り上げる</td></tr>
-      <tr><td>PVC の所有を ownerReference で判定</td><td>テナントが ownerReference を消すと、取り上げるべき PVC を見失う</td><td><code>spec.volumeName</code> で判定する</td></tr>
-      <tr><td>削除中かどうかを許可より先に判定</td><td>削除中の SharedFilesystem から許可を外しても、取り上げが効かない</td><td>許可を最初に判定する</td></tr>
-      <tr><td>SharedFilesystem が消えたら何もしない</td><td>finalizer を手で外すと、許可元の無い PV が残り続ける</td><td><code>FilesystemNotFound</code> も取り上げの理由にする</td></tr>
-      <tr><td>猶予の起点が condition の時刻</td><td>別の理由で既に拒否されていた Claim は猶予ゼロになる</td><td>status の <code>withdrawAfter</code> で起点を持つ</td></tr>
-      <tr><td>許可の数え方が Claim の数</td><td>拒否された Claim でも管理者の削除を止められる</td><td>実際にファイルシステムを掴んでいる生成 PV の数で数える</td></tr>
-      <tr><td>PVC を先に作り、PV を後に作る</td><td>PVC が定期的な見直しまで結び付かず、使えるまで 25 秒かかる</td><td>名前の衝突を確かめてから PV を先に作る</td></tr>
-    </table>
-    <p>テストの欠陥も 1 つ見つかった。envtest(第 15 回)でも、使用中の PVC と PV を守る保護用の finalizer は API サーバーが付ける。ところがそれを外す役(kube-controller-manager)が居ないので、そのままでは削除が終わらない。そこでテストが代わりに外す補助関数を書いていたが、それがこのコントローラー自身の finalizer まで外していた。そのため 3 つのテストが、コントローラーが何もしなくても通る状態になっていた。外すのを Kubernetes の保護用の finalizer だけに絞り、削除の順番は「Pod が使っている」状態を別の finalizer で真似して確かめるように直した。</p>
-    <div class="fig">
-      <svg viewBox="0 0 860 170" role="img" aria-label="取り上げの判断が、即時から猶予と読み直しつきに変わった">
-        <text x="20" y="28" font-size="14" fill="#c0492f" font-weight="600">最初</text>
-        <g font-size="13" text-anchor="middle">
-          <rect x="20" y="40" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="130" y="65">どんな拒否でも</text>
-          <rect x="300" y="40" width="220" height="40" rx="6" fill="#fbeeea" stroke="#c0492f"/><text x="410" y="65">すぐ削除</text>
-        </g>
-        <text x="20" y="118" font-size="14" fill="#198754" font-weight="600">今</text>
-        <g font-size="13" text-anchor="middle">
-          <rect x="20" y="126" width="220" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="130" y="151">許可が無い 3 理由だけ</text>
-          <rect x="300" y="126" width="220" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="410" y="151">猶予 30 秒</text>
-          <rect x="580" y="126" width="260" height="40" rx="6" fill="#e7f6ee" stroke="#198754"/><text x="710" y="151">API から読み直して削除</text>
-        </g>
-        <g stroke="#4a5d54" stroke-width="2" marker-end="url(#a17d)"><path d="M242 60 L296 60"/><path d="M242 146 L296 146"/><path d="M522 146 L576 146"/></g>
-        <defs><marker id="a17d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5d54"/></marker></defs>
-      </svg>
-      <p class="cap">図: 一番大きく変わったのは取り上げの判断。消す操作は元に戻せないので、条件を絞り、待ち、確かめてから行う。</p>
-    </div>
-  </section>
-  <section>
     <h2>まとめと次の回</h2>
-    <p>CR は書き手ごとに 2 種類に分け、生成する PV と PVC の各項目は「何を防ぐか」から決めた。守る約束は「許可が消えて猶予を過ぎたら、新しいマウントはできない」の 1 つで、取り上げは許可が無い理由に絞り、猶予と読み直しの後に行う。動いている Pod は止めないという限界は隠さずに書く。webhook を使わなかったのは、この題材の規則が全部スキーマ・reconcile・RBAC に収まったからだ。第 18 回では、この設計を実装し、本物の FSx で 39 項目を確かめた結果を見る。</p>
+    <p>配る単位をファイルシステムからパスに、申し込みを専用の CR から普通の PVC に変えた。管理者は FilesystemShare を書き、利用者は StorageClass の名前を書いた PVC を出すだけで、コントローラーは係として、そのパスだけをマウントする PV を作る。取り上げは許可が無いときだけ、猶予と読み直しの後に行い、期限はテナントが書けない PV に置く。パス単位にしたことで新しく要った重なりの検査は、「後から持ち込んだ側を止める」で決めた。第 18 回では、ディレクトリを作る Pod の中身と実装、そして本物の FSx for Lustre で 49 項目を確かめた結果を見る。</p>
     <div class="fig">
       <svg viewBox="0 0 860 110" role="img" aria-label="設計の 3 つの柱">
-        <g font-size="14" text-anchor="middle">
-          <rect x="20" y="30" width="250" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="145" y="60">書き手で分けた 2 つの CR</text>
-          <rect x="305" y="30" width="250" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="430" y="60">約束は 1 つ</text>
-          <rect x="590" y="30" width="250" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="715" y="60">責任で分けた 3 つの制御</text>
+        <g font-size="13" text-anchor="middle">
+          <rect x="20" y="30" width="250" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="145" y="60">パスごとに、いつもの PVC で</text>
+          <rect x="305" y="30" width="250" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="430" y="60">取り上げは猶予と読み直しの後</text>
+          <rect x="590" y="30" width="250" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="715" y="60">重なりは後から来た側を止める</text>
         </g>
       </svg>
       <p class="cap">図: 第 18 回は、この 3 つがコードのどこにあるかをたどる。</p>
@@ -328,118 +360,118 @@ spec:
   ============================================================ */
 const QUIZ = [
   {
-    q: '「配ってよい先」と「使いたい」を 1 つの CR にまとめず、SharedFilesystem と SharedFilesystemClaim に分けた一番の理由は？',
+    q: '最初の形(専用の Claim CR で申し込む)をやめて、普通の PVC で申し込む形にした一番の理由は？',
     opts: [
-      'CR は 1 種類につきフィールドを 10 個までしか持てないから',
-      '書く人(管理者と利用者)が違い、分ければ RBAC でそのまま書き手を分けられるから',
-      'namespace に属する CR は status を持てないから',
-      'kubebuilder が 1 つの CRD に 1 つのコントローラーしか作れないから',
-      'クラスタ全体の CR は削除できないから'
+      'CR は namespace に置けないから',
+      'Helm チャートや StatefulSet、一時ボリュームなど、StorageClass 名を書いた PVC を自分で作る道具がそのまま使えるから',
+      'PVC の方が API サーバーの負荷が小さいから',
+      '専用の CR は status を持てないから',
+      'PVC を使うと読み取り専用が自動で強制されるから'
     ],
     ans: 1,
     exps: [
-      'そんな上限は無い。',
-      '<b>これが正解。</b>1 つにまとめると、利用者に「配ってよい先」まで書ける権限を渡すことになる。書き手ごとに分ければ、Claim の作成権だけをチームに渡せばよい。',
-      'namespace に属する CR も status を持てる(第 08 回)。',
-      'kubebuilder はいくつでも API とコントローラーを作れる(第 15 回)。',
-      'クラスタ全体の CR も普通に削除できる。'
+      '違う。CR は namespace に置ける(第 05 回の scope)。v1 の Claim も namespace に置いていた。',
+      '<b>これが正解。</b>多くの道具は「storageClassName を書いた PVC」を自分で作る。専用の CR をはさむと、それらの道具からは使えない。PVC なら何も変えずに使える。',
+      '負荷の差は理由ではない。PVC も CR も API サーバーにとっては同じオブジェクトの読み書きだ。',
+      '違う。CR も status サブリソースを持てる(第 08 回)。',
+      '違う。読み取り専用は PVC の種類ではなく、係が作る PV のマウントオプション ro で強制する。'
     ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="書き手と CR の対応"><g font-size="13" text-anchor="middle"><rect x="20" y="25" width="120" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="80" y="52">管理者</text><rect x="170" y="25" width="140" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="240" y="52">SharedFilesystem</text><rect x="340" y="25" width="70" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="375" y="52">利用者</text><rect x="430" y="25" width="110" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="485" y="52">Claim</text></g></svg><p class="cap">図: 書き手 1 人に CR 1 種類。</p></div>' }
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="道具は PVC を作るだけ"><rect x="20" y="30" width="150" height="50" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="95" y="60" font-size="13" text-anchor="middle">Helm / StatefulSet</text><rect x="210" y="30" width="140" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="280" y="60" font-size="13" text-anchor="middle">PVC</text><rect x="390" y="30" width="150" height="50" rx="8" fill="#fff" stroke="#0f5132"/><text x="465" y="60" font-size="13" text-anchor="middle">sharedfs が PV</text><path fill="none" d="M172 55 L206 55" stroke="#4a5d54" stroke-width="2"/><path fill="none" d="M352 55 L386 55" stroke="#4a5d54" stroke-width="2"/></svg><p class="cap">図: 道具が作るのは PVC だけ。そこから先を係が受け持つ。</p></div>' }
   },
   {
-    q: '生成した PVC が「このコントローラーのものか」を、ownerReference ではなく spec.volumeName で判定するのはなぜ？',
+    q: 'share のパスが <code>checkpoints/{namespace}</code> のとき、namespace <code>team-a</code> の PVC(storageClassName: checkpoints-rw)の PV は、どこをマウントする？',
     opts: [
-      'ownerReference はクラスタ全体のオブジェクトにしか付けられないから',
-      'volumeName の方が文字数が短いから',
-      'ownerReference は PVC の持ち主のテナントが消せるので、消されると取り上げるべき PVC を見失うから',
-      'ownerReference を付けると PVC が bind されないから',
-      'volumeName は status に入っているので書き換えられないから'
+      'ファイルシステム全体',
+      'checkpoints ディレクトリ全体',
+      'checkpoints/team-a だけ',
+      'checkpoints/{namespace} という名前のディレクトリ',
+      'PVC の名前のディレクトリ'
     ],
     ans: 2,
     exps: [
-      '違う。namespace に属するオブジェクトは、同じ namespace の親かクラスタ全体の親を持てる。PVC には Claim を親とする ownerReference を付けている(GC 用)。',
-      '長さは関係ない。',
-      '<b>これが正解。</b>テナントは自分の PVC の metadata を編集できる。判定はテナントが意味のある書き換えをできない値、つまり予約付きの PV を指す volumeName で行う。ownerReference は外されたら付け直すだけの補助にした。',
-      'ownerReference は bind に影響しない。',
-      'volumeName は status ではなく spec の項目。'
+      '違う。全体を配るのは最初の形。今は share のパスだけを mountname の後ろに足す。',
+      '違う。それでは他のチームのディレクトリも見えてしまう。{namespace} は申し込んだ namespace の名前に置き換わる。',
+      '<b>これが正解。</b>{namespace} が team-a に置き換わり、その結果を mountname の後ろに足す。Lustre はそのディレクトリを根としてマウントするので、上は見えない。',
+      '違う。{namespace} は文字どおりの名前ではなく、置き換えの印だ。',
+      '違う。ディレクトリは PVC の名前ではなく、share のパスと namespace で決まる。同じ namespace の PVC はすべて同じディレクトリを指す。'
     ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="消せる印と意味のある印"><rect x="20" y="25" width="240" height="60" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="140" y="52" font-size="13" text-anchor="middle">ownerReference</text><text x="140" y="72" font-size="13" text-anchor="middle">テナントが消せる</text><rect x="300" y="25" width="240" height="60" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="420" y="52" font-size="13" text-anchor="middle">volumeName = sfc-UID</text><text x="420" y="72" font-size="13" text-anchor="middle">変えても得るものが無い</text></svg><p class="cap">図: 判定は右の印で行う。</p></div>' }
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 100" aria-label="パスの置き換え"><rect x="20" y="30" width="200" height="44" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="120" y="57" font-size="13" text-anchor="middle">checkpoints/{namespace}</text><rect x="320" y="30" width="220" height="44" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="430" y="57" font-size="13" text-anchor="middle">checkpoints/team-a</text><path fill="none" d="M222 52 L316 52" stroke="#4a5d54" stroke-width="2"/><text x="270" y="44" font-size="12" text-anchor="middle" fill="#4a5d54">team-a</text></svg><p class="cap">図: 置き換えた結果だけがマウントされる。</p></div>' }
   },
   {
-    q: '元の PV が一時的に読めなくなり、全 Claim が Accepted=False(SourceNotFound)になった。既にある PVC と PV はどうなる？',
+    q: '許可が外れたときの取り上げ期限を、PVC ではなく PV の注釈に書くのはなぜ？',
     opts: [
-      '猶予 30 秒の後に全部削除される',
-      'すぐに全部削除される',
-      'PVC だけ削除され、PV は残る',
-      'PV だけ削除され、PVC は Lost になる',
-      'そのまま残る。取り上げるのは「許可が無い」3 つの理由だけ'
+      'PVC には注釈を付けられないから',
+      'PV の方が先に消えるから',
+      'PVC はテナントが書き換えられ、期限を消し続ければ取り上げを延ばせてしまうから。PV を書けるのは管理者だけ',
+      'PV の注釈は API サーバーが自動で期限切れにするから',
+      'PVC に書くと bind されなくなるから'
     ],
-    ans: 4,
+    ans: 2,
     exps: [
-      '猶予が付くのは取り上げの対象になる理由だけ。SourceNotFound は対象外。',
-      '最初の設計はこうだった。一瞬読めないだけで全チームの PVC が消えるので改めた。',
-      '一部だけ消すこともしない。',
-      'PV だけ消すこともしない。',
-      '<b>これが正解。</b>NamespaceNotGranted、AccessNotGranted、FilesystemNotFound だけが取り上げの理由。一時的かもしれない理由では、既にある PVC と PV を残して status だけ更新する。'
+      '違う。PVC にも注釈は付けられる。問題は誰が書き換えられるか。',
+      '違う。PVC を消した後に PV が消える。順番は逆。',
+      '<b>これが正解。</b>判定の材料を、判定される側が書ける場所に置くと、判定を自分で曲げられる。期限は管理者しか書けない PV に置く。同じ理由で PVC のラベルも判定に使わない。',
+      '違う。注釈に期限切れの仕組みは無い。期限を見て消すのはコントローラー。',
+      '違う。PVC の注釈は bind に影響しない。'
     ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="取り上げる理由と残す理由"><rect x="20" y="25" width="240" height="60" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="140" y="60" font-size="13" text-anchor="middle">許可が無い → 猶予後に取り上げ</text><rect x="300" y="25" width="240" height="60" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="420" y="60" font-size="13" text-anchor="middle">一時的かも → 残す</text></svg><p class="cap">図: 元に戻せない操作は、理由を絞って行う。</p></div>' }
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="書き手と置き場所"><rect x="20" y="30" width="230" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="135" y="60" font-size="13" text-anchor="middle">PVC(テナントが書ける)</text><rect x="310" y="30" width="230" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="425" y="60" font-size="13" text-anchor="middle">PV(管理者だけ)に期限</text></svg><p class="cap">図: 判定の材料は、判定される側が触れない場所に置く。</p></div>' }
   },
   {
-    q: '取り上げの猶予の起点を「Accepted 条件が False になった時刻」にすると、どんな穴があった？',
+    q: '外側の share teams(読み取り専用)と内側の share teams/x があり、内側は使われている。後から外側に読み書きの許可を足した。どうなる？',
     opts: [
-      '別の理由で既に False だった Claim では起点が古く、ラベルが外れた瞬間に猶予ゼロで消える',
-      'condition の時刻は書き換えられないので猶予が永遠に終わらない',
-      '時刻が UTC なので日本では 9 時間ずれる',
-      '猶予が 2 倍になる',
-      'True に戻ったときに PVC が作り直されない'
-    ],
-    ans: 0,
-    exps: [
-      '<b>これが正解。</b>condition の時刻(lastTransitionTime)は True と False の切り替わりでしか更新されない。False のまま理由だけ変わっても時刻は古いまま。だから猶予の起点は、取り上げの対象になった瞬間に status の withdrawAfter へ書いて持つ。',
-      '時刻は切り替わりのたびに更新される。永遠に終わらないのではなく、早く終わりすぎるのが問題。',
-      '時刻は同じ基準で比べるので、タイムゾーンはずれの原因にならない。',
-      '短くなることはあっても、2 倍にはならない。',
-      'True に戻れば普通に作られる。'
-    ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 120" aria-label="古い起点で猶予が消える"><line x1="20" y1="60" x2="540" y2="60" stroke="#4a5d54" stroke-width="2"/><circle cx="60" cy="60" r="6" fill="#8a5a12"/><text x="60" y="40" font-size="13" text-anchor="middle">別の理由で False</text><circle cx="400" cy="60" r="6" fill="#c0492f"/><text x="400" y="40" font-size="13" text-anchor="middle">ラベルが外れる</text><text x="230" y="95" font-size="13" text-anchor="middle" fill="#c0492f">起点がここだと猶予は既に過ぎている</text></svg><p class="cap">図: 起点は「取り上げの対象になった瞬間」でなければならない。</p></div>' }
-  },
-  {
-    q: 'この題材で admission webhook を作らなかった理由として正しいものは？',
-    opts: [
-      'webhook は EKS では使えないから',
-      'webhook は CRD には使えないから',
-      'webhook を使うと controller-runtime が起動しないから',
-      '1 つの CR で決まる規則はスキーマと CEL で書け、他のオブジェクトに依存する許可は後から変わるが、webhook はその Claim への書き込みが来たときにしか呼ばれないから',
-      'webhook は読み取り専用の判定しかできないから'
-    ],
-    ans: 3,
-    exps: [
-      'EKS でも webhook は使える。',
-      'CR にも webhook は使える(第 12 回)。',
-      'controller-runtime は webhook のサーバーも提供している。',
-      '<b>これが正解。</b>webhook が呼ばれるのは、その Claim への書き込みが来たときだけで、namespace のラベルや SharedFilesystem の許可が後から変わっても呼ばれない。だから reconcile で変化のたびに判定して condition に出す。webhook が要る規則が残らなかったので作らなかった。',
-      'mutating webhook はオブジェクトを書き換えられる。'
-    ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="書き込み時の判定と変化のたびの判定"><rect x="20" y="25" width="240" height="60" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="140" y="60" font-size="13" text-anchor="middle">webhook: Claim への書き込み時だけ</text><rect x="300" y="25" width="240" height="60" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="420" y="60" font-size="13" text-anchor="middle">reconcile: 変化のたびに毎回</text></svg><p class="cap">図: 後から変わる条件は右で見る。</p></div>' }
-  },
-  {
-    q: 'Claim の finalizer が働かずに Claim だけ消えたとき(finalizer を手で外した、など)、残った PV を片付けるのはどれ？',
-    opts: [
-      'Kubernetes の garbage collector が ownerReference をたどって消す',
-      'PV をキーに動く Orphan コントローラーが、持ち主の Claim が無いことに気付いて消す',
-      'SharedFilesystem コントローラーが削除時にまとめて消す',
-      '誰も消さないので、管理者が手で消すしかない',
-      'PV は Retain なので、消してはいけない'
+      '後から作られた内側の share が止まる',
+      '外側の share が OverlappingShare で止まり、内側は配り続ける',
+      '両方とも止まる',
+      '何も起きない。重なりは作成時にしか検査しない',
+      '内側の PV がすべて取り上げられる'
     ],
     ans: 1,
     exps: [
-      'namespace に属する Claim からクラスタ全体の PV へは ownerReference を張れない(第 10 回、実測)。',
-      '<b>これが正解。</b>PV の名前に Claim の UID が入っているので、PV だけを見て持ち主をたどり、API サーバーに直接聞いて居ないと確かめてから、PVC、PV の順に消す。起動時に全 PV を見直すので、止まっている間に残ったものも拾える。',
-      'SharedFilesystem コントローラーは数えて削除を待たせるだけで、PV は消さない。',
-      'それでは予約付きの PV が残り、後で同じ名前の namespace が許可なしに使えてしまう。',
-      'Retain は「PV を消してもファイルシステムを消さない」という意味。生成した PV を消すのは安全。'
+      '違う。作成の順だけで決めると、使われている内側が止まり、外側は読み書きの PV を配れてしまう。',
+      '<b>これが正解。</b>外側は「初めて読み書きの許可を見た時刻」を記録する。それは内側を作った時刻より後なので、重なりを後から持ち込んだのは外側。外側が止まる。',
+      '違う。片方だけを止める。どちらから判定しても同じ答えになるように決めてある。',
+      '違う。許可の一覧は変えられるので、変わるたびに検査し直す。',
+      '違う。重なりの検査は新しい PV を止めるだけで、既に配った PV は取り上げない。'
     ],
-    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="PV から持ち主をたどる"><rect x="20" y="30" width="230" height="50" rx="8" fill="#fff" stroke="#4a5d54"/><text x="135" y="60" font-size="13" text-anchor="middle">PV sfc-UID</text><rect x="310" y="30" width="230" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="425" y="60" font-size="13" text-anchor="middle">Claim UID … 居ない</text><path d="M252 55 L306 55" stroke="#4a5d54" stroke-width="2"/></svg><p class="cap">図: 名前に持ち主の UID を入れておくと、子の側から親を確かめられる。</p></div>' }
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="時刻で比べる"><line x1="20" y1="70" x2="540" y2="70" stroke="#4a5d54" stroke-width="2"/><circle cx="180" cy="70" r="6" fill="#198754"/><text x="180" y="50" font-size="13" text-anchor="middle">内側を作る</text><circle cx="400" cy="70" r="6" fill="#c0492f"/><text x="400" y="50" font-size="13" text-anchor="middle">外側が読み書きに</text><text x="400" y="96" font-size="12" text-anchor="middle" fill="#c0492f">後から来た側が止まる</text></svg><p class="cap">図: 比べるのは「重なりが生まれた時刻」。</p></div>' }
+  },
+  {
+    q: 'namespace team-a を消して、同じ名前で作り直した。share は checkpoints/{namespace}。新しい team-a の PVC はどうなる？',
+    opts: [
+      'すぐに前のチームのディレクトリをマウントする',
+      'ディレクトリが空にされてからマウントする',
+      'Pending のまま NamespaceRecreated の Event が出る。管理者がディレクトリの記録を消すと使える',
+      'PVC の作成そのものが API サーバーに拒否される',
+      '新しい名前のディレクトリが自動で作られる'
+    ],
+    ans: 2,
+    exps: [
+      '違う。名前が同じでも UID が違えば別のチームかもしれない。黙って受け継がせない。',
+      '違う。sharedfs は既にあるディレクトリを決して変えない。データを消すことも無い。',
+      '<b>これが正解。</b>FilesystemShareDirectory に最初の namespace の UID が記録されている。UID が違うので PV を作らない。受け継がせてよいかは管理者が決め、記録を消すことで表す。',
+      '違う。PVC の作成は普通に通る。判定はコントローラーが reconcile で行う。',
+      '違う。ディレクトリの場所はパスと namespace の名前で決まるので、別の名前にはならない。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="UID で見分ける"><rect x="20" y="30" width="230" height="50" rx="8" fill="#fff" stroke="#4a5d54"/><text x="135" y="52" font-size="13" text-anchor="middle">記録: team-a</text><text x="135" y="70" font-size="12" text-anchor="middle" fill="#4a5d54">UID 1111</text><rect x="310" y="30" width="230" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="425" y="52" font-size="13" text-anchor="middle">今の team-a</text><text x="425" y="70" font-size="12" text-anchor="middle" fill="#c0492f">UID 2222</text></svg><p class="cap">図: 名前ではなく UID で同じ namespace かを見分ける。</p></div>' }
+  },
+  {
+    q: 'PV に <code>pv.kubernetes.io/provisioned-by: sharedfs...</code> の注釈と回収方針 Delete を付けた。PVC が消えたとき何が起きる？',
+    opts: [
+      'FSx のファイルシステムが削除される',
+      'PV コントローラーが PV を消し、FSx のドライバにも削除を頼む',
+      'PV は Released になり、sharedfs が PV の札だけを消す。ファイルとディレクトリは残る',
+      'PV は Available に戻り、別の PVC と結び付く',
+      'PV は Failed になり、管理者が手で消すまで残る'
+    ],
+    ans: 2,
+    exps: [
+      '違う。注釈が sharedfs を指すので、ドライバの係は手を出さない。ファイルシステムに削除は頼まれない。',
+      '違う。PV コントローラーは、注釈の係(sharedfs)が消すのを待つだけで自分では消さない。',
+      '<b>これが正解。</b>注釈が「この PV の係は sharedfs」と示すので、Released の PV を消すのは sharedfs だけ。消すのは Kubernetes の札で、ファイルシステムの中身ではない。実機でも、消した PV で書いたファイルが後で読めた。',
+      '違う。claimRef に UID が入っているので、別の PVC とは結び付かない。',
+      '違う。それは係が見つからないときの動き。ここでは sharedfs が係として消す。'
+    ],
+    why: { html: '<h4>図で理解する</h4><div class="fig"><svg viewBox="0 0 560 110" aria-label="Released から削除まで"><rect x="20" y="30" width="150" height="50" rx="8" fill="#fbeeea" stroke="#c0492f"/><text x="95" y="60" font-size="13" text-anchor="middle">PVC が消える</text><rect x="205" y="30" width="150" height="50" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="280" y="60" font-size="13" text-anchor="middle">PV は Released</text><rect x="390" y="30" width="150" height="50" rx="8" fill="#e7f6ee" stroke="#198754"/><text x="465" y="60" font-size="13" text-anchor="middle">sharedfs が札を消す</text><path fill="none" d="M172 55 L201 55" stroke="#4a5d54" stroke-width="2"/><path fill="none" d="M357 55 L386 55" stroke="#4a5d54" stroke-width="2"/></svg><p class="cap">図: 消えるのは札だけで、データは残る。</p></div>' }
   }
 ];
 
