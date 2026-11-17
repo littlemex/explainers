@@ -54,6 +54,10 @@
   th{background:var(--g1);color:#fff}
   tr:nth-child(even) td{background:#f3f9f6}
   .tag{display:inline-block;background:var(--g4);color:var(--g1);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  figure.fig{margin:18px 0;text-align:center}
+  figure.fig svg{max-width:100%;height:auto}
+  figure.fig figcaption{font-size:13.5px;color:var(--sub);margin-top:6px}
+  pre.code{background:var(--code);color:#d7f5e6;border-radius:12px;padding:14px 18px;font-size:13.5px;overflow-x:auto;text-align:left}
   .fn{font-size:14px;color:var(--sub);border-top:1px solid var(--line);margin-top:26px;padding-top:14px}
   .toc{columns:2;font-size:15px;gap:30px}
   .toc a{display:block;padding:3px 0;text-decoration:none;color:var(--sub)}
@@ -93,7 +97,8 @@
     <a href="#s7">7. 学習長を超えると壊れる — 文脈長の拡張</a>
     <a href="#s8">8. 【体験】外挿 vs 内挿 (PI/NTK/YaRN)</a>
     <a href="#s9">9. NoPE — そもそも要らない説</a>
-    <a href="#s10">10. まとめ</a>
+    <a href="#s10">10. 2026 年のモデルは全層 RoPE から離れつつある</a>
+    <a href="#s11">11. まとめ</a>
   </div>
 </section>
 
@@ -106,6 +111,38 @@
   <div class="warn">
     <b>足す方式の弱点。</b>(1) <b>学習型 APE</b> は学習で見た位置までしか埋め込みを持たず、それより長い文に対応できない (sinusoidal は任意の位置を計算できるが、学習で見ていない長さでは実際には性能が劣化しやすい)。(2) 本当に効かせたいのは「単語 A と B が<b>何個離れているか</b>」という<b>相対</b>距離なのに、埋め込みに絶対位置を足す方式では、射影と単語内容が混ざった後の Attention スコアに相対距離がきれいな形で残りません。この 2 つの不満が、次の RoPE を生みます。
   </div>
+  <p>弱点 (1) は数字にすると重さが分かります。GPT-2 Medium では、1,024 位置ぶんの学習型位置埋め込みは全重みの <b>0.30%</b> にすぎません。ところが同じ作りで文脈長を今どき普通の 10 万前後まで伸ばすと、位置埋め込みだけで全重みの <b>22% 超</b>を占めます。しかも表の行数は学習の前に決めておく必要があり、あとから文脈を伸ばすには表そのものを作り直すことになります。</p>
+  <p>細かいが効いている工夫も 1 つあります。原論文の Transformer は、単語埋め込みを $\sqrt{d_{\text{model}}}$ 倍してから位置ベクトルを足します。論文に理由は書かれていませんが、初期化の時点で単語埋め込みと sin/cos の大きさを揃え、足したときに位置ベクトルが和を支配しないようにするためだと考えられています。GPT-2 はこの倍率を使わない代わりに、初期値の標準偏差を単語埋め込み 0.02、位置埋め込み 0.01 にして、最初から同じくらいの大きさにしています。</p>
+  <p>位置が入る<b>場所</b>も、このあと見る RoPE とは大きく違います。足す方式では、位置は最初のブロックに入る前に 1 回だけ入ります。RoPE では、位置は<b>すべてのブロックの Attention の中</b>で、しかも <b>Q と K だけ</b>に入ります。V は回しません。</p>
+  <figure class="fig">
+    <svg viewBox="0 0 820 300" role="img" aria-label="位置情報が入る場所の比較。GPT-2 は入力で 1 回足し、RoPE は各ブロックの Q と K を回す">
+      <g font-size="14" text-anchor="middle" font-family="inherit">
+        <text x="200" y="22" font-weight="700" fill="#0f5132">足す方式 (GPT-2)</text>
+        <rect x="60" y="230" width="130" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="125" y="255">単語埋め込み</text>
+        <rect x="215" y="230" width="130" height="40" rx="8" fill="#e8dcf7" stroke="#6a3fb0" stroke-width="2"/><text x="280" y="255">位置埋め込み</text>
+        <circle cx="200" cy="200" r="14" fill="#fff" stroke="#12211a"/><text x="200" y="205">+</text>
+        <path d="M125 230 L190 210 M280 230 L210 210" stroke="#12211a" fill="none"/>
+        <rect x="90" y="60" width="220" height="110" rx="10" fill="#f3f9f6" stroke="#4a5d54"/>
+        <text x="200" y="95">Transformer ブロック × L</text>
+        <text x="200" y="125" font-size="12.5" fill="#4a5d54">中では位置を扱わない</text>
+        <path d="M200 186 L200 172" stroke="#12211a" marker-end="url(#ar)"/>
+        <text x="610" y="22" font-weight="700" fill="#0f5132">回す方式 (RoPE)</text>
+        <rect x="545" y="230" width="130" height="40" rx="8" fill="#fff" stroke="#4a5d54"/><text x="610" y="255">単語埋め込み</text>
+        <rect x="470" y="40" width="280" height="160" rx="10" fill="#f3f9f6" stroke="#4a5d54"/>
+        <text x="610" y="62" font-size="12.5" fill="#4a5d54">すべてのブロックの Attention の中</text>
+        <rect x="490" y="140" width="70" height="34" rx="6" fill="#fdf1ec" stroke="#e07a5f" stroke-width="2"/><text x="525" y="162">Q</text>
+        <rect x="575" y="140" width="70" height="34" rx="6" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="610" y="162">K</text>
+        <rect x="660" y="140" width="70" height="34" rx="6" fill="#fff" stroke="#4a5d54" stroke-dasharray="5 4"/><text x="695" y="162">V</text>
+        <rect x="490" y="80" width="155" height="34" rx="6" fill="#e8dcf7" stroke="#6a3fb0" stroke-width="2"/><text x="567" y="102">位置 m で回転</text>
+        <path d="M525 140 L525 116" stroke="#12211a" marker-end="url(#ar)"/><path d="M610 140 L610 116" stroke="#12211a" marker-end="url(#ar)"/>
+        <text x="695" y="105" font-size="12.5" fill="#4a5d54">回さない</text>
+        <path d="M610 230 L610 202" stroke="#12211a" marker-end="url(#ar)"/>
+      </g>
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#12211a"/></marker></defs>
+    </svg>
+    <figcaption>紫が位置情報。足す方式は入力で 1 回だけ、RoPE は各ブロックで Q と K にだけ入る (V は点線 = 回さない)</figcaption>
+  </figure>
+  <p>最近のモデルでは、RoPE の前に QK-Norm (Q と K を正規化する層) を置く構成がよく見られます。MiniMax-M3 は QK-Norm で Q と K を正規化してから RoPE を掛けます。</p>
 </section>
 
 <section id="s2">
@@ -146,6 +183,24 @@
   <div class="key">
     <b>ここが RoPE の勝ち筋。</b>「位置 5 の Query と位置 8 の Key」でも「位置 105 と位置 108」でも、<b>差が 3 なら内積は同じ</b>。モデルは絶対番地を覚える必要がなく、<b>「3 個左の単語」といった相対関係</b>を直接扱えます。しかも回転を掛けるだけなので<b>追加パラメータはゼロ</b>、埋め込みに足し込む必要もありません。次の体験でこの「差だけに効く」を確かめます。
   </div>
+  <h3>数字で 1 回たどる</h3>
+  <p>「The red fox jumps over the gray fox.」で、位置 5 の「the」を Query、位置 2 の「fox」を Key にします。比べやすいように、Q と K の最初のペアはどちらも同じ値 $(1, 5)$ から始め、回転の速さを 1 位置あたり $20^\circ$ にします。長さはどちらも $\sqrt{26}$ で、回転しても変わりません。</p>
+  <table>
+    <tr><th>#</th><th>置き方</th><th>Key の回転</th><th>Query の回転</th><th>2 本の間の角度</th><th>このペアの内積</th></tr>
+    <tr><td>1</td><td>回す前</td><td>0°</td><td>0°</td><td>0°</td><td>$1\cdot1+5\cdot5=26$</td></tr>
+    <tr><td>2</td><td>Key 位置 2、Query 位置 5 (差 3)</td><td>40°</td><td>100°</td><td>60°</td><td>$26\cos 60^\circ = 13$</td></tr>
+    <tr><td>3</td><td>Key だけ位置 3 へ (差 2)</td><td>60°</td><td>100°</td><td>40°</td><td>$26\cos 40^\circ \approx 19.92$</td></tr>
+    <tr><td>4</td><td>行 2 の両方を 3 つ右へ (位置 5 と 8、差 3)</td><td>100°</td><td>160°</td><td>60°</td><td>13 (行 2 と同じ)</td></tr>
+    <tr><td>5</td><td>前に 100 トークンのシステムプロンプトを足す (位置 102 と 105)</td><td>2040°</td><td>2100°</td><td>60°</td><td>13 (行 2 と同じ)</td></tr>
+  </table>
+  <p>行 3 のように距離が変わると内積は変わり、行 4 と行 5 のように両方が同じだけずれると内積は変わりません。行 5 が実務で効く場面です。前にどんな長さのプロンプトが付いても、文の中の「3 個前」は同じ「3 個前」として扱われます。ただしこれは回す前の Q と K を固定した場合の話です。実際のモデルでは、前に足した 100 トークンを Attention が読むので、Q と K の中身そのものが変わり得ます。</p>
+  <p>sin/cos を足す元祖の方式にも「ずらすと決まった回転になる」性質がありました。原論文は、どのずれ $k$ でも $PE_{pos+k}$ が $PE_{pos}$ の線形変換で書けるので、相対位置を学びやすいだろうと書いています。違いは<b>回転がどこに掛かるか</b>です。</p>
+  <table>
+    <tr><th>#</th><th>方式</th><th>2 トークンを両方同じだけずらしたとき</th></tr>
+    <tr><td>1</td><td>学習型の絶対位置 (GPT-2)</td><td>別々の行を引くので、位置ベクトルどうしに決まった関係が無い。スコアは変わり得る</td></tr>
+    <tr><td>2</td><td>sin/cos を足す (原論文)</td><td>位置ベクトルはずれの分だけ決まった回転をするが、回るのは入力に足したベクトルで、Q と K ではない。射影と単語の中身が混ざったあとのスコアは変わり得る</td></tr>
+    <tr><td>3</td><td>RoPE</td><td>Q と K そのものを回すので、間の角度が保たれ、スコアは変わらない</td></tr>
+  </table>
 </section>
 
 <section id="s5">
@@ -174,6 +229,32 @@
   <div class="key">
     <b>周波数を混ぜる意味。</b>時計の秒針 (高周波) だけでは「何時か」が分からず、時針 (低周波) だけでは「何秒か」が分かりません。<b>複数の針を組み合わせて初めて時刻を一意に読める</b>のと同じで、RoPE は高周波から低周波までを束ねることで、<b>近距離の細かさと長距離の広がりを同時に</b>表現します。この「一番遅い針が学習中どこまでしか回っていないか」が、次章で見る文脈長拡張の鍵になります。
   </div>
+  <h3>実装で決めること: 角度の表と、ペアの組み方</h3>
+  <p>回転の角度 $m\theta_i$ は、位置とペア番号だけで決まります。そのため実装では、cos と sin の値を表にして 1 回だけ前計算します。文脈 1,024、ヘッド次元 128 なら、表は cos と sin がそれぞれ $1024\times 64$ (64 はペアの数) です。この表はバッチにもヘッドにも依存しないので、32 ヘッドあっても全ヘッドで同じ表を使い回します。各ヘッドが回すのは自分の値なので、回したあとの Q はヘッドごとに違います。計算が軽いので、表を重みと一緒にディスクへ保存する必要もありません。</p>
+  <p>もう 1 つ、どの 2 つの値をペアにするかの流儀が 2 つあります。RoFormer 原論文と初期の LLaMA の実装は、隣どうしを組にする <b>interleaved</b> です。今の実装の多くは、ヘッドの前半と後半の同じ位置どうしを組にする <b>split-half</b> で、要素ごとの cos/sin の掛け算で全ペアを一度に回せるので書きやすくなります。</p>
+  <figure class="fig">
+    <svg viewBox="0 0 640 175" role="img" aria-label="split-half はヘッドの前半と後半の同じ位置どうしを組にし、interleaved は隣どうしを組にする">
+      <g font-size="14" text-anchor="middle" font-family="inherit">
+        <text x="85" y="62" font-weight="700" fill="#0f5132">split-half</text>
+        <text x="85" y="80" font-size="12" fill="#4a5d54">(1,5) (2,6) ...</text>
+        <rect x="180" y="40" width="44" height="34" rx="5" fill="#fdf1ec" stroke="#e07a5f" stroke-width="2"/><text x="202" y="62">1</text><rect x="232" y="40" width="44" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="254" y="62">2</text><rect x="284" y="40" width="44" height="34" rx="5" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="306" y="62">3</text><rect x="336" y="40" width="44" height="34" rx="5" fill="#f3ecfb" stroke="#6a3fb0" stroke-width="2"/><text x="358" y="62">4</text><rect x="388" y="40" width="44" height="34" rx="5" fill="#fdf1ec" stroke="#e07a5f" stroke-width="2"/><text x="410" y="62">5</text><rect x="440" y="40" width="44" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="462" y="62">6</text><rect x="492" y="40" width="44" height="34" rx="5" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="514" y="62">7</text><rect x="544" y="40" width="44" height="34" rx="5" fill="#f3ecfb" stroke="#6a3fb0" stroke-width="2"/><text x="566" y="62">8</text>
+        <text x="85" y="142" font-weight="700" fill="#0f5132">interleaved</text>
+        <text x="85" y="160" font-size="12" fill="#4a5d54">(1,2) (3,4) ...</text>
+        <rect x="180" y="120" width="44" height="34" rx="5" fill="#fdf1ec" stroke="#e07a5f" stroke-width="2"/><text x="202" y="142">1</text><rect x="232" y="120" width="44" height="34" rx="5" fill="#fdf1ec" stroke="#e07a5f" stroke-width="2"/><text x="254" y="142">2</text><rect x="284" y="120" width="44" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="306" y="142">3</text><rect x="336" y="120" width="44" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="358" y="142">4</text><rect x="388" y="120" width="44" height="34" rx="5" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="410" y="142">5</text><rect x="440" y="120" width="44" height="34" rx="5" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="462" y="142">6</text><rect x="492" y="120" width="44" height="34" rx="5" fill="#f3ecfb" stroke="#6a3fb0" stroke-width="2"/><text x="514" y="142">7</text><rect x="544" y="120" width="44" height="34" rx="5" fill="#f3ecfb" stroke="#6a3fb0" stroke-width="2"/><text x="566" y="142">8</text>
+      </g>
+    </svg>
+    <figcaption>同じ色が 1 つのペア (同じ角度で回る 2 つの値)。色に加えて、上段は「前半 i 番目と後半 i 番目」、下段は「隣どうし」という並びの規則で見分けられる</figcaption>
+  </figure>
+  <pre class="code">def rope_split_half(x, cos, sin):
+    first, second = x.float().chunk(2, dim=-1)
+    return torch.cat((first * cos - second * sin,
+                      first * sin + second * cos), dim=-1).to(x.dtype)
+
+def rope_interleaved(x, cos, sin):
+    even, odd = x.float()[..., 0::2], x.float()[..., 1::2]
+    return torch.stack((even * cos - odd * sin,
+                        even * sin + odd * cos), dim=-1).flatten(-2).to(x.dtype)</pre>
+  <p>2 つは数学的には同じものです。split-half の並び $[1,2,3,4,5,6,7,8]$ を $[1,5,2,6,3,7,4,8]$ に並べ替えてから interleaved で回すと、回した値も Attention のスコアも一致します。ただし並べ替えずに混ぜると、別のペアを回すことになってスコアは変わります。ある実装で学習した重みを別の流儀の実装で読み込むときは、Q と K の重みの並びを合わせる必要があるのはこのためです。</p>
 </section>
 
 <section id="s7">
@@ -231,6 +312,21 @@
     <li>学習後の Attention は、自然と <b>T5 型の相対位置</b> (距離ごとに学習したバイアスをスコアに足す方式) に似たパターンになる。</li>
     <li>彼らの推論・アルゴリズム系タスクでは、<b>学習より長い入力への汎化 (length generalization) が ALiBi・RoPE・絶対 PE より良かった</b>。</li>
   </ul>
+  <p>「見える個数から位置が分かる」は、論文の小さな例で確かめられます。「The red fox jumps」の 4 トークンで、V のある 1 つの値が「The」だけ 1、ほかは 0 だとします。どのトークンから見ても見える範囲に「The」はちょうど 1 個あります。スコアがすべて同じなら softmax は見えるトークンに均等に重みを配るので、出力のその値は「fox」(位置 2、3 個見える) で $1/3$、「jumps」(位置 3、4 個見える) で $1/4$ になります。つまり出力に「1 / 見えている個数」が現れ、後ろの層はこれを位置の手がかりに使えます。</p>
+  <figure class="fig">
+    <svg viewBox="0 0 640 200" role="img" aria-label="均等な注意のとき、The の寄与は 1 から 1/2、1/3、1/4 と見える個数に応じて小さくなる">
+      <g font-size="14" text-anchor="middle" font-family="inherit">
+        <text x="70" y="182">The</text><text x="210" y="182">red</text><text x="350" y="182">fox</text><text x="490" y="182">jumps</text>
+        <rect x="40" y="40" width="60" height="120" rx="6" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="70" y="32">1</text>
+        <rect x="180" y="100" width="60" height="60" rx="6" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="210" y="92">1/2</text>
+        <rect x="320" y="120" width="60" height="40" rx="6" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="350" y="112">1/3</text>
+        <rect x="460" y="130" width="60" height="30" rx="6" fill="#eaf5ef" stroke="#198754" stroke-width="2"/><text x="490" y="122">1/4</text>
+        <text x="590" y="70" font-size="12.5" fill="#4a5d54">棒の高さ =</text><text x="590" y="88" font-size="12.5" fill="#4a5d54">出力の値</text>
+      </g>
+    </svg>
+    <figcaption>各トークンの出力に残る「The」の寄与。見えるトークンが 1 個増えるたびに 1/(見える個数) に下がる</figcaption>
+  </figure>
+  <p>実験の規模にも注意が要ります。上の汎化の結果は、107M パラメータの小さなデコーダを、コピー・並べ替え・足し算などのタスクで一から学習したもので、10 タスク全体で NoPE が RoPE より上位でした。同じ論文はコードで学習した 1.3B のモデルも試していて、NoPE は学習長を超えても動いたものの、試した中で一番長い長さでは次トークン予測が悪化しています。</p>
   <div class="warn">
     <b>ただし万能ではありません。</b>この結果は主に<b>デコーダ専用</b>かつ<b>特定の推論系タスク</b>での話です。実運用の大規模 LLM の多くは、依然として RoPE (＋ YaRN 系の拡張) を採用しています。NoPE の教訓は「位置符号化を捨てよ」ではなく、<b>「因果マスクが既にかなりの位置情報を与えている」</b>という設計上の気づきにあります。
   </div>
@@ -239,7 +335,69 @@
 </section>
 
 <section id="s10">
-  <h2><span class="num">10</span>まとめ</h2>
+  <h2><span class="num">10</span>2026 年のモデルは「全層・全次元に RoPE」から離れつつある</h2>
+  <p class="lead">LLaMA 以来、公開重みの LLM のほとんどは全層の Q と K の全次元を RoPE で回してきました。2026 年のモデルでは、この形を崩すものが増えています。崩し方は 3 通りあります。</p>
+  <table>
+    <tr><th>#</th><th>崩し方</th><th>何をするか</th><th>例</th></tr>
+    <tr><td>1</td><td>部分 RoPE</td><td>ヘッドの次元の一部だけを回し、残りは回さない</td><td>MiniMax-M3 (128 次元中 64 次元)</td></tr>
+    <tr><td>2</td><td>層ごとに RoPE と NoPE を混ぜる</td><td>一部の層だけ RoPE を外す</td><td>SmolLM3、Kolibri-1、Kimi K3</td></tr>
+    <tr><td>3</td><td>学習する相対位置バイアス</td><td>回転をやめ、距離に応じた値をスコアに足す</td><td>Inkling</td></tr>
+  </table>
+
+  <h3>1. 部分 RoPE</h3>
+  <figure class="fig"><svg viewBox="0 0 640 130" role="img" aria-label="128 次元のヘッドのうち、全 RoPE は 128 次元すべて、MiniMax-M3 の部分 RoPE は 64 次元だけを回す">
+  <defs><pattern id="pU" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#fff"/><line x1="0" y1="0" x2="0" y2="8" stroke="#9aa" stroke-width="1.5"/></pattern></defs>
+  <g font-size="14" font-family="inherit">
+  <text x="200" y="35" text-anchor="end" font-weight="700">全 RoPE</text>
+  <rect x="215" y="12" width="400" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="415" y="34" text-anchor="middle">128 次元すべてを回す (64 ペア)</text>
+  <text x="200" y="95" text-anchor="end" font-weight="700">部分 RoPE</text><text x="200" y="111" text-anchor="end" font-size="12" fill="#4a5d54">MiniMax-M3</text>
+  <rect x="215" y="72" width="200" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="315" y="94" text-anchor="middle">64 次元を回す</text>
+  <rect x="415" y="72" width="200" height="34" rx="5" fill="url(#pU)" stroke="#4a5d54" stroke-width="1.5" stroke-dasharray="5 3"/><text x="515" y="94" text-anchor="middle" fill="#12211a">64 次元はそのまま</text>
+  </g></svg>
+    <figcaption>128 次元のヘッドで、回す次元 (青) と回さない次元 (斜線・点線) を比べたもの</figcaption>
+  </figure>
+  <p>MiniMax-M3 は 128 次元のヘッドのうち 64 次元だけを回します。回すペアは 32 本で、残りの 64 次元はそのまま内積に入ります。回さない次元にも位置情報が無いわけではありません。2 層目より後では、前の層までに混ざった位置情報が入力に含まれているからです。</p>
+  <p>メモリの節約は小さいものです。減るのは前計算する cos/sin の表で、回す次元が半分なら表も半分になります。MiniMax-M3 の 1M トークンの文脈で、表を BF16 で持つ場合の節約は 128 MiB です。一方、KV キャッシュには回す前後に関係なく K と V の全次元を置くので、キャッシュは 1 バイトも減りません。品質の面では、1B〜8B のモデルで調べた研究 (<a href="https://arxiv.org/abs/2603.11611" target="_blank" rel="noopener">arXiv:2603.11611</a>) が、各ヘッドの 10% 前後を回すだけで学習損失とベンチマーク精度が全 RoPE とほぼ並ぶことが多い、と報告しています。ただし一部の評価では全 RoPE の方が良い結果でした。Raschka は、メモリの理由だけなら部分 RoPE はほとんど割に合わないと評価しています。</p>
+  <div class="key">
+    <b>このシリーズの観点で見ると、部分 RoPE には構造上どうしても必要な場面があります。</b> <a href="./attn-mla.html">MLA</a> は K の展開行列を Q 側に吸収して KV キャッシュを潜在ベクトルだけに縮めますが、位置ごとに違う回転が間に挟まると、この吸収ができません。そこで DeepSeek-V2 以降の MLA は、RoPE を掛ける小さな次元 $d_r$ を別枠にし、残りの潜在部分は回しません。これも「次元の一部だけを回す」形で、こちらは表の節約ではなく KV キャッシュを縮めるための分け方です。
+  </div>
+
+  <h3>2. 層ごとに RoPE と NoPE を混ぜる</h3>
+  <figure class="fig"><svg viewBox="0 0 640 190" role="img" aria-label="層ごとの位置符号化。従来は全層 RoPE、SmolLM3 は 4 層ごとに 1 層 NoPE、Kimi K3 は KDA 3 層と RoPE なしの MLA 1 層">
+  <defs><pattern id="pN" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f3ecfb"/><circle cx="4" cy="4" r="1.6" fill="#6a3fb0"/></pattern></defs>
+  <g font-size="14" font-family="inherit">
+  <text x="200" y="25" text-anchor="end" font-weight="700">従来の構成</text><text x="200" y="41" text-anchor="end" font-size="12" fill="#4a5d54">全層で RoPE</text><rect x="215" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="234" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="259" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="278" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="303" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="322" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="347" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="366" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="391" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="410" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="435" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="454" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="479" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="498" y="32" text-anchor="middle" font-size="12">RoPE</text><rect x="523" y="10" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="542" y="32" text-anchor="middle" font-size="12">RoPE</text>
+  <text x="200" y="85" text-anchor="end" font-weight="700">SmolLM3</text><text x="200" y="101" text-anchor="end" font-size="12" fill="#4a5d54">36 層 = この 4 層 × 9</text><rect x="215" y="70" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="234" y="92" text-anchor="middle" font-size="12">RoPE</text><rect x="259" y="70" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="278" y="92" text-anchor="middle" font-size="12">RoPE</text><rect x="303" y="70" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="322" y="92" text-anchor="middle" font-size="12">RoPE</text><rect x="347" y="70" width="38" height="34" rx="5" fill="#fff" stroke="#6a3fb0" stroke-width="2.5" stroke-dasharray="5 3"/><text x="366" y="92" text-anchor="middle" font-size="12">NoPE</text><rect x="391" y="70" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="410" y="92" text-anchor="middle" font-size="12">RoPE</text><rect x="435" y="70" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="454" y="92" text-anchor="middle" font-size="12">RoPE</text><rect x="479" y="70" width="38" height="34" rx="5" fill="#eaf1fb" stroke="#3d7dca" stroke-width="2"/><text x="498" y="92" text-anchor="middle" font-size="12">RoPE</text><rect x="523" y="70" width="38" height="34" rx="5" fill="#fff" stroke="#6a3fb0" stroke-width="2.5" stroke-dasharray="5 3"/><text x="542" y="92" text-anchor="middle" font-size="12">NoPE</text>
+  <text x="200" y="145" text-anchor="end" font-weight="700">Kimi K3</text><text x="200" y="161" text-anchor="end" font-size="12" fill="#4a5d54">点線の層は RoPE なしの MLA</text><rect x="215" y="130" width="38" height="34" rx="5" fill="#f3f9f6" stroke="#4a5d54" stroke-width="1.5"/><text x="234" y="152" text-anchor="middle" font-size="12">KDA</text><rect x="259" y="130" width="38" height="34" rx="5" fill="#f3f9f6" stroke="#4a5d54" stroke-width="1.5"/><text x="278" y="152" text-anchor="middle" font-size="12">KDA</text><rect x="303" y="130" width="38" height="34" rx="5" fill="#f3f9f6" stroke="#4a5d54" stroke-width="1.5"/><text x="322" y="152" text-anchor="middle" font-size="12">KDA</text><rect x="347" y="130" width="38" height="34" rx="5" fill="#fff" stroke="#6a3fb0" stroke-width="2.5" stroke-dasharray="5 3"/><text x="366" y="152" text-anchor="middle" font-size="12">NoPE</text><rect x="391" y="130" width="38" height="34" rx="5" fill="#f3f9f6" stroke="#4a5d54" stroke-width="1.5"/><text x="410" y="152" text-anchor="middle" font-size="12">KDA</text><rect x="435" y="130" width="38" height="34" rx="5" fill="#f3f9f6" stroke="#4a5d54" stroke-width="1.5"/><text x="454" y="152" text-anchor="middle" font-size="12">KDA</text><rect x="479" y="130" width="38" height="34" rx="5" fill="#f3f9f6" stroke="#4a5d54" stroke-width="1.5"/><text x="498" y="152" text-anchor="middle" font-size="12">KDA</text><rect x="523" y="130" width="38" height="34" rx="5" fill="#fff" stroke="#6a3fb0" stroke-width="2.5" stroke-dasharray="5 3"/><text x="542" y="152" text-anchor="middle" font-size="12">NoPE</text>
+  </g></svg>
+    <figcaption>層の並びを左から右へ。青が RoPE の層、白地に点線の枠が RoPE を外した層、灰色が KDA (RoPE を使わない線形の層)</figcaption>
+  </figure>
+  <p>SmolLM3 (3B) は、RoPE の層を 3 つ続けて 4 つ目で RoPE を外す並びを 36 層くり返します。開発チームは、この並びで長い文脈の性能が上がったと書いています。Kolibri-1 (78B) は、窓で見る SWA の層では RoPE を使い、全体を見る層では RoPE を外します。Kimi K3 はさらに進めて、MLA の層すべてで RoPE を外しました。順序の情報は、間に挟まる KDA の層が減衰のかたちで運ぶという説明です (<a href="./paper-kimi-k3.html">11 章</a>)。RoPE を外した層も、前の層から位置の混ざった入力を受け取る点は部分 RoPE と同じです。</p>
+
+  <h3>3. 学習する相対位置バイアス</h3>
+  <p>Thinking Machines の Inkling (975B、文脈 1M トークン) は、GQA と SWA を 5:1 の比で混ぜた構成で、その両方で RoPE ではなく学習する相対位置バイアスを使います。Q と K の内積をスケールしたあと、softmax の前に 1 つの値を足します。足す値は、Key が何個前にあるかと、Query のトークンの隠れ状態から決まります。発想自体は T5 (2019, <a href="https://arxiv.org/abs/1910.10683" target="_blank" rel="noopener">arXiv:1910.10683</a>) と同じですが、T5 の値は距離 (をいくつかの区間にまとめたもの) だけで決まりました。§9 の ALiBi も「スコアに距離の値を足す」仲間で、こちらは学習せず決まった傾きを使います。Inkling は、同じ距離でも Query の中身によって足す値を変えられる点が違います。</p>
+
+  <h3>実際の割合</h3>
+  <p>Raschka が自身の LLM Architecture Gallery (2026-11-09 時点) の掲載モデルを公開時期で 3 つに分けて数えた結果が次の 2 つの図です。1 モデルの派生版が別々に数えられていることがあり、2026 年後半は 21 モデルと少ないので、傾向の確定ではなく兆しとして読むのが妥当です。</p>
+  <figure class="fig"><svg viewBox="0 0 840 222" role="img" aria-label="位置符号化の種類ごとのモデル数。全層 RoPE は 2025 年 84.4% から 2026 年後半 57.1% に下がった"><g font-size="14" font-family="inherit"><defs>
+ <pattern id="pD" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#eaf5ef"/><line x1="0" y1="0" x2="0" y2="8" stroke="#198754" stroke-width="2"/></pattern>
+ <pattern id="pX" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f3ecfb"/><circle cx="4" cy="4" r="1.6" fill="#6a3fb0"/></pattern>
+ <pattern id="pO" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#fdf1ec"/><line x1="0" y1="4" x2="8" y2="4" stroke="#e07a5f" stroke-width="2"/></pattern>
+</defs><text x="218" y="35" text-anchor="end" font-weight="700">2025 年</text><text x="218" y="51" text-anchor="end" font-size="12" fill="#4a5d54">32 モデル</text><rect x="230.0" y="20" width="371.2" height="34" fill="#eaf1fb" stroke="#3d7dca" stroke-width="1.5"/><text x="415.6" y="42" text-anchor="middle" font-weight="700" fill="#12211a">27</text><rect x="601.2" y="20" width="27.5" height="34" fill="url(#pD)" stroke="#198754" stroke-width="1.5"/><rect x="628.8" y="20" width="27.5" height="34" fill="url(#pX)" stroke="#6a3fb0" stroke-width="1.5"/><rect x="656.2" y="20" width="13.8" height="34" fill="url(#pO)" stroke="#e07a5f" stroke-width="1.5"/><text x="680" y="42" font-size="12.5" fill="#4a5d54">全層 RoPE 84.4%</text><text x="218" y="91" text-anchor="end" font-weight="700">2026-01〜08-25</text><text x="218" y="107" text-anchor="end" font-size="12" fill="#4a5d54">60 モデル</text><rect x="230.0" y="76" width="344.7" height="34" fill="#eaf1fb" stroke="#3d7dca" stroke-width="1.5"/><text x="402.3" y="98" text-anchor="middle" font-weight="700" fill="#12211a">47</text><rect x="574.7" y="76" width="36.7" height="34" fill="url(#pD)" stroke="#198754" stroke-width="1.5"/><text x="593.0" y="98" text-anchor="middle" font-weight="700" fill="#12211a">5</text><rect x="611.3" y="76" width="51.3" height="34" fill="url(#pX)" stroke="#6a3fb0" stroke-width="1.5"/><text x="637.0" y="98" text-anchor="middle" font-weight="700" fill="#12211a">7</text><rect x="662.7" y="76" width="7.3" height="34" fill="url(#pO)" stroke="#e07a5f" stroke-width="1.5"/><text x="680" y="98" font-size="12.5" fill="#4a5d54">全層 RoPE 78.3%</text><text x="218" y="147" text-anchor="end" font-weight="700">2026-08-26〜11-05</text><text x="218" y="163" text-anchor="end" font-size="12" fill="#4a5d54">21 モデル</text><rect x="230.0" y="132" width="251.4" height="34" fill="#eaf1fb" stroke="#3d7dca" stroke-width="1.5"/><text x="355.7" y="154" text-anchor="middle" font-weight="700" fill="#12211a">12</text><rect x="481.4" y="132" width="104.8" height="34" fill="url(#pD)" stroke="#198754" stroke-width="1.5"/><text x="533.8" y="154" text-anchor="middle" font-weight="700" fill="#12211a">5</text><rect x="586.2" y="132" width="83.8" height="34" fill="url(#pX)" stroke="#6a3fb0" stroke-width="1.5"/><text x="628.1" y="154" text-anchor="middle" font-weight="700" fill="#12211a">4</text><text x="680" y="154" font-size="12.5" fill="#4a5d54">全層 RoPE 57.1%</text><rect x="230" y="192" width="16" height="16" fill="#eaf1fb" stroke="#3d7dca"/><text x="252" y="205" font-size="13">全層 RoPE</text><rect x="365" y="192" width="16" height="16" fill="url(#pD)" stroke="#198754"/><text x="387" y="205" font-size="13">RoPE と NoPE を混ぜる</text><rect x="617" y="192" width="16" height="16" fill="url(#pX)" stroke="#6a3fb0"/><text x="639" y="205" font-size="13">NoPE のみ</text><rect x="752" y="192" width="16" height="16" fill="url(#pO)" stroke="#e07a5f"/><text x="774" y="205" font-size="13">その他</text></g></svg>
+    <figcaption>位置符号化の種類ごとのモデル数。「NoPE のみ」はすべて、再帰型の層と softmax の層を混ぜたハイブリッドで、softmax の層に位置符号化を付けないもの。「その他」は xLSTM 7B (softmax の層が無い) と Inkling</figcaption>
+  </figure>
+  <figure class="fig"><svg viewBox="0 0 840 222" role="img" aria-label="RoPE を使うモデルのうち部分 RoPE の割合。2025 年 37.9% から 2026 年 69.2%、70.6% に増えた"><g font-size="14" font-family="inherit"><defs>
+ <pattern id="pD" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#eaf5ef"/><line x1="0" y1="0" x2="0" y2="8" stroke="#198754" stroke-width="2"/></pattern>
+ <pattern id="pX" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f3ecfb"/><circle cx="4" cy="4" r="1.6" fill="#6a3fb0"/></pattern>
+ <pattern id="pO" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#fdf1ec"/><line x1="0" y1="4" x2="8" y2="4" stroke="#e07a5f" stroke-width="2"/></pattern>
+</defs><text x="218" y="35" text-anchor="end" font-weight="700">2025 年</text><text x="218" y="51" text-anchor="end" font-size="12" fill="#4a5d54">RoPE を使う 29</text><rect x="230.0" y="20" width="166.9" height="34" fill="#eaf5ef" stroke="#198754" stroke-width="1.5"/><text x="313.4" y="42" text-anchor="middle" font-weight="700" fill="#12211a">11</text><rect x="396.9" y="20" width="273.1" height="34" fill="#eaf1fb" stroke="#3d7dca" stroke-width="1.5"/><text x="533.4" y="42" text-anchor="middle" font-weight="700" fill="#12211a">18</text><text x="680" y="42" font-size="12.5" fill="#4a5d54">部分 RoPE 37.9%</text><text x="218" y="91" text-anchor="end" font-weight="700">2026-01〜08-25</text><text x="218" y="107" text-anchor="end" font-size="12" fill="#4a5d54">RoPE を使う 52</text><rect x="230.0" y="76" width="304.6" height="34" fill="#eaf5ef" stroke="#198754" stroke-width="1.5"/><text x="382.3" y="98" text-anchor="middle" font-weight="700" fill="#12211a">36</text><rect x="534.6" y="76" width="118.5" height="34" fill="#eaf1fb" stroke="#3d7dca" stroke-width="1.5"/><text x="593.8" y="98" text-anchor="middle" font-weight="700" fill="#12211a">14</text><rect x="653.1" y="76" width="16.9" height="34" fill="url(#pO)" stroke="#e07a5f" stroke-width="1.5"/><text x="680" y="98" font-size="12.5" fill="#4a5d54">部分 RoPE 69.2%</text><text x="218" y="147" text-anchor="end" font-weight="700">2026-08-26〜11-05</text><text x="218" y="163" text-anchor="end" font-size="12" fill="#4a5d54">RoPE を使う 17</text><rect x="230.0" y="132" width="310.6" height="34" fill="#eaf5ef" stroke="#198754" stroke-width="1.5"/><text x="385.3" y="154" text-anchor="middle" font-weight="700" fill="#12211a">12</text><rect x="540.6" y="132" width="129.4" height="34" fill="#eaf1fb" stroke="#3d7dca" stroke-width="1.5"/><text x="605.3" y="154" text-anchor="middle" font-weight="700" fill="#12211a">5</text><text x="680" y="154" font-size="12.5" fill="#4a5d54">部分 RoPE 70.6%</text><rect x="230" y="192" width="16" height="16" fill="#eaf5ef" stroke="#198754"/><text x="252" y="205" font-size="13">部分 RoPE</text><rect x="365" y="192" width="16" height="16" fill="#eaf1fb" stroke="#3d7dca"/><text x="387" y="205" font-size="13">全次元を回す</text><rect x="487" y="192" width="16" height="16" fill="url(#pO)" stroke="#e07a5f"/><text x="509" y="205" font-size="13">不明</text></g></svg>
+    <figcaption>RoPE を使うモデルだけを取り出し、少なくとも 1 層で部分 RoPE を使うものを数えたもの</figcaption>
+  </figure>
+  <p>全層 RoPE は今も最多ですが、2025 年の 84.4% から 2026 年 8 月 25 日までで 78.3%、それ以降は 57.1% に下がりました。代わりに RoPE と NoPE を混ぜる構成が 6.3% → 8.3% → 23.8% と増えています。RoPE を使うモデルの中では、部分 RoPE が 2025 年の 37.9% から 2026 年の 69.2% と 70.6% になり、少数派から多数派に変わりました。Raschka 自身は、RoPE が主流であることは 2027 年も変わらないと見ています。</p>
+</section>
+
+<section id="s11">
+  <h2><span class="num">11</span>まとめ</h2>
   <p class="lead">位置符号化の系譜を一枚に畳みます。</p>
   <table>
     <tr><th>方式</th><th>注入の仕方</th><th>相対距離</th><th>長文への強さ</th></tr>
@@ -247,12 +405,15 @@
     <tr><td><b>RoPE</b></td><td>Q/K を位置角で<b>回す</b> (追加パラメータ 0)</td><td>内積が $n-m$ だけの関数</td><td>拡張法 (PI/NTK/YaRN) で対応</td></tr>
     <tr><td>ALiBi</td><td>スコアに距離ペナルティを<b>引く</b></td><td>ペナルティが距離に比例</td><td>外挿に比較的強い</td></tr>
     <tr><td><b>NoPE</b></td><td><b>何も足さない</b> (因果マスク頼み)</td><td>暗黙に表現 (T5 相対に類似)</td><td>推論系タスクで良好との報告</td></tr>
+    <tr><td>部分 RoPE</td><td>ヘッドの次元の<b>一部だけ</b>を回す</td><td>回した次元で RoPE と同じ</td><td>RoPE と同じ。節約は cos/sin の表だけで、KV キャッシュは減らない</td></tr>
+    <tr><td>RoPE と NoPE の層の混在</td><td>一部の層だけ RoPE を<b>外す</b></td><td>RoPE の層が担う</td><td>SmolLM3 は長文で改善と報告</td></tr>
+    <tr><td>学習する相対位置バイアス</td><td>距離と Query から決まる値をスコアに<b>足す</b></td><td>バイアスが距離の関数</td><td>Inkling が 1M 文脈で採用</td></tr>
   </table>
   <div class="key">
-    <b>持ち帰り。</b>位置符号化の歴史は<b>「絶対 → 相対 → いっそ暗黙に」</b>という流れで読めます。RoPE の核心は<b>「足すのでなく回す」</b>ことで内積を相対距離 $n-m$ の関数に変えた点にあり、長文対応の PI・NTK・YaRN はいずれも<b>「回転角を学習で見た範囲に収める」</b>工夫です。次に「このモデルは 128k コンテキスト対応」と聞いたら、<b>「RoPE の base をいじったの? YaRN で微調整したの?」</b>と中身を推測できるようになれば、この回は成功です。
+    <b>持ち帰り。</b>位置符号化の歴史は<b>「絶対 → 相対 → いっそ暗黙に」</b>という流れで読めます。RoPE の核心は<b>「足すのでなく回す」</b>ことで内積を相対距離 $n-m$ の関数に変えた点にあり、長文対応の PI・NTK・YaRN はいずれも<b>「回転角を学習で見た範囲に収める」</b>工夫です。次に「このモデルは 128k コンテキスト対応」と聞いたら、<b>「RoPE の base をいじったの? YaRN で微調整したの?」</b>と中身を推測できるようになれば、この回は成功です。さらに 2026 年のモデルなら、<b>「全層で回しているのか、一部の次元・一部の層だけなのか」</b>も確かめるべき点になりました。
   </div>
   <div class="fn">
-    主要参照: Vaswani et al. 2017 "Attention Is All You Need" (<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">arXiv:1706.03762</a>) / Su et al. 2021 RoFormer=RoPE (<a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener">arXiv:2104.09864</a>) / Press et al. 2021 ALiBi (<a href="https://arxiv.org/abs/2108.12409" target="_blank" rel="noopener">arXiv:2108.12409</a>) / Chen et al. 2023 Position Interpolation (<a href="https://arxiv.org/abs/2306.15595" target="_blank" rel="noopener">arXiv:2306.15595</a>) / Kazemnejad et al. 2023 NoPE (<a href="https://arxiv.org/abs/2305.19466" target="_blank" rel="noopener">arXiv:2305.19466</a>) / Peng et al. 2023 YaRN (<a href="https://arxiv.org/abs/2309.00071" target="_blank" rel="noopener">arXiv:2309.00071</a>)。NTK-aware scaling はコミュニティ (bloc97) 発の手法。<br>
+    主要参照: Vaswani et al. 2017 "Attention Is All You Need" (<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">arXiv:1706.03762</a>) / Su et al. 2021 RoFormer=RoPE (<a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener">arXiv:2104.09864</a>) / Press et al. 2021 ALiBi (<a href="https://arxiv.org/abs/2108.12409" target="_blank" rel="noopener">arXiv:2108.12409</a>) / Chen et al. 2023 Position Interpolation (<a href="https://arxiv.org/abs/2306.15595" target="_blank" rel="noopener">arXiv:2306.15595</a>) / Kazemnejad et al. 2023 NoPE (<a href="https://arxiv.org/abs/2305.19466" target="_blank" rel="noopener">arXiv:2305.19466</a>) / Peng et al. 2023 YaRN (<a href="https://arxiv.org/abs/2309.00071" target="_blank" rel="noopener">arXiv:2309.00071</a>) / Raffel et al. 2019 T5 (<a href="https://arxiv.org/abs/1910.10683" target="_blank" rel="noopener">arXiv:1910.10683</a>) / Khan et al. 2026 "Fractional Rotation, Full Potential? Investigating Performance and Convergence of Partial RoPE" (<a href="https://arxiv.org/abs/2603.11611" target="_blank" rel="noopener">arXiv:2603.11611</a>) / <a href="https://huggingface.co/blog/smollm3#architecture-and-training-details" target="_blank" rel="noopener">SmolLM3 の公式ブログ</a> / <a href="https://thinkingmachines.ai/news/introducing-inkling/#architecture" target="_blank" rel="noopener">Inkling の公式発表</a>。§1・§4・§6・§9・§10 の数値例、モデルの構成、2026 年の集計は Sebastian Raschka "<a href="https://magazine.sebastianraschka.com/p/understanding-positional-embeddings" target="_blank" rel="noopener">Understanding Positional Embeddings in Modern LLMs</a>" (2026-11-15) と、同氏の <a href="https://sebastianraschka.com/llm-architecture-gallery/" target="_blank" rel="noopener">LLM Architecture Gallery</a> (2026-11-09 時点) によります。図はこのページ用に描き直したものです。NTK-aware scaling はコミュニティ (bloc97) 発の手法。<br>
     注意: 本ページのアニメーションは直感を伝えるための<b>模式的な実装</b>で、次元数や係数は説明用に小さくしています。厳密な定義・数値は各原論文を参照してください。なお $\theta_i$ の添字は本記事では 0-indexed ($i=0,\dots,d/2-1$) で書いています (RoFormer 原論文は 1-indexed 表記)。
   </div>
 </section>
