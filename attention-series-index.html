@@ -80,7 +80,7 @@
 </header>
 <main>
   <a class="back" href="./index.html">← explainers トップへ戻る</a>
-  <p class="intro">Attention の変種は数多くありますが、その多くは「1 トークンあたりの KV-Cache をどう軽くするか」という 1 つの問いへの別々の答えです。この系統樹で全体像を掴み、各ノードをクリックして個別の解説へ進んでください。最新のノードは <b>CSA2</b> (DeepSeek-V4.1-Flash, 2026-09) で、global KV を <b>890 バイト/トークン</b>まで縮めています。前提となる基礎は <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> にあります。</p>
+  <p class="intro">Attention の変種は数多くありますが、その多くは「1 トークンあたりの KV-Cache をどう軽くするか」という 1 つの問いへの別々の答えです。この系統樹で全体像を掴み、各ノードをクリックして個別の解説へ進んでください。Softmax 系の最新ノードは <b>CSA2</b> (DeepSeek-V4.1-Flash, 2026-09) で、global KV を <b>890 バイト/トークン</b>まで縮めています。線形 / 状態系の最新ノードは <b>Muir</b> (2026-11) で、状態の大きさを変えずに、状態へ何をどう書き、どう読むかを作り直しています。前提となる基礎は <a href="./softmax-attention-explainer.html">Softmax Attention をビジュアルに理解する</a> にあります。</p>
 
   <section>
     <h2>進化系統図</h2>
@@ -109,7 +109,7 @@
       <tr><th>手法</th><th>公開時期</th><th>代表モデル</th><th>時間計算量</th><th>KV / 状態</th><th>論文</th></tr>
       <tbody id="tbl"></tbody>
     </table>
-    <p style="font-size:13px;color:var(--sub);margin:10px 0 0">CSA / HCA は DeepSeek-V4 (arXiv:2606.19348) で確認済みで、その後継の <b>CSA2</b> は DeepSeek-V4.1-Flash (2026-09) で提案されました。V4.1-Flash の論文は arXiv 番号ではなく <a href="https://www.alphaxiv.org/abs/2609.deepseek-v4-1-flash" target="_blank" rel="noopener">alphaXiv</a> と <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash" target="_blank" rel="noopener">HuggingFace</a> で公開されています。NSA (arXiv:2502.11089) と MoBA (arXiv:2502.13189) は 2025-02 の疎化系で、密集を避けるため簡略化した系統図には描かず、本表と DSA 章で扱います。Mamba3 は Mamba-3 (arXiv:2603.15569, 2026-03) として公開されています。</p>
+    <p style="font-size:13px;color:var(--sub);margin:10px 0 0">CSA / HCA は DeepSeek-V4 (arXiv:2606.19348) で確認済みで、その後継の <b>CSA2</b> は DeepSeek-V4.1-Flash (2026-09) で提案されました。V4.1-Flash の論文は arXiv 番号ではなく <a href="https://www.alphaxiv.org/abs/2609.deepseek-v4-1-flash" target="_blank" rel="noopener">alphaXiv</a> と <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash" target="_blank" rel="noopener">HuggingFace</a> で公開されています。NSA (arXiv:2502.11089) と MoBA (arXiv:2502.13189) は 2025-02 の疎化系で、密集を避けるため簡略化した系統図には描かず、本表と DSA 章で扱います。Mamba3 は Mamba-3 (arXiv:2603.15569, 2026-03) として公開されています。Muir (arXiv:2611.08376, 2026-11) は Gated DeltaNet-2 (GDN-2) を比較相手とする改良です。GDN-2 は、Gated DeltaNet の減衰と KDA (Kimi Linear) のチャネルごとの減衰の両方を一般化した後継なので、系統図では KDA から線を引いています。GDN-2 自体のノードはまだありません。</p>
   </section>
 
   <section>
@@ -168,6 +168,10 @@ const NODES = {
   kda:{label:'KDA', year:2025.8, lane:1, sys:'ln', file:'attn-kda.html', ch:'09',
     title:'KDA — Kimi Delta Attention', time:'2025-10', model:'Kimi Linear', arxiv:'2510.26692',
     O:'$O(N)$', kv:'固定状態, 1M で decode 高速', desc:'Gated DeltaNet を細粒度ゲート + DPLR に拡張。MLA と層ごとにハイブリッド配置。'},
+  muir:{label:'Muir', year:2026.85, lane:1, sys:'ln', file:'attn-deltanet.html#s6', ch:'07',
+    title:'Muir — ゲートを低ランクにし、読み出しで状態の行を重み付けし直す', time:'2026-11', model:'(論文モデル, 166M〜1.34B を TPU で検証)', arxiv:'2611.08376',
+    O:'$O(N)$', kv:'固定状態 (状態の大きさは GDN-2 と同じ)',
+    desc:'Gated DeltaNet-2 (GDN-2) はチャネルごとの減衰と、消去・書き込みの 2 つのゲートを別々のフルランクで持つ。Muir は、状態の更新が消去より書き込みに強く左右されることを示し、ゲートを感度に応じたランクの低ランク射影にまとめた。浮いたパラメータは FFN を広げる側に回している。さらに、減衰の遅い行ほどノルムが大きく読み出しを支配する点に着目し、クエリ時に行を重み付けし直す matched-filter の読み出しを入れた。1.34B までで perplexity は GDN-2 より 1.8〜2.0%、Transformer より 2.5〜3.6% 低い。4K で学習して 10M トークンまで perplexity が崩れず、passkey は 1M トークンまでほぼ 100% (GDN-2 は 4K〜8K を超えると崩れる)。学習スループットは GDN-2 と同等で、32K では Transformer の 2.7 倍。DeltaNet 章で扱う。'},
   mamba:{label:'Mamba', year:2023.85, lane:2, sys:'ln', file:'attn-mamba.html', ch:'08',
     title:'Mamba', time:'2023-12', model:'Mamba 3B, Jamba 等', arxiv:'2312.00752',
     O:'$O(N)$', kv:'固定状態', desc:'状態空間モデル (SSM) を入力依存の「選択」で拡張。固定状態の再帰で系列を処理。'},
@@ -180,7 +184,7 @@ const NODES = {
   streamingllm:{label:'StreamingLLM', year:2023.75, lane:2, sys:'sm', file:'attn-swa.html', ch:'04', dim:true, notree:true,
     title:'StreamingLLM — attention sink を残す', time:'2023-09', model:'(既存モデルの窓運用)', arxiv:'2309.17453',
     O:'$O(N w)$', kv:'窓 + 先頭 sink 数個',
-    desc:'全結合で学習したモデルを推論時だけ窓運用にすると、先頭付近の attention sink を追い出した瞬間に品質が崩れる。先頭の少数トークンを常に保持すれば回避できる。SWA 章で扱う。'},
+    desc:'全結合で学習したモデルを推論時だけ窓運用にすると、先頭付近の attention sink を追い出した瞬間に品質が崩れる。先頭の少数トークンを常に保持すれば回避できる。softmax を使わない Mamba でも、層が深くなるほど先頭トークンが後続のトークンを引き寄せ、sink と同じ現象が起きることが理論で示されている (arXiv:2611.08303)。SWA 章と Mamba 章で扱う。'},
   kivi:{label:'KV 量子化', year:2024.1, lane:1, sys:'sm', file:'attn-mla.html', ch:'03', dim:true, notree:true,
     title:'KV 量子化 (KIVI / MXFP4)', time:'2024-02 →', model:'KIVI (研究) / DeepSeek-V4.1-Flash (MXFP4)', arxiv:'2402.02750',
     O:'計算は変えない', kv:'1 要素のビット数を削る',
@@ -209,7 +213,7 @@ const NODES = {
 const EDGES = [
   ['mha','mqa','sm'],['mqa','gqa','sm'],['gqa','mla','sm'],['mla','dsa','sm'],['dsa','csa','sm'],['csa','csa2','sm'],
   ['mha','swa','sm'],['mha','gated','sm'],['mha','xlayer','sm'],['xlayer','csa2','sm'],
-  ['linear','deltanet','ln'],['deltanet','kda','ln'],
+  ['linear','deltanet','ln'],['deltanet','kda','ln'],['kda','muir','ln'],
   ['linear','mamba','ln'],['mamba','mamba2','ln'],['mamba2','mamba3','ln'],
 ];
 const NW=96, NH=40;
@@ -295,7 +299,7 @@ function select(k){
   gNodes.querySelector(`[data-k="${k}"] rect`).setAttribute('stroke-width','4');
 }
 // 表: 時系列順
-const ORDER=['mha','mqa','swa','linear','gqa','rwkv','retnet','streamingllm','gla','mamba','kivi','xlayer','mla','mamba2','deltanet','lightning','nsa','moba','gated','dsa','kda','csa','csa2','mamba3'];
+const ORDER=['mha','mqa','swa','linear','gqa','rwkv','retnet','streamingllm','gla','mamba','kivi','xlayer','mla','mamba2','deltanet','lightning','nsa','moba','gated','dsa','kda','csa','csa2','mamba3','muir'];
 const tbl=document.getElementById('tbl');
 ORDER.forEach(k=>{const n=NODES[k];
   const paper=n.arxiv?`<a href="https://arxiv.org/abs/${n.arxiv}" target="_blank" rel="noopener">${n.arxiv}</a>`
