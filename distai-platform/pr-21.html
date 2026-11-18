@@ -73,10 +73,11 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <p class="nav"><a href="../index.html">explainers</a> &nbsp;/&nbsp; <a href="index.html">distai-platform シリーズ</a> &nbsp;/&nbsp; PR #21</p>
 
 <h1>PR #21: セルの Terraform 基盤層を作る<br><span style="font-size:17px;color:#3c5a4c">Add the foundation Terraform layer for a cell</span></h1>
-<p><span class="tag b">レビュー中</span><span class="tag">Issue #20 を閉じる予定</span><span class="tag">ブランチ feat/20-foundation</span><span class="tag">commit 3b81748</span><span class="tag">22 ファイル、+2,408 行</span></p>
+<p><span class="tag b">レビュー中</span><span class="tag">Issue #20 を閉じる予定</span><span class="tag">ブランチ feat/20-foundation</span><span class="tag">commit 7884eaf3af</span><span class="tag">23 ファイル、+3,069 行</span></p>
+<p><span class="tag g">追記: 多テナント対応の契約 4 点 -- push・レビュー・修正・実機検証 済み</span><span class="tag">10 ファイル、+717/-56 行</span></p>
 <div class="lead">
 <p><b>結論から。</b>この PR は、1 つのセル (VPC + EKS クラスタ + その上の最小限) を一式作って壊せる、最初の実装である。<b>Terraform はクラスタの入れ物 (shell) だけを作り、Karpenter 本体や NodePool、device plugin といった「中で動くもの」は一切作らない</b>。これは #17 と #19 で決めた線引きをそのまま実装したもので、理由は単純で、中で動くものはセルが生きている間に何度も変わるのに対し、入れ物はクラスタと同じだけ長生きするからである。もう 1 つの要点は、<b>Karpenter が作った instance はこの Terraform の state には載っていない</b>ので、壊す側にも専用の仕掛け (削除ガード) が要ったこと。実機で 3 回動かし、3 回目の結果を証拠として PR に貼った。</p>
-<p style="margin-bottom:0"><b>この PR でやったこと。</b><code>infra/foundation/</code> を新規に追加し (22 ファイル、+2,408 行)、Fable 5.2 の 3 視点レビューで出た指摘 17 件のうち 12 件を直し、東京リージョンで実際に作って壊すテストを 3 回走らせた。</p>
+<p style="margin-bottom:0"><b>この PR でやったこと。</b><code>infra/foundation/</code> を新規に追加し (23 ファイル、+3,069 行)、独立したレビューで出た指摘 17 件のうち 12 件を直し、東京リージョンで実際に作って壊すテストを 3 回走らせた。これに加えて、Issue #20 が追記した多テナント対応の契約 4 点 (IMDS の遮断、CNI 権限の分離、NetworkPolicy の施行、Argo CD の役の分離) を実装し、これも独立したレビューを受けて直し、実機の e2e を 4 回 (1 回目はテストスクリプトの不備で失敗) 走らせて、Karpenter が作る起動テンプレートの削除漏れという実際の欠陥を見つけて直すところまで確認した。</p>
 </div>
 
 <h2>数字で見る</h2>
@@ -87,27 +88,42 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <td><code>tests/1.e2e.sh</code> が各段で打つタイムスタンプの差。run 2 (レビュー前のコード) と run 3 (レビュー後のコード) を同じ <code>ap-northeast-1</code>、同じ <code>m7i.large</code> で比べた</td>
 <td>CloudTrail のイベント時刻から逆算 (採らず、スクリプトが毎段の時刻を出すのでそれで足りる)</td>
 <td class="n">apply: 636 秒 → 658 秒 (+22 秒、3.5% 増)<br>destroy: 883 秒 → 860 秒 (-23 秒、2.6% 減)<br>どちらも誤差の範囲で、レビューの変更がコストを増やしてはいない</td>
-<td>5 節・8 節</td></tr>
+<td>6 節・9 節</td></tr>
 <tr><td class="n">2</td><td>この PR の大きさを言葉でなく数字で示す</td>
-<td><code>git diff --stat origin/main...feat/20-foundation</code></td>
+<td><code>git diff --stat origin/main...feat/20-foundation</code> を PR 先頭 <code>7884eaf3af</code> で実行 (多テナント対応の分を含む)</td>
 <td>行数だけでなくファイルの役割も見るため <code>cloc</code> は使わず、diff の統計で十分と判断</td>
-<td class="n">22 ファイル、+2,408 行 / -5 行。<code>karpenter.tf</code> が 561 行で全体の約 23%</td>
-<td>2 節・3 節</td></tr>
+<td class="n">23 ファイル、+3,069 行 / -5 行。<code>tests/1.e2e.sh</code> が 910 行で全体の約 30%</td>
+<td>2 節・3 節・5 節</td></tr>
 <tr><td class="n">3</td><td>レビューの指摘が実際にどれだけ直ったかを、件数の主張でなく内訳で示す</td>
-<td>Fable 5.2 の指摘 17 件を 1 件ずつ、修正コミット <code>00afa70</code> の diff と突き合わせた</td>
+<td>独立したレビューの指摘 17 件を 1 件ずつ、修正コミット <code>00afa70</code> の diff と突き合わせた</td>
 <td>「何件直した」だけを数える (採らず、「書いて説明した」や「残した」を混ぜると対応の実態が見えなくなる)</td>
 <td class="n">12 件を直した、2 件は文書に書いて説明した、2 件は残した、1 件は制約を外す形で応じた</td>
-<td>5 節</td></tr>
+<td>6 節</td></tr>
 <tr><td class="n">4</td><td>e2e が一度で通ったように見せない</td>
 <td><code>run1.log</code>/<code>run2.log</code>/<code>run3.log</code> のタイムスタンプと <code>RESULT</code> 行</td>
 <td>最後に通ったログだけを貼る (採らず、1 回目が落ちた理由がテスト側のバグだったことも含めて正確に書く)</td>
 <td class="n">run 1 FAIL (テストの誤り)、run 2 PASS、run 3 PASS</td>
-<td>6 節</td></tr>
+<td>7 節</td></tr>
+<tr><td class="n">5</td><td>多テナント対応の契約 4 点 (Issue #20 への追記) が、実装だけでなくテストとレビュー対応・削除ガードの修正まで含めてどれだけの大きさになったかを示す</td>
+<td><code>git diff --shortstat 3b81748 7884eaf3af -- infra/foundation</code> (最初の実装コミット 9899449 から PR 先頭まで全部を含む)</td>
+<td>最初の実装コミットだけを測る (採らず、テストとレビュー対応を含めないと実際の変更規模を見誤る)</td>
+<td class="n">10 ファイル、+717 行 / -56 行。最大は <code>tests/1.e2e.sh</code> の +325 行 (4 点の受け入れ基準を実機で確認するテスト)、次が <code>eks.tf</code> の +130/-3 行</td>
+<td>5 節</td></tr>
+<tr><td class="n">6</td><td>追記した 4 点が実機のクラスタで本当に成立し、Karpenter の instance も含めて削除までクリーンに終わることを確かめる (static チェックだけでは分からない)</td>
+<td><code>infra/foundation/tests/1.e2e.sh</code> を 4 回実行 (run4〜run7) した <code>RESULT</code> 行と teardown-guard のログ、実行後の独立確認 (<code>evidence-tenancy.txt</code>、<code>evidence-fc1afc0.txt</code>、<code>evidence-7884eaf.txt</code>)</td>
+<td><code>terraform fmt</code>/<code>validate</code>/<code>tflint</code> の static チェックで止める (採らず、起動順序の競合やガードの取り逃しはクラスタを実際に作って壊すまで見えない)</td>
+<td class="n">run4 FAIL (テストスクリプト側の不備)、run5 PASS、run6 PASS だが Karpenter が作った起動テンプレートが 1 つ残存、run7 (PR 先頭 7884eaf3af) PASS で残存ゼロ</td>
+<td>5 節・9 節</td></tr>
+<tr><td class="n">7</td><td>run6 で残った起動テンプレートの原因を、憶測でなく一次情報で確定する</td>
+<td>CloudTrail でその起動テンプレートを作った呼び出し元 (Karpenter のコントローラロール) を確認し、Karpenter v1.15.2 のソース (<code>pkg/apis/v1/labels.go</code>、<code>pkg/providers/launchtemplate/launchtemplate.go</code>) で実際に貼るタグキーを確認、teardown-guard.sh が検索していたタグキーと比べた</td>
+<td>ガードのコードだけを読んで「たぶんこのタグだろう」と直す (採らず、Karpenter が実際に貼るタグを一次情報で確認しないと同種の見落としが別の箇所にも残る)</td>
+<td class="n">ガードは <code>karpenter.k8s.aws/cluster</code> を検索していたが、Karpenter v1 のコントローラはこのタグを一度も設定しない。実際に設定するのは <code>eks:eks-cluster-name</code> と <code>karpenter.k8s.aws/ec2nodeclass</code> の 2 つで、ガードをこの 2 つに変えると run7 で起動テンプレートの残存がゼロになった</td>
+<td>5 節</td></tr>
 </table>
 
 
 <h2>1. 何を作るか、なぜこの範囲だけか</h2>
-<p>1 つのセル (クラスタ 1 個分の環境) には、生きている間ずっと変わらないもの (ネットワーク、クラスタ本体、最低限のノード) と、毎日のように変わるもの (どの NodePool を使うか、どの Capacity Block を買うか、どの device plugin を入れるか) が混ざっている。両方を 1 つの Terraform state に入れると、Capacity Block を 1 つ買うだけで巨大な state の plan を見ることになる。そこで <a href="https://github.com/littlemex/distai-platform/blob/3b81748929248330b8d695f6b3adc93d55f1284d/infra/foundation">infra/foundation</a> は入れ物だけを持ち、中身は Argo CD (<a href="https://github.com/littlemex/distai-platform/issues/17">#17</a>) に渡す。</p>
+<p>1 つのセル (クラスタ 1 個分の環境) には、生きている間ずっと変わらないもの (ネットワーク、クラスタ本体、最低限のノード) と、毎日のように変わるもの (どの NodePool を使うか、どの Capacity Block を買うか、どの device plugin を入れるか) が混ざっている。両方を 1 つの Terraform state に入れると、Capacity Block を 1 つ買うだけで巨大な state の plan を見ることになる。そこで <a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation">infra/foundation</a> は入れ物だけを持ち、中身は Argo CD (<a href="https://github.com/littlemex/distai-platform/issues/17">#17</a>) に渡す。</p>
 <figure>
 <svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="Terraform が作る範囲と Argo CD が作る範囲の境界"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
 <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
@@ -116,7 +132,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 </figure>
 
 <h2>2. 各要素</h2>
-<p>作る順番にも意味がある。add-on には 2 種類あって、<code>vpc-cni</code> のような DaemonSet 系はノードグループより先に入れないとノードが Ready にならず、<code>coredns</code> のような Deployment 系はノードが無いとスケジュールできないので後に入れる (<a href="https://github.com/littlemex/distai-platform/blob/3b81748929248330b8d695f6b3adc93d55f1284d/infra/foundation/eks.tf">eks.tf</a> の <code>addons_before_nodes</code> / <code>addons_after_nodes</code>)。Karpenter 自体は入れないが、<b>Karpenter が要る AWS 側の下ごしらえ</b> (controller の IAM role、node の IAM role、割り込みキューと EventBridge の rule 5 本) はここで作る (<a href="https://github.com/littlemex/distai-platform/blob/3b81748929248330b8d695f6b3adc93d55f1284d/infra/foundation/karpenter.tf">karpenter.tf</a>)。5 本目は Capacity Block や予約の中断警告で、#17 の予約プールが Karpenter に生き残る相手として確実に認識されるために足した。</p>
+<p>作る順番にも意味がある。add-on には 2 種類あって、<code>vpc-cni</code> のような DaemonSet 系はノードグループより先に入れないとノードが Ready にならず、<code>coredns</code> のような Deployment 系はノードが無いとスケジュールできないので後に入れる (<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/eks.tf">eks.tf</a> の <code>addons_before_nodes</code> / <code>addons_after_nodes</code>)。Karpenter 自体は入れないが、<b>Karpenter が要る AWS 側の下ごしらえ</b> (controller の IAM role、node の IAM role、割り込みキューと EventBridge の rule 5 本) はここで作る (<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/karpenter.tf">karpenter.tf</a>)。5 本目は Capacity Block や予約の中断警告で、#17 の予約プールが Karpenter に生き残る相手として確実に認識されるために足した。</p>
 <figure>
 <svg viewBox="0 0 880 260" width="100%" style="max-width:880px" role="img" aria-label="infra/foundation が作る要素の依存の順"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
 <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
@@ -125,7 +141,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 </figure>
 
 <h2>3. 削除の順番とガード</h2>
-<p>Karpenter が起動した EC2 instance は、Karpenter 自身が Argo CD から入るので、この Terraform の state には記録が無い。<code>terraform destroy</code> が素直にネットワークから壊していくと、instance はまだ動いているのにサブネットや NAT を先に消すことになり、instance のネットワークインターフェースが邪魔をして destroy が止まる (teardown.tf のコメントが名指しする失敗)。これを避けるため、<a href="https://github.com/littlemex/distai-platform/blob/3b81748929248330b8d695f6b3adc93d55f1284d/infra/foundation/teardown.tf">teardown.tf</a> の <code>terraform_data</code> が <code>destroy</code> 専用の provisioner で <a href="https://github.com/littlemex/distai-platform/blob/3b81748929248330b8d695f6b3adc93d55f1284d/infra/foundation/scripts/teardown-guard.sh">teardown-guard.sh</a> を呼び、Karpenter の instance を先に手で片付けてから、それ以外の削除を進める。</p>
+<p>Karpenter が起動した EC2 instance は、Karpenter 自身が Argo CD から入るので、この Terraform の state には記録が無い。<code>terraform destroy</code> が素直にネットワークから壊していくと、instance はまだ動いているのにサブネットや NAT を先に消すことになり、instance のネットワークインターフェースが邪魔をして destroy が止まる (teardown.tf のコメントが名指しする失敗)。これを避けるため、<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/teardown.tf">teardown.tf</a> の <code>terraform_data</code> が <code>destroy</code> 専用の provisioner で <a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/scripts/teardown-guard.sh">teardown-guard.sh</a> を呼び、Karpenter の instance を先に手で片付けてから、それ以外の削除を進める。</p>
 <figure>
 <svg viewBox="0 0 880 280" width="100%" style="max-width:880px" role="img" aria-label="ネットワークを先に壊すと起きること と、この PR の削除順"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
 <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
@@ -142,8 +158,64 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <figcaption>5 つのセキュリティの選択。どれも、既定値のままでは何が開いてしまうかから決めている。たとえば CIDR は、EKS が「空リストなら全世界に公開」という既定を持つので、変数を必須にして下限も決めた。</figcaption>
 </figure>
 
-<h2>5. Fable 5.2 の 3 視点レビューで見つかったこと</h2>
-<p>実装、テスト、レビューを別々のセッションに分けて進め、Fable 5.2 に 17 件の指摘を受けた。<b>12 件を直し、2 件は README に書いて説明するだけにし、2 件は残し、1 件は制約そのものを外す形で応じた。</b>「残した」ものを隠さずに書く。</p>
+<h2>5. 多テナント対応の契約 4 点 (Issue #20 への追記)</h2>
+<div class="note"><p style="margin:0">この節は <code>feat/20-tenancy</code> (実装 commit <code>9899449</code>) として書き、<code>feat/20-foundation</code> に push し、独立したレビューを受けて直し (<code>fc1afc0</code>)、削除ガードの欠陥を実機の e2e で見つけて直し (<code>7884eaf</code>)、4 回の e2e で検証済みである。PR 先頭は <a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8">7884eaf3af</a> で、この節のリンクも全てそこを指す。</p></div>
+<p>複数のチームが 1 つのクラスタを共有する構成では、<code>CriticalAddonsOnly</code> の taint だけではテナントの pod を system ノードから遠ざけられない (taint は誰でも toleration を付けて乗り越えられる)。それを止める admission policy はテナンシー層の仕事だが、<b>乗り越えられてしまった pod が何を取れるか</b>を狭めるのはこの基盤層の仕事で、Issue #20 のコメントはそこだけを 4 点に絞っている。</p>
+<table>
+<tr><th>#</th><th>何を変えたか</th><th>この層が保証すること</th><th>テナンシー層が足すこと</th></tr>
+<tr><td>1</td><td>system ノードグループに <code>aws_launch_template</code> を追加し、<code>http_put_response_hop_limit = 1</code> を設定 (<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/eks.tf">eks.tf</a>)</td><td>host network を使わない pod は IMDSv2 のトークンを 1 つも取れない</td><td><code>CriticalAddonsOnly</code> への toleration を締める admission policy</td></tr>
+<tr><td>2</td><td><code>AmazonEKS_CNI_Policy</code> を node role から外し、<code>kube-system/aws-node</code> に束縛した Pod Identity 専用の role に移す (<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/eks.tf">eks.tf</a>)</td><td>node role を乗っ取っても ENI の attach/detach はできない</td><td>(この項目に追加のテナンシー層の作業は無い)</td></tr>
+<tr><td>3</td><td><code>vpc-cni</code> の <code>configuration_values</code> に <code>enableNetworkPolicy = "true"</code> を設定 (<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/eks.tf">eks.tf</a>)</td><td>NetworkPolicy の施行そのものは有効 (まだ何も無いので挙動は変わらない)</td><td>namespace ごとの NetworkPolicy オブジェクト本体</td></tr>
+<tr><td>4</td><td><code>var.argocd</code> を <code>admin_group_ids</code> から <code>role_mappings = list(object({ role, group_ids }))</code> に変更、<code>ADMIN</code>/<code>EDITOR</code>/<code>VIEWER</code> を検証 (<a href="https://github.com/littlemex/distai-platform/blob/7884eaf3af1095c57ffc2b9e0181bcc6bb8edee8/infra/foundation/argocd.tf">argocd.tf</a>)</td><td>チームごとに閲覧専用・編集可を Argo CD の役として渡せる</td><td>チームごとの AppProject (役を「その役のチームのアプリだけ」に絞る)</td></tr>
+</table>
+<figure>
+<svg viewBox="0 0 880 270" width="100%" style="max-width:880px" role="img" aria-label="ホップ数の上限 1 で、host network を使わない pod だけが IMDS から外れる"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
+<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs><text x="230" y="24" font-size="12.5" fill="#0f4a2e" text-anchor="middle" font-weight="600">system ノード (launch template: hop_limit = 1)</text><rect x="20" y="40" width="420" height="160" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="230.0" y="124.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600"></text><rect x="50" y="70" width="170" height="66" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="135.0" y="99.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">aws-node</text><text x="135.0" y="116.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">host network</text><rect x="250" y="70" width="170" height="66" rx="8" fill="#fbeceb" stroke="#8f2f2f"/><text x="335.0" y="99.0" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">テナントの pod</text><text x="335.0" y="116.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">host network ではない</text><text x="235" y="176" font-size="11" fill="#3c5a4c" text-anchor="middle" font-weight="400">どちらも同じノードの上で起動する</text><rect x="560" y="70" width="300" height="76" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="710.0" y="97.0" font-size="13" fill="#8a5a12" text-anchor="middle" font-weight="600">IMDS (169.254.169.254)</text><text x="710.0" y="114.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">払い出すのは node role の資格情報</text><text x="710.0" y="129.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">(WorkerNodePolicy・ECR pull・SSM のみ)</text><path d="M135 70 L135 52 L560 52 L560 85" stroke="#1f7a4d" stroke-width="2" fill="none" marker-end="url(#arg)"/><path d="M420 108 L558 130" stroke="#8f2f2f" stroke-width="2" fill="none" marker-end="url(#arr)" stroke-dasharray="5 4"/><text x="690" y="232" font-size="11" fill="#1f7a4d" text-anchor="middle" font-weight="400">aws-node: 1 ホップでトークンが出る</text><text x="690" y="250" font-size="11" fill="#8f2f2f" text-anchor="middle" font-weight="400">テナント pod: 2 ホップ以上で hop_limit=1 に止められる</text></svg>
+<figcaption>launch template の http_put_response_hop_limit を 1 にすると、ホスト側のネットワーク名前空間にいる aws-node は 1 ホップで IMDS に届きトークンが出る。host network を使わないテナント pod は、自分のネットワーク名前空間から出る分でもう 1 ホップ余計に使うため、残りホップ数が 0 になりトークンが出ない。IMDS が払い出す node role の資格情報自体も WorkerNodePolicy・ECR pull・SSM しか持たないので、万一トークンが出ても CNI 操作はできない。</figcaption>
+</figure>
+<p>4 点のうち、実装として一番難しかったのは 2 番目に付随する順序の問題である。<code>vpc-cni</code> の DaemonSet (<code>aws-node</code>) は、EKS Pod Identity の認証情報を <code>eks-pod-identity-agent</code> の DaemonSet から受け取る。元のコードは 2 つの add-on を同じ <code>for_each</code> で順序なく作っていたため、新しいノードが参加したときに <code>aws-node</code> が agent より先に起動する競合が原理的にあり得た。<code>vpc-cni</code> を単独の resource に分け、<code>eks-pod-identity-agent</code> が <code>ACTIVE</code> になるまで <code>depends_on</code> で待たせることにした。</p>
+<figure>
+<svg viewBox="0 0 880 520" width="100%" style="max-width:880px" role="img" aria-label="vpc-cni を eks-pod-identity-agent の後に作るようにした理由"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
+<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs><text x="190" y="22" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">変更前: 3 つが同じ for_each、順序なし</text><rect x="20" y="36" width="170" height="44" rx="8" fill="#fbeceb" stroke="#8f2f2f"/><text x="105.0" y="62.0" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">vpc-cni</text><rect x="210" y="36" width="230" height="44" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="325.0" y="62.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600">eks-pod-identity-agent</text><rect x="460" y="36" width="170" height="44" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="545.0" y="62.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600">kube-proxy</text><rect x="170" y="168" width="340" height="40" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="340.0" y="192.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600">system ノードグループ</text><path d="M105 80 L250 166" stroke="#8f2f2f" stroke-width="2" fill="none" marker-end="url(#arr)" stroke-dasharray="5 4"/><path d="M295 80 L310 166" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)" stroke-dasharray="5 4"/><path d="M545 80 L400 166" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)" stroke-dasharray="5 4"/><text x="440" y="230" font-size="11" fill="#8f2f2f" text-anchor="middle" font-weight="400">aws-node と agent はどちらも DaemonSet。先に起動する方は</text><text x="440" y="246" font-size="11" fill="#8f2f2f" text-anchor="middle" font-weight="400">kubelet が決め、この depends_on には現れない</text><text x="190" y="288" font-size="12.5" fill="#1f7a4d" text-anchor="middle" font-weight="600">変更後: eks-pod-identity-agent の ACTIVE を vpc-cni が待つ</text><rect x="210" y="302" width="230" height="44" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="325.0" y="328.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">eks-pod-identity-agent</text><rect x="460" y="302" width="170" height="44" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="545.0" y="328.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600">kube-proxy</text><rect x="20" y="382" width="170" height="50" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="105.0" y="403.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">vpc-cni</text><text x="105.0" y="420.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">depends_on 上の 2 つ</text><rect x="170" y="462" width="340" height="40" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="340.0" y="486.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">system ノードグループ</text><path d="M325 346 L105 380" stroke="#1f7a4d" stroke-width="2" fill="none" marker-end="url(#arg)"/><path d="M545 346 L420 460" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)" stroke-dasharray="5 4"/><path d="M190 407 L300 460" stroke="#1f7a4d" stroke-width="2" fill="none" marker-end="url(#arg)"/></svg>
+<figcaption>変更前は vpc-cni・kube-proxy・eks-pod-identity-agent を同じ for_each で並べて作るだけで、3 つの間に順序が無かった。aws-node (vpc-cni の DaemonSet) と eks-pod-identity-agent はどちらも DaemonSet で、新しいノードが参加すると同時に起動が始まる。aws-node は Pod Identity の認証情報を agent から受け取れないと動けないので、agent の DaemonSet オブジェクトがまだクラスタに無い状態で aws-node が先に動く事故があり得た。変更後は vpc-cni を単独の resource にして eks-pod-identity-agent (ACTIVE) に depends_on させ、agent の DaemonSet が先にクラスタへ存在する状態を保証してからノードを増やす。</figcaption>
+</figure>
+
+<h3>5.1 独立したレビューで見つかったこと</h3>
+<p>実装を独立したレビューに出し、9 件の指摘を受けた。<b>重大度「高」の 3 件はいずれも「適用対象外」で応じ、中 2 件・低 4 件を直した。</b>「高」の 3 件は、「既にこの層の古い版を動かしているセルがある前提」で読む指摘で、この PR がまだ main に未マージで、古い版を動かしているセルが 1 つも存在しないために当てはまらない。マージ後にこの層をもう一度変える PR では、同じ指摘が実際に当てはまる。</p>
+<table>
+<tr><th>重大度</th><th>指摘</th><th>対応</th></tr>
+<tr><td>高</td><td>既にこの層の古い版 (CNI 権限を node role に残した版) を動かしているセルに対してこの変更を <code>terraform apply</code> すると、<code>aws-node</code> への Pod Identity の権限委譲が揃うまでの短い間、CNI の操作ができなくなる恐れがある</td><td class="b">適用対象外: この PR は main に未マージで、古い版を動かしているセルは存在しない (e2e は毎回ゼロから作って壊す使い捨てのセルだけを使っている)。次に <code>infra/foundation</code> を変える PR では、main の版で動くセルに対して apply → 変更 → 再 apply → 壊れていないことの確認という upgrade e2e が必要になる</td></tr>
+<tr><td>高</td><td>system ノードグループに新しい <code>aws_launch_template</code> を足すと、既にそのノードグループを動かしているセルでは Auto Scaling Group がノードを入れ替える</td><td class="b">適用対象外: 同上の理由。古い版を動かしているセルが無いので、今回は入れ替えが起きるセル自体が無い</td></tr>
+<tr><td>高</td><td><code>vpc-cni</code> の <code>enableNetworkPolicy</code> を <code>true</code> に切り替えると、add-on の設定更新で DaemonSet が再起動し、既存セルの pod のネットワークが一瞬途切れる恐れがある</td><td class="b">適用対象外: 同上の理由</td></tr>
+<tr><td>中</td><td>README が「node role の資格情報は CNI の操作を一切できない」と読める書き方だったが、実際は node 上で root 権限を取れば <code>aws-node</code> 自身のトークンを読める</td><td class="y">直した: 「node role の資格情報は CNI 権限を持たない」に文言を狭めた</td></tr>
+<tr><td>中</td><td>Karpenter が作る node の IMDS の設定 (hop limit など) が <code>EC2NodeClass</code> で明示されていない</td><td class="a">書いて説明した: Karpenter の node は <code>EC2NodeClass</code> の <code>metadataOptions</code> を明示すべきことを README に追記</td></tr>
+<tr><td>低</td><td>IMDS のチェックが「トークンが空である」ことだけを見ており、それが hop limit のせいか、チェック自体の実装不備かを区別できない</td><td class="y">直した: 同じ system ノード上で host network を使う制御 pod を追加し、そちらはトークンが出ることを対比で示した</td></tr>
+<tr><td>低</td><td><code>aws-node</code> の EKS Pod Identity association の数や、紐づく role が持つ権限の範囲を厳密に確認していない</td><td class="y">直した: association がちょうど 1 つで、紐づく role が <code>AmazonEKS_CNI_Policy</code> だけを持つことを確認するチェックに強化</td></tr>
+<tr><td>低</td><td>入力検証 (<code>argocd</code> の <code>role_mappings</code>、CIDR の下限) が実クラスタの e2e でしか通らず、一部の分岐が実行されない</td><td class="y">直した: モックプロバイダに対する <code>terraform test</code> を <code>0.static.sh</code> に追加し、7 パターンの検証を静的チェックに含めた</td></tr>
+<tr><td>低</td><td>コードコメント 2 箇所と <code>argocd</code> 変数の description に、変更後の実態と合わない記述が残っていた</td><td class="y">直した: コメントと description を修正</td></tr>
+</table>
+
+<h3>5.2 実機の e2e (4 回)</h3>
+<p>レビュー対応後のコードを、東京リージョンで <code>infra/foundation/tests/1.e2e.sh</code> により 4 回走らせた。</p>
+<table>
+<tr><th>run</th><th>対象</th><th>結果</th><th>何が起きたか</th></tr>
+<tr><td>run4</td><td>fc1afc0 直前のテナンシー実装</td><td class="no">FAIL</td><td><code>netpol-server</code>/<code>netpol-client</code> が <code>Pending</code> のまま。この時点ではまだ Karpenter が入っておらず、system ノードの <code>CriticalAddonsOnly</code> taint に対する toleration をこの 2 つの pod だけが持っていなかった。IMDS のトークン拒否や CNI 権限の分離など、それ以前のチェックは全部 PASS していたので、基盤層ではなくテストスクリプト側の不備と判断した</td></tr>
+<tr><td>run5</td><td>同上 (nodeSelector/toleration を直した <code>66c8cf8</code>)</td><td class="y">PASS</td><td>NetworkPolicy の 2 チェックを含め、4 点すべてが PASS。削除後の独立確認でも残存ゼロ</td></tr>
+<tr><td>run6</td><td>レビュー対応後 (<code>fc1afc0</code>)</td><td class="y">PASS (が残存あり)</td><td>スクリプト自身は全項目 PASS で終えたが、スクリプトが見ていない範囲で Karpenter が作った起動テンプレートが 1 つ残っていた。独立確認で見つけて手で削除した (fig9)</td></tr>
+<tr><td>run7</td><td>PR 先頭 (<code>7884eaf</code>、ガードの修正後)</td><td class="y">PASS</td><td>ガードのログに <code>deleting launch template</code> が現れ、e2e 自身の残存チェックにも <code>launch-template</code> の項目が増え、両方が green。独立確認でも残存ゼロ</td></tr>
+</table>
+<figure>
+<svg viewBox="0 0 880 360" width="100%" style="max-width:880px" role="img" aria-label="teardown-guard.sh が探していたタグと、Karpenter v1 が実際に貼るタグの不一致"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
+<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs><text x="190" y="22" font-size="12.5" fill="#8f2f2f" text-anchor="middle" font-weight="600">直す前: ガードが探していたタグ</text><rect x="20" y="36" width="420" height="56" rx="8" fill="#fbeceb" stroke="#8f2f2f"/><text x="230.0" y="53.0" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">tag:karpenter.k8s.aws/cluster</text><text x="230.0" y="70.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">Karpenter v1 のコントローラはこのタグを一度も設定しない</text><text x="230.0" y="85.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">(Karpenter 自身のテストヘルパーのタグ名で、本体のコードには無い)</text><rect x="520" y="36" width="340" height="100" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="690.0" y="75.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600">Karpenter が実際に作った起動テンプレート</text><text x="690.0" y="92.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">タグ: eks:eks-cluster-name = dp-fnd-e2e</text><text x="690.0" y="107.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">タグ: karpenter.k8s.aws/ec2nodeclass = e2e-spot</text><path d="M442 64 L518 64" stroke="#8f2f2f" stroke-width="2" fill="none" marker-end="url(#arr)"/><text x="480" y="54" font-size="12" fill="#8f2f2f" text-anchor="middle" font-weight="700">0 件</text><text x="480" y="160" font-size="11" fill="#8f2f2f" text-anchor="middle" font-weight="400">一致しないので何も削除されず、run6 で残った</text><text x="190" y="200" font-size="12.5" fill="#1f7a4d" text-anchor="middle" font-weight="600">直した後: ガードが探すタグ (v1.15.2 のソースで確認)</text><rect x="20" y="214" width="420" height="70" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="230.0" y="238.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">tag:eks:eks-cluster-name</text><text x="230.0" y="255.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">+ tag-key:karpenter.k8s.aws/ec2nodeclass</text><text x="230.0" y="270.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">(v1.EKSClusterNameTagKey と NodeClassTagKey、両方を要求)</text><rect x="520" y="214" width="340" height="100" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="690.0" y="253.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">同じ起動テンプレート</text><text x="690.0" y="270.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">タグ: eks:eks-cluster-name = dp-fnd-e2e</text><text x="690.0" y="285.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">タグ: karpenter.k8s.aws/ec2nodeclass = e2e-spot</text><path d="M442 249 L518 249" stroke="#1f7a4d" stroke-width="2" fill="none" marker-end="url(#arg)"/><text x="480" y="239" font-size="12" fill="#1f7a4d" text-anchor="middle" font-weight="700">1 件</text><text x="480" y="334" font-size="11" fill="#1f7a4d" text-anchor="middle" font-weight="400">一致して削除。run7 で残存ゼロ</text></svg>
+<figcaption>直す前の teardown-guard.sh は launch_template を <code>karpenter.k8s.aws/cluster</code> というタグで検索していたが、Karpenter v1 のコントローラはこのタグをどの起動テンプレートにも設定しない (CloudTrail でテンプレート作成イベントを確認し、Karpenter v1.15.2 のソース <code>pkg/apis/v1/labels.go</code> と <code>pkg/providers/launchtemplate/launchtemplate.go</code> で、実際に貼るタグキーが <code>eks:eks-cluster-name</code> と <code>karpenter.k8s.aws/ec2nodeclass</code> の 2 つであることを確認した)。だから検索は常に 0 件で、run6 では起動テンプレートが残った。ガードがこの 2 つのタグを両方要求するように変えると、run7 で同じ起動テンプレートが見つかり削除された。</figcaption>
+</figure>
+<p>4 回とも plan/apply/destroy を実際に実行している。各 run の詳細は <code>~/tmp/dp-exp/fnd-e2e/run4.log</code>〜<code>run7.log</code> と、独立確認の記録 <code>evidence-tenancy.txt</code>・<code>evidence-fc1afc0.txt</code>・<code>evidence-7884eaf.txt</code> にある。</p>
+
+<h2>6. 独立したレビューで見つかったこと</h2>
+<p>実装、テスト、レビューを別々のセッションに分けて進め、独立したレビューで 17 件の指摘を受けた。<b>12 件を直し、2 件は README に書いて説明するだけにし、2 件は残し、1 件は制約そのものを外す形で応じた。</b>「残した」ものを隠さずに書く。</p>
 <figure>
 <svg viewBox="0 0 880 222" width="100%" style="max-width:880px" role="img" aria-label="指摘 17 件を重大度と対応で数えた表"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
 <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
@@ -171,7 +243,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <tr><td>低</td><td>system node group の台数の上限が 10 に固定されていて、根拠のない制約に見える</td><td class="b">制約を外した: 上限を無くし、1 台以上の任意の台数を許すようにした</td></tr>
 </table>
 
-<h2>6. 実機での 3 回の e2e</h2>
+<h2>7. 実機での 3 回の e2e</h2>
 <p>東京リージョン (<code>ap-northeast-1</code>) で、<code>infra/foundation/tests/1.e2e.sh</code> を 3 回走らせた。1 回目は基盤のコードではなく、確認スクリプトの思い込みが原因で落ちた。<code>argocd_capability_arn</code> を <code>null</code> にする仕様 (README の「未作成なら null」) は正しかったが、Terraform は値が正確に <code>null</code> の output を state から省くため、名前で <code>terraform output</code> を呼ぶと「無い」エラーになる。これはテストのバグなので、null と同値に扱うよう確認スクリプト側を直した。</p>
 <figure>
 <svg viewBox="0 0 880 222" width="100%" style="max-width:880px" role="img" aria-label="3 回の e2e 実行の流れ"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
@@ -181,7 +253,7 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 </figure>
 <p>3 回目は、レビュー後のコード (controller の trust policy にセッションタグを足したもの) で再実行した結果で、これが PR の <code>## Test Results</code> に貼った証拠である。セッションタグを足しても Karpenter の Pod Identity の認証情報は通常どおり発行され、EC2NodeClass が Ready になり、spot の起動・中断・置き換えの一連の流れが問題なく動いた。実行後の独立した確認でも、VPC、instance、ENI、NAT、ボリューム、EKS クラスタ、SQS キュー、EventBridge の rule、ロググループ、起動テンプレート、IAM role、instance profile のいずれも、このセルに属するものは 1 つも残っていなかった。</p>
 
-<h2>7. awsome 側に取り込むと良いこと (提案)</h2>
+<h2>8. awsome 側に取り込むと良いこと (提案)</h2>
 <p>この PR で選んだことのうち、Trainium (Neuron) に限らず GPU のセルにもそのまま当てはまるものを挙げる。上流の事実は commit 固定で確認した。</p>
 <table>
 <tr><th>#</th><th>提案</th><th>上流の今</th><th>取り込むと何が良いか</th><th>出し方</th></tr>
@@ -200,24 +272,27 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 </table>
 <p>Neuron (Trainium) を前提にした提案はここに含めていない。<a href="https://github.com/awslabs/awsome-distributed-ai/blob/25d5723cb62ab1f83b0f4307c28c8f3496bfaa53/">awsome-distributed-ai</a> は Neuron を中心には扱っておらず、Trainium に特有の部分は distai-platform の中で育ててから、実機で動いたものだけを後の PR で出す。</p>
 
-<h2>8. まだ終わっていないこと</h2>
+<h2>9. まだ終わっていないこと</h2>
 <div class="warn"><p style="margin:0"><b>PR はまだレビュー中。</b>2026-11-18 の時点で <code>status: in review</code>、マージ待ち。main のブランチルールセット (PR 必須、force push 禁止) もまだ無い。</p></div>
 <div class="note"><p style="margin:0"><b>低い重大度の指摘 2 件を残したまま。</b>削除ガードの ENI フィルタはクラスタのタグを持たない (VPC ID で絞っているので実害は無いと判断している)。<code>kubernetes_version</code> の add-on 存在チェックは <code>validation</code> ではなく <code>lifecycle.precondition</code> のままで、他の変数の検証と場所が揃っていない。</p></div>
 <p>Argo CD の capability は、作る分岐だけ実機で確認しておらず (IAM Identity Center のインスタンスが要るため)、コードレビューと <code>terraform plan</code> までしか通していない。</p>
+<div class="note"><p style="margin:0"><b>5 節の 4 点は push・レビュー・修正・実機検証が済み、この PR の一部になっている。</b>ノード参加時の実際の起動順 (fig8 の競合) も、<code>enableNetworkPolicy</code> を立てても既存の通信が変わらないことも、deny-all NetworkPolicy が実際に通信を止めることも、run5・run7 の e2e で確認済みである。残っているのは「次にこの層を変える PR は、main 上の版を動かしているセルに対する upgrade e2e が要る」という運用上の宿題で、これは 5.1 節の「高」3 件が今回は適用対象外だったことの裏返しである。</p></div>
 
-<h2>9. レビューで見てほしいこと</h2>
+<h2>10. レビューで見てほしいこと</h2>
 <div class="box">
 <ol style="margin:0">
-<li><b>「残した」2 件の判断が正しいか。</b>ENI フィルタ (5 節) と <code>kubernetes_version</code> のチェックの場所 (5 節) は、このまま残してよい理由になっているか。</li>
+<li><b>「残した」2 件の判断が正しいか。</b>ENI フィルタ (6 節) と <code>kubernetes_version</code> のチェックの場所 (6 節) は、このまま残してよい理由になっているか。</li>
 <li><b>削除ガードの前提。</b>teardown.tf の <code>depends_on</code> (3 節) が、将来 <code>karpenter.tf</code> に新しい IAM リソースを足したときにも正しい順番を保てる作りか。</li>
 <li><b>セッションタグの条件 (4 節) が、別のアカウントで Pod Identity を使う他のコンポーネントとぶつからないか。</b></li>
-<li><b>system ノードグループの台数の上限を外したこと (5 節の「制約を外した」) が、既定の 2 台から大きく外れた値で事故にならないか。</b></li>
-<li><b>awsome への提案 (7 節) の出し方。</b>既定値を変えずにパラメータを増やすだけで済むか、互換性を壊す提案になっていないか。</li>
+<li><b>system ノードグループの台数の上限を外したこと (6 節の「制約を外した」) が、既定の 2 台から大きく外れた値で事故にならないか。</b></li>
+<li><b>awsome への提案 (8 節) の出し方。</b>既定値を変えずにパラメータを増やすだけで済むか、互換性を壊す提案になっていないか。</li>
+<li><b>5 節で足した <code>vpc-cni</code> の <code>depends_on</code> (fig8) が、本当にこの競合を防ぐ十分な条件か。</b>EKS の add-on が <code>ACTIVE</code> を返すのは「DaemonSet の定義をクラスタに適用した」時点で、既存ノード上の Pod が実際に <code>Running</code> になったことまでは保証しない。run5・run6・run7 のいずれでも競合は再現しなかったが、これは「ノードがまだ 0 台のこの時点では <code>ACTIVE</code> で十分」という前提を複数回裏付けただけで、別の起動順になるケース (たとえば既にノードが動いているセルにこの変更を入れる場合) まで保証する根拠にはならない。この前提が正しいか。</li>
+<li><b>Argo CD の <code>role_mappings</code> (5 節の表の 4) で、同じ role を 2 度書けないようにした (1 role = 1 エントリ) 制約が、実際の使い方に合っているか。</b></li>
 </ol>
 </div>
 
-<div class="lead"><p style="margin:0"><b>まとめ。</b>PR #21 は、Terraform に「入れ物だけ」を作らせるという #17 / #19 の決定を、VPC、EKS、system ノード、Karpenter の前提、削除ガードの 5 つの要素で実装したもの。Fable 5.2 の指摘 17 件のうち 12 件を直し、残り 5 件 (文書化 2、保留 2、制約緩和 1) は理由とともに本文に書いてある。実機では 3 回中 2 回が通り、1 回目の失敗はテスト側の誤りだった。</p></div>
-<p class="foot">PR: <a href="https://github.com/littlemex/distai-platform/pull/21">https://github.com/littlemex/distai-platform/pull/21</a> ・ Issue: <a href="https://github.com/littlemex/distai-platform/issues/20">#20</a> ・ 上流: <a href="https://github.com/awslabs/awsome-distributed-ai/blob/25d5723cb62ab1f83b0f4307c28c8f3496bfaa53/architectures/amazon-eks/assets/eks-cluster.yaml">awsome-distributed-ai の eks-cluster.yaml (25d5723)</a><br>コードと行数は PR のブランチの先頭 (3b81748、レビュー修正 commit 00afa70 を含む) から、e2e のログと秒数は <code>~/tmp/dp-exp/fnd-e2e/run1.log</code>〜<code>run3.log</code> と <code>evidence.txt</code> から、上流の事実は awsome-distributed-ai commit 25d5723 から、2026-11-18 に確かめた。</p>
+<div class="lead"><p style="margin:0"><b>まとめ。</b>PR #21 は、Terraform に「入れ物だけ」を作らせるという #17 / #19 の決定を、VPC、EKS、system ノード、Karpenter の前提、削除ガードの 5 つの要素で実装したもの。独立したレビューの指摘 17 件のうち 12 件を直し、残り 5 件 (文書化 2、保留 2、制約緩和 1) は理由とともに本文に書いてある。実機では 3 回中 2 回が通り、1 回目の失敗はテスト側の誤りだった。これに加えて、Issue #20 が追記した多テナント対応の契約 4 点 (IMDS の遮断、CNI 権限の分離、NetworkPolicy の施行、Argo CD の役の分離) を実装し、<b>push・独立したレビュー・レビュー対応・実機の e2e 検証まで済んでいる。</b>レビューの指摘 9 件のうち「高」3 件は、まだ main に無い版への「アップグレード」を前提にした指摘で今回は適用対象外、中 2 件・低 4 件は直した。実機の e2e は 4 回走らせ (1 回目はテストスクリプトの不備で失敗)、3 回目で見つかった「Karpenter が作った起動テンプレートが削除ガードの網をすり抜けて残る」という実在の欠陥を、CloudTrail と Karpenter 本体のソースで原因を確定させてから直し、4 回目で残存ゼロを確認した。</p></div>
+<p class="foot">PR: <a href="https://github.com/littlemex/distai-platform/pull/21">https://github.com/littlemex/distai-platform/pull/21</a> ・ Issue: <a href="https://github.com/littlemex/distai-platform/issues/20">#20</a> ・ 上流: <a href="https://github.com/awslabs/awsome-distributed-ai/blob/25d5723cb62ab1f83b0f4307c28c8f3496bfaa53/architectures/amazon-eks/assets/eks-cluster.yaml">awsome-distributed-ai の eks-cluster.yaml (25d5723)</a><br>コードと行数は PR のブランチの先頭 (3b81748、レビュー修正 commit 00afa70 を含む) から、e2e のログと秒数は <code>~/tmp/dp-exp/fnd-e2e/run1.log</code>〜<code>run3.log</code> と <code>evidence.txt</code> から、上流の事実は awsome-distributed-ai commit 25d5723 から、2026-11-18 に確かめた。5 節の 4 点は <code>feat/20-tenancy</code> 実装 commit <code>9899449</code>・テスト <code>8f7fd23</code>/<code>66c8cf8</code>・レビュー対応 <code>fc1afc0</code>・削除ガード修正 <code>7884eaf</code> (PR 先頭) の diff と commit メッセージ、4 回の e2e ログ <code>~/tmp/dp-exp/fnd-e2e/run4.log</code>〜<code>run7.log</code>、独立確認の記録 <code>evidence-tenancy.txt</code>・<code>evidence-fc1afc0.txt</code>・<code>evidence-7884eaf.txt</code>、Karpenter v1.15.2 のソース (<code>pkg/apis/v1/labels.go</code>、<code>pkg/providers/launchtemplate/launchtemplate.go</code>) から、2026-11-18 に確かめた。</p>
 
 </div>
 <script>
