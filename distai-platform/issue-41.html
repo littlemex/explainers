@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>部品を3層に分け、セルごとに選べるようにする仕組み — distai-platform</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre code{background:none;color:inherit;padding:0;font-size:inherit}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.tag{display:inline-block;font-size:12px;padding:1px 9px;border-radius:20px;border:1px solid var(--line);background:#fff;margin:0 4px 4px 0;color:var(--ink2)}
+.tag.g{background:var(--g);color:#fff;border-color:var(--g)}
+.tag.r{background:var(--badbg);color:var(--bad);border-color:#e7bdba}
+.tag.a{background:var(--warnbg);color:var(--warn);border-color:#e6cf9e}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="../index.html">explainers</a> &nbsp;/&nbsp; <a href="index.html">distai-platform シリーズ</a> &nbsp;/&nbsp; 部品の3層とセルごとの選択</p>
+
+<h1>部品を3層に分け、セルごとに選べるようにする仕組み<br><span style="font-size:17px;color:#3c5a4c">Issue #41 (RFC) の解説</span></h1>
+
+<div class="lead">
+<p><b>結論から。</b>今の distai-platform は、admin が用意した部品 (karpenter、kueue、GPU/Trainium の device plugin など) を <code>gitops/addons/</code> に置くと、登録した全クラスタに無条件で配られる。これは「外さなくていい部品」には正しいが、監視 (dcgm-exporter) や社内ビルド環境 (BuildKit) のような「要るセルだけに入れたい部品」には合わない。<a href="https://github.com/littlemex/distai-platform/issues/41">Issue #41</a> は、部品を <b>core (外せない)</b>・<b>platform-optional (admin が配る、セルごとに選べる)</b>・<b>workload (チームが選ぶ)</b> の3層に分け、<b>セルごとの選択</b> を既存の仕組みの延長だけで (新しい CRD もコントローラも作らずに) 実現する設計を提案した。Fable 5.2 による見直しを13 回かけて、見つかった設計の誤りと安全上の穴を全部直し、最終版で「直す点なし」の承認を得た。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>既存の実装 (PR #40 の <code>platform.ApplicationSet.yaml</code> / <code>cells.ApplicationSet.yaml</code>) を読んで今の挙動を確かめ、元の distributed-ai (Terraform で監視・BuildKit を入れている) と upstream の awsome-distributed-ai (観測の2つの流儀) を調べ、それを踏まえて設計をレビューにかけた。実装はしていない (この RFC はまだ Issue のみ)。</p>
+</div>
+
+<table>
+<tr><th>#</th><th>決めたこと</th><th>比べた案</th><th>なぜこの形か</th><th>関連</th></tr>
+<tr><td>1</td><td>Argo CD 自体は core に含める (admin-optional にはしない)</td><td>Argo CD を4つ目の層にする／platform-optional 扱いにする</td><td>Argo CD が無いと、core・platform-optional・workload のどれも配れない。配る側を配られる側と同じ扱いにできない</td><td>Decision 1</td></tr>
+<tr><td>2</td><td>セルごとの選択は、クラスタの Secret のラベルではなく「ファイルがあるかどうか」で決める</td><td>Secret のラベル (<code>distai.dev/addon.monitoring: enabled</code>) を ApplicationSet の selector で見る</td><td>ApplicationSet の selector は、同じ Matrix の中の「別の生成元が読んだファイルの中身」を見られない。部品が増えるたびに Secret にラベルを増やす方式は上限が無い</td><td>Decision 3</td></tr>
+<tr><td>3</td><td>任意の部品は専用の3番目の ApplicationSet (<code>addons-optional.ApplicationSet.yaml</code>) で配る</td><td>既存の <code>cells.ApplicationSet.yaml</code> に glob を1本足すだけで済ませる</td><td>Argo CD の RollingSync は ApplicationSet 単位で効くので、同じオブジェクトに混ぜると、将来 RollingSync が本当に効くようになった日に、1つのセルの壊れた監視が他のセルの容量やチームの区画まで止めてしまう</td><td>Decision 3</td></tr>
+<tr><td>4</td><td>セルごとに書く値は許可リスト (<code>overridableKeys</code>) でしか変えられない</td><td>危ないキー名 (<code>image</code>、<code>registry</code> など) を禁止リストで塞ぐ</td><td>upstream の Helm chart のキーの付け方は一定でない (<code>global.imageRegistry</code> など)。禁止リストは名前を見落とすと通ってしまう。許可リストなら、載っていない物は最初から拒否される</td><td>Decision 3/4</td></tr>
+</table>
+
+<h2>0. 何に困っていたか</h2>
+<p>実装を読むと、<code>platform.ApplicationSet.yaml</code> は <code>gitops/addons/*/addon.yaml</code> を1本ずつ読み、登録されている全クラスタに配る。GPU/Trainium の device plugin のような「要らないセルに入っても costs 0 (ノードが無ければ DaemonSet は単に起動しない)」部品にはこれで良いが、監視スタック (Prometheus 一式で数 GB のメモリと専用ノードが要る) や BuildKit (特権に近い namespace が要る) は、入れたくないセルにまで配ってしまうと、課金とセキュリティの両方で無駄がある。これを選べるようにする仕組みが今まで無かった。</p>
+
+<h2>1. 3層とは何か</h2>
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="3層とその配布経路">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="20" y="30" width="230" height="70" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="135" y="58" font-size="13" text-anchor="middle" font-weight="600" fill="#8a5a12">core</text><text x="135" y="76" font-size="11.5" text-anchor="middle" fill="#3c5a4c">Argo CD・karpenter・kueue・</text><text x="135" y="91" font-size="11.5" text-anchor="middle" fill="#3c5a4c">GPU/Trainium advertiser</text>
+<rect x="325" y="30" width="230" height="70" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="440" y="58" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">platform-optional</text><text x="440" y="76" font-size="11.5" text-anchor="middle" fill="#3c5a4c">dcgm-exporter・Prometheus・</text><text x="440" y="91" font-size="11.5" text-anchor="middle" fill="#3c5a4c">BuildKit・sharedfs・通知</text>
+<rect x="630" y="30" width="230" height="70" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="745" y="58" font-size="13" text-anchor="middle" font-weight="600" fill="#1d4e8f">workload</text><text x="745" y="76" font-size="11.5" text-anchor="middle" fill="#3c5a4c">分離推論の参照・訓練の例・</text><text x="745" y="91" font-size="11.5" text-anchor="middle" fill="#3c5a4c">examples/inference</text>
+<rect x="20" y="160" width="230" height="56" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="135" y="184" font-size="12.5" text-anchor="middle" fill="#12241c">platform.ApplicationSet</text><text x="135" y="200" font-size="11" text-anchor="middle" fill="#3c5a4c">全クラスタに無条件 (#25 のまま)</text>
+<rect x="325" y="160" width="230" height="56" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="440" y="184" font-size="12.5" text-anchor="middle" fill="#12241c">addons-optional.ApplicationSet</text><text x="440" y="200" font-size="11" text-anchor="middle" fill="#3c5a4c">新規・セルの marker ファイルがある時だけ</text>
+<rect x="630" y="160" width="230" height="56" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="745" y="184" font-size="12.5" text-anchor="middle" fill="#12241c">#22 のチーム専用経路</text><text x="745" y="200" font-size="11" text-anchor="middle" fill="#3c5a4c">#22 が出るまでは配る経路が無い</text>
+<path d="M135 100 L135 158" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<path d="M440 100 L440 158" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<path d="M745 100 L745 158" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<text x="440" y="250" font-size="12" text-anchor="middle" fill="#3c5a4c">配る側 (Argo CD ApplicationSet) を増やすのは真ん中だけ。core と workload の配り方は今まで通り</text>
+</svg>
+<figcaption>core は外せない (admin が #20/#21 の Terraform と platform.ApplicationSet で配る)。workload はチームが選ぶが、配る経路自体はまだ #22 待ち。今回の RFC が実際に新しく作るのは、真ん中の platform-optional だけである。</figcaption>
+</figure>
+
+<h2>2. セルごとの選択はどう決まるか</h2>
+<p>セルが監視 (dcgm-exporter) を入れたいなら、<code>gitops/cells/&lt;セル名&gt;/addons/dcgm-exporter.yaml</code> という小さなファイルを置く。これだけで、新しい <code>addons-optional.ApplicationSet.yaml</code> がそのセルにだけ Application を作る。ファイルが無いセルには何も作られない。これは、容量のプール (<code>capacity-pool</code>) や smoke テストが今すでに使っている「クラスタの名前でパスをテンプレート化した Git file generator」の仕組みをそのまま使い回しているだけで、新しい Argo CD の機能は一切要らない。</p>
+<p>この marker ファイルは、<code>gitops/addon-catalog/</code> に書かれた「正本」(版・場所・<b>許可リスト</b>) と内容が一致しているかを、PR の時点で (実機に適用する前に) 自動で確かめる。版がずれていたり、許可されていないキーを書いていたりすると、その場で CI が落ちる。</p>
+
+<h2>3. 最初に入れる部品の一覧</h2>
+<table>
+<tr><th>部品</th><th>層</th><th>どこから持ってくるか</th></tr>
+<tr><td>dcgm-exporter</td><td>platform-optional</td><td>元の distributed-ai がすでに踏んだ罠 (GPU Operator 内蔵の DCGM と衝突する) を避けた値を、新しい local wrapper chart に移す</td></tr>
+<tr><td>neuron-monitor</td><td>platform-optional</td><td>distributed-ai にも awsome にも無い新規作業。dcgm-exporter と同じ丁寧さで、同じタイミングで Issue を立てる (GPU と Trainium を同じ扱いにする原則どおり)</td></tr>
+<tr><td>Prometheus (kube-prometheus-stack)</td><td>platform-optional</td><td>distributed-ai の自前運用をそのまま移植。AMP/AMG (マネージド) は別の部品として後回し</td></tr>
+<tr><td>BuildKit (社内ビルド)</td><td>platform-optional・admin 専用</td><td>distributed-ai の「Terraform は ECR/IAM だけ、Build 自体は chart」という分担をそのまま踏襲。チームの namespace には絶対に入れない</td></tr>
+<tr><td>通知・sharedfs</td><td>platform-optional</td><td>既存の Issue #23・#18 をこの層に位置づけるだけで、設計のやり直しはしない</td></tr>
+<tr><td>分散学習コントローラ (JobSet/Trainer v2)</td><td>platform-optional</td><td>既存の Issue #34 を、コントローラ (platform-optional) と使い方の例 (workload) に分ける</td></tr>
+<tr><td>分離推論の参照・examples/inference</td><td>workload</td><td>#22 のチーム専用経路が出来るまで配れない、と正直に書く (無理に今の仕組みに押し込まない)</td></tr>
+</table>
+
+<h2>4. レビューで見つかった、直した大きな勘違い</h2>
+<p>最初の案は「セルの marker ファイルは、正本のファイルを参照するだけで値は書かない」という形だったが、これは Argo CD の ApplicationSet が <b>1つのファイルからしか値を作れない</b>という実際の仕組みと食い違っていた (2つ目のファイルを「参照」で読み込む機能は無い)。直した形は、容量のプールが今すでにやっている通り、marker ファイルに値をそのまま書き、CI が正本と一致しているかを別途確認する、というもの。</p>
+<p>もう1つの大きな指摘は、Argo CD の RollingSync (順番を強制する機能) が、実はこの基盤が使っている EKS 管理の Argo CD では<b>まだ効いていない</b> (実機で確認済みの既知の事実) こと。これを踏まえて、依存関係のある部品 (例: dcgm-exporter は Prometheus が要る) が今どうやって動くか (順番が逆でも、Application が自分で再試行して追いつく) を、ごまかさずに書き直した。</p>
+
+<h2>5. GPU/Trainium を同等に扱う原則との関係</h2>
+<p>最初の案では、GPU 用の dcgm-exporter だけ値を用意し、Trainium 用の neuron-monitor は「後で考える」で済ませていた。これはこのリポジトリの標準原則 (GPU と Neuron を同じ扱いにする) に反すると直し、neuron-monitor も dcgm-exporter と同じ基準の Issue を同じタイミングで立てる形にした。参考にできる既存の実装が無いのは事実だが、それは優先度の差ではなく、持ってこられる材料の差でしかない、と書き分けた。</p>
+
+<h2>6. まだ終わっていないこと</h2>
+<ul>
+<li>workload 層 (チームが選ぶ部品) を実際に配る経路は、<a href="https://github.com/littlemex/distai-platform/issues/22">Issue #22</a> (マルチテナント) が出るまで存在しない。この RFC は層の名前と契約だけを決め、配り方は #22 に委ねた</li>
+<li>Pod Security (特権度) を実際にどこまで必要とするかは、dcgm-exporter・Prometheus の chart を実際に書くときに確かめる (この RFC では「どちらが危ないか」を決めつけていない)</li>
+<li>許可リスト (<code>overridableKeys</code>) の存在チェックは、実装時に Helm の依存関係を実際にマージした木に対して検証する必要があり、まだコードにはしていない</li>
+</ul>
+
+<h2>7. レビューで見てほしいこと</h2>
+<ol>
+<li>3番目の ApplicationSet を新設する判断 (既存の2つに glob を足すだけで済ませない) は、コストに対して十分に理由づけられているか</li>
+<li>許可リスト方式 (<code>overridableKeys</code>) は、将来チームが自分の値を調整したくなった場合に、運用上きつすぎないか</li>
+<li>workload 層を「#22 が出るまで配れない」で止めた判断は、今すぐ分離推論の参照 (#37) を動かしたい側から見て妥当か</li>
+<li>今の基準 (「設計の誤り」「安全上の穴」「既存の決め事 (#22・#25・#19) との矛盾」の3つ) で見て、他に見落としがないか</li>
+</ol>
+
+<p class="foot">
+確認した内容と日付: Issue 本文は 2026-11-21 に <a href="https://github.com/littlemex/distai-platform/issues/41">littlemex/distai-platform#41</a> として投稿 (Fable 5.2 の見直しを合計13回実施し、最終版で APPROVE)。実装は含まない (RFC のみ)。参照した実装は PR #40 (<code>feat/19-accel-addons</code>) の <code>gitops/appsets/*.ApplicationSet.yaml</code>・<code>gitops/addons/*/addon.yaml</code>、元の <code>littlemex/distributed-ai</code> の <code>infra/eks/observability.tf</code>・<code>gpu-addons.tf</code>・<code>image-builder.tf</code>、upstream <code>awslabs/awsome-distributed-ai</code> の <code>observability/</code> 配下 (いずれも 2026-11-21 時点)。<br>
+リポジトリ: <a href="https://github.com/littlemex/distai-platform">https://github.com/littlemex/distai-platform</a> ・ 進め方のスキル: <a href="../skills/distai-platform.html">/distai-platform</a>
+</p>
+
+</div>
+</body>
+</html>
