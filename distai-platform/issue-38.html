@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI セッションどうしでタスクを引き渡す仕組み — distai-platform</title>
+<style>
+:root{--ink:#12241c;--ink2:#3c5a4c;--line:#d5e3da;--bg:#f6faf7;--card:#fff;
+--g:#1f7a4d;--g2:#2f9e63;--gp:#e8f4ec;--gd:#0f4a2e;--warn:#8a5a12;--warnbg:#fdf3e2;--bad:#8f2f2f;--badbg:#fbeceb;
+--b:#1d4e8f;--bp:#e6eef8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16px;
+font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:36px 24px 90px}
+a{color:var(--g)}
+.nav{font-size:13.5px;color:var(--ink2);margin-bottom:18px}
+h1{font-size:25px;margin:0 0 12px;line-height:1.5;border-bottom:3px solid var(--g);padding-bottom:14px}
+h2{font-size:20px;margin:48px 0 12px;padding-left:12px;border-left:5px solid var(--g2)}
+h3{font-size:16.5px;margin:28px 0 8px;color:var(--gd)}
+.lead{background:var(--gp);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 10px}
+.lead b{color:var(--gd)}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:var(--gp);color:var(--gd);font-weight:600}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.no{background:var(--badbg)} td.y{background:#eef7f1}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.warn{background:var(--warnbg);border:1px solid #e6cf9e;border-radius:10px;padding:14px 16px;margin:16px 0}
+.warn b{color:var(--warn)}
+.bad{background:var(--badbg);border:1px solid #e7bdba;border-radius:10px;padding:14px 16px;margin:16px 0}
+.bad b{color:var(--bad)}
+.note{background:var(--bp);border:1px solid #bed3ea;border-radius:10px;padding:14px 16px;margin:16px 0}
+.note b{color:var(--b)}
+pre{background:#10241b;color:#dff1e6;padding:14px 16px;border-radius:9px;overflow-x:auto;
+font-size:12.6px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--gp);padding:1px 5px;border-radius:4px;font-size:13.5px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre code{background:none;color:inherit;padding:0;font-size:inherit}
+figure{margin:22px 0;text-align:center}
+figcaption{font-size:13.5px;color:var(--ink2);margin-top:8px;text-align:left}
+ul,ol{padding-left:22px} li{margin:5px 0}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.tag{display:inline-block;font-size:12px;padding:1px 9px;border-radius:20px;border:1px solid var(--line);background:#fff;margin:0 4px 4px 0;color:var(--ink2)}
+.tag.g{background:var(--g);color:#fff;border-color:var(--g)}
+.tag.r{background:var(--badbg);color:var(--bad);border-color:#e7bdba}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p class="nav"><a href="../index.html">explainers</a> &nbsp;/&nbsp; <a href="index.html">distai-platform シリーズ</a> &nbsp;/&nbsp; AI セッションの引き渡し</p>
+
+<h1>AI セッションどうしでタスクを引き渡す仕組み<br><span style="font-size:17px;color:#3c5a4c">Issue #38 (RFC) の解説</span></h1>
+
+<div class="lead">
+<p><b>結論から。</b>AI の作業セッション (Mac、EC2、将来はクラスタの中) が途中で落ちたり、交代したりしても、高価な予約 (Capacity Block など) を取り残さず、同じ作業を 2 回やらず、別のセッションが安全に続きを拾えるようにする仕組みを <a href="https://github.com/littlemex/distai-platform/issues/38">Issue #38</a> として提案した。DynamoDB の小さな台帳 (Ledger) と、権限を絞って渡す窓口 (ブローカー) の 2 つだけで作る。Fable 5.2 による見直しを 6 回かけて安全性を詰め、実機 (EC2) でプロトタイプを動かして 26 項目すべて通った。</p>
+<p style="margin-bottom:0"><b>この文書でやったこと。</b>設計の全文 (日本語ではなく英語、150KB 超) を Fable 5.2 で 7 回レビューし、Issue 本文はその要点を 65,000 字弱に絞って書いた。検証は、設計が決まった後の最終形に対して、安全性にかかわる主張 (二重に取れない・期限切れで拾える・権限が絞れる) だけを選んで実機で確かめた。</p>
+</div>
+
+<table>
+<tr><th>#</th><th>なぜ測ったか</th><th>どう測ったか</th><th>他の選択肢</th><th>結果</th><th>関連</th></tr>
+<tr><td>1</td><td>2 つのセッションが同時に同じ作業を取ってしまわないか</td><td>8 本のスレッドが同時に同じタスクを取りに行く実験を EC2 ランナーで実行</td><td>Kubernetes の Lease (クラスタが無いと使えない)</td><td>4/4 成功。勝者は 1 人だけ</td><td>Decision 4</td></tr>
+<tr><td>2</td><td>落ちたセッションの作業を、別のセッションが安全に拾えるか</td><td>片方のセッションを「クラッシュしたまま」にして、もう片方が決められた待ち時間の後に取りに行く</td><td>ハートビートのタイムスタンプを自分の時計と比べる方式 (時計のズレに弱い)</td><td>9/9 成功。待ち時間を守り、元のセッションは復帰しても拒否される</td><td>Decision 4</td></tr>
+<tr><td>3</td><td>人の承認 (Go) が無いと危険な作業を始められないか</td><td>承認前の取得を試す、ズレた承認を試す、承認後に計画を変えて無効になるかを試す</td><td>同じ台帳の中の 1 つのフィールドで承認を表す方式 (AI が書き換えられる)</td><td>6/6 成功</td><td>Decision 6</td></tr>
+<tr><td>4</td><td>AI の権限が本当に絞れているか</td><td>AI 役のロールが台帳を直接書けないこと、窓口 (ブローカー) が渡す作業用の認証情報が許可されたことしかできないことを確認</td><td>AI 自身が自分の権限を狭める方式 (本人が従わなければ効かない)</td><td>7/7 成功</td><td>Decision 5</td></tr>
+</table>
+
+<h2>0. 何に困っていたか</h2>
+<p>distai-platform では、GPU や Trainium の予約 (Capacity Block) を取ると、安いときでも 1 日 24 時間ぶんの課金がすでに発生している。これまでは、この予約を使い切るまで 1 つの AI セッションがずっと動いているという前提だった。しかし実際には、セッションは Mac でも EC2 でも、文脈の長さや時間で区切られて終わる。バックグラウンドに回すこともあるし、強制終了されることもある。そうなると、</p>
+<ul>
+<li>予約の残り時間を、誰も使わないまま放置してしまう (お金が無駄になる)</li>
+<li>別のセッションが「続きをやろう」としたときに、前のセッションがまだ生きていて、同じ作業を 2 回やってしまう</li>
+<li>検知の仕組み (Claude Code の hook) が必ず動くとは限らない。動かないことを前提に設計する必要がある</li>
+<li>今のセッションは、必要以上に広い AWS の権限を持ったまま動いている</li>
+</ul>
+<p>この 4 つを、クラスタが無い Mac でも、EC2 でも、将来のクラスタの中の Pod でも同じ仕組みで解く、というのが Issue #38 の中身である。</p>
+
+<h2>1. 何を作るか: 台帳とブローカー</h2>
+<p>仕組みは 2 つの部品だけでできている。<b>台帳 (Ledger)</b> は「どのタスクを、誰が、いつまで持っているか」を記録する、DynamoDB の小さな表。<b>ブローカー</b> は、台帳への書き込みと、作業に必要な AWS の権限 (絞ったもの) を渡す、唯一の窓口。AI セッションは台帳を直接書けない。読むことと、ブローカーに頼むことしかできない。</p>
+<figure>
+<svg viewBox="0 0 880 300" width="100%" style="max-width:880px" role="img" aria-label="台帳とブローカーの関係">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker></defs>
+<rect x="30" y="30" width="190" height="56" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="125" y="54" font-size="13" text-anchor="middle" font-weight="600" fill="#12241c">AI セッション A</text><text x="125" y="72" font-size="11.5" text-anchor="middle" fill="#3c5a4c">(前の作業者)</text>
+<rect x="30" y="200" width="190" height="56" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="125" y="224" font-size="13" text-anchor="middle" font-weight="600" fill="#12241c">AI セッション B</text><text x="125" y="242" font-size="11.5" text-anchor="middle" fill="#3c5a4c">(拾う側)</text>
+<rect x="340" y="110" width="200" height="70" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="440" y="138" font-size="13" text-anchor="middle" font-weight="600" fill="#0f4a2e">ブローカー</text><text x="440" y="156" font-size="11.5" text-anchor="middle" fill="#3c5a4c">唯一の書き込み窓口</text><text x="440" y="172" font-size="11.5" text-anchor="middle" fill="#3c5a4c">権限を絞って渡す</text>
+<rect x="650" y="40" width="200" height="60" rx="8" fill="#fdf3e2" stroke="#8a5a12"/><text x="750" y="64" font-size="13" text-anchor="middle" font-weight="600" fill="#8a5a12">台帳 (DynamoDB)</text><text x="750" y="82" font-size="11.5" text-anchor="middle" fill="#3c5a4c">誰が・いつまで持つか</text>
+<rect x="650" y="200" width="200" height="60" rx="8" fill="#e6eef8" stroke="#1d4e8f"/><text x="750" y="224" font-size="13" text-anchor="middle" font-weight="600" fill="#1d4e8f">Kueue / 人の承認</text><text x="750" y="242" font-size="11.5" text-anchor="middle" fill="#3c5a4c">資源の割当・Go ボタン</text>
+<path d="M220 58 L338 130" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<path d="M220 228 L338 155" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<path d="M540 135 L648 80" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<path d="M540 160 L648 220" stroke="#3c5a4c" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+<text x="440" y="270" font-size="12" text-anchor="middle" fill="#3c5a4c">A・B は台帳を直接書けない。書けるのはブローカーだけ</text>
+</svg>
+<figcaption>AI セッションは、台帳を直接書き換えることができない。すべての書き込みと、作業用の権限の受け渡しはブローカーという 1 つの窓口を通る。これにより「AI が自分で承認を偽造する」「権限を自分で広げる」が構造的にできなくなる。</figcaption>
+</figure>
+
+<h2>2. 動いている様子 (3 つの場面)</h2>
+<h3>場面 A: 24 時間の予約を 2 つのセッションで引き継ぐ</h3>
+<p>次の 24 時間の Capacity Block (p5en × 2 台) は、前半をこの基盤自体の検証、後半を別の実験に使う計画。前半を担当したセッション A が終わる (あるいは落ちる) と、別のセッション B が「後半はもう始めてよい」ことを台帳から見つけて拾う。B は Kubernetes が全く無い、裸の EC2 の上でも同じ仕組みで作業を引き継げる。<b>ただし、この仕組みが保証するのは「2 つのセッションが同時に同じタスクの権利を持たない」ことだけ</b>で、「前半が終わるまで後半を始めない」という順番そのものは、まだ自動化していない (下の「まだ終わっていないこと」)。</p>
+<h3>場面 B: クラッシュしたセッションを、二重実行なしで引き継ぐ</h3>
+<p>セッション A が作業中に強制終了され、台帳への「まだ生きています」の返事 (ハートビート) が止まる。セッション B が取りに行くと、台帳はすぐには渡さず、決められた待ち時間だけ待たせる。この待ち時間は<b>ブローカー自身の時計</b>で測る。A や B 自身の時計 (ノート PC がスリープしていた場合などにズレる) は一切使わない。待ち時間が過ぎてもまだ誰も更新していなければ B が引き継ぎ、もし A が後から復活してハートビートを送っても、台帳はそれを拒否する。</p>
+<h3>場面 C: 危険な作業には人の承認 (Go) がいる</h3>
+<p>破壊的・高額な作業は、あらかじめ管理者が決めた一覧 (AI は選べない) によって「人の承認が無いと取れない」設定になる。AI は別の種類の作業を選んで承認を回避することもできない (その種類の作業にそもそも危険な権限が無いように管理者側で決めてあるため)。承認は「どの内容を承認したか」のハッシュ値に固定されるので、承認された後に内容が変わると、古い承認は自動的に無効になる。</p>
+
+<h2>3. 検証で見つかった実装上のミス (5 件)</h2>
+<p>実機で実際にコードを動かしたことで、設計の文章だけでは見つからなかった実装のミスが 5 つ見つかり、その場で直した。</p>
+<ol>
+<li>IAM の API 呼び出しのパラメータ名を 1 つ間違えていた</li>
+<li>DynamoDB から読み戻した数値が Python の <code>Decimal</code> 型になり、ハッシュの再計算が壊れる (書いた時の型と比較できなくなる) バグ</li>
+<li>テストコードの中で <code>plan</code> という予約語を使ってしまい、DynamoDB の更新式が構文エラーになった</li>
+<li><b>最も重要な発見</b>: 権限を渡す側のコードが、ブローカー自身の認証情報ではなく、たまたまその場にあった広い権限 (管理者相当) を使ってしまっていた。これは「権限が絞られているはずの経路を、間違った認証情報が素通りしてしまう」という、まさにこの仕組みが防ぎたかった種類のミスで、実機で動かした瞬間に権限エラーとして検出できた</li>
+<li>さらに、AWS の実際の仕様として「絞るための Deny だけを書いたセッションポリシーは、何も許可していないのと同じ (交差で全部ゼロになる)」ことが分かった。絞るときは「まず全部許可してから、絞りたい部分だけ Deny する」という書き方が必要で、設計の文章にはこの精度までは書かれていなかった</li>
+</ol>
+<p>5 つとも、設計 (DynamoDB の条件付き書き込みという仕組み自体) のバグではなく、実装コードの側のミスだった。文章のレビューだけでは絶対に見つからない種類の発見で、これが「実機で動かす」ことの価値である。</p>
+
+<h2>4. 他の方法と比べた理由</h2>
+<table>
+<tr><th>候補</th><th>採用しなかった理由</th></tr>
+<tr><td>Kueue の Workload に印をつける</td><td>Kueue は「資源をタスクに割り当てる」ことしかしない。誰が持っているか・取り戻せるかは一切解釈しない、ただの飾りになる</td></tr>
+<tr><td>Kubernetes の Lease (coordination.k8s.io)</td><td>仕組み自体は正しいが、Kubernetes のクラスタが無いと使えない。Mac だけで動く場面に対応できない</td></tr>
+<tr><td>GitHub の Issue のラベルや本文</td><td>GitHub の書き込みには「同時に 2 人が書いたら片方だけ勝つ」という保証がない。人が読む場所としては使うが、実際の取得・解放はここでは行わない</td></tr>
+<tr><td>Temporal / AWS Step Functions</td><td>保証の形としては近いが、常時動くサーバやサービスを新たに運用する必要がある。今の作業量 (同時に数件) には重すぎる</td></tr>
+<tr><td>SQS の visibility timeout</td><td>「もう一度配達されないことを保証しない」仕組みで、取りこぼしへの対策が結局別に必要になる</td></tr>
+</table>
+
+<h2>5. 0 節 (Neuron を GPU と同等に扱う) との関係</h2>
+<p>この仕組みは、アクセラレータの種類はおろか、<b>Kubernetes があるかどうかさえ問わない</b>。だからこそ、distai-platform の中にしか無い専用の層ではなく、<b>独立した小さな OSS として切り出し、distai-platform はその最初の利用者になる</b>という判断にした (Decision 12)。これは、このリポジトリの標準原則「ここでしか使えない高度な抽象化は NG。汎用に使える仕組みは独立 OSS として切り出す」をそのまま適用した結果である。</p>
+
+<h2>6. まだ終わっていないこと</h2>
+<ul>
+<li>実際のハードウェア MFA (多要素認証) での承認は未検証。IAM Identity Center のセッションで MFA の条件キーが実際に立つかどうかも未確認</li>
+<li>Kueue に実際に結びつける部分 (同じ名前での再提出、専用の ClusterQueue) は、実際の EKS クラスタが要るため、最初にこの仕組みを使う PR に持ち越し</li>
+<li>一時停止 (park/resume)・失敗からの再試行・掃除役 (sweep) などは設計とレビューは済んでいるが、今回の実機検証では回していない</li>
+<li>「前半が終わるまで後半のタスクを作らない」という順番の制御は、まだ運用上の決め事であり、コードでは強制していない</li>
+</ul>
+
+<h2>7. レビューで見てほしいこと</h2>
+<ol>
+<li>独立した OSS に切り出す判断 (Decision 12) は、distai-platform の中に置く案と比べて十分に理由づけられているか</li>
+<li>人の承認 (Go) の窓口を、ブローカーの他の処理と別の Lambda に分け、その関数だけ呼び出し元を絞る設計は十分か</li>
+<li>ブローカーが単一障害点になっている点 (落ちている間は新しい引き継ぎが止まる) の割り切りは妥当か</li>
+<li>今の基準 (「設計の誤り」「安全上の穴」「読み手が誤解する説明」の 3 つ) で見て、他に見落としがないか</li>
+</ol>
+
+<p class="foot">
+確認した内容と日付: Issue 本文は 2026-11-20 に <a href="https://github.com/littlemex/distai-platform/issues/38">littlemex/distai-platform#38</a> として投稿 (Fable 5.2 の見直しを合計 6 回実施し APPROVE)。設計全文・レビュー履歴・検証コードは、マージしない前提のブランチ <a href="https://github.com/littlemex/distai-platform/tree/f85ca6c71ea1e1f76d4b57056e0cd342c68233a8/rfc/agent-handoff"><code>rfc/agent-handoff</code></a> (commit <code>f85ca6c</code>) に置いた。検証は <code>distai-platform</code> の EC2 ランナー (us-east-1) で実行し、作成した AWS 資源は全て削除を直接の API 呼び出しで確認済み。<br>
+リポジトリ: <a href="https://github.com/littlemex/distai-platform">https://github.com/littlemex/distai-platform</a> ・ 進め方のスキル: <a href="../skills/distai-platform.html">/distai-platform</a>
+</p>
+
+</div>
+</body>
+</html>
