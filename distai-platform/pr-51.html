@@ -75,8 +75,8 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <h1>PR #51: SGLang の分離推論と、llm-d 経由のルーティング<br><span style="font-size:17px;color:#3c5a4c">examples/inference: SGLang prefill/decode disaggregation, and the llm-d/Gateway routing variant for vLLM (RFC #37)</span></h1>
 <p><span class="tag g">ready</span><span class="tag">Issue #37 の一部</span><span class="tag">ブランチ feat/disagg-pd-reference</span><span class="tag">base PR #44 (feat/25-delivery-bootstrap)</span></p>
 <div class="lead">
-<p><b>結論から言うと。</b>大きな文章生成 AI を「質問を読む役」と「答えを書く役」に分けて別々のサーバーで動かす仕組み(分離推論)を、もう一つの有名なエンジン SGLang でも動くようにした。これまでは vLLM という 1 つのエンジンでしか試していなかった。合わせて、この 2 台をつなぐ「交通整理役」を手作りの小さなプログラムから、業界標準の仕組み(llm-d / Gateway API Inference Extension)に替える版も作った。実際に GPU を 2 台借りて 5 つの組み合わせを動かし、4 つは最後まで正しい答えが返ってくることを確認した。残り 1 つ(交通整理役を標準品に替えた版)は、部品同士のつながりは正しく配線できたが、実際の質問を送ると交通整理役の手前でエラーが起きることが分かった。</p>
-<p style="margin-bottom:0"><b>この PR でやったこと。</b>SGLang の統合・分離の両方の設定ファイル (chart) を作り(1 節)、交通整理役を標準品に替える版も作り(2 節)、実機の GPU 2 台で 5 通り全部を動かして確認した(3 節)。途中、既存の確認手順が実は間違っていたこと(4 節)と、ネットワーク設定の既定値が思いがけず外部に公開される設定になっていたこと(5 節)も見つけて直した。</p>
+<p><b>結論から言うと。</b>大きな文章生成 AI を「質問を読む役」と「答えを書く役」に分けて別々のサーバーで動かす仕組み(分離推論)を、もう一つの有名なエンジン SGLang でも動くようにした。これまでは vLLM という 1 つのエンジンでしか試していなかった。合わせて、この 2 台をつなぐ「交通整理役」を手作りの小さなプログラムから、業界標準の仕組み(llm-d / Gateway API Inference Extension)に替える版も作った。実際に GPU を 2 台借りて 5 つの組み合わせを動かし、<b>最終的に 5 つ全部が最後まで正しい答えを返すことを確認した</b>。交通整理役を標準品に替えた版は、1 回目の確認では配線は正しくても実際の質問の手前でエラーが起きたが、原因(暗号化通信の設定の食い違い)を特定して直し、追い確認で完走させた。</p>
+<p style="margin-bottom:0"><b>この PR でやったこと。</b>SGLang の統合・分離の両方の設定ファイル (chart) を作り(1 節)、交通整理役を標準品に替える版も作り(2 節)、実機の GPU 2 台で 5 通り全部を動かして確認した(3 節)。途中、既存の確認手順が実は間違っていたこと(4 節)、ネットワーク設定の既定値が思いがけず外部に公開される設定になっていたこと(5 節)、交通整理役の暗号化通信の設定の食い違い(6 節)を見つけて、全部直した。</p>
 </div>
 
 <h2>数字で見る</h2>
@@ -85,13 +85,18 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <tr><td class="n">1</td><td>SGLang でも本当に「分離した 2 台をまたいで答えの材料(KV キャッシュ)が転送されたか」</td>
 <td>転送の前後でネットワークカード(EFA)の送受信バイト数を、サーバーの中のファイルを直接読んで比べた</td>
 <td>ログに「転送した」と書いてあることだけを信じる(採らず、ログは嘘をつかないが、本当にそのネットワークカードを通ったかまでは分からない)</td>
-<td>prefill 役のサーバーで送信バイト数が 0 から 63,040 に増加。decode 役の受信側は今回読まなかった(片側のみの確認、3 節)</td>
-<td>3 節</td></tr>
+<td>1 回目は送信側だけ確認(0→63,040)。追い確認で受信側も確認し、送信側(0→1,011,328)と受信側の値が完全に一致することを確認(3・6 節)</td>
+<td>3・6 節</td></tr>
 <tr><td class="n">2</td><td>5 つの組み合わせそれぞれで、本当に正しい答えが返ってきたか</td>
 <td>実際に「フランスの首都は」という質問を送り、返ってきた文章を目で確認。さらに 40 件の質問を一定の間隔で流し、全件成功したかを数えた</td>
 <td>サーバーが Ready 状態になったことだけで合格にする(採らず、Ready は起動確認に過ぎず、実際に正しく答えるかは別の話)</td>
-<td>4 組み合わせは 40 件とも成功。llm-d 経由の 1 組み合わせは、質問を送った時点でエラー(5 節とは別の問題)</td>
-<td>3 節</td></tr>
+<td>1 回目は 4 組み合わせが成功、llm-d 経由の 1 組み合わせだけエラー。原因を直した追い確認で、その 1 組み合わせも正しい答えを確認(3・6 節)</td>
+<td>3・6 節</td></tr>
+<tr><td class="n">5</td><td>llm-d 経由の版で、EPP が本当に質問を prefill と decode に振り分けたか</td>
+<td>EPP 自身が数えている振り分け回数(カウンタ)と、EPP 自身の生ログを両方読んだ</td>
+<td>「エラーが出なくなった」ことだけで振り分けが成功したとみなす(採らず、エラーが消えても振り分けの中身までは分からない)</td>
+<td>送った質問の数(4 件)とカウンタの値(4)が一致。生ログでも 1 件ごとに「decode の判定」と「prefill の判定」の両方が走っていることを確認(6 節)</td>
+<td>6 節</td></tr>
 <tr><td class="n">3</td><td>既存の README に書かれた「EFA を通ったことの確認方法」が、実機でも本当に正しいか</td>
 <td>書かれている通りの値(rdma_write_bytes)を実際に読み、転送前後で変化するか確認した</td>
 <td>コードを読むだけで「たぶん正しい」と判断する(採らず、同じ理由で過去に別の見立てが実機で外れている)</td>
@@ -109,13 +114,13 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <figure>
 <svg viewBox="0 0 880 280" width="100%" style="max-width:880px" role="img" aria-label="5 組み合わせの結果"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
 <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
-<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs><text x="220" y="20" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="700">vLLM</text><text x="660" y="20" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="700">SGLang</text><rect x="20" y="40" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="210.0" y="66.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">agg-baseline</text><text x="210.0" y="83.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">統合・1 ノード</text><rect x="460" y="40" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="650.0" y="66.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">agg-baseline</text><text x="650.0" y="83.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">統合・1 ノード</text><rect x="20" y="115" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="210.0" y="141.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">disagg-pd (proxy)</text><text x="210.0" y="158.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">分離・2 ノード・EFA</text><rect x="460" y="115" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="650.0" y="141.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">disagg-pd (router)</text><text x="650.0" y="158.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">分離・2 ノード・EFA</text><rect x="20" y="190" width="380" height="70" rx="8" fill="#fbeceb" stroke="#8f2f2f"/><text x="210.0" y="221.0" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">disagg-pd-llmd (EPP)</text><text x="210.0" y="238.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">分離・Gateway 経由</text><text x="410" y="225" font-size="11.5" fill="#8a9a92" text-anchor="middle" font-weight="400">この PR で新規</text></svg>
-<figcaption>5 つの組み合わせ。緑の 4 つは実機で完走(完成の答えを返した)。赤の 1 つ(llm-d/Gateway 経路)は配線は正しく繋がったが、実際のリクエストは Gateway 自身のデータプレーンで 500 エラーになった。</figcaption>
+<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs><text x="220" y="20" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="700">vLLM</text><text x="660" y="20" font-size="13" fill="#1d4e8f" text-anchor="middle" font-weight="700">SGLang</text><rect x="20" y="40" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="210.0" y="66.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">agg-baseline</text><text x="210.0" y="83.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">統合・1 ノード</text><rect x="460" y="40" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="650.0" y="66.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">agg-baseline</text><text x="650.0" y="83.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">統合・1 ノード</text><rect x="20" y="115" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="210.0" y="141.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">disagg-pd (proxy)</text><text x="210.0" y="158.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">分離・2 ノード・EFA</text><rect x="460" y="115" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="650.0" y="141.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">disagg-pd (router)</text><text x="650.0" y="158.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">分離・2 ノード・EFA</text><rect x="20" y="190" width="380" height="70" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="210.0" y="221.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">disagg-pd-llmd (EPP)</text><text x="210.0" y="238.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">分離・Gateway 経由</text><text x="410" y="225" font-size="11.5" fill="#8a9a92" text-anchor="middle" font-weight="400">この PR で新規</text></svg>
+<figcaption>5 つの組み合わせ全部。最終的に全部、実機で完走(完成の答えを返した)。llm-d/Gateway 経路(左下)は、最初の確認では Gateway 自身のデータプレーンで 500 エラーになったが、原因を特定して直し、追加の確認で完走を確認した。</figcaption>
 </figure>
 
 <h2>2. 交通整理役を標準品(llm-d / Gateway API Inference Extension)に替える</h2>
 <p>これまでの分離推論は、手作りの小さな中継プログラムが「まず質問を prefill に送り、その答えの材料を decode に渡す」という 2 段階を仲介していた。業界で標準になりつつある仕組み(llm-d という OSS プロジェクトの Gateway 経由の方式)に替える版も作った。この方式では、Kubernetes の標準規格(Gateway API)の上に、どのサーバーに質問を振るかを決める専用の部品(EPP、Endpoint Picker)が乗る。</p>
-<p>実機で確認した範囲では、EPP は正しく 2 台のサーバーを認識し、「質問はこちらの decode に、答えの材料はあちらの prefill から」という振り分けの準備までは正しく動いていた。しかし実際に質問を送ると、Gateway 自身(通信の窓口になるソフトウェア)が EPP への内部通信でエラーを起こし、500 エラーが返ってきた。原因は暗号化通信(TLS)の設定の食い違いらしいと分かったが、完全には特定できていない。</p>
+<p>1 回目の確認では、EPP は正しく 2 台のサーバーを認識し、「質問はこちらの decode に、答えの材料はあちらの prefill から」という振り分けの準備までは正しく動いていた。しかし実際に質問を送ると、Gateway 自身(通信の窓口になるソフトウェア)が EPP への内部通信でエラーを起こし、500 エラーが返ってきた。原因と直し方は 6 節にまとめた。</p>
 
 <h2>3. 実機の GPU 2 台で、5 通り全部を動かした</h2>
 <p>EFA(高速ネットワークカード)付きの GPU インスタンスを 2 台借り、Kubernetes クラスタを一から作って、5 つの組み合わせを順番にインストールして試した。</p>
@@ -134,27 +139,38 @@ border:0;border-radius:5px;padding:3px 9px;cursor:pointer;opacity:.85}
 <h2>5. 公開されるはずのない通信窓口が、実は外部公開の設定になっていた</h2>
 <p>Gateway(交通整理役の窓口)を作るソフトウェア(NGINX Gateway Fabric)は、何も指定しないと「外部のインターネットからアクセスできるロードバランサー」を自動で作る既定値を持っていた。クラスター内だけで使うつもりだったのに、実際に試したところ、本物の、認証も何も無いロードバランサーが AWS 上に作られていたことが分かった。見つけてすぐに「クラスター内限定」の設定に直し、ロードバランサーが実際に消えたことも AWS 側の API で確認した。この落とし穴は、今回使った交通整理役のソフトウェア自体の既定値の問題なので、README に目立つように書き、上流(ソフトウェアの開発元)への報告候補としても記録した(https://github.com/littlemex/distai-platform/issues/49へのメモ)。</p>
 
-<h2>6. まだ終わっていないこと</h2>
-<div class="note"><p style="margin:0"><b>llm-d / Gateway 経由の方式は、まだ実際の質問に答えられない。</b>部品同士の配線(どのサーバーがどれかを認識する部分)は正しく動くが、実際の通信の手前でエラーが起きる。原因は暗号化通信の設定の食い違いらしいと分かっているが、完全な特定はできていない。</p></div>
-<div class="note"><p style="margin:0"><b>SGLang 側の確認は、片側(送信側)のネットワークの値しか見ていない。</b>受け取る側(decode)の値も確認すれば、より確実な証拠になる。</p></div>
-<div class="note"><p style="margin:0"><b>SGLang の chart は、まだ自動テストの対象に入っていない部分がある。</b>vLLM 側にある「配置とネットワーク設定が正しいか」の自動チェックは、SGLang 側にはまだ無い。</p></div>
+<h2>6. 追い確認: llm-d 経由の 500 エラーを直し、SGLang の受信側も確認した</h2>
+<p>500 エラーの原因は、Gateway を作るソフトウェア(NGINX Gateway Fabric)自身の設定だった。「EPP との通信は暗号化なしにする」という設定を自分で入れていたが、EPP 自身は何も指定しなければ暗号化ありで待ち受ける作りになっていた。双方の思い込みが食い違っていたため、接続がすぐ切られてエラーになっていた。</p>
+<figure>
+<svg viewBox="0 0 880 230" width="100%" style="max-width:880px" role="img" aria-label="TLS 設定の食い違いの図"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3c5a4c"/></marker>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8f2f2f"/></marker>
+<marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f7a4d"/></marker></defs><text x="220" y="20" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="700">直す前</text><rect x="20" y="40" width="380" height="60" rx="8" fill="#fbeceb" stroke="#8f2f2f"/><text x="210.0" y="66.0" font-size="13" fill="#8f2f2f" text-anchor="middle" font-weight="600">Gateway (NGF)</text><text x="210.0" y="83.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">暗号化なしで話す設定にした</text><rect x="20" y="125" width="380" height="60" rx="8" fill="#ffffff" stroke="#9fb5a8"/><text x="210.0" y="151.0" font-size="13" fill="#12241c" text-anchor="middle" font-weight="600">EPP</text><text x="210.0" y="168.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">既定は暗号化ありで待ち受け</text><path d="M210 100 L210 123" stroke="#8f2f2f" stroke-width="2" fill="none" marker-end="url(#arr)"/><text x="210" y="205" font-size="11.5" fill="#8f2f2f" text-anchor="middle" font-weight="400">食い違い → 接続が切れて 500 エラー</text><text x="660" y="20" font-size="13" fill="#1f7a4d" text-anchor="middle" font-weight="700">直した後</text><rect x="460" y="40" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="650.0" y="66.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">Gateway (NGF)</text><text x="650.0" y="83.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">既定のまま(暗号化あり、証明書は確認しない)</text><rect x="460" y="125" width="380" height="60" rx="8" fill="#e8f4ec" stroke="#1f7a4d"/><text x="650.0" y="151.0" font-size="13" fill="#0f4a2e" text-anchor="middle" font-weight="600">EPP</text><text x="650.0" y="168.0" font-size="11.5" fill="#3c5a4c" text-anchor="middle">既定は暗号化ありで待ち受け</text><path d="M650 100 L650 123" stroke="#1f7a4d" stroke-width="2" fill="none" marker-end="url(#arg)"/><text x="650" y="205" font-size="11.5" fill="#1f7a4d" text-anchor="middle" font-weight="400">両方「暗号化あり」で一致 → 成功</text></svg>
+<figcaption>Gateway を作るソフトウェア(NGINX Gateway Fabric)の設定を「EPP とは暗号化なしで話す」に自分で変えていたのが原因だった。EPP 自身は何も指定しなければ暗号化ありで待ち受けるので、既定のまま変えないのが正しい設定だった。</figcaption>
+</figure>
+<p>直し方は単純で、「暗号化なしにする」という設定を入れないこと。Gateway 側の既定(暗号化はするが、証明書までは確認しない)のままにすれば、EPP 側の既定(暗号化あり、自前の証明書)とそのまま噛み合う。実際にこの設定を外して質問を送ったところ、正しい答えが返ってきた。さらに、EPP 自身が「振り分けた回数」を数えているカウンタと、EPP 自身の詳しいログの両方で、1 件の質問ごとに「decode への判定」と「prefill への判定」の両方が実行されていることを確認した。質問を送った回数とカウンタの値も一致した。</p>
+<p>あわせて、公開ロードバランサーの対策(5 節)も最初から安全な順番(先に「クラスター内限定」の設定を作ってから Gateway を作る)に直し、今回は一度も公開ロードバランサーが作られないことを確認した。</p>
+<p>SGLang の分離推論(1・3・4 節)についても、前回は送信側(prefill)のネットワークの値しか見ていなかった。追い確認で受信側(decode)の値も読み、送信側の送った量と受信側の受け取った量が 1 バイトも違わず一致することを確認した。</p>
 
-<h2>7. awsome 側に取り込むと良いこと(提案)</h2>
+<h2>7. まだ終わっていないこと</h2>
+<div class="note"><p style="margin:0"><b>SGLang の chart は、まだ自動テストの対象に入っていない部分がある。</b>vLLM 側にある「配置とネットワーク設定が正しいか」の自動チェックは、SGLang 側にはまだ無い。</p></div>
+<div class="note"><p style="margin:0"><b>SGLang の Mooncake 転送方式や、prefill:decode の比率を変えた場合は未確認。</b>今回は NIXL 方式・1:1 の比率のみ。</p></div>
+
+<h2>8. awsome 側に取り込むと良いこと(提案)</h2>
 <table>
 <tr><th>#</th><th>提案</th><th>上流の今</th><th>取り込むと何が良いか</th><th>出し方</th></tr>
 <tr><td class="n">1</td><td>無し</td><td>-</td><td>今回の内容は、この基盤自身が持つ Terraform 管理の GitOps の仕組みを前提にしており、<code>awsome-distributed-ai</code> 自体にはその土台が無いため、そのまま当てはまる提案にならない。</td><td>-</td></tr>
 </table>
 
-<h2>8. レビューで見てほしいこと</h2>
+<h2>9. レビューで見てほしいこと</h2>
 <div class="box">
 <ol style="margin:0">
-<li><b>llm-d / Gateway 経路の未解決のエラー(2 節)。</b>暗号化通信の設定の食い違いという見立てで良いか、他の原因を見落としていないか。</li>
-<li><b>SGLang の片側だけの EFA 確認(3 節、6 節)。</b>受け取る側の値を追加で確認する価値があるか。</li>
+<li><b>TLS 設定の直し方(6 節)。</b>「暗号化なしの設定を入れない」で既定に委ねる方針で良いか、証明書をちゃんと確認する設定(BackendTLSPolicy)まで用意すべきか。</li>
 <li><b>交通整理役を標準品に替える判断そのもの(2 節)。</b>手作りの中継プログラムのままで十分という判断もあり得る。</li>
+<li><b>SGLang の chart の自動テストの薄さ(7 節)。</b>優先して追加すべきか。</li>
 </ol>
 </div>
 
-<div class="lead"><p style="margin:0"><b>まとめ。</b>SGLang という 2 つ目のエンジンでも分離推論が動くことを実機で確認し、交通整理役を業界標準の仕組みに替える試みも行った。4 つの組み合わせは実機で完走したが、標準品への切り替えはまだ実際の質問に答えられる状態になっていない。途中で見つけた既存の確認方法の誤りと、意図しない外部公開の設定は、どちらも実機で動かしてみなければ気付けなかった類のものだった。</p></div>
+<div class="lead"><p style="margin:0"><b>まとめ。</b>SGLang という 2 つ目のエンジンでも分離推論が動くことを実機で確認し、交通整理役を業界標準の仕組みに替える試みも行った。5 つの組み合わせ全部が、最終的に実機で完走した。途中で見つけた既存の確認方法の誤り、意図しない外部公開の設定、交通整理役の暗号化通信の設定の食い違いは、どれも実機で動かしてみなければ気付けなかった類のものだった。</p></div>
 
 <p style="font-size:12.5px;color:#8a9a92;margin-top:40px">確認日: 2026-11-22。対象ブランチ: <code>feat/disagg-pd-reference</code> (<a href="https://github.com/littlemex/distai-platform/pull/51">PR #51</a>)。実機ログは us-east-1 の軽量クラスタ(アカウント ID・インスタンス ID・プライベート IP は本ページには載せていない)。</p>
 
