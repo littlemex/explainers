@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>依存型 ― 型だけでバグを消す</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">FORMAL VERIFICATION ・ 第 22 回</p>
+  <span class="level lv-s">Senior</span>
+  <h1>依存型 ― 型だけでバグを消す</h1>
+  <p>長さを型に持つベクトルで、空の配列から先頭を取り出すバグを実行前に消す</p>
+</header>
+<main>
+  <a class="back" href="./formal-index.html">← 形式検証シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 20 回 <a href="./formal-lean-intro.html">Lean 4 はプログラミング言語でもある</a>、第 21 回 <a href="./formal-lean-tactics.html">Lean のタクティクと自動化</a></p>
+  <p class="intro">前回までで induction や simp, omega, decide を使い、命題の証明をタクティクで進めました。今回は少し見方を変えます。証明を書くのではなく、<b>型そのものにルールを埋め込んで</b>、間違ったプログラムをそもそも書けなくする依存型 (dependent types) を見ます。空っぽの配列から先頭の要素を取り出す、という典型的なバグを例にします。</p>
+
+<section>
+  <h2>1. 型が値に依存するとはどういうことか</h2>
+  <p>これまでの <code>List α</code> のような型は、要素の型 α には依存しますが、要素が何個あるか (リストの長さ) という<b>値</b>には依存しません。長さ 0 のリストも長さ 100 のリストも、型は同じ <code>List α</code> です。依存型とは、型が α のような型だけでなく、n のような<b>具体的な値</b>にも依存する型のことです。Lean の公式資料には、リストと「その長さが n であるという証明」を組にした、値 n に依存する型の例が載っています。</p>
+  <pre><code>def Tuple (α : Type) (n : Nat) :=
+  { as : List α // as.length = n }</code></pre>
+  <p>この <code>Tuple α n</code> は n の値ごとに別の型になります。<code>Tuple α 0</code> と <code>Tuple α 3</code> は見た目は似ていますが、Lean にとっては違う型です。今回はこれと同じ考え方を、証明を組として持たせる代わりに、ベクトルの構造そのものに長さを埋め込む形で使います。</p>
+</section>
+
+<section>
+  <h2>2. 長さを型に持つベクトル Vec</h2>
+  <p>自分で <code>Vec α n</code> という型を定義します。n は要素数で、<code>nil</code> (空) は長さ 0、<code>cons</code> (先頭に 1 個追加) は長さを 1 つ増やします。</p>
+  <pre><code>inductive Vec (α : Type) : Nat → Type where
+  | nil : Vec α 0
+  | cons : {n : Nat} → α → Vec α n → Vec α (n + 1)</code></pre>
+  <p>ここで <code>head</code> (先頭の要素を取る関数) の型を、長さ 0 のベクトルではなく<b>長さ n+1 のベクトルだけ</b>を受け取るように書きます。</p>
+  <pre><code>def head {α : Type} {n : Nat} (v : Vec α (n + 1)) : α :=
+  match v with
+  | Vec.cons a _ =&gt; a</code></pre>
+  <p>要素 3 個のベクトルを実際に作り、<code>head</code> を使ってみます。</p>
+  <pre><code>def v3 : Vec Nat 3 :=
+  Vec.cons 10 (Vec.cons 20 (Vec.cons 30 Vec.nil))
+
+#eval head v3             -- 10</code></pre>
+  <p><code>v3</code> の型は <code>Vec Nat 3</code> です。<code>cons</code> を 1 回使うごとに長さが 1 増えるので、<code>cons 30 nil</code> は長さ 1、<code>cons 20 (...)</code> は長さ 2、<code>cons 10 (...)</code> は長さ 3 になります。この <code>match</code> には <code>nil</code> の場合が書かれていません。それでもこの定義は Lean に受理されます。なぜかというと、<code>nil : Vec α 0</code> の長さは 0 であり、<code>head</code> が要求する長さ <code>n + 1</code> とは決して一致しないからです。<code>nil</code> という場合は、型の上でそもそも起こり得ないと Lean が判断し、場合分けを省略してよいことになります。これが「テストではなく型検査で消えるバグ」の具体的な姿です。<code>List α</code> のままでは、空リストを渡されても型だけでは防げず、実行してみてようやく失敗に気づくか、戻り値を <code>Option α</code> にして「無いかもしれない」ことを呼び出し側に押し付けるしかありません。</p>
+  <div class="fig">
+    <svg viewBox="0 0 600 190" role="img" aria-label="List は長さに関わらず同じ型だが Vec は長さごとに違う型になる図">
+      <rect x="20" y="20" width="250" height="140" rx="10" fill="#f3f9f6" stroke="#8fd6b4" stroke-width="2"/>
+      <text x="145" y="42" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">List α</text>
+      <rect x="40" y="55" width="90" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/>
+      <text x="85" y="76" font-size="12" text-anchor="middle" fill="#12211a">長さ 0</text>
+      <rect x="150" y="55" width="90" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/>
+      <text x="195" y="76" font-size="12" text-anchor="middle" fill="#12211a">長さ 3</text>
+      <text x="145" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">どちらも同じ型 List α</text>
+      <text x="145" y="128" font-size="12.5" text-anchor="middle" fill="#4a5d54">head の型だけでは空を防げない</text>
+      <rect x="320" y="20" width="260" height="140" rx="10" fill="#eaf5ef" stroke="#0f5132" stroke-width="2"/>
+      <text x="450" y="42" font-size="13.5" text-anchor="middle" fill="#0f5132" font-weight="700">Vec α n</text>
+      <rect x="335" y="55" width="100" height="34" rx="6" fill="#fbeeea" stroke="#c0492f"/>
+      <text x="385" y="76" font-size="12" text-anchor="middle" fill="#8a3420">Vec α 0</text>
+      <rect x="450" y="55" width="110" height="34" rx="6" fill="#e7f6ee" stroke="#198754"/>
+      <text x="505" y="76" font-size="12" text-anchor="middle" fill="#0f5132">Vec α 3</text>
+      <text x="450" y="110" font-size="12.5" text-anchor="middle" fill="#4a5d54">長さごとに別の型</text>
+      <text x="450" y="128" font-size="12.5" text-anchor="middle" fill="#4a5d54">head は Vec α (n+1) しか受け取れない</text>
+    </svg>
+    <p class="cap">図: List α は長さに関わらず 1 つの型。Vec α n は長さごとに別の型になり、空を型レベルで締め出せる。</p>
+  </div>
+</section>
+
+<section>
+  <h2>3. Fin n: 範囲が保証された添字</h2>
+  <p>配列の添字 (インデックス) でも同じ考え方が使えます。Lean core にある <code>Fin n</code> は「0 以上 n 未満の自然数」を表す型で、中身は値 <code>val</code> と「<code>val &lt; n</code> である」という証明 <code>isLt</code> の組です。</p>
+  <pre><code>def one : Fin 3 := ⟨1, by decide⟩
+#eval one.val             -- 1</code></pre>
+  <p><code>⟨1, by decide⟩</code> は、値 1 と「1 &lt; 3 である」という証明をセットにして <code>Fin 3</code> の値を作っています。証明の部分は <code>decide</code> が計算して確かめてくれます。ここで範囲外の値、たとえば 5 を使おうとすると何が起きるでしょうか。</p>
+  <pre><code>def badIdx : Fin 3 := ⟨5, by decide⟩</code></pre>
+  <p><code>5 &lt; 3</code> は偽なので、<code>decide</code> はその場で証明に失敗し、このコードは<b>コンパイルが通りません</b>。範囲外の添字は、実行して初めてエラーになるのではなく、そもそも <code>Fin 3</code> の値として組み立てることができません。<code>checks/22/VecBad.lean</code> には、この例と、長さ 0 のベクトルを <code>head</code> に渡そうとする例をまとめてあります。どちらも、実行する前の型検査の段階で Lean に拒否されます。</p>
+  <p><code>Vec α n</code> も <code>Fin n</code> も、仕組みは同じです。どちらも「値 (長さや添字) を型の一部にする」ことで、本来は実行してみないと分からなかった制約を、コンパイルの時点で検査できる制約に変えています。第 18 回で見た「命題は型、証明はプログラム」という対応も思い出してください。ここでの <code>isLt : val &lt; n</code> という証明は、まさに「<code>val &lt; n</code> という命題の証明」が、値として <code>Fin n</code> の中に詰め込まれている例になっています。</p>
+</section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 5</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 5 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とします。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://lean-lang.org/theorem_proving_in_lean4/dependent_type_theory.html" target="_blank" rel="noopener">Theorem Proving in Lean 4, Chapter 2: Dependent Type Theory</a> ― 型が値に依存するという依存型の基本的な考え方の一次情報。</li>
+      <li><a href="https://lean-lang.org/theorem_proving_in_lean4/inductive_types.html" target="_blank" rel="noopener">Theorem Proving in Lean 4, Chapter 7: Inductive Types</a> ― 長さの証明を値として持つ Tuple の例があり、添字が値に依存する帰納型 (indexed family) の実例として参照した。</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./formal-lean-tactics.html">← 第 21 回 Lean のタクティクと自動化</a><a href="./formal-index.html">目次</a><a href="./formal-hoare.html">第 23 回 プログラムの正しさを証明する: ホーア論理 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+ {
+  "q": "head の型が Vec α n ではなく Vec α (n + 1) になっている理由として最も適切なものはどれか。",
+  "opts": [
+   "Fin n との互換性のために n + 1 という書き方が必須だから",
+   "Vec α n のままだと cons が定義できなくなるから",
+   "n + 1 の方が n よりも計算が速いから",
+   "長さが「1 以上」であることを型の時点で要求し、長さ 0 (nil) を引数として受け付けないようにするため",
+   "Lean では関数の引数の型に + を使うことが構文上禁止されているから"
+  ],
+  "ans": 3,
+  "exps": [
+   "Fin n は head の型とは別の独立した型で、head の型の書き方に Fin n との互換性は関係しない。",
+   "cons の定義 (Vec.cons : {n : Nat} → α → Vec α n → Vec α (n + 1)) 自体は Vec α n を引数に取っており、head の型とは別の話。",
+   "計算速度とは無関係。型の書き方は実行速度に影響しない。",
+   "<b>これが正解。<\/b>n + 1 という形にすることで、引数の型は「長さが 1 以上のベクトル」しか表せなくなる。nil (長さ 0) はこの形に当てはまらないため、head の引数として渡すこと自体ができない。",
+   "Lean の型の中で + を使うこと自体は普通に許されている。実際に本文のコードでも Vec α (n + 1) という書き方がそのまま使われている。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>head の引数の型を「1 以上の長さ」に絞ることで、nil が入り込む余地をなくします。<\/p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"headの引数の型が長さ1以上に絞られている図\"><rect x=\"30\" y=\"30\" width=\"220\" height=\"90\" rx=\"10\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"140\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#8a3420\" font-weight=\"700\">Vec α 0 (nil)<\/text><text x=\"140\" y=\"78\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">head の型 Vec α (n+1)<\/text><text x=\"140\" y=\"96\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">とは絶対に一致しない<\/text><rect x=\"310\" y=\"30\" width=\"220\" height=\"90\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"420\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">Vec α (n+1) (cons ...)<\/text><text x=\"420\" y=\"78\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">head の型とちょうど一致<\/text><text x=\"420\" y=\"96\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">→ head に渡せる<\/text><\/svg><p class=\"cap\">図: head の引数の型を Vec α (n+1) にすることで、nil だけを型の時点で締め出せる。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "checks/22/VecBad.lean の bad := head (Vec.nil : Vec Nat 0) という定義には何が起きるか。",
+  "opts": [
+   "型検査の段階で、長さ 0 と head が要求する長さ n+1 が一致しないために拒否される",
+   "警告だけが出て、そのまま動作する",
+   "実行した瞬間にランタイムエラーで停止する",
+   "Vec.nil が自動的に Vec Nat 1 に変換され、何も問題なく動く",
+   "head の中の match 式が無限ループに入る"
+  ],
+  "ans": 0,
+  "exps": [
+   "<b>これが正解。<\/b>head の引数の型は Vec α (n+1)。Vec.nil : Vec Nat 0 の長さ 0 は、どんな n を選んでも n+1 と一致しないため、型検査の段階でこの呼び出し自体が拒否される。",
+   "警告で済むような緩い話ではなく、コンパイル自体が失敗する。",
+   "Lean の head は全域関数 (total function) として定義されており、プログラムが実行される前の型検査の段階で既に止まる。実行時エラーではない。",
+   "Vec.nil の型は Vec α 0 のまま固定されており、長さが自動的に書き換わるようなことは起きない。",
+   "match 式は無限ループを起こす構造ではなく、型が合わない時点でそもそもこの呼び出しの型チェックが通らない。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>長さ 0 のベクトルは、head が要求する「長さ 1 以上」の型にそもそも当てはまりません。<\/p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"型不一致で拒否される図\"><rect x=\"30\" y=\"40\" width=\"180\" height=\"60\" rx=\"10\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"120\" y=\"75\" font-size=\"13\" text-anchor=\"middle\" fill=\"#8a3420\" font-weight=\"700\">Vec Nat 0<\/text><text x=\"280\" y=\"75\" font-size=\"18\" text-anchor=\"middle\" fill=\"#c0492f\" font-weight=\"700\">≠<\/text><rect x=\"330\" y=\"40\" width=\"200\" height=\"60\" rx=\"10\" fill=\"#eaf5ef\" stroke=\"#0f5132\" stroke-width=\"2\"/><text x=\"430\" y=\"75\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">head: Vec α (n+1) → α<\/text><\/svg><p class=\"cap\">図: 0 と n+1 は一致しないので、コンパイルの時点で呼び出しが拒否される。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "badIdx := ⟨5, by decide⟩ を Fin 3 の値として定義しようとすると何が起きるか。",
+  "opts": [
+   "5 を 3 で割った余り 2 が自動的に使われ、badIdx.val は 2 になる",
+   "問題なくコンパイルが通り、badIdx.val は 5 になる",
+   "decide が 5 < 3 を証明しようとして失敗し、コンパイルが通らない",
+   "Fin 3 は内部で最大値を自動的に切り詰めるので、5 は 3 に変換される",
+   "実行時に配列の範囲外アクセスとして例外が投げられる"
+  ],
+  "ans": 2,
+  "exps": [
+   "Fin n にそのような自動的な剰余変換の仕組みはない (OfNat による数値リテラルの扱いとは別の話で、ここでは明示的に ⟨5, ...⟩ と構成している)。",
+   "Fin 3 の値は「3 未満である証明」も一緒に持つ必要があり、5 < 3 が偽である以上、そのままではコンパイルが通らない。",
+   "<b>これが正解。<\/b>⟨5, by decide⟩ の 2 番目の要素は「5 < 3」の証明を要求される。5 < 3 は偽なので decide はこれを証明できず、コンパイルの時点で失敗する。",
+   "自動的な切り詰めは行われない。範囲外の値を表す Fin 3 の値は、そもそも作ることができない。",
+   "Fin n の値は構成できた時点で範囲内であることが保証されているので、配列アクセス時に範囲外になることはそもそも起こらない。この例はその値を作る段階で失敗する。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>Fin 3 の値は「数値」と「範囲内であることの証明」の組です。証明が作れない数値は、そもそも値として存在できません。<\/p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"Fin3の構成に証明が必要な図\"><rect x=\"30\" y=\"30\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"140\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">⟨1, 証明(1&lt;3)⟩<\/text><text x=\"140\" y=\"78\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">decide が証明できる → OK<\/text><rect x=\"310\" y=\"30\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"420\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#8a3420\" font-weight=\"700\">⟨5, 証明(5&lt;3)⟩<\/text><text x=\"420\" y=\"78\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">5&lt;3 は偽 → decide 失敗<\/text><\/svg><p class=\"cap\">図: 範囲外の値は、証明部分が作れないので Fin 3 の値として存在できない。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "本文で説明した「テストではなく型検査で消えるバグ」という考え方に最も近い説明はどれか。",
+  "opts": [
+   "テストと型検査はまったく独立していて、型検査をしてもテストの必要性は一切減らないという考え方",
+   "バグを起こすような呼び出し (例えば空のベクトルを head に渡すこと) 自体を、型が合わないという理由でコンパイルの時点で書けなくしてしまう考え方",
+   "型検査はコンパイルを遅くするだけで、実行時の正しさには影響しないという考え方",
+   "実行して様々な入力を試し、空の配列を渡した場合の挙動を 1 つずつ確認していく考え方",
+   "単体テストの数を増やせば増やすほど、型検査は不要になるという考え方"
+  ],
+  "ans": 1,
+  "exps": [
+   "型検査によって「空のベクトルを渡す」という種類のバグ自体が排除されるため、少なくともその種類のテストを書く必要性は実際に減る。",
+   "<b>これが正解。<\/b>Vec α (n+1) のように型にルールを埋め込むことで、空のベクトルを head に渡すという誤ったプログラム自体を書けなくする。これにより、該当する入力のテストを書いて確かめる必要すらなくなる。",
+   "型検査は単なる速度の問題ではなく、本文で見たとおり、特定の種類のバグをプログラムが実行される前に排除する役割を持つ。",
+   "それはまさに「テストで確かめる」考え方であり、本文が対比として挙げた「型検査で消す」考え方とは違う。",
+   "テストの数を増やすことと型検査は別の話で、型検査が不要になるという説明は本文の趣旨と逆。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>テストは「試した入力について」確かめます。型検査は「その型に当てはまる入力全部について」コンパイルの時点で確かめます。<\/p><div class=\"fig\"><svg viewBox=\"0 0 560 140\" aria-label=\"テストと型検査の違いの図\"><rect x=\"30\" y=\"30\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#eaf5ef\" stroke=\"#2f5f8a\" stroke-width=\"2\"/><text x=\"140\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1f4a68\" font-weight=\"700\">テスト<\/text><text x=\"140\" y=\"78\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">試した入力だけ実行して確認<\/text><rect x=\"310\" y=\"30\" width=\"220\" height=\"80\" rx=\"10\" fill=\"#e7f6ee\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"420\" y=\"55\" font-size=\"13\" text-anchor=\"middle\" fill=\"#0f5132\" font-weight=\"700\">型検査 (依存型)<\/text><text x=\"420\" y=\"78\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#12211a\">その型の入力は実行前に全部拒否/許可<\/text><\/svg><p class=\"cap\">図: 依存型は「空のベクトルを渡す」という種類の誤りを、個別に試さずまとめて締め出す。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "Vec α n が依存型であるのに対し、List α が依存型でないとされるのはなぜか。本文の説明に最も近いものを選べ。",
+  "opts": [
+   "List α は可変長だが、Vec α n は常に長さ 0 でなければならないから",
+   "List α は Lean core に存在しないが、Vec α n は Lean core に存在するから",
+   "List α は数値しか要素に持てないが、Vec α n は任意の型を要素に持てるから",
+   "List α は再帰的に定義されているが、Vec α n は再帰的に定義されていないから",
+   "List α は要素の型 α だけに依存し、要素数という値には依存しないが、Vec α n は要素数 n という値そのものに型が依存するから"
+  ],
+  "ans": 4,
+  "exps": [
+   "Vec α n の n は任意の自然数を取れ、長さ 0 に限定されるわけではない (本文の v3 は長さ 3)。",
+   "List α は Lean core に実在する標準的な型。存在するかどうかの違いではない。",
+   "List α も Vec α n も、どちらも α という型パラメータを持ち、α に Nat 以外の任意の型を指定できる。要素の種類の制限の話ではない。",
+   "List も Vec も、どちらも帰納的な型として定義できる。再帰的かどうかの違いが依存型かどうかを決めるわけではない。",
+   "<b>これが正解。<\/b>本文の冒頭で述べたとおり、List α の型は要素の型 α には依存するが、要素数という値には依存しない (長さ 0 も長さ 100 も同じ型)。Vec α n は n という値そのものによって型が変わる、これが依存型の核心。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>依存型の核心は「型が値に依存する」ことです。Vec α n では n という値が変わると、型そのものが変わります。<\/p><div class=\"fig\"><svg viewBox=\"0 0 560 150\" aria-label=\"依存型の核心を示す図\"><text x=\"280\" y=\"25\" font-size=\"13.5\" text-anchor=\"middle\" fill=\"#12211a\">n の値が変わると...<\/text><rect x=\"40\" y=\"45\" width=\"130\" height=\"50\" rx=\"8\" fill=\"#e7f6ee\" stroke=\"#198754\"/><text x=\"105\" y=\"75\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">Vec α 0<\/text><rect x=\"210\" y=\"45\" width=\"130\" height=\"50\" rx=\"8\" fill=\"#eaf5ef\" stroke=\"#0f5132\"/><text x=\"275\" y=\"75\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">Vec α 1<\/text><rect x=\"380\" y=\"45\" width=\"140\" height=\"50\" rx=\"8\" fill=\"#f3f9f6\" stroke=\"#8fd6b4\"/><text x=\"450\" y=\"75\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">Vec α 2 ...<\/text><text x=\"280\" y=\"125\" font-size=\"13\" text-anchor=\"middle\" fill=\"#4a5d54\">型そのものが変わる (= 型が値に依存する)<\/text><\/svg><p class=\"cap\">図: n が変わるたびに Vec α n は別の型になる。これが List α との違い。<\/p><\/div>"
+  }
+ }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

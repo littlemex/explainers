@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>システムを状態機械として見る ― 状態・遷移・振る舞い</title>
+<style>
+  :root{
+    --bg:#f4f7f5; --ink:#12211a; --sub:#4a5d54;
+    --g1:#0f5132; --g2:#198754; --g3:#43b581; --g4:#8fd6b4;
+    --card:#ffffff; --line:#d9e5df;
+    --ok:#198754; --okbg:#e7f6ee; --ng:#c0492f; --ngbg:#fbeeea;
+    --code:#0b2e20;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.85}
+  header{background:linear-gradient(135deg,var(--g1),var(--g2));color:#fff;padding:60px 24px 48px;text-align:center}
+  header .kicker{font-size:14px;letter-spacing:.18em;opacity:.85;margin:0 0 10px}
+  header h1{margin:0 0 10px;font-size:32px;letter-spacing:.03em;line-height:1.35}
+  header p{margin:0;opacity:.92;font-size:16.5px}
+  main{max-width:920px;margin:0 auto;padding:32px 20px 90px}
+  .back{display:inline-block;margin:0 0 20px;color:var(--g2);text-decoration:none;font-size:14px}
+  .intro{color:var(--sub);font-size:16px;margin:0 0 26px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:24px 26px;margin:20px 0;box-shadow:0 2px 14px rgba(15,81,50,.05)}
+  h2{color:var(--g1);font-size:22px;margin:0 0 14px;border-left:6px solid var(--g3);padding-left:14px}
+  h3{color:var(--g1);font-size:18px;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  code{background:#eef4f0;border:1px solid #dbe8e1;border-radius:5px;padding:1px 6px;font-size:14px;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;color:var(--code)}
+  pre{background:#0b2e20;color:#dbefe4;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  .fig{background:#f3f9f6;border:1px solid var(--g4);border-radius:12px;padding:16px;margin:12px 0}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .cap{font-size:13px;color:var(--sub);text-align:center;margin:8px 0 0}
+  /* ===== クイズ ===== */
+  .quiz-intro{color:var(--sub);font-size:15px;margin:0 0 18px}
+  .q{border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:16px 0;background:#fff}
+  .q .qnum{display:inline-block;background:var(--g1);color:#fff;border-radius:6px;
+    padding:2px 10px;font-size:13px;font-weight:700;margin-bottom:10px}
+  .q .qbody{font-size:16px;margin:0 0 14px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:#fbfdfc;
+    border-radius:10px;padding:11px 14px;font-size:15px;cursor:pointer;transition:.14s;color:var(--ink);
+    font-family:inherit;line-height:1.6}
+  .opt:hover{border-color:var(--g3);background:#f3f9f6}
+  .opt .lab{font-weight:700;color:var(--g1);margin-right:8px}
+  .opt.correct{border-color:var(--ok);background:var(--okbg)}
+  .opt.wrong{border-color:var(--ng);background:var(--ngbg)}
+  .opt.dim{opacity:.72}
+  .opt .mark{float:right;font-weight:700}
+  .opt.correct .mark{color:var(--ok)}
+  .opt.wrong .mark{color:var(--ng)}
+  .exp{display:none;border-radius:10px;padding:12px 14px;margin:8px 0 4px;font-size:14.5px}
+  .exp.show{display:block}
+  .exp.e-ok{background:var(--okbg);border:1px solid #b7e0c8}
+  .exp.e-ng{background:var(--ngbg);border:1px solid #eec6bb}
+  .exp .tag{font-weight:700;font-size:13px;margin-right:6px}
+  .exp.e-ok .tag{color:var(--ok)}
+  .exp.e-ng .tag{color:var(--ng)}
+  .why{margin-top:12px;background:#eef6f1;border:1px solid var(--g4);border-radius:10px;padding:14px 16px;display:none}
+  .why.show{display:block}
+  .why h4{margin:0 0 8px;color:var(--g1);font-size:15px}
+  .why .fig{background:#fff}
+  .progress{position:sticky;top:0;background:rgba(244,247,245,.94);backdrop-filter:blur(4px);
+    padding:10px 0;font-size:14px;color:var(--sub);z-index:5;border-bottom:1px solid var(--line)}
+  .progress b{color:var(--g1)}
+  footer{text-align:center;color:var(--sub);font-size:13.5px;padding:24px}
+  footer a{color:var(--g2)}
+  @media(max-width:600px){header h1{font-size:24px}}
+  .level{display:inline-block;border-radius:999px;padding:3px 14px;font-size:13px;font-weight:700;letter-spacing:.08em;margin:0 0 12px;background:#fff}
+  .lv-b{color:#0f5132} .lv-m{color:#1f4a68} .lv-s{color:#5b3d80} .lv-e{color:#b5401f}
+  .pre{font-size:14px;color:var(--sub);background:#fff;border:1px dashed var(--g4);border-radius:10px;padding:10px 14px;margin:0 0 22px}
+  .pre a,.nav a,#sources a{color:var(--g2)}
+  .nav{display:flex;justify-content:space-between;gap:12px;margin:26px 0 0;font-size:14.5px}
+  #sources li{margin:4px 0;font-size:14.5px}
+
+</style>
+</head>
+<body>
+<header>
+  <p class="kicker">FORMAL VERIFICATION ・ 第 07 回</p>
+  <span class="level lv-m">Mid</span>
+  <h1>システムを状態機械として見る ― 状態・遷移・振る舞い</h1>
+  <p>どんなシステムも「今の状態」「次の状態への移り方」「状態の並び」の 3 つで記述できる。TLA+ に入る前の土台</p>
+</header>
+<main>
+  <a class="back" href="./formal-index.html">← 形式検証シリーズ目次へ</a>
+  <p class="pre">この回の前提: 第 06 回 <a href="./formal-map.html">形式検証の道具の地図</a></p>
+  <p class="intro">前回、形式検証の道具をモデル検査と証明支援系に分けました。今回からの 7 回では、モデル検査の道具 TLA+ を使っていきます。その前に、TLA+ がシステムをどう捉えているかという土台の考え方、<b>状態機械</b> を押さえます。難しい記法はまだ出てきません。状態・遷移・振る舞いという 3 つの言葉の意味さえ掴めば、次回の TLA+ の記法もすんなり読めるはずです。</p>
+<section>
+  <h2>1. 状態とは何か ― 変数の値の組</h2>
+  <p>システムの<b>状態 (state)</b> とは、ある瞬間にシステムが持っている変数の値をすべて集めた組のことです。信号機を例にすると、信号機の状態は「今どの色が点いているか」という 1 つの変数の値だけで決まり、赤・黄・緑のどれかという 3 通りの状態がありえます。</p>
+  <p>もっと複雑なシステムでは、状態は複数の変数の値の組になります。交差点全体を考えると、東西方向の信号の色と南北方向の信号の色という 2 つの変数の組が状態になり、組み合わせの数だけ状態が増えます。大事なのは、状態とは「変数の値のスナップショット」であり、それ以上の特別な意味を持たないという点です。</p>
+  <p>変数が 1 つ増えるたびに、状態の数は掛け算で増えていきます。信号機の色 (3 通り) と、歩行者用ボタンが押されたかどうか (2 通り) の 2 つの変数を持つシステムなら、状態の総数は 3 × 2 = 6 通りです。この「変数が増えるほど状態が掛け算で増える」という性質は、第 12 回の状態爆発でもう一度取り上げます。</p>
+  <div class="fig"><svg viewBox="0 0 560 160" role="img" aria-label="信号機の3つの状態を表す図">
+    <circle cx="100" cy="80" r="40" fill="#fbeeea" stroke="#c0492f" stroke-width="2.5"/>
+    <text x="100" y="85" font-size="14" text-anchor="middle" fill="#c0492f" font-weight="700">赤</text>
+    <circle cx="280" cy="80" r="40" fill="#f3f9f6" stroke="#198754" stroke-width="2.5"/>
+    <text x="280" y="85" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">緑</text>
+    <circle cx="460" cy="80" r="40" fill="#e7f6ee" stroke="#8fd6b4" stroke-width="2.5"/>
+    <text x="460" y="85" font-size="14" text-anchor="middle" fill="#0f5132" font-weight="700">黄</text>
+    <text x="100" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">state = 赤</text>
+    <text x="280" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">state = 緑</text>
+    <text x="460" y="140" font-size="12.5" text-anchor="middle" fill="#4a5d54">state = 黄</text>
+  </svg><p class="cap">図: 信号機の状態は「色」という変数 1 個の値で決まり、3 通りの状態がある。</p></div>
+</section>
+<section>
+  <h2>2. 遷移と振る舞い</h2>
+  <p>状態がどう変わるかを定めるのが<b>遷移 (transition)</b> です。信号機なら「赤の次は緑、緑の次は黄、黄の次は赤」という規則が遷移です。ある状態から次の状態への移り方を示す関係のことを、形式検証では<b>アクション (action)</b> と呼びます。1 つのアクションは、変化前の状態の値と、変化後の状態の値の関係として書けます。</p>
+  <p>システムを実際に時間に沿って動かしたときにできる、状態の無限に続く並び (state0, state1, state2, ...) を<b>振る舞い (behavior)</b> と呼びます。振る舞いは、初期状態から始まり、毎回どれかのアクションに従って次の状態に移った結果の記録です。同じシステムでも、どのアクションを選ぶかによって複数の異なる振る舞いがあり得ます。信号機なら、赤から始まる振る舞いは「赤, 緑, 黄, 赤, 緑, 黄, ...」とずっと続きます。</p>
+  <p>ある状態から次の状態への移り方が 1 つしかないとは限りません。1 つの状態から複数のアクションが選べる場合、どれを選ぶかによって枝分かれした別の振る舞いになります。この「どれを選ぶかが決まっていない」という性質を<b>非決定性 (nondeterminism)</b> と呼び、次回取り上げる時計の例のような小さな仕組みでも現れます。1 つの状態から次の状態がただ 1 つに決まる場合も、形の上では「選べる先が 1 つだけ」という特別な非決定性として扱えます。</p>
+</section>
+<section>
+  <h2>3. 並行は遷移の交互実行 (インターリーブ)</h2>
+  <p>複数の独立した部品が相互作用するシステムを<b>並行 (concurrency)</b> システムと呼びます。形式検証では、複数の部品が「本当に同時に」動くとは考えません。その代わり、どの部品がどの順番で 1 歩ずつ動くかを、ありうる組み合わせとして全部並べます。これを<b>インターリーブ (interleaving)</b> と呼びます。</p>
+  <p>例えば独立した信号機 A と B がそれぞれ 1 回ずつ色を変えるとすると、「A が先に変わってから B が変わる」場合と「B が先に変わってから A が変わる」場合の 2 通りの順番がありえます。部品の数が増えると、ありうる順番の数は階乗で増えます。3 つの書き手と 1 つの読み手が独立に 1 回ずつ動く例では、4 つの処理の順番は 4 ! = 24 通りにもなります。TLA+ では、各部品の実行がどこまで進んだかを示す<b>実行位置 (プログラムカウンタ)</b> を使って、このインターリーブを表します。1 歩ずつ順番に進むという考え方は、次回から TLA+ で実際に仕様を書くときの土台になります。</p>
+  <p>この考え方は現実のコンピュータの動きにも合っています。1 つの CPU コアは、ある瞬間には 1 つの命令しか実行できません。複数のプログラムが「同時に動いている」ように見えても、実際には短い時間単位で切り替えながら 1 つずつ実行されています。形式検証がインターリーブで並行をモデル化するのは、見た目の便利さのためではなく、どの順番で切り替わっても困らないことを確かめたいからです。順番を限定せずすべての組み合わせを候補として残しておくことで、見落としがちな稀な順番も検査の対象にできます。</p>
+  <div class="fig"><svg viewBox="0 0 580 190" role="img" aria-label="2つの独立した部品の動きが2通りの順番でインターリーブする図">
+    <text x="20" y="25" font-size="13.5" fill="#0f5132" font-weight="700">順番 1</text>
+    <rect x="20" y="35" width="90" height="36" rx="6" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+    <text x="65" y="58" font-size="12.5" text-anchor="middle" fill="#0f5132">A が動く</text>
+    <rect x="130" y="35" width="90" height="36" rx="6" fill="#f3f9f6" stroke="#198754" stroke-width="2"/>
+    <text x="175" y="58" font-size="12.5" text-anchor="middle" fill="#0f5132">B が動く</text>
+    <line x1="110" y1="53" x2="128" y2="53" stroke="#198754" stroke-width="2" marker-end="url(#a1)"/>
+    <text x="20" y="105" font-size="13.5" fill="#0f5132" font-weight="700">順番 2</text>
+    <rect x="20" y="115" width="90" height="36" rx="6" fill="#f3f9f6" stroke="#198754" stroke-width="2"/>
+    <text x="65" y="138" font-size="12.5" text-anchor="middle" fill="#0f5132">B が動く</text>
+    <rect x="130" y="115" width="90" height="36" rx="6" fill="#e7f6ee" stroke="#0f5132" stroke-width="2"/>
+    <text x="175" y="138" font-size="12.5" text-anchor="middle" fill="#0f5132">A が動く</text>
+    <line x1="110" y1="133" x2="128" y2="133" stroke="#198754" stroke-width="2" marker-end="url(#a1)"/>
+    <text x="400" y="100" font-size="13.5" text-anchor="middle" fill="#4a5d54">同時には動かず、</text>
+    <text x="400" y="120" font-size="13.5" text-anchor="middle" fill="#4a5d54">順番の分だけ振る舞いが増える</text>
+    <defs><marker id="a1" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#198754"/></marker></defs>
+  </svg><p class="cap">図: 独立した A と B の 1 歩ずつの動きは、ありうる順番の数だけ別の振る舞いになる。</p></div>
+</section>
+
+  <div class="progress">理解度チェック ― <b><span id="answered">0</span> / 5</b> 問回答済み ・ 正答 <b id="score">0</b></div>
+  <section>
+    <h2>理解度チェック（全 5 問）</h2>
+    <p class="quiz-intro">各問 5 択。選択肢を押すと、正解・不正解にかかわらず<b>すべての選択肢について「なぜ正しい／なぜ違うのか」</b>が展開し、続けて図解による根拠が出ます。採点は各問の<b>最初にクリックした選択肢のみ</b>を対象とします。</p>
+    <div id="quiz"></div>
+  </section>
+
+  <section id="sources">
+    <h2>出典と参考</h2>
+    <ul>
+      <li><a href="https://lamport.azurewebsites.net/tla/book.html" target="_blank" rel="noopener">Leslie Lamport, Specifying Systems (book page)</a> ― 状態機械の考え方を信号機や時計のような小さな例で導入する構成 (第2章 Specifying a Simple Clock ほか) の根拠</li>
+      <li><a href="https://learntla.com/core/concurrency.html" target="_blank" rel="noopener">Learn TLA+, Concurrency</a> ― 並行は複数の独立した部品が相互作用することであり、プロセスごとの実行位置 (pc) を使って交互実行 (インターリーブ) として表すこと、部品が増えると順番の数が階乗で増えること (3つの書き手+1つの読み手で4!=24通り) の根拠</li>
+    </ul>
+  </section>
+  <div class="nav"><a href="./formal-map.html">← 第 06 回 形式検証の道具の地図</a><a href="./formal-index.html">目次</a><a href="./formal-tla-first-spec.html">第 08 回 TLA+ 最初の仕様 →</a></div>
+</main>
+<footer>
+  <a href="https://github.com/littlemex/explainers" target="_blank" rel="noopener">GitHub: littlemex/explainers</a>
+</footer>
+
+<script>
+const QUIZ = [
+ {
+  "q": "形式検証における「状態 (state)」の定義として最も正確なものはどれか。",
+  "opts": [
+   "システムを設計した人が書いた仕様書そのもの",
+   "システムが次に実行する命令の名前だけ",
+   "システムのソースコード全体のテキスト",
+   "システムが過去にたどった状態の履歴すべて",
+   "ある瞬間にシステムが持っている変数の値をすべて集めた組"
+  ],
+  "ans": 4,
+  "exps": [
+   "仕様書はシステムの状態を記述する文書であって、状態そのものではない。",
+   "次に実行する命令だけでは状態にならない。実行位置を表す変数も、状態を決める変数の一部になりうるが、それだけが状態の定義ではない。",
+   "ソースコードのテキストは状態ではない。状態はプログラムの実行中に変数が持つ値の話。",
+   "過去の履歴全体は「振る舞い」であり、1 つの状態ではない。状態はある瞬間の値の組。",
+   "<b>これが正解。<\/b>状態とは、ある瞬間にシステムが持っている変数の値をすべて集めた組 (スナップショット)。信号機なら色の値 1 つがそのまま状態になる。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>本文の信号機の図のとおり、状態は「色」という変数 1 個の値で決まる。<\/p><div class=\"fig\"><svg viewBox=\"0 0 400 110\" role=\"img\" aria-label=\"信号機の状態は色の値で決まる図\"><circle cx=\"90\" cy=\"55\" r=\"36\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"90\" y=\"60\" font-size=\"13\" text-anchor=\"middle\" fill=\"#c0492f\">赤<\/text><text x=\"260\" y=\"50\" font-size=\"13\" fill=\"#0f5132\">state = 色の値<\/text><text x=\"260\" y=\"72\" font-size=\"13\" fill=\"#4a5d54\">(= 赤)<\/text><\/svg><p class=\"cap\">図: 状態は変数の値そのもの。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "「遷移 (アクション)」と「振る舞い」の関係を最も正確に説明しているものはどれか。",
+  "opts": [
+   "遷移は状態から次の状態への移り方を定め、振る舞いはそれに従って続く状態の並びである",
+   "振る舞いが先に決まり、その後で遷移が振る舞いから逆算される",
+   "遷移は状態そのものを指す言葉で、振る舞いとは無関係である",
+   "振る舞いは遷移を 1 回だけ適用した結果の、単一の状態である",
+   "遷移と振る舞いは同じ概念を指す、単なる呼び方の違いである"
+  ],
+  "ans": 0,
+  "exps": [
+   "<b>これが正解。<\/b>遷移 (アクション) は状態から次の状態への移り方を定める関係で、振る舞いはその遷移に従って続く状態の並び (state0, state1, state2, ...) のこと。",
+   "順序が逆。先に遷移の規則が決まり、それに従って実際に動かした結果として振る舞いが生成される。",
+   "遷移は状態から状態への移り方を示す関係であり、状態そのものとは異なる概念。",
+   "振る舞いは単一の状態ではなく、状態の並び (無限に続く列) を指す。",
+   "両者は役割が異なる別の概念であり、同義語ではない。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>遷移は「次へ移るルール」、振る舞いは「そのルールに従って実際に続いた列」。<\/p><div class=\"fig\"><svg viewBox=\"0 0 480 110\" role=\"img\" aria-label=\"遷移規則と振る舞いの列の図\"><text x=\"60\" y=\"30\" font-size=\"13\" fill=\"#0f5132\" font-weight=\"700\">遷移: 赤→緑→黄→赤<\/text><rect x=\"20\" y=\"50\" width=\"70\" height=\"36\" rx=\"6\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"55\" y=\"72\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#c0492f\">赤<\/text><rect x=\"110\" y=\"50\" width=\"70\" height=\"36\" rx=\"6\" fill=\"#f3f9f6\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"145\" y=\"72\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">緑<\/text><rect x=\"200\" y=\"50\" width=\"70\" height=\"36\" rx=\"6\" fill=\"#e7f6ee\" stroke=\"#8fd6b4\" stroke-width=\"2\"/><text x=\"235\" y=\"72\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">黄<\/text><rect x=\"290\" y=\"50\" width=\"70\" height=\"36\" rx=\"6\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"325\" y=\"72\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#c0492f\">赤<\/text><text x=\"440\" y=\"72\" font-size=\"13\" fill=\"#4a5d54\">...<\/text><\/svg><p class=\"cap\">図: 振る舞いは遷移規則に従って続く状態の列。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "本文の「並行はインターリーブで表す」という考え方に最も合う説明はどれか。",
+  "opts": [
+   "並行システムは、必ず 1 つの部品だけが永久に動き続け、他の部品は止まったままになる",
+   "複数の独立した部品は、本当に同時には動かず、どれが先に 1 歩動くかという順番の組み合わせとして表される",
+   "並行システムは必ず部品の数と同じ回数だけ状態が増え、それ以上には増えない",
+   "並行システムでは、複数の部品の変化が厳密に同じ瞬間に起こると仮定する",
+   "並行システムでは部品の数を増やしても、ありうる順番の数は変化しない"
+  ],
+  "ans": 1,
+  "exps": [
+   "並行システムの各部品は、それぞれ順番が回ってきたときに動く。1 つの部品だけが永久に動き続けるという前提ではない。",
+   "<b>これが正解。<\/b>複数の独立した部品は、同時にではなく、どれが先に 1 歩動くかという順番の組み合わせ (インターリーブ) として表される。",
+   "順番の組み合わせの数だけ振る舞いが増えるため、部品の数と同じ回数に留まるとは限らない。",
+   "本文の説明はその逆。形式検証では「本当に同時に」動くとは考えず、1 歩ずつ順番に動くと考える。",
+   "本文のとおり、部品の数が増えるとありうる順番の数は階乗で増える (3 つの書き手+1 つの読み手で 4!=24 通り)。変化しないという説明は誤り。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>本文の図のとおり、A と B が同時にではなく、順番 1 (A→B) と順番 2 (B→A) という別々の順序で 1 歩ずつ動く。<\/p><div class=\"fig\"><svg viewBox=\"0 0 420 120\" role=\"img\" aria-label=\"2通りの順番の図\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"34\" rx=\"6\" fill=\"#e7f6ee\" stroke=\"#0f5132\" stroke-width=\"2\"/><text x=\"60\" y=\"41\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">A<\/text><rect x=\"120\" y=\"20\" width=\"80\" height=\"34\" rx=\"6\" fill=\"#f3f9f6\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"160\" y=\"41\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">B<\/text><rect x=\"20\" y=\"70\" width=\"80\" height=\"34\" rx=\"6\" fill=\"#f3f9f6\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"60\" y=\"91\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">B<\/text><rect x=\"120\" y=\"70\" width=\"80\" height=\"34\" rx=\"6\" fill=\"#e7f6ee\" stroke=\"#0f5132\" stroke-width=\"2\"/><text x=\"160\" y=\"91\" font-size=\"12.5\" text-anchor=\"middle\" fill=\"#0f5132\">A<\/text><text x=\"300\" y=\"50\" font-size=\"13\" fill=\"#4a5d54\">順番1: A→B<\/text><text x=\"300\" y=\"90\" font-size=\"13\" fill=\"#4a5d54\">順番2: B→A<\/text><\/svg><p class=\"cap\">図: 同時ではなく順番の組み合わせとして表す。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "信号機が赤から始まり、「赤→緑→黄→赤→緑→黄→...」という規則に従って動くとき、この無限に続く状態の並びを指す言葉は何か。",
+  "opts": [
+   "不変条件",
+   "インターリーブ",
+   "アクション",
+   "振る舞い",
+   "状態"
+  ],
+  "ans": 3,
+  "exps": [
+   "不変条件は「常に成り立つはずの条件」を指す言葉で、第 09 回で扱う別の概念。状態の並びそのものではない。",
+   "インターリーブは複数の独立した部品の 1 歩ずつの動きを順番の組み合わせとして表す考え方で、1 つのシステムの状態の並びそのものを指す言葉ではない。",
+   "アクションは状態から次の状態への移り方 (遷移の規則) を指す言葉で、できあがった並びそのものではない。",
+   "<b>これが正解。<\/b>初期状態から始まり、遷移規則に従って続く状態の無限の並び (state0, state1, state2, ...) を振る舞いと呼ぶ。",
+   "状態はある瞬間のスナップショット 1 つを指す言葉で、並び全体ではない。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>赤→緑→黄→赤→... と続く列全体が振る舞い。各コマが状態、矢印がアクション。<\/p><div class=\"fig\"><svg viewBox=\"0 0 480 90\" role=\"img\" aria-label=\"振る舞いが状態の並びであることを示す図\"><rect x=\"10\" y=\"20\" width=\"60\" height=\"34\" rx=\"6\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"40\" y=\"41\" font-size=\"12\" text-anchor=\"middle\" fill=\"#c0492f\">赤<\/text><rect x=\"90\" y=\"20\" width=\"60\" height=\"34\" rx=\"6\" fill=\"#f3f9f6\" stroke=\"#198754\" stroke-width=\"2\"/><text x=\"120\" y=\"41\" font-size=\"12\" text-anchor=\"middle\" fill=\"#0f5132\">緑<\/text><rect x=\"170\" y=\"20\" width=\"60\" height=\"34\" rx=\"6\" fill=\"#e7f6ee\" stroke=\"#8fd6b4\" stroke-width=\"2\"/><text x=\"200\" y=\"41\" font-size=\"12\" text-anchor=\"middle\" fill=\"#0f5132\">黄<\/text><rect x=\"250\" y=\"20\" width=\"60\" height=\"34\" rx=\"6\" fill=\"#fbeeea\" stroke=\"#c0492f\" stroke-width=\"2\"/><text x=\"280\" y=\"41\" font-size=\"12\" text-anchor=\"middle\" fill=\"#c0492f\">赤<\/text><text x=\"360\" y=\"42\" font-size=\"13\" fill=\"#4a5d54\">... これ全体が振る舞い<\/text><\/svg><p class=\"cap\">図: 状態の並び全体が振る舞い。<\/p><\/div>"
+  }
+ },
+ {
+  "q": "3 つの独立した書き手プロセスと 1 つの読み手プロセスが、それぞれ 1 回ずつ動くとき、ありうる動く順番の総数として本文で示されているものはどれか。",
+  "opts": [
+   "16 通り (4 の 2 乗)",
+   "8 通り",
+   "24 通り (4 の階乗)",
+   "4 通り (プロセスの数だけ)",
+   "1 通り (必ず読み手が最後に動く)"
+  ],
+  "ans": 2,
+  "exps": [
+   "16 通り (4 の 2 乗) という計算方法は、順番の組み合わせを数える式としては本文の説明と合わない。",
+   "8 通りという数は本文の例と一致しない。",
+   "<b>これが正解。<\/b>本文で紹介した learntla.com の例のとおり、独立した 4 つのプロセス (書き手 3 つ+読み手 1 つ) がそれぞれ 1 回ずつ動く場合、ありうる順番は 4 個の並べ方の総数である 4! = 24 通りになる。",
+   "4 通りはプロセスの数そのものであり、順番の組み合わせの数ではない。各プロセスが 1 歩動くとしても、動く順番自体は複数ありうる。",
+   "読み手が必ず最後に動くという制約は本文に書かれておらず、順番は自由に組み合わされる。"
+  ],
+  "why": {
+   "html": "<h4>図で理解する<\/h4><p>4 つの独立した部品の動く順番は、4 つを並べる並べ方の数 (階乗) で増える。<\/p><div class=\"fig\"><svg viewBox=\"0 0 440 100\" role=\"img\" aria-label=\"4個の階乗で順番が増える図\"><text x=\"40\" y=\"35\" font-size=\"14\" fill=\"#0f5132\" font-weight=\"700\">4 個の部品<\/text><text x=\"220\" y=\"35\" font-size=\"14\" fill=\"#0f5132\" font-weight=\"700\">→ 4! = 24 通りの順番<\/text><text x=\"40\" y=\"65\" font-size=\"12.5\" fill=\"#4a5d54\">部品が増えるほど、順番の数は階乗で急に増える<\/text><\/svg><p class=\"cap\">図: 部品の数が増えると順番の数は階乗で増える。<\/p><\/div>"
+  }
+ }
+];
+
+/* ---- 描画エンジン (全シリーズ共通。原則いじらない) ---- */
+const LAB = ['A','B','C','D','E'];
+const quizEl = document.getElementById('quiz');
+let answered = 0, score = 0;
+const done = new Array(QUIZ.length).fill(false);
+
+QUIZ.forEach((item, qi) => {
+  const q = document.createElement('div');
+  q.className = 'q';
+  const opts = item.opts.map((o, oi) =>
+    `<button class="opt" data-q="${qi}" data-o="${oi}">`
+    + `<span class="lab">${LAB[oi]}.</span>${o}<span class="mark"></span></button>`
+    + `<div class="exp" id="exp-${qi}-${oi}"></div>`
+  ).join('');
+  q.innerHTML = `<span class="qnum">Q${qi+1}</span>`
+    + `<div class="qbody">${item.q}</div>`
+    + `<div class="opts">${opts}</div>`
+    + `<div class="why" id="why-${qi}"></div>`;
+  quizEl.appendChild(q);
+});
+
+quizEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.opt');
+  if(!btn) return;
+  const qi = +btn.dataset.q, oi = +btn.dataset.o, item = QUIZ[qi];
+  const buttons = quizEl.querySelectorAll(`.opt[data-q="${qi}"]`);
+
+  // 全選択肢の状態と解説を確定表示 (なぜ違うかを全部見せる)
+  buttons.forEach((b, i) => {
+    b.classList.remove('correct','wrong','dim');
+    const isAns = (i === item.ans);
+    b.classList.add(isAns ? 'correct' : 'wrong');
+    if(i !== oi && !isAns) b.classList.add('dim');
+    b.querySelector('.mark').textContent = isAns ? '正解' : '×';
+    const exp = document.getElementById(`exp-${qi}-${i}`);
+    exp.className = 'exp show ' + (isAns ? 'e-ok' : 'e-ng');
+    exp.innerHTML = `<span class="tag">${isAns?'なぜ正しい':'なぜ違う'}</span>${item.exps[i]}`;
+  });
+  const why = document.getElementById(`why-${qi}`);
+  why.className = 'why show';
+  why.innerHTML = item.why.html;
+
+  if(!done[qi]){
+    done[qi] = true; answered++;
+    if(oi === item.ans) score++;
+    document.getElementById('answered').textContent = answered;
+    document.getElementById('score').textContent = score;
+  }
+  if(window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([quizEl.children[qi]]);
+});
+
+</script>
+<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']],displayMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>
